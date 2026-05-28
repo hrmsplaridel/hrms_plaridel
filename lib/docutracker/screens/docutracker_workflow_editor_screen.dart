@@ -1134,7 +1134,7 @@ class _WorkflowEditorHeader extends StatelessWidget {
             children: [
               Text(
                 'BACK TO DOCUMENTS',
-                style: DocuTrackerTokens.metaStyle().copyWith(
+                style: DocuTrackerTokens.metaStyle(context).copyWith(
                   fontSize: 10,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 0.8,
@@ -1333,7 +1333,7 @@ class _WorkflowInsightPanel extends StatelessWidget {
           children: [
             Text(
               'ANALYTICS INSIGHT',
-              style: DocuTrackerTokens.metaStyle().copyWith(
+              style: DocuTrackerTokens.metaStyle(context).copyWith(
                 fontSize: 10,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 0.8,
@@ -1342,7 +1342,7 @@ class _WorkflowInsightPanel extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               insight,
-              style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 12),
+              style: DocuTrackerTokens.subtitleStyle(context).copyWith(fontSize: 12),
             ),
             const SizedBox(height: 14),
             ClipRRect(
@@ -1940,7 +1940,7 @@ class _WorkflowActiveSummaryCard extends StatelessWidget {
           children: [
             Text(
               'ACTIVE WORKFLOW',
-              style: DocuTrackerTokens.metaStyle().copyWith(
+              style: DocuTrackerTokens.metaStyle(context).copyWith(
                 fontSize: 10,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 0.8,
@@ -2018,7 +2018,7 @@ class _OverviewMiniStat extends StatelessWidget {
             ),
             Text(
               label,
-              style: DocuTrackerTokens.metaStyle().copyWith(fontSize: 11),
+              style: DocuTrackerTokens.metaStyle(context).copyWith(fontSize: 11),
             ),
           ],
         ),
@@ -2108,7 +2108,7 @@ class _OverviewMetricCard extends StatelessWidget {
             Text(
               label,
               textAlign: TextAlign.center,
-              style: DocuTrackerTokens.metaStyle().copyWith(
+              style: DocuTrackerTokens.metaStyle(context).copyWith(
                 fontSize: 10,
                 fontWeight: FontWeight.w800,
               ),

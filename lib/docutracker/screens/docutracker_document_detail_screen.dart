@@ -2039,7 +2039,7 @@ class _AiSummaryTextBlock extends StatelessWidget {
         children: [
           Text(
             label.toUpperCase(),
-            style: DocuTrackerTokens.metaStyle().copyWith(
+            style: DocuTrackerTokens.metaStyle(context).copyWith(
               fontSize: 11,
               fontWeight: FontWeight.w800,
               letterSpacing: 0.4,
@@ -2078,7 +2078,7 @@ class _AiSummaryListBlock extends StatelessWidget {
         children: [
           Text(
             label.toUpperCase(),
-            style: DocuTrackerTokens.metaStyle().copyWith(
+            style: DocuTrackerTokens.metaStyle(context).copyWith(
               fontSize: 11,
               fontWeight: FontWeight.w800,
               letterSpacing: 0.4,
