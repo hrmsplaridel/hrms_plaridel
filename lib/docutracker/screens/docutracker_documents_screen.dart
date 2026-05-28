@@ -5,7 +5,6 @@ import '../docutracker_provider.dart';
 import '../docutracker_styles.dart';
 import '../docutracker_repository.dart';
 import '../models/document.dart';
-import '../models/document_action.dart';
 import '../models/document_status.dart';
 import '../models/document_type.dart';
 import '../theme/docutracker_tokens.dart';
@@ -36,6 +35,7 @@ class _DocuTrackerDocumentsScreenState
   String _searchQuery = '';
   bool _sortByDeadline = false;
   bool? _canCreateDocuments;
+  List<DocumentType> _creatableDocumentTypes = const [];
 
   @override
   void initState() {
@@ -54,19 +54,14 @@ class _DocuTrackerDocumentsScreenState
       status: _filterStatus,
     );
 
-    // Map "Job posting" permission to the ability to create documents.
     final repo = DocuTrackerRepository.instance;
-    final userId = auth.user?.id ?? '';
-    final roleId = auth.user?.role;
-    final canCreate = await repo.hasPermission(
-      userId: userId,
-      roleId: roleId,
-      documentType: '*',
-      action: DocumentAction.createDraft.value,
-    );
+    final creatableTypes = await repo.creatableDocumentTypes();
 
     if (!mounted) return;
-    setState(() => _canCreateDocuments = canCreate);
+    setState(() {
+      _creatableDocumentTypes = creatableTypes;
+      _canCreateDocuments = creatableTypes.isNotEmpty;
+    });
   }
 
   @override
@@ -246,6 +241,7 @@ class _DocuTrackerDocumentsScreenState
                         context,
                         auth: auth,
                         provider: provider,
+                        allowedDocumentTypes: _creatableDocumentTypes,
                         onCreated: _load,
                       )
                     : null,
@@ -271,6 +267,7 @@ class _DocuTrackerDocumentsScreenState
                 context,
                 auth: auth,
                 provider: provider,
+                allowedDocumentTypes: _creatableDocumentTypes,
                 onCreated: _load,
               ),
             ),

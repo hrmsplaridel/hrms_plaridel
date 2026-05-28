@@ -17,6 +17,7 @@ import '../theme/docutracker_tokens.dart';
 import '../widgets/docutracker_error_banner.dart';
 import '../widgets/docutracker_responsive_body.dart';
 import '../widgets/docutracker_section_header.dart';
+import 'docutracker_escalation_config_screen.dart';
 import 'docutracker_step_assignees_editor_screen.dart';
 import '../widgets/workflow_step_editor_panel.dart';
 
@@ -794,44 +795,96 @@ class _DocuTrackerWorkflowEditorScreenState
       );
     }
 
-    Widget workflowHeaderBlock() {
+    Future<void> openAssignees() async {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => DocuTrackerStepAssigneesEditorScreen(
+            initialDocumentType: widget.initialConfig.documentType.value,
+            initialWorkflowVersion: widget.initialConfig.version,
+          ),
+        ),
+      );
+      if (mounted) await _loadStepAssigneeSnapshots();
+    }
+
+    void openEscalationRules() {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => const DocuTrackerEscalationConfigScreen(),
+        ),
+      );
+    }
+
+    void openAuditTrail() {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Audit log export will be available soon.')),
+      );
+    }
+
+    Widget toolsPanel() {
+      return _WorkflowToolsPanel(
+        enabledStepCount: _steps.where((s) => s.enabled).length,
+        stepCount: _steps.length,
+        onManageAssignees: openAssignees,
+        onEscalationRules: openEscalationRules,
+        onAuditTrail: openAuditTrail,
+      );
+    }
+
+    Widget workflowHeaderBlock({required bool includeToolsPanel}) {
+      final defaultDeadlineHours =
+          int.tryParse(_defaultDeadlineController.text.trim()) ?? 1;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _InfoBanner(version: widget.initialConfig.version),
-          const SizedBox(height: 10),
-          _AssigneesReminderBanner(
-            onManageAssignees: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => DocuTrackerStepAssigneesEditorScreen(
-                    initialDocumentType:
-                        widget.initialConfig.documentType.value,
-                    initialWorkflowVersion: widget.initialConfig.version,
-                  ),
-                ),
+          _WorkflowEditorHeader(
+            documentType: widget.initialConfig.documentType,
+            version: widget.initialConfig.version,
+            hasUnsavedChanges: _hasUnsavedChanges,
+          ),
+          const SizedBox(height: 14),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 760;
+              final info = _InfoBanner(version: widget.initialConfig.version);
+              final assignees = _AssigneesReminderBanner(
+                onManageAssignees: openAssignees,
               );
-              if (mounted) await _loadStepAssigneeSnapshots();
+              if (!wide) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    info,
+                    const SizedBox(height: 12),
+                    assignees,
+                  ],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: info),
+                  const SizedBox(width: 16),
+                  Expanded(child: assignees),
+                ],
+              );
             },
           ),
-          const SizedBox(height: 12),
-          _DefaultDeadlineCard(
-            controller: _defaultDeadlineController,
-            onChanged: () {
+          const SizedBox(height: 16),
+          _WorkflowBuilderOverview(
+            documentType: widget.initialConfig.documentType,
+            stepCount: _steps.length,
+            enabledStepCount: _steps.where((s) => s.enabled).length,
+            selectedStep: selectedStep,
+            defaultDeadlineHours: defaultDeadlineHours,
+            defaultDeadlineController: _defaultDeadlineController,
+            onDeadlineChanged: () {
               _markUnsaved();
               _revalidate();
             },
           ),
-          const SizedBox(height: 12),
-          _WorkflowBuilderOverview(
-            stepCount: _steps.length,
-            enabledStepCount: _steps.where((s) => s.enabled).length,
-            selectedStep: selectedStep,
-            defaultDeadlineHours:
-                int.tryParse(_defaultDeadlineController.text.trim()) ?? 1,
-          ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 16),
           _WorkflowPathPreviewStrip(
             steps: _steps,
             rowKeys: _stepIds,
@@ -840,7 +893,11 @@ class _DocuTrackerWorkflowEditorScreenState
             selectedIndex: selectedIndex,
             onSelectIndex: _saving ? null : _onPreviewSelectStep,
           ),
-          const SizedBox(height: 12),
+          if (includeToolsPanel) ...[
+            const SizedBox(height: 16),
+            toolsPanel(),
+          ],
+          const SizedBox(height: 16),
           if (_issues.isNotEmpty)
             _ValidationPanel(blocking: blocking, warnings: warnings),
           if (_error != null) ...[
@@ -906,15 +963,19 @@ class _DocuTrackerWorkflowEditorScreenState
         body: DocuTrackerResponsiveBody(
           maxWidth: DocuTrackerTokens.maxContentWidth,
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: CustomScrollView(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 1180;
+              Widget workflowScroll({required bool includeToolsPanel}) {
+                return CustomScrollView(
                   controller: _listScrollController,
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
-                    SliverToBoxAdapter(child: workflowHeaderBlock()),
+                    SliverToBoxAdapter(
+                      child: workflowHeaderBlock(
+                        includeToolsPanel: includeToolsPanel,
+                      ),
+                    ),
                     if (_steps.isEmpty)
                       SliverFillRemaining(
                         hasScrollBody: true,
@@ -993,10 +1054,23 @@ class _DocuTrackerWorkflowEditorScreenState
                         ),
                       ),
                   ],
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
+                );
+              }
+
+              if (!wide) return workflowScroll(includeToolsPanel: true);
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: workflowScroll(includeToolsPanel: false)),
+                  const SizedBox(width: 20),
+                  SizedBox(
+                    width: 310,
+                    child: SingleChildScrollView(child: toolsPanel()),
+                  ),
+                ],
+              );
+            },
           ),
         ),
         bottomNavigationBar: _WorkflowEditorBottomActions(
@@ -1017,6 +1091,277 @@ class _DocuTrackerWorkflowEditorScreenState
 }
 
 // --- Layout pieces ---
+
+BoxDecoration _workflowPanelDecoration({Color? fill, Color? border}) {
+  return BoxDecoration(
+    color: fill ?? DocuTrackerTokens.surface,
+    borderRadius: BorderRadius.circular(14),
+    border: Border.all(color: border ?? DocuTrackerTokens.highlightPeachBorder),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.035),
+        blurRadius: 14,
+        offset: const Offset(0, 3),
+      ),
+    ],
+  );
+}
+
+class _WorkflowEditorHeader extends StatelessWidget {
+  const _WorkflowEditorHeader({
+    required this.documentType,
+    required this.version,
+    required this.hasUnsavedChanges,
+  });
+
+  final DocumentType documentType;
+  final int version;
+  final bool hasUnsavedChanges;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        IconButton(
+          tooltip: 'Back to documents',
+          onPressed: () => Navigator.of(context).maybePop(),
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'BACK TO DOCUMENTS',
+                style: DocuTrackerTokens.metaStyle().copyWith(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    'Workflow Builder',
+                    style: const TextStyle(
+                      color: DocuTrackerTokens.textPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  _MiniChip(
+                    icon: Icons.description_outlined,
+                    label: documentType.displayName,
+                    tint: DocuTrackerTokens.brand,
+                  ),
+                  _MiniChip(
+                    icon: Icons.new_releases_outlined,
+                    label: 'v$version - Draft',
+                    tint: hasUnsavedChanges
+                        ? DocuTrackerTokens.brand
+                        : DocuTrackerTokens.textMuted,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WorkflowToolsPanel extends StatelessWidget {
+  const _WorkflowToolsPanel({
+    required this.enabledStepCount,
+    required this.stepCount,
+    required this.onManageAssignees,
+    required this.onEscalationRules,
+    required this.onAuditTrail,
+  });
+
+  final int enabledStepCount;
+  final int stepCount;
+  final VoidCallback onManageAssignees;
+  final VoidCallback onEscalationRules;
+  final VoidCallback onAuditTrail;
+
+  @override
+  Widget build(BuildContext context) {
+    final insight = stepCount == 0
+        ? 'Add the first route step before publishing this workflow.'
+        : 'Steps typically complete faster when multiple backups are assigned.';
+    return DecoratedBox(
+      decoration: _workflowPanelDecoration(fill: DocuTrackerTokens.canvas),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.tune_rounded,
+                  color: DocuTrackerTokens.brand,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Workflow Tools',
+                  style: DocuTrackerTokens.titleStyle(context).copyWith(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            _WorkflowToolTile(
+              icon: Icons.groups_rounded,
+              label: 'Global Assignees',
+              onTap: onManageAssignees,
+            ),
+            const SizedBox(height: 10),
+            _WorkflowToolTile(
+              icon: Icons.notifications_active_outlined,
+              label: 'Escalation Rules',
+              onTap: onEscalationRules,
+            ),
+            const SizedBox(height: 10),
+            _WorkflowToolTile(
+              icon: Icons.history_edu_rounded,
+              label: 'Audit Trail',
+              onTap: onAuditTrail,
+            ),
+            const SizedBox(height: 18),
+            _WorkflowInsightPanel(
+              insight: insight,
+              progress: stepCount == 0
+                  ? 0.08
+                  : (enabledStepCount / stepCount).clamp(0.08, 1.0).toDouble(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkflowToolTile extends StatelessWidget {
+  const _WorkflowToolTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: DocuTrackerTokens.surface,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: DocuTrackerTokens.highlightPeachBorder),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: DocuTrackerTokens.brandSoft,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: DocuTrackerTokens.brand, size: 16),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: DocuTrackerTokens.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: DocuTrackerTokens.textMuted,
+                size: 18,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkflowInsightPanel extends StatelessWidget {
+  const _WorkflowInsightPanel({
+    required this.insight,
+    required this.progress,
+  });
+
+  final String insight;
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: _workflowPanelDecoration(fill: DocuTrackerTokens.highlightPeach),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'ANALYTICS INSIGHT',
+              style: DocuTrackerTokens.metaStyle().copyWith(
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              insight,
+              style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 12),
+            ),
+            const SizedBox(height: 14),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 7,
+                backgroundColor: DocuTrackerTokens.brandSoft,
+                valueColor: const AlwaysStoppedAnimation<Color>(
+                  DocuTrackerTokens.brand,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _WorkflowEditorBottomActions extends StatelessWidget {
   const _WorkflowEditorBottomActions({
@@ -1131,13 +1476,9 @@ class _InfoBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFE3F2FD),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: _workflowPanelDecoration(fill: DocuTrackerTokens.highlightPeach),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(18),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1173,13 +1514,9 @@ class _AssigneesReminderBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFE8F5E9),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: _workflowPanelDecoration(fill: DocuTrackerTokens.surface),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1512,46 +1849,283 @@ class _WorkflowStepAssigneeSnapshot {
 
 class _WorkflowBuilderOverview extends StatelessWidget {
   const _WorkflowBuilderOverview({
+    required this.documentType,
     required this.stepCount,
     required this.enabledStepCount,
     required this.selectedStep,
     required this.defaultDeadlineHours,
+    required this.defaultDeadlineController,
+    required this.onDeadlineChanged,
   });
 
+  final DocumentType documentType;
   final int stepCount;
   final int enabledStepCount;
   final WorkflowStep? selectedStep;
   final int defaultDeadlineHours;
+  final TextEditingController defaultDeadlineController;
+  final VoidCallback onDeadlineChanged;
 
   @override
   Widget build(BuildContext context) {
-    final selectedLabel = selectedStep == null
-        ? 'No step selected'
-        : 'Step ${selectedStep!.stepOrder}: ${_stepName(selectedStep!)}';
-    return DecoratedBox(
-      decoration: DocuTrackerTokens.cardDecoration(),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          crossAxisAlignment: WrapCrossAlignment.center,
+    final selectedLabel = selectedStep == null ? 'None' : 'Step ${selectedStep!.stepOrder}';
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 760;
+        final activeCard = _WorkflowActiveSummaryCard(
+          documentType: documentType,
+          enabledStepCount: enabledStepCount,
+          stepCount: stepCount,
+          defaultDeadlineHours: defaultDeadlineHours,
+        );
+        final deadlineCard = _DeadlineMetricCard(
+          controller: defaultDeadlineController,
+          onChanged: onDeadlineChanged,
+        );
+        final selectedCard = _OverviewMetricCard(
+          icon: Icons.manage_search_rounded,
+          label: 'Highlighted item',
+          value: selectedLabel,
+          emphasized: true,
+        );
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              activeCard,
+              const SizedBox(height: 12),
+              deadlineCard,
+              const SizedBox(height: 12),
+              selectedCard,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _OverviewMetric(
-              icon: Icons.account_tree_rounded,
-              label: 'Workflow',
-              value: '$enabledStepCount active of $stepCount',
+            Expanded(flex: 2, child: activeCard),
+            const SizedBox(width: 14),
+            Expanded(child: deadlineCard),
+            const SizedBox(width: 14),
+            Expanded(child: selectedCard),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _WorkflowActiveSummaryCard extends StatelessWidget {
+  const _WorkflowActiveSummaryCard({
+    required this.documentType,
+    required this.enabledStepCount,
+    required this.stepCount,
+    required this.defaultDeadlineHours,
+  });
+
+  final DocumentType documentType;
+  final int enabledStepCount;
+  final int stepCount;
+  final int defaultDeadlineHours;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: _workflowPanelDecoration(),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'ACTIVE WORKFLOW',
+              style: DocuTrackerTokens.metaStyle().copyWith(
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.8,
+              ),
             ),
-            _OverviewMetric(
-              icon: Icons.touch_app_rounded,
-              label: 'Highlighted',
-              value: selectedLabel,
+            const SizedBox(height: 8),
+            Text(
+              documentType.displayName,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: DocuTrackerTokens.brandDark,
+                fontSize: 22,
+                height: 1.05,
+                fontWeight: FontWeight.w900,
+              ),
             ),
-            _OverviewMetric(
-              icon: Icons.schedule_rounded,
-              label: 'Default deadline',
-              value: '$defaultDeadlineHours h',
+            const SizedBox(height: 26),
+            Wrap(
+              spacing: 18,
+              runSpacing: 10,
+              children: [
+                _OverviewMiniStat(
+                  icon: Icons.account_tree_rounded,
+                  value: '$enabledStepCount Active',
+                  label: 'Steps',
+                ),
+                _OverviewMiniStat(
+                  icon: Icons.schedule_rounded,
+                  value: '${defaultDeadlineHours}h',
+                  label: 'Default SLA',
+                ),
+                _OverviewMiniStat(
+                  icon: Icons.layers_rounded,
+                  value: '$stepCount Total',
+                  label: 'Cards',
+                ),
+              ],
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OverviewMiniStat extends StatelessWidget {
+  const _OverviewMiniStat({
+    required this.icon,
+    required this.value,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 17, color: DocuTrackerTokens.brand),
+        const SizedBox(width: 7),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              value,
+              style: const TextStyle(
+                color: DocuTrackerTokens.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            Text(
+              label,
+              style: DocuTrackerTokens.metaStyle().copyWith(fontSize: 11),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _DeadlineMetricCard extends StatelessWidget {
+  const _DeadlineMetricCard({
+    required this.controller,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return _OverviewMetricCard(
+      icon: Icons.timer_rounded,
+      label: 'Default deadline',
+      value: 'Hours',
+      child: TextField(
+        controller: controller,
+        keyboardType: TextInputType.number,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 25,
+          fontWeight: FontWeight.w900,
+          color: DocuTrackerTokens.textPrimary,
+        ),
+        decoration: const InputDecoration(
+          border: InputBorder.none,
+          isDense: true,
+          contentPadding: EdgeInsets.zero,
+        ),
+        onChanged: (_) => onChanged(),
+      ),
+    );
+  }
+}
+
+class _OverviewMetricCard extends StatelessWidget {
+  const _OverviewMetricCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.child,
+    this.emphasized = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Widget? child;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: DocuTrackerTokens.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: emphasized
+              ? DocuTrackerTokens.brand
+              : DocuTrackerTokens.highlightPeachBorder,
+          width: emphasized ? 2 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.035),
+            blurRadius: 14,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: DocuTrackerTokens.brand, size: 25),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: DocuTrackerTokens.metaStyle().copyWith(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            child ??
+                Text(
+                  value,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: DocuTrackerTokens.textPrimary,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
           ],
         ),
       ),
@@ -1879,7 +2453,7 @@ class _WorkflowBuilderToolbar extends StatelessWidget {
             children: [
               Flexible(
                 child: DocuTrackerSectionHeader(
-                  title: 'Visual workflow builder',
+                  title: 'Step Details',
                   icon: Icons.account_tree_rounded,
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1908,7 +2482,7 @@ class _WorkflowBuilderToolbar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             DocuTrackerSectionHeader(
-              title: 'Visual workflow builder',
+              title: 'Step Details',
               icon: Icons.account_tree_rounded,
             ),
             Wrap(

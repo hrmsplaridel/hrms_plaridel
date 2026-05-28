@@ -123,7 +123,6 @@ class _DocuTrackerPermissionEditorScreenState
     DocumentAction.createDraft,
     DocumentAction.download,
     DocumentAction.submit,
-    DocumentAction.delete,
   ];
 
   static const _draftOwnerActions = <DocumentAction>[

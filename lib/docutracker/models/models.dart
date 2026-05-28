@@ -1,6 +1,7 @@
 /// DocuTracker models barrel export.
 export 'document.dart';
 export 'document_action.dart';
+export 'document_ai_summary.dart';
 export 'document_permission.dart';
 export 'document_routing_config.dart';
 export 'document_routing_record.dart';

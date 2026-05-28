@@ -239,3 +239,139 @@ test('POST /permissions normalizes create to create_draft', async () => {
   restoreRbac();
   delete require.cache[routePath];
 });
+
+test('GET /documents/:id/ai-summary returns saved summary for readable document', async () => {
+  const restoreWorkflow = withMockedModule('../src/services/docutrackerWorkflowService', {
+    DOC_ACTIONS: new Set(['view']),
+    hasPermission: async () => null,
+    canUserPerformTypeAction: async () => true,
+    canUserPerformDocumentAction: async () => true,
+    listDocuments: async () => [],
+    getDocumentBundle: async () => null,
+    createDocument: async () => ({}),
+    transitionDocument: async () => ({}),
+    updateDocumentMetadata: async () => ({}),
+    addDocumentRemark: async () => true,
+    getEffectivePermissionExplanation: async () => ({}),
+  });
+  const restoreAi = withMockedModule('../src/services/docutrackerAiSummaryService', {
+    getLatestAiSummary: async () => ({
+      id: 'sum-1',
+      document_id: 'doc-1',
+      summary_json: { purpose: 'Review request' },
+      generated_by: 'user-1',
+      generated_by_name: 'User One',
+      provider: 'ollama',
+      model: 'qwen2.5:7b',
+      generated_at: '2026-05-27T10:00:00.000Z',
+    }),
+    generateAiSummary: async () => ({}),
+  });
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      query: async (sql) => {
+        if (sql.includes('SELECT * FROM docutracker_documents')) {
+          return { rowCount: 1, rows: [{ id: 'doc-1', document_type: 'memo' }] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    },
+  });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'get', '/documents/:id/ai-summary');
+
+  const req = {
+    params: { id: 'doc-1' },
+    headers: {},
+    user: { id: 'user-1', role: 'employee' },
+  };
+  const res = createMockResponse();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload?.summary?.purpose, 'Review request');
+  assert.equal(res.payload?.generated_by_name, 'User One');
+
+  restoreWorkflow();
+  restoreAi();
+  restoreDb();
+  restoreAuth();
+  restoreRbac();
+  delete require.cache[routePath];
+});
+
+test('POST /documents/:id/ai-summary reports unavailable local AI', async () => {
+  const restoreWorkflow = withMockedModule('../src/services/docutrackerWorkflowService', {
+    DOC_ACTIONS: new Set(['view']),
+    hasPermission: async () => null,
+    canUserPerformTypeAction: async () => true,
+    canUserPerformDocumentAction: async () => true,
+    listDocuments: async () => [],
+    getDocumentBundle: async () => null,
+    createDocument: async () => ({}),
+    transitionDocument: async () => ({}),
+    updateDocumentMetadata: async () => ({}),
+    addDocumentRemark: async () => true,
+    getEffectivePermissionExplanation: async () => ({}),
+  });
+  const restoreAi = withMockedModule('../src/services/docutrackerAiSummaryService', {
+    getLatestAiSummary: async () => null,
+    generateAiSummary: async () => {
+      const err = new Error('local unavailable');
+      err.code = 'AI_LOCAL_UNAVAILABLE';
+      throw err;
+    },
+  });
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      query: async (sql) => {
+        if (sql.includes('SELECT * FROM docutracker_documents')) {
+          return { rowCount: 1, rows: [{ id: 'doc-1', document_type: 'memo' }] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    },
+  });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'post', '/documents/:id/ai-summary');
+
+  const req = {
+    params: { id: 'doc-1' },
+    body: {},
+    headers: {},
+    user: { id: 'user-1', role: 'employee' },
+  };
+  const res = createMockResponse();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 503);
+  assert.equal(
+    res.payload?.error,
+    'Local AI is not available. Start Ollama and pull the configured model.'
+  );
+
+  restoreWorkflow();
+  restoreAi();
+  restoreDb();
+  restoreAuth();
+  restoreRbac();
+  delete require.cache[routePath];
+});

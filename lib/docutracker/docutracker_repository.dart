@@ -4,6 +4,7 @@ import '../api/client.dart';
 import 'docutracker_api_result.dart';
 import 'models/document.dart';
 import 'models/escalation_config.dart';
+import 'models/document_ai_summary.dart';
 import 'models/document_history.dart';
 import 'models/document_notification.dart';
 import 'models/document_action.dart';
@@ -11,6 +12,7 @@ import 'models/document_permission.dart';
 import 'models/document_routing_config.dart';
 import 'models/document_routing_record.dart';
 import 'models/document_status.dart';
+import 'models/document_type.dart';
 import 'services/docutracker_document_visibility.dart';
 import 'services/docutracker_permission_service.dart';
 import 'services/docutracker_permissions_datasource.dart';
@@ -339,6 +341,46 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  Future<DocuTrackerResult<DocumentAiSummary?>> getAiSummary(
+    String documentId,
+  ) async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/documents/$documentId/ai-summary',
+      );
+      final row = res.data;
+      if (row == null) return const DocuTrackerSuccess(null);
+      return DocuTrackerSuccess(DocumentAiSummary.fromJson(row));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        return const DocuTrackerSuccess(null);
+      }
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
+  Future<DocuTrackerResult<DocumentAiSummary>> generateAiSummary(
+    String documentId,
+  ) async {
+    try {
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/documents/$documentId/ai-summary',
+        data: const <String, dynamic>{},
+      );
+      final row = res.data;
+      if (row == null) {
+        return DocuTrackerFailure<DocumentAiSummary>(
+          'Empty response from server',
+        );
+      }
+      return DocuTrackerSuccess(DocumentAiSummary.fromJson(row));
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
   Future<List<DocumentNotification>> listMyNotifications() async {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
@@ -546,6 +588,44 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       // Default deny on any error (security > convenience).
       return false;
     }
+  }
+
+  Future<bool> hasCurrentUserPermission({
+    required String documentType,
+    required String action,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/permission-explain',
+        queryParameters: {
+          'document_type': documentType,
+          'action': action,
+        },
+      );
+      return res.data?['final_decision'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<List<DocumentType>> creatableDocumentTypes() async {
+    const allTypes = DocumentType.values;
+    final action = DocumentAction.createDraft.value;
+    final wildcardAllowed = await hasCurrentUserPermission(
+      documentType: '*',
+      action: action,
+    );
+    if (wildcardAllowed) return allTypes;
+
+    final allowed = <DocumentType>[];
+    for (final type in allTypes) {
+      final canCreate = await hasCurrentUserPermission(
+        documentType: type.value,
+        action: action,
+      );
+      if (canCreate) allowed.add(type);
+    }
+    return allowed;
   }
 
   Future<DocuTrackerPermissionExplanation> explainPermission({

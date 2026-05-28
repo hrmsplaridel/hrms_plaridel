@@ -22,6 +22,7 @@ const postSections = [
   ["11 — ACTIVE ROUTING STEP INDEX (one active row per document)", "migrate-docutracker-active-step-index-v1.sql"],
   ["12 — SEED PERMISSION BASELINE (role rows)", "seed-docutracker-permission-baseline.sql"],
   ["13 — OPTIONAL VERIFY (checks source tables exist)", "verify-docutracker-source-parity.sql"],
+  ["14 — AI SUMMARIES (saved metadata-only summaries)", "migrate-docutracker-ai-summaries-v1.sql"],
 ];
 
 function readBody(file) {
