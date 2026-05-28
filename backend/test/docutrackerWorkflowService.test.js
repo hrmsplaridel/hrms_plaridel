@@ -222,7 +222,7 @@ test('transitionDocument enforces invalid action from status', async () => {
       ),
     (err) => {
       assert.equal(err.code, 'VALIDATION');
-      assert.match(err.message, /forward is not valid from status pending/);
+      assert.match(err.message, /forward is not allowed while the document is pending/);
       return true;
     }
   );

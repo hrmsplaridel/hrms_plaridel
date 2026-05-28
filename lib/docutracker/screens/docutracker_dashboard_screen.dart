@@ -6,10 +6,10 @@ import '../../landingpage/constants/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../docutracker_provider.dart';
 import '../docutracker_repository.dart';
-import '../models/document_action.dart';
 import '../models/document.dart';
 import '../models/document_notification.dart';
 import '../models/document_status.dart';
+import '../models/document_type.dart';
 import '../widgets/docutracker_create_document_dialog.dart';
 import '../theme/docutracker_tokens.dart';
 import '../widgets/docutracker_module_header.dart';
@@ -47,6 +47,7 @@ class _DocuTrackerDashboardScreenState
 
   Timer? _pollTimer;
   bool? _canCreateDocuments;
+  List<DocumentType> _creatableDocumentTypes = const [];
   _AdminQuickFilter _adminFilter = _AdminQuickFilter.all;
   final Map<String, bool> _expandedSections = <String, bool>{};
 
@@ -66,17 +67,13 @@ class _DocuTrackerDashboardScreenState
     );
     await provider.loadNotifications();
 
-    final userId = auth.user?.id ?? '';
     final repo = DocuTrackerRepository.instance;
-    final roleId = auth.user?.role;
-    final canCreate = await repo.hasPermission(
-      userId: userId,
-      roleId: roleId,
-      documentType: '*',
-      action: DocumentAction.createDraft.value,
-    );
+    final creatableTypes = await repo.creatableDocumentTypes();
     if (!mounted) return;
-    setState(() => _canCreateDocuments = canCreate);
+    setState(() {
+      _creatableDocumentTypes = creatableTypes;
+      _canCreateDocuments = creatableTypes.isNotEmpty;
+    });
 
     // Keep document list in sync with server-side workflow/escalation changes.
     _pollTimer?.cancel();
@@ -177,6 +174,7 @@ class _DocuTrackerDashboardScreenState
                         context,
                         auth: auth,
                         provider: provider,
+                        allowedDocumentTypes: _creatableDocumentTypes,
                         onCreated: _load,
                       ),
                 backgroundColor: DocuTrackerTokens.terracotta,

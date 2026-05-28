@@ -10,10 +10,16 @@ Future<void> showDocuTrackerCreateDocumentDialog(
   BuildContext context, {
   required AuthProvider auth,
   required DocuTrackerProvider provider,
+  List<DocumentType>? allowedDocumentTypes,
   VoidCallback? onCreated,
 }) async {
   String title = '';
-  DocumentType type = DocumentType.memo;
+  final typeOptions = allowedDocumentTypes == null || allowedDocumentTypes.isEmpty
+      ? DocumentType.values
+      : DocumentType.values
+            .where((type) => allowedDocumentTypes.contains(type))
+            .toList();
+  DocumentType type = typeOptions.first;
   String? description;
   String? inlineError;
   bool creating = false;
@@ -135,7 +141,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                                       context,
                                       'Document Type',
                                     ),
-                                items: DocumentType.values
+                                items: typeOptions
                                     .map(
                                       (t) => DropdownMenuItem(
                                         value: t,

@@ -11,6 +11,7 @@
 --   11 — ACTIVE ROUTING STEP INDEX (one active row per document)
 --   12 — SEED PERMISSION BASELINE (role rows)
 --   13 — OPTIONAL VERIFY (checks source tables exist)
+--   14 — AI SUMMARIES (saved metadata-only summaries)
 --
 -- =============================================================================
 
@@ -155,8 +156,8 @@ END $$;
 
 WITH baseline(role_id, document_type, action, granted) AS (
   VALUES
-    -- Employee baseline: create/submit/download; view is relationship-scoped in API (not org-wide).
-    ('employee',  '*', 'view',     false),
+    -- Employee baseline: can create/submit/view/download their workflow-relevant docs.
+    ('employee',  '*', 'view',     true),
     ('employee',  '*', 'create',   true),
     ('employee',  '*', 'submit',   true),
     ('employee',  '*', 'download', true),
@@ -167,8 +168,8 @@ WITH baseline(role_id, document_type, action, granted) AS (
     ('employee',  '*', 'reject',   false),
     ('employee',  '*', 'return',   false),
 
-    -- HR baseline: review-capable; list visibility is relationship-scoped, not role-wide view.
-    ('hr',        '*', 'view',     false),
+    -- HR baseline: review-capable.
+    ('hr',        '*', 'view',     true),
     ('hr',        '*', 'create',   true),
     ('hr',        '*', 'submit',   true),
     ('hr',        '*', 'download', true),
@@ -179,8 +180,8 @@ WITH baseline(role_id, document_type, action, granted) AS (
     ('hr',        '*', 'reject',   true),
     ('hr',        '*', 'return',   true),
 
-    -- Supervisor baseline: review-capable; list visibility is relationship-scoped.
-    ('supervisor','*', 'view',     false),
+    -- Supervisor baseline: review-capable.
+    ('supervisor','*', 'view',     true),
     ('supervisor','*', 'create',   true),
     ('supervisor','*', 'submit',   true),
     ('supervisor','*', 'download', true),
@@ -275,3 +276,25 @@ BEGIN
 
   RAISE NOTICE 'DocuTracker schema parity check passed. All required tables are present.';
 END $$;
+
+
+-- #############################################################################
+-- 14 — AI SUMMARIES (saved metadata-only summaries)
+-- Source file: migrate-docutracker-ai-summaries-v1.sql
+-- #############################################################################
+
+-- DocuTracker AI summaries v1.
+-- Stores generated summaries separately from workflow/runtime document state.
+
+CREATE TABLE IF NOT EXISTS docutracker_ai_summaries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
+  summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  generated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  provider TEXT NOT NULL DEFAULT 'ollama',
+  model TEXT,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_ai_summaries_document_generated
+  ON docutracker_ai_summaries(document_id, generated_at DESC);

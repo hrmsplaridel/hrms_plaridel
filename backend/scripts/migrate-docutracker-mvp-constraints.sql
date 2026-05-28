@@ -39,15 +39,13 @@ END $$;
 
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'docutracker_permissions_action_check_v1'
-  ) THEN
-    ALTER TABLE docutracker_permissions
-      ADD CONSTRAINT docutracker_permissions_action_check_v1
-      CHECK (action IN ('view', 'create', 'edit', 'download', 'delete', 'return', 'forward', 'approve', 'reject', 'submit'));
-  END IF;
+  ALTER TABLE docutracker_permissions
+    DROP CONSTRAINT IF EXISTS docutracker_permissions_action_check;
+  ALTER TABLE docutracker_permissions
+    DROP CONSTRAINT IF EXISTS docutracker_permissions_action_check_v1;
+  ALTER TABLE docutracker_permissions
+    ADD CONSTRAINT docutracker_permissions_action_check_v1
+    CHECK (action IN ('view', 'create', 'create_draft', 'edit', 'download', 'delete', 'return', 'forward', 'approve', 'reject', 'submit'));
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_docutracker_documents_doc_type

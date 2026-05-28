@@ -106,27 +106,28 @@ BEGIN
       ));
   END IF;
 
-  -- Permission actions (include create + submit)
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'docutracker_permissions_action_check_prod_v1'
-  ) THEN
-    ALTER TABLE docutracker_permissions
-      DROP CONSTRAINT IF EXISTS docutracker_permissions_action_check_v1;
-    ALTER TABLE docutracker_permissions
-      ADD CONSTRAINT docutracker_permissions_action_check_prod_v1
-      CHECK (action IN (
-        'view',
-        'create',
-        'submit',
-        'download',
-        'edit',
-        'delete',
-        'forward',
-        'approve',
-        'reject',
-        'return'
-      ));
-  END IF;
+  -- Permission actions (include canonical create_draft and legacy create)
+  ALTER TABLE docutracker_permissions
+    DROP CONSTRAINT IF EXISTS docutracker_permissions_action_check;
+  ALTER TABLE docutracker_permissions
+    DROP CONSTRAINT IF EXISTS docutracker_permissions_action_check_v1;
+  ALTER TABLE docutracker_permissions
+    DROP CONSTRAINT IF EXISTS docutracker_permissions_action_check_prod_v1;
+  ALTER TABLE docutracker_permissions
+    ADD CONSTRAINT docutracker_permissions_action_check_prod_v1
+    CHECK (action IN (
+      'view',
+      'create',
+      'create_draft',
+      'submit',
+      'download',
+      'edit',
+      'delete',
+      'forward',
+      'approve',
+      'reject',
+      'return'
+    ));
 END $$;
 
 -- Routing config JSON must be an array (if you keep JSONB workflow configs)

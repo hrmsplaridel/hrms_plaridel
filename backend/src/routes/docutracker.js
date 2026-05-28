@@ -18,6 +18,10 @@ const {
 const {
   ACTIVE_WORKFLOW_STATUSES_FOR_OVERDUE,
 } = require('../services/docutrackerStatusSemantics');
+const {
+  generateAiSummary,
+  getLatestAiSummary,
+} = require('../services/docutrackerAiSummaryService');
 
 const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
 const { sameEntityId } = require('../utils/sameEntityId');
@@ -241,6 +245,20 @@ function mapDocumentRow(row) {
     needs_admin_intervention: row.needs_admin_intervention,
     created_at: row.created_at,
     updated_at: row.updated_at,
+  };
+}
+
+function mapAiSummaryRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    document_id: row.document_id,
+    summary: row.summary_json || {},
+    generated_by: row.generated_by,
+    generated_by_name: row.generated_by_name || null,
+    provider: row.provider,
+    model: row.model,
+    generated_at: row.generated_at,
   };
 }
 
@@ -744,6 +762,60 @@ router.post('/documents/:id/history', protect, async (req, res) => {
   } catch (err) {
     console.error('[docutracker POST /documents/:id/history]', err);
     res.status(500).json({ error: 'Failed to add history' });
+  }
+});
+
+/**
+ * GET /api/docutracker/documents/:id/ai-summary
+ * Returns the latest saved AI summary for a readable document.
+ */
+router.get('/documents/:id/ai-summary', protect, async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (!(await assertDocumentReadable(req, id))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const row = await getLatestAiSummary(pool, id);
+    if (!row) return res.status(404).json({ error: 'AI summary not found' });
+    return res.json(mapAiSummaryRow(row));
+  } catch (err) {
+    console.error('[docutracker GET /documents/:id/ai-summary]', err);
+    return res.status(500).json({ error: 'Failed to fetch AI summary' });
+  }
+});
+
+/**
+ * POST /api/docutracker/documents/:id/ai-summary
+ * Generates and saves a metadata-only AI summary for a readable document.
+ */
+router.post('/documents/:id/ai-summary', protect, async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (!(await assertDocumentReadable(req, id))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const row = await generateAiSummary(pool, {
+      documentId: id,
+      userId: req.user?.id,
+    });
+    return res.status(201).json(mapAiSummaryRow(row));
+  } catch (err) {
+    console.error('[docutracker POST /documents/:id/ai-summary]', err);
+    if (err?.code === 'NOT_FOUND') {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    if (err?.code === 'AI_LOCAL_UNAVAILABLE') {
+      return res.status(503).json({
+        error:
+          'Local AI is not available. Start Ollama and pull the configured model.',
+      });
+    }
+    if (err?.code === 'AI_PROVIDER_FAILED') {
+      return res.status(err.status === 404 ? 503 : 502).json({
+        error: err.providerMessage || 'Local AI provider failed.',
+      });
+    }
+    return res.status(500).json({ error: 'Failed to generate AI summary' });
   }
 });
 
@@ -1982,4 +2054,3 @@ router.get('/documents/:id/attachment', protect, async (req, res) => {
 });
 
 module.exports = router;
-

@@ -52,29 +52,9 @@ class _DocuTrackerSetupPermissionsScreenState
       icon: Icons.visibility_outlined,
     ),
     _RestrictionItem(
-      action: DocumentAction.forward,
-      title: 'Allocate a job authority',
-      icon: Icons.assignment_turned_in_rounded,
-    ),
-    _RestrictionItem(
-      action: DocumentAction.approve,
-      title: 'Candidate activation',
-      icon: Icons.how_to_vote_rounded,
-    ),
-    _RestrictionItem(
-      action: DocumentAction.edit,
-      title: 'Candidate documents',
-      icon: Icons.description_rounded,
-    ),
-    _RestrictionItem(
       action: DocumentAction.download,
-      title: 'Financial information',
+      title: 'Download attachments',
       icon: Icons.account_balance_wallet_rounded,
-    ),
-    _RestrictionItem(
-      action: DocumentAction.delete,
-      title: 'Job posting',
-      icon: Icons.post_add_rounded,
     ),
   ];
 
