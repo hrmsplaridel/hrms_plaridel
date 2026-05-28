@@ -34,10 +34,7 @@ class HeroSection extends StatelessWidget {
     }
     final viewportHeight = MediaQuery.sizeOf(context).height;
     final padding = MediaQuery.paddingOf(context);
-    return math.max(
-      520.0,
-      viewportHeight - padding.top - padding.bottom,
-    );
+    return math.max(520.0, viewportHeight - padding.top - padding.bottom);
   }
 
   @override
@@ -102,82 +99,81 @@ class HeroSection extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.35),
-                      ),
-                    ),
-                    child: Text(
-                      'Official Website · Municipality of Plaridel',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: _heroFont,
-                        color: Colors.white.withValues(alpha: 0.95),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.35,
-                      ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.35),
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'Human Resource Management System',
+                  child: Text(
+                    'Official Website · Municipality of Plaridel',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontFamily: _hrmsTitleFont,
-                      color: Colors.white,
-                      fontSize: isNarrow ? 26 : (isWide ? 44 : 32),
-                      fontWeight: FontWeight.w400,
-                      height: 1.08,
-                      letterSpacing: isWide ? -0.35 : -0.2,
+                      fontFamily: _heroFont,
+                      color: Colors.white.withValues(alpha: 0.95),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.35,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Human Resource Management System',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: _hrmsTitleFont,
+                    color: Colors.white,
+                    fontSize: isNarrow ? 26 : (isWide ? 44 : 32),
+                    fontWeight: FontWeight.w400,
+                    height: 1.08,
+                    letterSpacing: isWide ? -0.35 : -0.2,
+                    shadows: const [
+                      Shadow(
+                        color: Color(0x88000000),
+                        blurRadius: 12,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: Text(
+                    'A digital platform for recruitment, employee management, and HR services of the Municipality of Plaridel.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: _heroFont,
+                      color: Colors.white.withValues(alpha: 0.96),
+                      fontSize: isNarrow ? 15.5 : (isWide ? 19 : 17),
+                      height: 1.5,
+                      fontWeight: FontWeight.w500,
                       shadows: const [
                         Shadow(
-                          color: Color(0x88000000),
-                          blurRadius: 12,
-                          offset: Offset(0, 2),
+                          color: Color(0x66000000),
+                          blurRadius: 8,
+                          offset: Offset(0, 1),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 640),
-                    child: Text(
-                      'A digital platform for recruitment, employee management, and HR services of the Municipality of Plaridel.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: _heroFont,
-                        color: Colors.white.withValues(alpha: 0.96),
-                        fontSize: isNarrow ? 15.5 : (isWide ? 19 : 17),
-                        height: 1.5,
-                        fontWeight: FontWeight.w500,
-                        shadows: const [
-                          Shadow(
-                            color: Color(0x66000000),
-                            blurRadius: 8,
-                            offset: Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 36),
-                  _TrackButton(
-                    onTap: onTrackApplicationTap,
-                    isNarrow: isNarrow,
-                    heroFont: _heroFont,
-                  ),
-                  SizedBox(height: isWide ? 56 : 40),
-                  if (scrollToVacancies != null)
-                    _ScrollCue(
-                      onTap: scrollToVacancies,
-                      heroFont: _heroFont,
-                    ),
+                ),
+                const SizedBox(height: 36),
+                _TrackButton(
+                  onTap: onTrackApplicationTap,
+                  isNarrow: isNarrow,
+                  heroFont: _heroFont,
+                ),
+                SizedBox(height: isWide ? 56 : 40),
+                if (scrollToVacancies != null)
+                  _ScrollCue(onTap: scrollToVacancies, heroFont: _heroFont),
               ],
             ),
           ),
@@ -217,9 +213,10 @@ class _TrackButtonState extends State<_TrackButton>
       duration: const Duration(milliseconds: 120),
       reverseDuration: const Duration(milliseconds: 200),
     );
-    _scale = Tween<double>(begin: 1.0, end: 0.955).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
-    );
+    _scale = Tween<double>(
+      begin: 1.0,
+      end: 0.955,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
 
   @override
@@ -234,8 +231,10 @@ class _TrackButtonState extends State<_TrackButton>
 
   @override
   Widget build(BuildContext context) {
-    final hPad = widget.isNarrow ? 28.0 : 36.0;
-    final vPad = widget.isNarrow ? 16.0 : 18.0;
+    final hPad = widget.isNarrow ? 18.0 : 22.0;
+    final vPad = widget.isNarrow ? 9.0 : 10.0;
+    final iconSize = widget.isNarrow ? 22.0 : 24.0;
+    final labelSize = widget.isNarrow ? 13.0 : 14.0;
 
     return Semantics(
       button: true,
@@ -251,10 +250,8 @@ class _TrackButtonState extends State<_TrackButton>
           onTapCancel: _onTapCancel,
           child: AnimatedBuilder(
             animation: _scale,
-            builder: (context, child) => Transform.scale(
-              scale: _scale.value,
-              child: child,
-            ),
+            builder: (context, child) =>
+                Transform.scale(scale: _scale.value, child: child),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
@@ -263,74 +260,68 @@ class _TrackButtonState extends State<_TrackButton>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: _hovering
-                      ? [
-                          AppTheme.primaryNavy,
-                          AppTheme.primaryNavyLight,
-                        ]
-                      : [
-                          AppTheme.primaryNavyDark,
-                          AppTheme.primaryNavy,
-                        ],
+                      ? [AppTheme.primaryNavy, AppTheme.primaryNavyLight]
+                      : [AppTheme.primaryNavyDark, AppTheme.primaryNavy],
                 ),
-                borderRadius: BorderRadius.circular(50),
+                borderRadius: BorderRadius.circular(32),
                 boxShadow: [
                   BoxShadow(
                     color: AppTheme.primaryNavy.withValues(
-                      alpha: _hovering ? 0.65 : 0.45,
+                      alpha: _hovering ? 0.5 : 0.35,
                     ),
-                    blurRadius: _hovering ? 28 : 18,
-                    spreadRadius: _hovering ? 2 : 0,
-                    offset: const Offset(0, 6),
+                    blurRadius: _hovering ? 16 : 12,
+                    spreadRadius: _hovering ? 1 : 0,
+                    offset: Offset(0, _hovering ? 5 : 3),
                   ),
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.18),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
                   ),
                 ],
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.22),
-                  width: 1.5,
+                  color: Colors.white.withValues(alpha: 0.2),
+                  width: 1,
                 ),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Icon in a frosted circle
                   Container(
-                    width: 30,
-                    height: 30,
+                    width: iconSize,
+                    height: iconSize,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
+                      color: Colors.white.withValues(alpha: 0.18),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.35),
+                        color: Colors.white.withValues(alpha: 0.3),
                         width: 1,
                       ),
                     ),
                     alignment: Alignment.center,
-                    child: const Icon(
+                    child: Icon(
                       Icons.track_changes_rounded,
                       color: Colors.white,
-                      size: 17,
+                      size: iconSize * 0.58,
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(width: widget.isNarrow ? 8 : 10),
                   Text(
                     'Track application status',
                     style: TextStyle(
                       fontFamily: widget.heroFont,
                       color: Colors.white,
-                      fontSize: widget.isNarrow ? 14.5 : 15.5,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.15,
+                      fontSize: labelSize,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.1,
+                      height: 1.2,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  SizedBox(width: widget.isNarrow ? 6 : 8),
                   Icon(
                     Icons.arrow_forward_rounded,
-                    color: Colors.white.withValues(alpha: 0.85),
-                    size: 16,
+                    color: Colors.white.withValues(alpha: 0.9),
+                    size: labelSize + 1,
                   ),
                 ],
               ),
@@ -365,9 +356,10 @@ class _ScrollCueState extends State<_ScrollCue>
       vsync: this,
       duration: const Duration(milliseconds: 800),
     )..repeat(reverse: true);
-    _bounce = Tween<double>(begin: 0, end: 6).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
-    );
+    _bounce = Tween<double>(
+      begin: 0,
+      end: 6,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
 
   @override

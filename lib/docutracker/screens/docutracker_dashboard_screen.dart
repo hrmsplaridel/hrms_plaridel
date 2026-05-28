@@ -104,6 +104,7 @@ class _DocuTrackerDashboardScreenState
     final auth = context.watch<AuthProvider>();
     final userId = auth.user?.id ?? '';
     final showFab = !widget.embedded && _canCreateDocuments == true;
+    final dark = Theme.of(context).brightness == Brightness.dark;
 
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,14 +144,25 @@ class _DocuTrackerDashboardScreenState
       ],
     );
 
-    if (widget.embedded) return content;
+    if (widget.embedded) {
+      if (!dark) return content;
+      return ColoredBox(
+        color: DocuTrackerTokens.canvasDark,
+        child: content,
+      );
+    }
 
     return Stack(
       clipBehavior: Clip.none,
       children: [
         SingleChildScrollView(
           padding: EdgeInsets.only(bottom: showFab ? 88 : 0),
-          child: content,
+          child: dark
+              ? ColoredBox(
+                  color: DocuTrackerTokens.canvasDark,
+                  child: content,
+                )
+              : content,
         ),
         if (showFab)
           Positioned(
@@ -360,9 +372,10 @@ class _DocuTrackerDashboardScreenState
   }
 
   Widget _buildEmptyState() {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
-      decoration: DocuTrackerTokens.cardDecoration(),
+      decoration: DocuTrackerTokens.cardDecoration(context: context),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -370,13 +383,15 @@ class _DocuTrackerDashboardScreenState
             Icon(
               Icons.inbox_outlined,
               size: 40,
-              color: AppTheme.textSecondary.withValues(alpha: 0.5),
+              color: dark
+                  ? Colors.white.withValues(alpha: 0.5)
+                  : AppTheme.textSecondary.withValues(alpha: 0.5),
             ),
             const SizedBox(height: 12),
             Text(
               'No documents yet',
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: dark ? Colors.white : AppTheme.textPrimary,
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
               ),
@@ -385,7 +400,7 @@ class _DocuTrackerDashboardScreenState
             Text(
               'When documents are routed to you, they will appear here.',
               textAlign: TextAlign.center,
-              style: DocuTrackerTokens.subtitleStyle(),
+              style: DocuTrackerTokens.subtitleStyle(context),
             ),
           ],
         ),
@@ -468,11 +483,12 @@ class _DocuTrackerDashboardScreenState
     bool compact = false,
     bool showDownloadAction = true,
   }) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final items = provider.notifications.take(compact ? 3 : 5).toList();
     return _HoverLift(
       child: Container(
         width: double.infinity,
-        decoration: DocuTrackerTokens.cardDecoration(),
+        decoration: DocuTrackerTokens.cardDecoration(context: context),
         padding: EdgeInsets.all(compact ? 12 : 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -481,9 +497,9 @@ class _DocuTrackerDashboardScreenState
               children: [
                 Text(
                   'Recent Activity',
-                  style: DocuTrackerTokens.titleStyle(context).copyWith(
-                    fontSize: compact ? 13.5 : 15,
-                  ),
+                  style: DocuTrackerTokens.titleStyle(
+                    context,
+                  ).copyWith(fontSize: compact ? 13.5 : 15),
                 ),
                 const Spacer(),
                 Container(
@@ -513,7 +529,7 @@ class _DocuTrackerDashboardScreenState
             if (items.isEmpty)
               Text(
                 'No recent workflow activity yet.',
-                style: DocuTrackerTokens.subtitleStyle(),
+                style: DocuTrackerTokens.subtitleStyle(context),
               )
             else
               for (final n in items)
@@ -542,22 +558,22 @@ class _DocuTrackerDashboardScreenState
                                   : n.displayType,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w700,
-                                color: DocuTrackerTokens.textPrimary,
+                                color: DocuTrackerTokens.textPrimaryOf(context),
                               ),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               _formatTimeAgo(n.createdAt),
-                              style: DocuTrackerTokens.metaStyle(),
+                              style: DocuTrackerTokens.metaStyle(context),
                             ),
                             Text(
                               _notificationSource(n),
-                              style: DocuTrackerTokens.metaStyle().copyWith(
-                                fontSize: 11,
-                              ),
+                              style: DocuTrackerTokens.metaStyle(
+                                context,
+                              ).copyWith(fontSize: 11),
                             ),
                           ],
                         ),
@@ -863,11 +879,11 @@ class _DocuTrackerDashboardScreenState
         if (docs.isEmpty)
           Container(
             padding: EdgeInsets.all(compact ? 16 : 24),
-            decoration: DocuTrackerTokens.cardDecoration(),
+            decoration: DocuTrackerTokens.cardDecoration(context: context),
             child: Center(
               child: Text(
                 'No documents yet.',
-                style: DocuTrackerTokens.subtitleStyle(),
+                style: DocuTrackerTokens.subtitleStyle(context),
               ),
             ),
           )
@@ -878,6 +894,7 @@ class _DocuTrackerDashboardScreenState
                 Container(
                   margin: EdgeInsets.only(bottom: compact ? 8 : 10),
                   decoration: DocuTrackerTokens.cardDecoration(
+                    context: context,
                     borderColor: highlightOverdue
                         ? DocuTrackerTokens.overdueAccent.withValues(
                             alpha: 0.35,
@@ -941,6 +958,7 @@ class _DocumentTileState extends State<_DocumentTile> {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 520;
@@ -979,7 +997,7 @@ class _DocumentTileState extends State<_DocumentTile> {
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: compact ? 13 : 14,
-                color: DocuTrackerTokens.textPrimary,
+                color: DocuTrackerTokens.textPrimaryOf(context),
                 height: 1.2,
               ),
             ),
@@ -988,7 +1006,7 @@ class _DocumentTileState extends State<_DocumentTile> {
               widget.document.documentNumber ?? '—',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: DocuTrackerTokens.metaStyle().copyWith(
+              style: DocuTrackerTokens.metaStyle(context).copyWith(
                 fontWeight: FontWeight.w600,
                 fontSize: compact ? 11 : 12,
               ),
@@ -1000,7 +1018,7 @@ class _DocumentTileState extends State<_DocumentTile> {
                   'Holder: ${widget.document.assigneeName}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: DocuTrackerTokens.metaStyle(),
+                  style: DocuTrackerTokens.metaStyle(context),
                 ),
               ),
           ],
@@ -1049,7 +1067,9 @@ class _DocumentTileState extends State<_DocumentTile> {
                       const SizedBox(height: 8),
                       Icon(
                         Icons.chevron_right_rounded,
-                        color: DocuTrackerTokens.textMuted,
+                        color: dark
+                            ? Colors.white.withValues(alpha: 0.7)
+                            : DocuTrackerTokens.textMuted,
                         size: 22,
                       ),
                     ],
@@ -1081,10 +1101,9 @@ class _DocumentTileState extends State<_DocumentTile> {
                   children: [
                     Text(
                       'CURRENT STATUS:',
-                      style: DocuTrackerTokens.metaStyle().copyWith(
-                        fontSize: 9,
-                        letterSpacing: 0.4,
-                      ),
+                      style: DocuTrackerTokens.metaStyle(
+                        context,
+                      ).copyWith(fontSize: 9, letterSpacing: 0.4),
                     ),
                     Container(
                       margin: const EdgeInsets.only(top: 2, bottom: 8),
@@ -1159,7 +1178,9 @@ class _DocumentTileState extends State<_DocumentTile> {
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           icon: const Icon(Icons.more_vert_rounded, size: 20),
-                          color: DocuTrackerTokens.textMuted,
+                          color: dark
+                              ? Colors.white.withValues(alpha: 0.7)
+                              : DocuTrackerTokens.textMuted,
                           onPressed: _opening ? null : _handleOpen,
                           tooltip: 'More actions',
                         ),
@@ -1233,12 +1254,15 @@ class _WarmFilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return DocuTrackerPressScale(
       pressedScale: 0.975,
       child: Material(
         color: selected
-            ? DocuTrackerTokens.overduePink.withValues(alpha: 0.85)
-            : DocuTrackerTokens.surface,
+            ? (dark
+                  ? const Color(0xFF3F2E25)
+                  : DocuTrackerTokens.overduePink.withValues(alpha: 0.85))
+            : (dark ? const Color(0xFF1F2937) : DocuTrackerTokens.surface),
         borderRadius: BorderRadius.circular(24),
         child: InkWell(
           onTap: onTap,
@@ -1250,7 +1274,9 @@ class _WarmFilterChip extends StatelessWidget {
               border: Border.all(
                 color: selected
                     ? DocuTrackerTokens.terracotta.withValues(alpha: 0.35)
-                    : DocuTrackerTokens.borderSubtle,
+                    : (dark
+                          ? const Color(0xFF374151)
+                          : DocuTrackerTokens.borderSubtle),
               ),
             ),
             child: Text(
@@ -1260,7 +1286,9 @@ class _WarmFilterChip extends StatelessWidget {
                 fontWeight: FontWeight.w700,
                 color: selected
                     ? DocuTrackerTokens.terracottaDark
-                    : DocuTrackerTokens.textSecondary,
+                    : (dark
+                          ? Colors.white.withValues(alpha: 0.85)
+                          : DocuTrackerTokens.textSecondary),
               ),
             ),
           ),
@@ -1283,12 +1311,13 @@ class _UtilityIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Tooltip(
       message: tooltip,
       child: DocuTrackerPressScale(
         pressedScale: 0.96,
         child: Material(
-          color: DocuTrackerTokens.surface,
+          color: dark ? const Color(0xFF1F2937) : DocuTrackerTokens.surface,
           borderRadius: BorderRadius.circular(10),
           child: InkWell(
             onTap: onPressed,
@@ -1298,9 +1327,19 @@ class _UtilityIconButton extends StatelessWidget {
               height: 36,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: DocuTrackerTokens.borderSubtle),
+                border: Border.all(
+                  color: dark
+                      ? const Color(0xFF374151)
+                      : DocuTrackerTokens.borderSubtle,
+                ),
               ),
-              child: Icon(icon, size: 18, color: DocuTrackerTokens.textMuted),
+              child: Icon(
+                icon,
+                size: 18,
+                color: dark
+                    ? Colors.white.withValues(alpha: 0.75)
+                    : DocuTrackerTokens.textMuted,
+              ),
             ),
           ),
         ),

@@ -861,7 +861,7 @@ class _DocuTrackerWorkflowEditorScreenState
             'Use the ⋮⋮ handle on the right: press, hold, and drag to reorder. '
             'Tap a card to highlight it, or tap a chip in the route preview to jump to that step in the list. '
             'Then use Edit to change people or deadlines.',
-            style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 12.5),
+            style: DocuTrackerTokens.subtitleStyle(context).copyWith(fontSize: 12.5),
           ),
           const SizedBox(height: 10),
         ],
@@ -878,7 +878,7 @@ class _DocuTrackerWorkflowEditorScreenState
         navigator.pop(false);
       },
       child: Scaffold(
-        backgroundColor: DocuTrackerTokens.canvas,
+        backgroundColor: DocuTrackerTokens.canvasOf(context),
         appBar: AppBar(
           backgroundColor: DocuTrackerTokens.surface,
           surfaceTintColor: Colors.transparent,
@@ -1680,7 +1680,7 @@ class _WorkflowPathPreviewStrip extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               'Same order as the builder · Tap a step to highlight it and scroll to its card',
-              style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 11.5),
+              style: DocuTrackerTokens.subtitleStyle(context).copyWith(fontSize: 11.5),
             ),
             const SizedBox(height: 10),
             if (steps.isEmpty)

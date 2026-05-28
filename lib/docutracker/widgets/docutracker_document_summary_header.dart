@@ -74,10 +74,14 @@ class DocuTrackerDocumentSummaryHeader extends StatelessWidget {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: DocuTrackerTokens.brand.withValues(alpha: 0.08),
+                          color: DocuTrackerTokens.brand.withValues(
+                            alpha: 0.08,
+                          ),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: DocuTrackerTokens.brand.withValues(alpha: 0.25),
+                            color: DocuTrackerTokens.brand.withValues(
+                              alpha: 0.25,
+                            ),
                           ),
                         ),
                         child: Row(

@@ -306,7 +306,7 @@ class _DocuTrackerDocumentDetailScreenState
           Expanded(
             child: Text(
               message,
-              style: DocuTrackerTokens.subtitleStyle().copyWith(
+              style: DocuTrackerTokens.subtitleStyle(context).copyWith(
                 color: DocuTrackerTokens.textPrimary,
                 fontWeight: FontWeight.w600,
               ),
@@ -446,7 +446,7 @@ class _DocuTrackerDocumentDetailScreenState
         canSubmit;
 
     return Scaffold(
-      backgroundColor: DocuTrackerTokens.canvas,
+      backgroundColor: DocuTrackerTokens.canvasOf(context),
       body: SingleChildScrollView(
         child: DocuTrackerResponsiveBody(
           maxWidth: DocuTrackerTokens.maxContentWidth,
@@ -663,7 +663,7 @@ class _DocuTrackerDocumentDetailScreenState
             DocuTrackerStatusBadge(status: doc.status, dotStyle: true),
             if (savedLabel.isNotEmpty) ...[
               const SizedBox(height: 6),
-              Text(savedLabel, style: DocuTrackerTokens.metaStyle()),
+              Text(savedLabel, style: DocuTrackerTokens.metaStyle(context)),
             ],
             if (deadlineLabel.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -1710,7 +1710,7 @@ class _CurrentAssignmentCard extends StatelessWidget {
       return DocuTrackerPeachDashedBox(
         child: Text(
           'No reviewers recorded for this step.',
-          style: DocuTrackerTokens.subtitleStyle(),
+          style: DocuTrackerTokens.subtitleStyle(context),
         ),
       );
     }
@@ -1814,7 +1814,7 @@ class _CurrentAssignmentCard extends StatelessWidget {
                       if (primaryHolderId != null)
                         Text(
                           primaryHolderId!,
-                          style: DocuTrackerTokens.metaStyle(),
+                          style: DocuTrackerTokens.metaStyle(context),
                         ),
                     ],
                   ),
@@ -1845,7 +1845,7 @@ class _InfoRow extends StatelessWidget {
             width: 120,
             child: Text(
               label,
-              style: DocuTrackerTokens.metaStyle().copyWith(fontSize: 13),
+              style: DocuTrackerTokens.metaStyle(context).copyWith(fontSize: 13),
             ),
           ),
           Expanded(

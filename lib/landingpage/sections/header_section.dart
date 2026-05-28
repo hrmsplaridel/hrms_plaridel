@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../constants/app_theme.dart';
 import '../widgets/section_container.dart';
@@ -27,18 +28,28 @@ class HeaderSection extends StatelessWidget {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
+        gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [AppTheme.primaryNavy, AppTheme.primaryNavyDark],
+          colors: [
+            AppTheme.primaryNavyDark,
+            AppTheme.primaryNavy,
+            Color(0xFFD84315),
+          ],
+          stops: [0.0, 0.5, 1.0],
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
           ),
         ],
+        border: Border(
+          bottom: BorderSide(
+            color: Colors.white.withValues(alpha: 0.12),
+          ),
+        ),
       ),
       child: Stack(
         clipBehavior: Clip.none,
@@ -52,11 +63,23 @@ class HeaderSection extends StatelessWidget {
               painter: const _TriangleAccentPainter(onOrangeHeader: true),
             ),
           ),
+          Positioned(
+            right: -20,
+            top: -30,
+            child: Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.06),
+              ),
+            ),
+          ),
           SectionContainer(
             backgroundColor: Colors.transparent,
             padding: EdgeInsets.symmetric(
               horizontal: isWide ? 80 : 20,
-              vertical: isWide ? 18 : 14,
+              vertical: isWide ? 12 : 10,
             ),
             child: isWide
                 ? Row(
@@ -71,31 +94,44 @@ class HeaderSection extends StatelessWidget {
                           lightOnColoredHeader: true,
                         ),
                       ),
-                      const SizedBox(width: 40),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          _NavLink(
-                            label: 'Home',
-                            onTap: onHomeTap,
-                            lightOnColoredHeader: true,
+                      const SizedBox(width: 28),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.2),
                           ),
-                          const SizedBox(width: 24),
-                          _NavLink(
-                            label: 'Job Vacancies',
-                            onTap: onJobVacanciesTap,
-                            lightOnColoredHeader: true,
-                          ),
-                          const SizedBox(width: 24),
-                          _NavLink(
-                            label: 'Contact',
-                            onTap: onContactTap,
-                            lightOnColoredHeader: true,
-                          ),
-                          const SizedBox(width: 32),
-                          _HeaderLoginButton(onLoginTap: onLoginTap),
-                        ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            _NavLink(
+                              label: 'Home',
+                              onTap: onHomeTap,
+                              lightOnColoredHeader: true,
+                            ),
+                            const SizedBox(width: 6),
+                            _NavLink(
+                              label: 'Job Vacancies',
+                              onTap: onJobVacanciesTap,
+                              lightOnColoredHeader: true,
+                            ),
+                            const SizedBox(width: 6),
+                            _NavLink(
+                              label: 'Contact',
+                              onTap: onContactTap,
+                              lightOnColoredHeader: true,
+                            ),
+                            const SizedBox(width: 10),
+                            _HeaderLoginButton(onLoginTap: onLoginTap),
+                          ],
+                        ),
                       ),
                     ],
                   )
@@ -118,27 +154,40 @@ class HeaderSection extends StatelessWidget {
                         ],
                       ),
                       if (!isNarrow) ...[
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 8,
-                          children: [
-                            _NavLink(
-                              label: 'Home',
-                              onTap: onHomeTap,
-                              lightOnColoredHeader: true,
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.2),
                             ),
-                            _NavLink(
-                              label: 'Job Vacancies',
-                              onTap: onJobVacanciesTap,
-                              lightOnColoredHeader: true,
-                            ),
-                            _NavLink(
-                              label: 'Contact',
-                              onTap: onContactTap,
-                              lightOnColoredHeader: true,
-                            ),
-                          ],
+                          ),
+                          child: Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: [
+                              _NavLink(
+                                label: 'Home',
+                                onTap: onHomeTap,
+                                lightOnColoredHeader: true,
+                              ),
+                              _NavLink(
+                                label: 'Job Vacancies',
+                                onTap: onJobVacanciesTap,
+                                lightOnColoredHeader: true,
+                              ),
+                              _NavLink(
+                                label: 'Contact',
+                                onTap: onContactTap,
+                                lightOnColoredHeader: true,
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ],
@@ -165,22 +214,22 @@ class _HeaderLoginButton extends StatefulWidget {
 class _HeaderLoginButtonState extends State<_HeaderLoginButton> {
   bool _hover = false;
 
-  static const _radius = 24.0;
-  static const _padding = EdgeInsets.symmetric(horizontal: 24, vertical: 12);
+  static const _radius = 20.0;
+  static const _padding = EdgeInsets.symmetric(horizontal: 16, vertical: 8);
   static const _paddingCompact = EdgeInsets.symmetric(
-    horizontal: 18,
-    vertical: 10,
+    horizontal: 12,
+    vertical: 7,
   );
 
   @override
   Widget build(BuildContext context) {
     final pad = widget.compact ? _paddingCompact : _padding;
-    final minW = widget.compact ? 100.0 : 120.0;
-    final minH = widget.compact ? 42.0 : 46.0;
+    final fontSize = widget.compact ? 12.5 : 13.0;
+    final iconSize = widget.compact ? 15.0 : 16.0;
 
     return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
+      onEnter: kIsWeb ? (_) => setState(() => _hover = true) : null,
+      onExit: kIsWeb ? (_) => setState(() => _hover = false) : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
@@ -188,39 +237,44 @@ class _HeaderLoginButtonState extends State<_HeaderLoginButton> {
           boxShadow: _hover
               ? [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.22),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
                   ),
                 ]
               : [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
                   ),
                 ],
         ),
-        child: FilledButton(
+        child: FilledButton.icon(
           onPressed: widget.onLoginTap,
+          icon: Icon(Icons.login_rounded, size: iconSize),
+          label: Text(
+            'Login',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: fontSize,
+              letterSpacing: 0.2,
+            ),
+          ),
           style: FilledButton.styleFrom(
-            backgroundColor: Colors.white,
+            backgroundColor:
+                _hover ? Colors.white : Colors.white.withValues(alpha: 0.96),
             foregroundColor: AppTheme.primaryNavyDark,
             padding: pad,
-            minimumSize: Size(minW, minH),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(_radius),
             ),
             elevation: 0,
             side: BorderSide(
-              color: AppTheme.primaryNavyDark.withValues(alpha: 0.12),
-            ),
-          ),
-          child: Text(
-            'Login',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: widget.compact ? 14 : 15,
+              color: AppTheme.primaryNavyDark.withValues(alpha: 0.1),
             ),
           ),
         ),
@@ -250,34 +304,43 @@ class _NavLinkState extends State<_NavLink> {
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 150),
-          style: TextStyle(
-            color: widget.lightOnColoredHeader
-                ? (_hover ? Colors.white : Colors.white.withValues(alpha: 0.92))
-                : AppTheme.primaryNavy,
-            fontSize: 15,
-            fontWeight: _hover ? FontWeight.w800 : FontWeight.w600,
-            shadows: widget.lightOnColoredHeader
-                ? [
-                    Shadow(
-                      color: Colors.black.withValues(alpha: 0.25),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
-                    ),
-                  ]
-                : null,
-            decoration: _hover ? TextDecoration.underline : null,
-            decorationColor: widget.lightOnColoredHeader
-                ? Colors.white
-                : AppTheme.primaryNavy,
-            decorationThickness: 2,
+      onEnter: kIsWeb ? (_) => setState(() => _hover = true) : null,
+      onExit: kIsWeb ? (_) => setState(() => _hover = false) : null,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: widget.lightOnColoredHeader
+                  ? Colors.white.withValues(alpha: _hover ? 0.18 : 0.0)
+                  : AppTheme.primaryNavy.withValues(alpha: _hover ? 0.08 : 0.0),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                color: widget.lightOnColoredHeader
+                    ? Colors.white.withValues(alpha: _hover ? 1 : 0.9)
+                    : AppTheme.primaryNavy,
+                fontSize: 13.5,
+                fontWeight: _hover ? FontWeight.w700 : FontWeight.w600,
+                letterSpacing: 0.1,
+                shadows: widget.lightOnColoredHeader
+                    ? [
+                        Shadow(
+                          color: Colors.black.withValues(alpha: 0.2),
+                          blurRadius: 3,
+                          offset: const Offset(0, 1),
+                        ),
+                      ]
+                    : null,
+              ),
+            ),
           ),
-          child: Text(widget.label),
         ),
       ),
     );
@@ -363,7 +426,7 @@ class _LguBranding extends StatelessWidget {
           'MUNICIPALITY OF PLARIDEL',
           style: TextStyle(
             color: titleColor,
-            fontSize: isNarrow ? 14 : (isWide ? 22 : 18),
+            fontSize: isNarrow ? 13 : (isWide ? 19 : 16),
             fontWeight: FontWeight.w800,
             letterSpacing: 1.0,
             height: 1.2,
@@ -383,7 +446,7 @@ class _LguBranding extends StatelessWidget {
           'HUMAN RESOURCE MANAGEMENT AND DEVELOPMENT OFFICE',
           style: TextStyle(
             color: hrOfficeColor,
-            fontSize: isNarrow ? 8 : (isWide ? 12 : 10),
+            fontSize: isNarrow ? 7.5 : (isWide ? 10.5 : 9),
             fontWeight: FontWeight.w700,
             letterSpacing: 0.6,
             height: 1.25,
@@ -406,10 +469,10 @@ class _LguBranding extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         _MunicipalityLogoCircular(
-          size: isNarrow ? 64 : (isWide ? 90 : 72),
+          size: isNarrow ? 56 : (isWide ? 72 : 64),
           lightEdge: lightOnColoredHeader,
         ),
-        SizedBox(width: isWide ? 20 : 12),
+        SizedBox(width: isWide ? 16 : 10),
         if (expandWidth)
           Expanded(child: textColumn)
         else

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import '../../api/user_facing_api_error.dart';
@@ -4113,9 +4114,34 @@ class _TrainingNeedAnalysisFormEditor extends StatefulWidget {
 
 class _TrainingNeedAnalysisFormEditorState
     extends State<_TrainingNeedAnalysisFormEditor> {
+  static const _tnaColWidths = <double>[140, 110, 110, 110, 130, 150];
+  static const _tnaColumnSpacing = 12.0;
+  static const _tnaHorizontalMargin = 12.0;
+
   late TextEditingController _cyYear;
   late TextEditingController _department;
   late List<Map<String, TextEditingController>> _rows;
+  final ScrollController _tnaTableHScroll = ScrollController();
+
+  static double _tnaTableMinWidth({required bool readOnly}) {
+    final sum = _tnaColWidths.fold<double>(0, (a, b) => a + b);
+    final gaps = _tnaColumnSpacing * (_tnaColWidths.length - 1);
+    final actionCol = readOnly ? 0.0 : 48.0;
+    // Floor keeps the last column visible when the dialog is narrower than the table.
+    return math.max(1080.0, sum + gaps + _tnaHorizontalMargin * 2 + actionCol);
+  }
+
+  static Widget _tnaColumnLabel(String text, double width) {
+    return SizedBox(
+      width: width,
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+        softWrap: true,
+        maxLines: 3,
+      ),
+    );
+  }
 
   static Map<String, TextEditingController> _rowControllers(
     String namePos,
@@ -4159,6 +4185,7 @@ class _TrainingNeedAnalysisFormEditorState
 
   @override
   void dispose() {
+    _tnaTableHScroll.dispose();
     _cyYear.dispose();
     _department.dispose();
     for (final row in _rows) {
@@ -4297,99 +4324,86 @@ class _TrainingNeedAnalysisFormEditorState
                 ],
               ],
             ),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: const [
-                  DataColumn(label: Text('NAME/POSITION')),
-                  DataColumn(label: Text('GOAL')),
-                  DataColumn(label: Text('BEHAVIOR')),
-                  DataColumn(label: Text('SKILLS/KNOWLEDGE')),
-                  DataColumn(label: Text('NEED FOR TRAINING')),
-                  DataColumn(label: Text('TRAINING RECOMMENDATIONS')),
-                  DataColumn(label: Text('')),
-                ],
-                rows: List.generate(_rows.length, (i) {
-                  final r = _rows[i];
-                  return DataRow(
-                    cells: [
-                      DataCell(
-                        SizedBox(
-                          width: 140,
-                          child: TextFormField(
-                            controller: r['name_position'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 120,
-                          child: TextFormField(
-                            controller: r['goal'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 120,
-                          child: TextFormField(
-                            controller: r['behavior'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 120,
-                          child: TextFormField(
-                            controller: r['skills_knowledge'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 120,
-                          child: TextFormField(
-                            controller: r['need_for_training'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 140,
-                          child: TextFormField(
-                            controller: r['training_recommendations'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        ro
-                            ? const SizedBox(width: 40)
-                            : IconButton(
-                                icon: const Icon(
-                                  Icons.remove_circle_outline,
-                                  size: 20,
-                                ),
-                                onPressed: _rows.length > 1
-                                    ? () => _removeRow(i)
-                                    : null,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final minW = _tnaTableMinWidth(readOnly: ro);
+                final parentW = constraints.maxWidth.isFinite
+                    ? constraints.maxWidth
+                    : 0.0;
+                final tableWidth = math.max(parentW, minW).toDouble();
+                final colLabels = [
+                  'NAME/POSITION',
+                  'GOAL',
+                  'BEHAVIOR',
+                  'SKILLS/KNOWLEDGE',
+                  'NEED FOR TRAINING',
+                  'TRAINING RECOMMENDATIONS',
+                ];
+                return Scrollbar(
+                  controller: _tnaTableHScroll,
+                  thumbVisibility: true,
+                  child: SingleChildScrollView(
+                    controller: _tnaTableHScroll,
+                    scrollDirection: Axis.horizontal,
+                    physics: const ClampingScrollPhysics(),
+                    child: SizedBox(
+                      width: tableWidth,
+                      child: DataTable(
+                        columnSpacing: _tnaColumnSpacing,
+                        horizontalMargin: _tnaHorizontalMargin,
+                        columns: [
+                          for (var c = 0; c < colLabels.length; c++)
+                            DataColumn(
+                              label: _tnaColumnLabel(
+                                colLabels[c],
+                                _tnaColWidths[c],
                               ),
+                            ),
+                          if (!ro) const DataColumn(label: SizedBox(width: 40)),
+                        ],
+                        rows: List.generate(_rows.length, (i) {
+                          final r = _rows[i];
+                          final keys = [
+                            'name_position',
+                            'goal',
+                            'behavior',
+                            'skills_knowledge',
+                            'need_for_training',
+                            'training_recommendations',
+                          ];
+                          return DataRow(
+                            cells: [
+                              for (var c = 0; c < keys.length; c++)
+                                DataCell(
+                                  SizedBox(
+                                    width: _tnaColWidths[c],
+                                    child: TextFormField(
+                                      controller: r[keys[c]],
+                                      readOnly: ro,
+                                      decoration: rspTableCellField(),
+                                    ),
+                                  ),
+                                ),
+                              if (!ro)
+                                DataCell(
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.remove_circle_outline,
+                                      size: 20,
+                                    ),
+                                    onPressed: _rows.length > 1
+                                        ? () => _removeRow(i)
+                                        : null,
+                                  ),
+                                ),
+                            ],
+                          );
+                        }),
                       ),
-                    ],
-                  );
-                }),
-              ),
+                    ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 24),
             const RspFormFooter(),

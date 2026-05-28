@@ -291,96 +291,99 @@ class _DashboardSidebarProfileCardState
         avatarPath: widget.avatarPath,
       ),
       expanded: AnimatedBuilder(
-      animation: _pulse,
-      builder: (context, _) {
-        final pulseT = _pulse.value;
-        final borderAlpha = _hovered ? 0.85 : (0.45 + pulseT * 0.4);
-        final glowAlpha = _hovered ? 0.22 : (0.08 + pulseT * 0.1);
+        animation: _pulse,
+        builder: (context, _) {
+          final pulseT = _pulse.value;
+          final borderAlpha = _hovered ? 0.85 : (0.45 + pulseT * 0.4);
+          final glowAlpha = _hovered ? 0.22 : (0.08 + pulseT * 0.1);
 
-        return MouseRegion(
-          onEnter: (_) => setState(() => _hovered = true),
-          onExit: (_) => setState(() => _hovered = false),
-          child: AnimatedScale(
-            scale: _hovered ? 1.02 : 1.0,
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOutCubic,
-            child: AnimatedContainer(
+          return MouseRegion(
+            onEnter: (_) => setState(() => _hovered = true),
+            onExit: (_) => setState(() => _hovered = false),
+            child: AnimatedScale(
+              scale: _hovered ? 1.02 : 1.0,
               duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-              decoration: BoxDecoration(
-                color: AppTheme.dashPanelOf(context),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: AppTheme.primaryNavy.withValues(alpha: borderAlpha),
-                  width: _hovered ? 2 : 1.5,
+              curve: Curves.easeOutCubic,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 11,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primaryNavy.withValues(alpha: glowAlpha),
-                    blurRadius: _hovered ? 14 : 8,
-                    offset: const Offset(0, 3),
+                decoration: BoxDecoration(
+                  color: AppTheme.dashPanelOf(context),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(alpha: borderAlpha),
+                    width: _hovered ? 2 : 1.5,
                   ),
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-                gradient: LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                  colors: [
-                    AppTheme.primaryNavy.withValues(
-                      alpha: _hovered ? 0.1 : 0.05 + pulseT * 0.04,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryNavy.withValues(alpha: glowAlpha),
+                      blurRadius: _hovered ? 14 : 8,
+                      offset: const Offset(0, 3),
                     ),
-                    AppTheme.dashMutedSurfaceOf(context),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.06),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [
+                      AppTheme.primaryNavy.withValues(
+                        alpha: _hovered ? 0.1 : 0.05 + pulseT * 0.04,
+                      ),
+                      AppTheme.dashMutedSurfaceOf(context),
+                    ],
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    _SidebarAvatarRing(
+                      avatarPath: widget.avatarPath,
+                      radius: avatarRadius,
+                      pulse: _pulse,
+                      hovered: _hovered,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            widget.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(context),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            widget.subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(context),
+                              fontSize: 12,
+                              height: 1.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
-              child: Row(
-                children: [
-                  _SidebarAvatarRing(
-                    avatarPath: widget.avatarPath,
-                    radius: avatarRadius,
-                    pulse: _pulse,
-                    hovered: _hovered,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          widget.displayName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: AppTheme.dashTextPrimaryOf(context),
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          widget.subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: AppTheme.dashTextSecondaryOf(context),
-                            fontSize: 12,
-                            height: 1.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
             ),
-          ),
-        );
-      },
+          );
+        },
       ),
     );
   }

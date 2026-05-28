@@ -105,9 +105,12 @@ class EmployeeDashUi {
   }
 
   static ButtonStyle ghostAction(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return TextButton.styleFrom(
-      foregroundColor: AppTheme.primaryNavy,
-      backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.06),
+      foregroundColor: dark
+          ? AppTheme.primaryNavyLight
+          : AppTheme.primaryNavy,
+      backgroundColor: AppTheme.primaryNavy.withValues(alpha: dark ? 0.18 : 0.06),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -285,6 +288,8 @@ class EmployeeSectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
+    final dark = AppTheme.dashIsDark(context);
+    final accent = AppTheme.primaryNavy;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -296,17 +301,26 @@ class EmployeeSectionHeader extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  AppTheme.primaryNavy.withValues(alpha: 0.14),
-                  AppTheme.letterheadNavy.withValues(alpha: 0.08),
-                ],
+                colors: dark
+                    ? [
+                        accent.withValues(alpha: 0.28),
+                        accent.withValues(alpha: 0.12),
+                      ]
+                    : [
+                        accent.withValues(alpha: 0.14),
+                        AppTheme.letterheadNavy.withValues(alpha: 0.08),
+                      ],
               ),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                color: accent.withValues(alpha: dark ? 0.35 : 0.12),
               ),
             ),
-            child: Icon(icon, color: AppTheme.primaryNavy, size: 22),
+            child: Icon(
+              icon,
+              color: dark ? AppTheme.primaryNavyLight : accent,
+              size: 22,
+            ),
           ),
           const SizedBox(width: 14),
         ],

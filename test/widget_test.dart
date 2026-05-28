@@ -41,7 +41,6 @@ void main() {
     // Build the app and trigger a frame.
     await tester.pumpWidget(MyApp(
       auth: auth,
-      storedLoginAs: 'Admin',
       themeNotifier: ThemeModeNotifier(initial: ThemeMode.light),
     ));
 

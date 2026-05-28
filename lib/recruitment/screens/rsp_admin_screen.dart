@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -26,6 +27,9 @@ import '../../widgets/rsp_ld_saved_records_browser.dart';
 import '../widgets/rsp_bei_grading_dialog.dart';
 import '../widgets/rsp_exam_editor_ui.dart';
 import '../widgets/rsp_final_interview_scheduler.dart';
+import '../utils/rsp_applications_report_export.dart';
+import '../widgets/rsp_generate_report_dialog.dart';
+import '../widgets/rsp_applications_report_preview_screen.dart';
 import '../../api/user_facing_api_error.dart';
 import '../widgets/rsp_iframe_preview.dart';
 import '../widgets/rsp_records_list_table.dart';
@@ -8873,6 +8877,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
 
   bool _loading = true;
   bool _syncing = false;
+  bool _exportingReport = false;
   final ScrollController _horizontalScrollController = ScrollController();
 
   Set<String> get _positionFilterOptions {
@@ -9611,18 +9616,155 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     }
   }
 
+  String _reportFilterSummary() {
+    final parts = <String>[];
+    if (_selectedPositionFilter != null &&
+        _selectedPositionFilter!.trim().isNotEmpty) {
+      parts.add('Position: ${_selectedPositionFilter!.trim()}');
+    }
+    if (_selectedAppliedDate != null) {
+      parts.add('Applied date: ${_formatDateShort(_selectedAppliedDate!)}');
+    }
+    if (parts.isEmpty) return 'Filters: none (all applications)';
+    return 'Filters: ${parts.join(' · ')}';
+  }
+
+  List<RspApplicationsReportRow> _reportRows() {
+    return _filteredApplications
+        .map(
+          (app) => RspApplicationsReportRow.fromApplication(
+            app: app,
+            exam: _examResults[app.id.toLowerCase()],
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> _showGenerateReportDialog() async {
+    final apps = _filteredApplications;
+    if (apps.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No applicants match the current filters. Adjust filters or refresh data.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    var withExam = 0;
+    var passed = 0;
+    for (final app in apps) {
+      final exam = _examResults[app.id.toLowerCase()];
+      if (exam != null) {
+        withExam++;
+        if (exam.passed) passed++;
+      }
+    }
+
+    final choice = await RspGenerateReportDialog.showApplications(
+      context,
+      applicantCount: apps.length,
+      filterSummary: _reportFilterSummary(),
+      withExamCount: withExam,
+      passedCount: passed,
+    );
+    if (choice == null || !mounted) return;
+
+    final rows = _reportRows();
+    final summary = _reportFilterSummary();
+
+    if (choice == RspReportExportChoice.preview) {
+      await RspApplicationsReportPreviewScreen.open(
+        context,
+        rows: rows,
+        filterSummary: summary,
+      );
+      return;
+    }
+
+    setState(() => _exportingReport = true);
+    try {
+      switch (choice) {
+        case RspReportExportChoice.preview:
+          break; // opened before export switch
+        case RspReportExportChoice.csv:
+          await RspApplicationsReportExport.shareCsv(
+            rows: rows,
+            filterSummary: summary,
+          );
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('CSV report downloaded (${rows.length} applicants).'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        case RspReportExportChoice.pdf:
+          await RspApplicationsReportExport.sharePdf(
+            rows: rows,
+            filterSummary: summary,
+          );
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('PDF report downloaded (${rows.length} applicants).'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        case RspReportExportChoice.print:
+          await RspApplicationsReportExport.printPdf(
+            context: context,
+            rows: rows,
+            filterSummary: summary,
+          );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Report failed. ${userFacingApiError(e)}'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingReport = false);
+    }
+  }
+
+  /// Lists storage paths; retries when the API returns 429 (rate limited).
+  Future<List<Map<String, String>>> _listStoragePathsWithRetry() async {
+    const maxAttempts = 3;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(Duration(seconds: attempt * 2));
+      }
+      try {
+        return await RecruitmentRepo.instance.listStorageAttachmentPaths();
+      } on DioException catch (e) {
+        if (e.response?.statusCode == 429 && attempt < maxAttempts - 1) {
+          continue;
+        }
+        rethrow;
+      }
+    }
+    return RecruitmentRepo.instance.listStorageAttachmentPaths();
+  }
+
   /// Sync attachment paths from server disk into DB for applications missing paths.
   Future<void> _syncAttachmentsFromStorage() async {
     if (_syncing) return;
     setState(() => _syncing = true);
     try {
-      final entries = await RecruitmentRepo.instance
-          .listStorageAttachmentPaths();
+      final entries = await _listStoragePathsWithRetry();
       debugPrint(
         'Sync attachments: listed ${entries.length} file(s) on server.',
       );
       int linked = 0;
-      for (final e in entries) {
+      for (var i = 0; i < entries.length; i++) {
+        final e = entries[i];
         final fileName = e['fileName']!;
         final kind = RspApplicationDocKind.fromStorageFileName(fileName);
         final ok = kind != null
@@ -9639,6 +9781,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 fileName,
               );
         if (ok) linked++;
+        if (i > 0 && i % 5 == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        }
       }
       if (mounted) {
         await _load();
@@ -9660,11 +9805,11 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       debugPrint('$st');
       if (mounted) {
         setState(() => _syncing = false);
-        final message = e.toString().replaceFirst('Exception: ', '');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Sync failed: $message'),
-            backgroundColor: const Color(0xFFC62828),
+            content: Text('Sync failed. ${userFacingApiError(e)}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -9820,6 +9965,38 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
           foregroundColor: Colors.white,
           elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+
+    final generateReportBtn = Tooltip(
+      message:
+          'Export the filtered applicant list and exam scores (CSV or PDF).',
+      child: OutlinedButton.icon(
+        onPressed: (_loading || _exportingReport)
+            ? null
+            : _showGenerateReportDialog,
+        icon: _exportingReport
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.summarize_outlined, size: 18),
+        label: Text(_exportingReport ? 'Generating…' : 'Generate report'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppTheme.dashIsDark(context)
+              ? AppTheme.primaryNavyLight
+              : AppTheme.primaryNavy,
+          side: BorderSide(
+            color: AppTheme.primaryNavy.withValues(
+              alpha: AppTheme.dashIsDark(context) ? 0.45 : 0.35,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -9983,6 +10160,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   children: [
                     viewScoreBtn,
                     const SizedBox(height: 10),
+                    generateReportBtn,
+                    const SizedBox(height: 10),
                     syncBtn,
                     const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
@@ -10054,10 +10233,13 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   ],
                 );
               }
-              return Row(
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   viewScoreBtn,
-                  const Spacer(),
+                  generateReportBtn,
                   syncBtn,
                 ],
               );

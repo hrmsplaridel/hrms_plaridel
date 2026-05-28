@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../data/job_vacancy_announcement.dart';
@@ -18,23 +19,25 @@ class _RequirementChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: AppTheme.offWhite,
+        color: AppTheme.primaryNavy.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E6EA)),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: AppTheme.textSecondary),
+          Icon(icon, size: 14, color: AppTheme.primaryNavy),
           const SizedBox(width: 6),
           Flexible(
             child: Text(
               label,
               style: const TextStyle(
                 color: AppTheme.textPrimary,
-                fontSize: 12.5,
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
-                height: 1.2,
+                height: 1.25,
               ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -141,29 +144,90 @@ class JobVacanciesSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Job Vacancies',
-            style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontSize: isWide ? 30 : 26,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.4,
-              height: 1.15,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: 56,
-            height: 4,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              gradient: LinearGradient(
-                colors: [
-                  AppTheme.primaryNavy,
-                  AppTheme.primaryNavy.withValues(alpha: 0.55),
-                ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppTheme.primaryNavy.withValues(alpha: 0.18),
+                      AppTheme.primaryNavy.withValues(alpha: 0.08),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.15),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.work_outline_rounded,
+                  color: AppTheme.primaryNavy,
+                  size: 26,
+                ),
               ),
-            ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Job Vacancies',
+                          style: TextStyle(
+                            color: AppTheme.primaryNavy,
+                            fontSize: isWide ? 28 : 24,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.35,
+                            height: 1.15,
+                          ),
+                        ),
+                        if (hasVacancies && list.isNotEmpty) ...[
+                          const SizedBox(width: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFD1FAE5),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              '${list.length} open',
+                              style: const TextStyle(
+                                color: Color(0xFF047857),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: 72,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(4),
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.primaryNavy,
+                            AppTheme.primaryNavyLight.withValues(alpha: 0.7),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
           ConstrainedBox(
@@ -388,15 +452,18 @@ class _RecruitmentCtaBanner extends StatelessWidget {
 
     final button = FilledButton.icon(
       onPressed: onTap,
-      icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+      icon: const Icon(Icons.arrow_forward_rounded, size: 16),
       label: const Text('Go to recruitment'),
       style: FilledButton.styleFrom(
         backgroundColor: AppTheme.primaryNavy,
         foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        elevation: 2,
-        shadowColor: AppTheme.primaryNavy.withValues(alpha: 0.35),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        elevation: 1,
+        shadowColor: AppTheme.primaryNavy.withValues(alpha: 0.3),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
 
@@ -460,15 +527,27 @@ class _StatusBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: fg.withValues(alpha: 0.2)),
       ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: fg,
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.25,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: fg,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -543,7 +622,7 @@ class _SlotProgressBar extends StatelessWidget {
   }
 }
 
-class _VacancyCard extends StatelessWidget {
+class _VacancyCard extends StatefulWidget {
   const _VacancyCard({
     required this.headline,
     required this.fallbackBody,
@@ -571,32 +650,49 @@ class _VacancyCard extends StatelessWidget {
   final VoidCallback? onApplyTap;
 
   @override
+  State<_VacancyCard> createState() => _VacancyCardState();
+}
+
+class _VacancyCardState extends State<_VacancyCard> {
+  bool _hovering = false;
+
+  @override
   Widget build(BuildContext context) {
-    final accent = hasVacancies ? AppTheme.primaryNavy : AppTheme.textSecondary;
-    const radius = 20.0;
-    final showSlots =
-        hasVacancies && slotsMax != null && slotsMax! >= 1 && slotsFilled != null;
+    final accent =
+        widget.hasVacancies ? AppTheme.primaryNavy : AppTheme.textSecondary;
+    const radius = 18.0;
+    final showSlots = widget.hasVacancies &&
+        widget.slotsMax != null &&
+        widget.slotsMax! >= 1 &&
+        widget.slotsFilled != null;
 
     final iconTile = Container(
-      width: 48,
-      height: 48,
+      width: 44,
+      height: 44,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppTheme.primaryNavy.withValues(alpha: 0.16),
+            AppTheme.primaryNavy.withValues(alpha: 0.06),
+          ],
+        ),
         border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.14)),
       ),
-      child: Icon(roleIcon, size: 26, color: accent),
+      child: Icon(widget.roleIcon, size: 22, color: accent),
     );
 
-    final detailsSection = hasVacancies
-        ? (requirementChips ??
-            (fallbackBody.trim().isNotEmpty
+    final detailsSection = widget.hasVacancies
+        ? (widget.requirementChips ??
+            (widget.fallbackBody.trim().isNotEmpty
                 ? Text(
-                    fallbackBody,
+                    widget.fallbackBody,
                     style: TextStyle(
                       color: AppTheme.textPrimary.withValues(alpha: 0.9),
-                      fontSize: 14.5,
-                      height: 1.55,
+                      fontSize: 14,
+                      height: 1.5,
                     ),
                   )
                 : null))
@@ -627,11 +723,11 @@ class _VacancyCard extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(10, 14, 16, 14),
                       child: Text(
-                        fallbackBody,
+                        widget.fallbackBody,
                         style: TextStyle(
                           color: AppTheme.textSecondary,
-                          fontSize: 14.5,
-                          height: 1.55,
+                          fontSize: 14,
+                          height: 1.5,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -642,51 +738,44 @@ class _VacancyCard extends StatelessWidget {
             ),
           );
 
-    final applyButton = onApplyTap != null
-        ? FilledButton(
-            onPressed: onApplyTap,
+    final applyButton = widget.onApplyTap != null
+        ? FilledButton.icon(
+            onPressed: widget.onApplyTap,
+            icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+            label: const Text('Apply now'),
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primaryNavy,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              minimumSize: const Size(double.infinity, 48),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
               ),
-              elevation: 1,
-            ),
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  'Apply now',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                ),
-                SizedBox(width: 6),
-                Icon(Icons.arrow_forward_rounded, size: 18),
-              ],
+              elevation: _hovering ? 2 : 0,
             ),
           )
-        : FilledButton(
+        : OutlinedButton(
             onPressed: null,
-            style: FilledButton.styleFrom(
-              disabledBackgroundColor: const Color(0xFFE9ECEF),
+            style: OutlinedButton.styleFrom(
               disabledForegroundColor: AppTheme.textSecondary,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              minimumSize: const Size(double.infinity, 48),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              side: const BorderSide(color: Color(0xFFE2E6EA)),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
               ),
-              elevation: 0,
             ),
             child: const Text(
               'Applications closed',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
           );
 
     final content = Padding(
-      padding: const EdgeInsets.fromLTRB(22, 22, 22, 22),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -696,90 +785,95 @@ class _VacancyCard extends StatelessWidget {
             children: [
               iconTile,
               const Spacer(),
-              if (hasVacancies) _StatusBadge(status: status),
+              if (widget.hasVacancies) _StatusBadge(status: widget.status),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Text(
-            headline,
+            widget.headline,
             style: TextStyle(
-              color: hasVacancies ? AppTheme.textPrimary : AppTheme.textPrimary,
-              fontSize: hasVacancies ? 20 : 18,
+              color: AppTheme.textPrimary,
+              fontSize: widget.hasVacancies ? 18 : 17,
               fontWeight: FontWeight.w800,
               height: 1.2,
-              letterSpacing: -0.2,
+              letterSpacing: -0.15,
             ),
           ),
           if (detailsSection != null) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             detailsSection,
           ],
           if (showSlots) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             _SlotProgressBar(
-              filled: slotsFilled!,
-              max: slotsMax!,
-              detailLine: slotDetailLine,
+              filled: widget.slotsFilled!,
+              max: widget.slotsMax!,
+              detailLine: widget.slotDetailLine,
             ),
           ],
-          if (hasVacancies) ...[
-            const SizedBox(height: 16),
-            applyButton,
+          if (widget.hasVacancies) ...[
+            const SizedBox(height: 14),
+            Align(alignment: Alignment.centerRight, child: applyButton),
           ],
         ],
       ),
     );
 
-    return Material(
-      color: Colors.transparent,
-      child: ConstrainedBox(
+    return MouseRegion(
+      onEnter: kIsWeb && widget.onApplyTap != null
+          ? (_) => setState(() => _hovering = true)
+          : null,
+      onExit: kIsWeb && widget.onApplyTap != null
+          ? (_) => setState(() => _hovering = false)
+          : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
         constraints: BoxConstraints(
-          minHeight: minTall && hasVacancies ? 280 : 0,
+          minHeight: widget.minTall && widget.hasVacancies ? 248 : 0,
         ),
-        child: Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: AppTheme.white,
-            borderRadius: BorderRadius.circular(radius),
-            border: Border.all(
-              color: hasVacancies
-                  ? AppTheme.primaryNavy.withValues(alpha: 0.12)
-                  : const Color(0xFFE2E6EA),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.06),
-                blurRadius: 24,
-                offset: const Offset(0, 10),
-              ),
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
+        decoration: BoxDecoration(
+          color: AppTheme.white,
+          borderRadius: BorderRadius.circular(radius),
+          border: Border.all(
+            color: widget.hasVacancies
+                ? AppTheme.primaryNavy.withValues(alpha: _hovering ? 0.28 : 0.14)
+                : const Color(0xFFE2E6EA),
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(radius),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (hasVacancies)
-                  Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          AppTheme.primaryNavy,
-                          AppTheme.primaryNavyLight.withValues(alpha: 0.9),
-                        ],
-                      ),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primaryNavy.withValues(
+                alpha: _hovering ? 0.12 : 0.06,
+              ),
+              blurRadius: _hovering ? 20 : 14,
+              offset: Offset(0, _hovering ? 8 : 5),
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.hasVacancies)
+                Container(
+                  height: 3,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppTheme.primaryNavy,
+                        AppTheme.primaryNavyLight,
+                      ],
                     ),
                   ),
-                content,
-              ],
-            ),
+                ),
+              content,
+            ],
           ),
         ),
       ),

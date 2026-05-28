@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/user_facing_api_error.dart';
 import '../../data/recruitment_application.dart';
 import '../../landingpage/constants/app_theme.dart';
 import '../../providers/recruitment_hire_prefill.dart';
 import 'rsp_hire_email_dialog.dart';
+import '../utils/rsp_final_interview_report_export.dart';
+import 'rsp_final_interview_report_preview_screen.dart';
+import 'rsp_generate_report_dialog.dart';
 
 /// Admin: applicants who passed the screening exam — schedule final interview,
 /// record pass/fail, then open Create Account (sidebar) using the shared form.
@@ -26,7 +30,9 @@ class _RspFinalInterviewSchedulerState
   String? _selectedPositionFilter;
   DateTime? _selectedAppliedDate;
   bool _loading = true;
+  bool _exportingReport = false;
   final Set<String> _savingIds = {};
+
   /// Any applicant can be collapsed to a compact, name-only row until expanded.
   final Set<String> _expandedHiredApplicantIds = {};
 
@@ -78,6 +84,139 @@ class _RspFinalInterviewSchedulerState
     return la.year == lb.year && la.month == lb.month && la.day == lb.day;
   }
 
+  String _reportFilterSummary() {
+    final parts = <String>[];
+    if (_selectedPositionFilter != null &&
+        _selectedPositionFilter!.trim().isNotEmpty) {
+      parts.add('Position: ${_selectedPositionFilter!.trim()}');
+    }
+    if (_selectedAppliedDate != null) {
+      parts.add('Applied date: ${_formatDateShort(_selectedAppliedDate!)}');
+    }
+    if (parts.isEmpty) {
+      return 'Filters: none (all passed-exam applicants)';
+    }
+    return 'Filters: ${parts.join(' · ')}';
+  }
+
+  List<RspFinalInterviewReportRow> _reportRows() {
+    return _filteredPassedApplicants
+        .map((app) {
+          final exam = _examResults[app.id.toLowerCase()];
+          if (exam == null) return null;
+          return RspFinalInterviewReportRow.fromApplication(
+            app: app,
+            exam: exam,
+          );
+        })
+        .whereType<RspFinalInterviewReportRow>()
+        .toList();
+  }
+
+  Future<void> _showGenerateReportDialog() async {
+    final apps = _filteredPassedApplicants;
+    if (apps.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No applicants match the current filters. Adjust filters or refresh.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    var scheduled = 0;
+    var hired = 0;
+    for (final app in apps) {
+      if (app.finalInterviewAt != null) scheduled++;
+      if (_isRegistered(app)) hired++;
+    }
+
+    final choice = await RspGenerateReportDialog.showFinalInterview(
+      context,
+      applicantCount: apps.length,
+      filterSummary: _reportFilterSummary(),
+      scheduledCount: scheduled,
+      hiredCount: hired,
+    );
+    if (choice == null || !mounted) return;
+
+    final rows = _reportRows();
+    final summary = _reportFilterSummary();
+
+    if (choice == RspReportExportChoice.preview) {
+      await RspFinalInterviewReportPreviewScreen.open(
+        context,
+        rows: rows,
+        filterSummary: summary,
+      );
+      return;
+    }
+
+    setState(() => _exportingReport = true);
+    try {
+      switch (choice) {
+        case RspReportExportChoice.preview:
+          break;
+        case RspReportExportChoice.csv:
+          await RspFinalInterviewReportExport.shareCsv(
+            rows: rows,
+            filterSummary: summary,
+          );
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'CSV report downloaded (${rows.length} applicants).',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        case RspReportExportChoice.pdf:
+          await RspFinalInterviewReportExport.sharePdf(
+            rows: rows,
+            filterSummary: summary,
+          );
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'PDF report downloaded (${rows.length} applicants).',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        case RspReportExportChoice.print:
+          await RspFinalInterviewReportExport.printPdf(
+            context: context,
+            rows: rows,
+            filterSummary: summary,
+          );
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Print dialog opened.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(userFacingApiError(e)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingReport = false);
+    }
+  }
+
   List<RecruitmentApplication> get _filteredPassedApplicants {
     return _passedApplicants.where((a) {
       final position = (a.positionAppliedFor ?? '').trim();
@@ -121,8 +260,7 @@ class _RspFinalInterviewSchedulerState
         (a.hiredUserId != null && a.hiredUserId!.trim().isNotEmpty);
   }
 
-  ({String label, IconData icon, Color fg, Color bg, Color border})
-      _statusSpec(
+  ({String label, IconData icon, Color fg, Color bg, Color border}) _statusSpec(
     BuildContext context,
     RecruitmentApplication app,
   ) {
@@ -197,7 +335,10 @@ class _RspFinalInterviewSchedulerState
 
   Widget _statusBadge(
     RecruitmentApplication app, {
-    EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    EdgeInsets padding = const EdgeInsets.symmetric(
+      horizontal: 10,
+      vertical: 6,
+    ),
     double fontSize = 12,
   }) {
     final s = _statusSpec(context, app);
@@ -419,9 +560,7 @@ class _RspFinalInterviewSchedulerState
         accent = dark
             ? const Color(0xFF78909C)
             : AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.45);
-        bg = dark
-            ? AppTheme.dashMutedSurfaceOf(context)
-            : AppTheme.offWhite;
+        bg = dark ? AppTheme.dashMutedSurfaceOf(context) : AppTheme.offWhite;
         fg = AppTheme.dashTextSecondaryOf(context);
         icon = Icons.hourglass_empty_rounded;
         headline = 'Pending';
@@ -477,9 +616,9 @@ class _RspFinalInterviewSchedulerState
                               fontSize: 13,
                               height: 1.45,
                               fontWeight: FontWeight.w500,
-                              color: AppTheme.dashTextPrimaryOf(context).withValues(
-                                alpha: 0.82,
-                              ),
+                              color: AppTheme.dashTextPrimaryOf(
+                                context,
+                              ).withValues(alpha: 0.82),
                             ),
                           ),
                         ],
@@ -621,11 +760,14 @@ class _RspFinalInterviewSchedulerState
             disabledForegroundColor: AppTheme.dashTextSecondaryOf(context),
             side: BorderSide(
               color: emailSent
-                  ? AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.35)
+                  ? AppTheme.dashTextSecondaryOf(
+                      context,
+                    ).withValues(alpha: 0.35)
                   : navy.withValues(alpha: 0.55),
             ),
-            backgroundColor:
-                emailSent ? AppTheme.offWhite.withValues(alpha: 0.6) : null,
+            backgroundColor: emailSent
+                ? AppTheme.offWhite.withValues(alpha: 0.6)
+                : null,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
         );
@@ -635,7 +777,10 @@ class _RspFinalInterviewSchedulerState
             if (accountLinked) ...[
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFE8F5E9).withValues(alpha: 0.7),
                   borderRadius: BorderRadius.circular(12),
@@ -684,7 +829,9 @@ class _RspFinalInterviewSchedulerState
               style: TextStyle(
                 fontSize: 12,
                 height: 1.4,
-                color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.95),
+                color: AppTheme.dashTextSecondaryOf(
+                  context,
+                ).withValues(alpha: 0.95),
                 fontStyle: FontStyle.italic,
               ),
             ),
@@ -789,7 +936,9 @@ class _RspFinalInterviewSchedulerState
               style: TextStyle(
                 fontSize: 12,
                 fontStyle: FontStyle.italic,
-                color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.92),
+                color: AppTheme.dashTextSecondaryOf(
+                  context,
+                ).withValues(alpha: 0.92),
               ),
             ),
           ],
@@ -854,9 +1003,7 @@ class _RspFinalInterviewSchedulerState
             AppTheme.primaryNavyLight.withValues(alpha: 0.1),
           ],
         ),
-        border: Border.all(
-          color: AppTheme.primaryNavy.withValues(alpha: 0.22),
-        ),
+        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.22)),
       ),
       alignment: Alignment.center,
       child: Text(
@@ -892,9 +1039,7 @@ class _RspFinalInterviewSchedulerState
         foregroundColor: Colors.white,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
     final dateFilterBtn = OutlinedButton.icon(
@@ -988,7 +1133,41 @@ class _RspFinalInterviewSchedulerState
               ),
             ),
             const SizedBox(width: 12),
-            refreshBtn,
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: (_loading || _exportingReport)
+                      ? null
+                      : _showGenerateReportDialog,
+                  icon: _exportingReport
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.summarize_outlined, size: 18),
+                  label: Text(
+                    _exportingReport ? 'Generating…' : 'Generate report',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: accentNavy,
+                    side: BorderSide(
+                      color: accentNavy.withValues(alpha: 0.35),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                refreshBtn,
+              ],
+            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -1018,12 +1197,12 @@ class _RspFinalInterviewSchedulerState
                     value: null,
                     child: Text('All positions'),
                   ),
-                  ...(_positionFilterOptions.toList()
-                        ..sort(
-                          (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
-                        ))
+                  ...(_positionFilterOptions.toList()..sort(
+                        (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+                      ))
                       .map(
-                        (p) => DropdownMenuItem<String>(value: p, child: Text(p)),
+                        (p) =>
+                            DropdownMenuItem<String>(value: p, child: Text(p)),
                       ),
                 ],
                 onChanged: _loading
@@ -1042,7 +1221,8 @@ class _RspFinalInterviewSchedulerState
               label: const Text('Today'),
             ),
             TextButton.icon(
-              onPressed: (_loading ||
+              onPressed:
+                  (_loading ||
                       (_selectedPositionFilter == null &&
                           _selectedAppliedDate == null))
                   ? null
@@ -1165,16 +1345,16 @@ class _RspFinalInterviewSchedulerState
                   : (outcome == true ? 'Passed' : 'Not passed');
               final step3Summary = app.hireCredentialsEmailSent
                   ? (registered
-                      ? 'Account linked · credentials email sent'
-                      : 'Credentials email sent')
+                        ? 'Account linked · credentials email sent'
+                        : 'Credentials email sent')
                   : (registered
-                      ? 'Account linked · send credentials email'
-                      : 'Create account & email login details');
+                        ? 'Account linked · send credentials email'
+                        : 'Create account & email login details');
               final expandStep1 = scheduled == null;
               final expandStep2 = !expandStep1 && outcome == null;
               final expandStep3 = showStep3 && !expandStep1 && !expandStep2;
-              final useMinimalApplicantRow =
-                  !_expandedHiredApplicantIds.contains(app.id);
+              final useMinimalApplicantRow = !_expandedHiredApplicantIds
+                  .contains(app.id);
 
               if (useMinimalApplicantRow) {
                 return Container(
@@ -1318,9 +1498,8 @@ class _RspFinalInterviewSchedulerState
                               ),
                               TextButton.icon(
                                 onPressed: () => setState(
-                                  () => _expandedHiredApplicantIds.remove(
-                                    app.id,
-                                  ),
+                                  () =>
+                                      _expandedHiredApplicantIds.remove(app.id),
                                 ),
                                 icon: const Icon(
                                   Icons.unfold_less_rounded,
@@ -1390,7 +1569,7 @@ class _RspFinalInterviewSchedulerState
                                             color: AppTheme.dashIsDark(context)
                                                 ? AppTheme.primaryNavyLight
                                                 : AppTheme.primaryNavy
-                                                    .withValues(alpha: 0.95),
+                                                      .withValues(alpha: 0.95),
                                             fontSize: 13,
                                             fontWeight: FontWeight.w700,
                                             height: 1.3,
@@ -1410,33 +1589,35 @@ class _RspFinalInterviewSchedulerState
                                               Container(
                                                 padding:
                                                     const EdgeInsets.symmetric(
-                                                  horizontal: 10,
-                                                  vertical: 6,
-                                                ),
+                                                      horizontal: 10,
+                                                      vertical: 6,
+                                                    ),
                                                 decoration: BoxDecoration(
                                                   color: AppTheme.dashPanelOf(
                                                     context,
                                                   ),
                                                   borderRadius:
                                                       BorderRadius.circular(
-                                                    999,
-                                                  ),
+                                                        999,
+                                                      ),
                                                   border: Border.all(
                                                     color: AppTheme.primaryNavy
                                                         .withValues(
-                                                      alpha: 0.22,
-                                                    ),
+                                                          alpha: 0.22,
+                                                        ),
                                                   ),
                                                   boxShadow: [
                                                     BoxShadow(
                                                       color: AppTheme
                                                           .primaryNavy
                                                           .withValues(
-                                                        alpha: 0.08,
-                                                      ),
+                                                            alpha: 0.08,
+                                                          ),
                                                       blurRadius: 8,
-                                                      offset:
-                                                          const Offset(0, 2),
+                                                      offset: const Offset(
+                                                        0,
+                                                        2,
+                                                      ),
                                                     ),
                                                   ],
                                                 ),
@@ -1444,9 +1625,10 @@ class _RspFinalInterviewSchedulerState
                                                   'Exam: ${exam.scorePercent.toStringAsFixed(0)}%',
                                                   style: TextStyle(
                                                     fontFamily: 'NotoSans',
-                                                    color: accentNavy.withValues(
-                                                      alpha: 0.92,
-                                                    ),
+                                                    color: accentNavy
+                                                        .withValues(
+                                                          alpha: 0.92,
+                                                        ),
                                                     fontSize: 12,
                                                     fontWeight: FontWeight.w800,
                                                   ),
@@ -1600,17 +1782,15 @@ class _RspFinalInterviewSchedulerState
                                                               FontWeight.w700,
                                                           color:
                                                               scheduled == null
+                                                              ? AppTheme.dashTextSecondaryOf(
+                                                                  context,
+                                                                )
+                                                              : AppTheme.dashIsDark(
+                                                                  context,
+                                                                )
                                                               ? AppTheme
-                                                                    .dashTextSecondaryOf(
-                                                                  context,
-                                                                )
-                                                              : AppTheme
-                                                                    .dashIsDark(
-                                                                  context,
-                                                                )
-                                                                ? AppTheme
                                                                     .primaryNavyLight
-                                                                : AppTheme
+                                                              : AppTheme
                                                                     .primaryNavy,
                                                           height: 1.3,
                                                         ),
@@ -1627,10 +1807,10 @@ class _RspFinalInterviewSchedulerState
                                                               fontFamily:
                                                                   'NotoSans',
                                                               fontSize: 12,
-                                                              color: AppTheme
-                                                                  .dashTextSecondaryOf(
-                                                                context,
-                                                              ),
+                                                              color:
+                                                                  AppTheme.dashTextSecondaryOf(
+                                                                    context,
+                                                                  ),
                                                               height: 1.4,
                                                               fontWeight:
                                                                   FontWeight
@@ -1682,12 +1862,16 @@ class _RspFinalInterviewSchedulerState
                                       icon: Icon(
                                         Icons.event_busy_rounded,
                                         size: 20,
-                                        color: AppTheme.dashTextSecondaryOf(context),
+                                        color: AppTheme.dashTextSecondaryOf(
+                                          context,
+                                        ),
                                       ),
                                       label: Text(
                                         'Clear',
                                         style: TextStyle(
-                                          color: AppTheme.dashTextSecondaryOf(context),
+                                          color: AppTheme.dashTextSecondaryOf(
+                                            context,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -1747,7 +1931,9 @@ class _RspFinalInterviewSchedulerState
                                   'Create Account shortcut is not available here. Use the full admin sidebar.',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: AppTheme.dashTextSecondaryOf(context),
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      context,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1903,32 +2089,32 @@ class _CollapsibleWorkflowStepState extends State<_CollapsibleWorkflowStep> {
                     ),
                   ),
                 ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeInOut,
-                alignment: Alignment.topCenter,
-                child: _expanded
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SizedBox(height: 6),
-                          Text(
-                            widget.subtitle,
-                            style: TextStyle(
-                              fontFamily: 'NotoSans',
-                              fontSize: 13,
-                              height: 1.5,
-                              color: AppTheme.dashTextSecondaryOf(context),
-                              fontWeight: FontWeight.w500,
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeInOut,
+                  alignment: Alignment.topCenter,
+                  child: _expanded
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(height: 6),
+                            Text(
+                              widget.subtitle,
+                              style: TextStyle(
+                                fontFamily: 'NotoSans',
+                                fontSize: 13,
+                                height: 1.5,
+                                color: AppTheme.dashTextSecondaryOf(context),
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 16),
-                          widget.child,
-                        ],
-                      )
-                    : const SizedBox(width: double.infinity),
-              ),
+                            const SizedBox(height: 16),
+                            widget.child,
+                          ],
+                        )
+                      : const SizedBox(width: double.infinity),
+                ),
               ],
             ),
           ),

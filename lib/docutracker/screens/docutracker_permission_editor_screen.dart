@@ -901,7 +901,7 @@ class _DocuTrackerPermissionEditorScreenState
           ),
         ),
         const SizedBox(height: 4),
-        Text(subtitle, style: DocuTrackerTokens.subtitleStyle()),
+        Text(subtitle, style: DocuTrackerTokens.subtitleStyle(context)),
         const SizedBox(height: 12),
         DocuTrackerPermissionGovernanceMatrix(
           roleIds: _baselineRoleIds.map(DocuTrackerRoles.normalize).toList(),
@@ -1137,7 +1137,7 @@ class _DocuTrackerPermissionEditorScreenState
     };
 
     return Scaffold(
-      backgroundColor: DocuTrackerTokens.canvas,
+      backgroundColor: DocuTrackerTokens.canvasOf(context),
       body: DocuTrackerResponsiveBody(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
         child: Column(
@@ -1168,9 +1168,9 @@ class _DocuTrackerPermissionEditorScreenState
                   dense: true,
                   title: Text(
                     'Also edit wildcard (*) rows when saving',
-                    style: DocuTrackerTokens.subtitleStyle().copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: DocuTrackerTokens.subtitleStyle(
+                      context,
+                    ).copyWith(fontWeight: FontWeight.w600),
                   ),
                   value: _editWildcardToo,
                   onChanged: _loading
@@ -1241,7 +1241,7 @@ class _DocuTrackerPermissionEditorScreenState
                               const SizedBox(height: 4),
                               Text(
                                 'Overrides beat role baseline for the selected employee only.',
-                                style: DocuTrackerTokens.subtitleStyle(),
+                                style: DocuTrackerTokens.subtitleStyle(context),
                               ),
                               const SizedBox(height: 12),
                               if (_employeesLoading)
@@ -1254,9 +1254,11 @@ class _DocuTrackerPermissionEditorScreenState
                               else ...[
                                 TextField(
                                   enabled: !_loading,
-                                  decoration: DocuTrackerTokens.warmSearchDecoration(
-                                    'Search user (name, department, id)',
-                                  ),
+                                  decoration:
+                                      DocuTrackerTokens.warmSearchDecoration(
+                                        context,
+                                        'Search user (name, department, id)',
+                                      ),
                                   onChanged: (value) {
                                     setState(() => _userSearchQuery = value);
                                   },

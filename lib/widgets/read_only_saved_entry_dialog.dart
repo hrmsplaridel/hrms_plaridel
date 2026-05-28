@@ -157,7 +157,8 @@ void showReadOnlySavedEntryDialog(
                   radius: const Radius.circular(4),
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-                    child: Center(
+                    child: Align(
+                      alignment: Alignment.topCenter,
                       child: ConstrainedBox(
                         constraints: BoxConstraints(maxWidth: maxW),
                         child: buildPreview != null

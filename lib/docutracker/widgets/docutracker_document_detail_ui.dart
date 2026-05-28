@@ -18,7 +18,7 @@ class DocuTrackerDetailTag extends StatelessWidget {
       ),
       child: Text(
         label.toUpperCase(),
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.4,
@@ -63,17 +63,17 @@ class DocuTrackerDetailActionBanner extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
-                    color: DocuTrackerTokens.textPrimary,
+                    color: DocuTrackerTokens.textPrimaryOf(context),
                   ),
                 ),
                 if (subtitle != null && subtitle!.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
                     subtitle!,
-                    style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 13),
+                    style: DocuTrackerTokens.subtitleStyle(context).copyWith(fontSize: 13),
                   ),
                 ],
               ],
@@ -131,10 +131,10 @@ class DocuTrackerDetailSectionCard extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
-                          color: DocuTrackerTokens.textPrimary,
+                          color: DocuTrackerTokens.textPrimaryOf(context),
                           letterSpacing: -0.2,
                         ),
                       ),
@@ -142,7 +142,7 @@ class DocuTrackerDetailSectionCard extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           subtitle!,
-                          style: DocuTrackerTokens.subtitleStyle(),
+                          style: DocuTrackerTokens.subtitleStyle(context),
                         ),
                       ],
                     ],

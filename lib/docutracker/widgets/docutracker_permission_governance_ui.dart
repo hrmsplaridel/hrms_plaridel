@@ -32,16 +32,16 @@ class DocuTrackerPermissionGovernanceHeader extends StatelessWidget {
                 IconButton(
                   onPressed: onBack,
                   icon: const Icon(Icons.arrow_back_rounded),
-                  color: DocuTrackerTokens.textPrimary,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                   tooltip: 'Back',
                 ),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Permissions Governance',
                     style: TextStyle(
                       fontSize: 26,
                       fontWeight: FontWeight.w800,
-                      color: DocuTrackerTokens.textPrimary,
+                      color: DocuTrackerTokens.textPrimaryOf(context),
                       letterSpacing: -0.5,
                     ),
                   ),
@@ -52,7 +52,7 @@ class DocuTrackerPermissionGovernanceHeader extends StatelessWidget {
               padding: const EdgeInsets.only(left: 48),
               child: RichText(
                 text: TextSpan(
-                  style: DocuTrackerTokens.subtitleStyle().copyWith(height: 1.45),
+                  style: DocuTrackerTokens.subtitleStyle(context).copyWith(height: 1.45),
                   children: const [
                     TextSpan(
                       text:
@@ -206,9 +206,9 @@ class DocuTrackerPermissionGovernanceTypeFilter extends StatelessWidget {
             children: [
               Text(
                 'Filter by Type:',
-                style: DocuTrackerTokens.metaStyle().copyWith(
+                style: DocuTrackerTokens.metaStyle(context).copyWith(
                   fontWeight: FontWeight.w700,
-                  color: DocuTrackerTokens.textPrimary,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                 ),
               ),
               for (final t in typeLabels)
@@ -353,7 +353,7 @@ class DocuTrackerPermissionGovernanceMatrix extends StatelessWidget {
                   flex: 3,
                   child: Text(
                     'ROLE ENTITY',
-                    style: DocuTrackerTokens.metaStyle().copyWith(
+                    style: DocuTrackerTokens.metaStyle(context).copyWith(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.6,
@@ -366,7 +366,7 @@ class DocuTrackerPermissionGovernanceMatrix extends StatelessWidget {
                     child: Text(
                       _columnLabel(a),
                       textAlign: TextAlign.center,
-                      style: DocuTrackerTokens.metaStyle().copyWith(
+                      style: DocuTrackerTokens.metaStyle(context).copyWith(
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0.35,
@@ -403,7 +403,7 @@ class DocuTrackerPermissionGovernanceMatrix extends StatelessWidget {
                     Expanded(
                       child: Text(
                         footerText!,
-                        style: DocuTrackerTokens.metaStyle().copyWith(
+                        style: DocuTrackerTokens.metaStyle(context).copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -475,16 +475,16 @@ class _RoleMatrixRow extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
-                      color: DocuTrackerTokens.textPrimary,
+                      color: DocuTrackerTokens.textPrimaryOf(context),
                     ),
                   ),
                   const SizedBox(height: 3),
                   Text(
                     description,
-                    style: DocuTrackerTokens.metaStyle().copyWith(height: 1.3),
+                    style: DocuTrackerTokens.metaStyle(context).copyWith(height: 1.3),
                   ),
                 ],
               ),
@@ -624,12 +624,12 @@ class DocuTrackerPermissionGovernanceSidebar extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Role Summaries',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
-                  color: DocuTrackerTokens.textPrimary,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                 ),
               ),
               const SizedBox(height: 12),
@@ -690,13 +690,13 @@ class _SummaryLine extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
-                  color: DocuTrackerTokens.textPrimary,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                 ),
               ),
-              Text(subtitle, style: DocuTrackerTokens.metaStyle()),
+              Text(subtitle, style: DocuTrackerTokens.metaStyle(context)),
             ],
           ),
         ),
@@ -776,15 +776,15 @@ class DocuTrackerPermissionGovernanceFooter extends StatelessWidget {
                       pendingChanges > 0
                           ? '$pendingChanges unsaved change${pendingChanges == 1 ? '' : 's'} pending'
                           : 'No unsaved changes',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
-                        color: DocuTrackerTokens.textPrimary,
+                        color: DocuTrackerTokens.textPrimaryOf(context),
                       ),
                     ),
                     Text(
                       lastSavedLabel,
-                      style: DocuTrackerTokens.metaStyle(),
+                      style: DocuTrackerTokens.metaStyle(context),
                     ),
                   ],
                 ),
@@ -800,7 +800,7 @@ class DocuTrackerPermissionGovernanceFooter extends StatelessWidget {
               OutlinedButton(
                 onPressed: loading ? null : onReset,
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: DocuTrackerTokens.textPrimary,
+                  foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
                   side: const BorderSide(color: DocuTrackerTokens.borderStrong),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 20,

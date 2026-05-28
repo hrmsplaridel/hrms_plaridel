@@ -32,8 +32,8 @@ class DocuTrackerModuleHeader extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
-                          color: DocuTrackerTokens.textPrimary,
+                        style: TextStyle(
+                          color: DocuTrackerTokens.textPrimaryOf(context),
                           fontSize: 22,
                           height: 1.2,
                           fontWeight: FontWeight.w800,
@@ -44,7 +44,7 @@ class DocuTrackerModuleHeader extends StatelessWidget {
                         const SizedBox(height: 6),
                         Text(
                           subtitle!,
-                          style: DocuTrackerTokens.subtitleStyle(),
+                          style: DocuTrackerTokens.subtitleStyle(context),
                         ),
                       ],
                     ],

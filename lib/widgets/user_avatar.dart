@@ -50,7 +50,9 @@ class _UserAvatarState extends State<UserAvatar> {
     if (widget.avatarPath == null || widget.avatarPath!.isEmpty) {
       final providerPath = context.read<AuthProvider>().avatarPath;
       if (providerPath != null && providerPath.isNotEmpty) {
-        _loadForPath(providerPath);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _loadForPath(providerPath);
+        });
       }
     }
   }
@@ -61,7 +63,12 @@ class _UserAvatarState extends State<UserAvatar> {
       await _loadForPath(passedPath);
       return;
     }
-    if (mounted) setState(() => _imageUrl = null);
+    _setImageUrl(null);
+  }
+
+  void _setImageUrl(String? url) {
+    if (!mounted || _imageUrl == url) return;
+    setState(() => _imageUrl = url);
   }
 
   Future<void> _loadForPath(String path) async {
@@ -70,35 +77,16 @@ class _UserAvatarState extends State<UserAvatar> {
       final userId = auth.user?.id;
       if (userId != null) {
         final url = '${ApiConfig.baseUrl}/api/files/avatar/$userId';
-        if (mounted) setState(() => _imageUrl = url);
+        _setImageUrl(url);
       } else {
-        if (mounted) setState(() => _imageUrl = null);
+        _setImageUrl(null);
       }
     } catch (_) {
-      if (mounted) setState(() => _imageUrl = null);
+      _setImageUrl(null);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final bg = widget.backgroundColor ?? AppTheme.primaryNavy;
-    final iconColor = widget.placeholderIconColor ?? Colors.white;
-
-    if (_imageUrl != null && _imageUrl!.isNotEmpty) {
-      return CircleAvatar(
-        radius: widget.radius,
-        backgroundColor: bg.withOpacity(0.15),
-        backgroundImage: NetworkImage(_imageUrl!),
-        onBackgroundImageError: (_, __) {
-          if (mounted) {
-            setState(() {
-              _imageUrl = null;
-            });
-          }
-        },
-      );
-    }
-
+  Widget _placeholder(Color bg, Color iconColor) {
     return CircleAvatar(
       radius: widget.radius,
       backgroundColor: bg,
@@ -109,5 +97,33 @@ class _UserAvatarState extends State<UserAvatar> {
       ),
     );
   }
-}
 
+  @override
+  Widget build(BuildContext context) {
+    final bg = widget.backgroundColor ?? AppTheme.primaryNavy;
+    final iconColor = widget.placeholderIconColor ?? Colors.white;
+    final diameter = widget.radius * 2;
+
+    if (_imageUrl == null || _imageUrl!.isEmpty) {
+      return _placeholder(bg, iconColor);
+    }
+
+    return CircleAvatar(
+      radius: widget.radius,
+      backgroundColor: bg.withValues(alpha: 0.15),
+      child: ClipOval(
+        child: Image.network(
+          _imageUrl!,
+          width: diameter,
+          height: diameter,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Icon(
+            Icons.person_rounded,
+            color: iconColor,
+            size: widget.radius * 1.2,
+          ),
+        ),
+      ),
+    );
+  }
+}

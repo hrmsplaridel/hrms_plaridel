@@ -52,32 +52,91 @@ class ContactSection extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
+          Positioned(
+            top: -30,
+            right: -20,
+            child: Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 40,
+            left: -30,
+            child: Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppTheme.primaryNavy.withValues(alpha: 0.04),
+              ),
+            ),
+          ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                'Contact Us',
-                style: TextStyle(
-                  color: AppTheme.primaryNavy,
-                  fontSize: isWide ? 30 : 26,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.4,
-                  height: 1.15,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Container(
-                width: 56,
-                height: 4,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(4),
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primaryNavy,
-                      AppTheme.primaryNavy.withValues(alpha: 0.55),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          AppTheme.primaryNavy.withValues(alpha: 0.18),
+                          AppTheme.primaryNavy.withValues(alpha: 0.08),
+                        ],
+                      ),
+                      border: Border.all(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.15),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.support_agent_rounded,
+                      color: AppTheme.primaryNavy,
+                      size: 26,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Contact Us',
+                        style: TextStyle(
+                          color: AppTheme.primaryNavy,
+                          fontSize: isWide ? 28 : 24,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.35,
+                          height: 1.15,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: 72,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(4),
+                          gradient: LinearGradient(
+                            colors: [
+                              AppTheme.primaryNavy,
+                              AppTheme.primaryNavyLight.withValues(alpha: 0.7),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
                   ),
-                ),
+                ],
               ),
               const SizedBox(height: 16),
               ConstrainedBox(
@@ -87,41 +146,44 @@ class ContactSection extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: AppTheme.textSecondary,
-                    fontSize: isWide ? 17 : 15,
-                    height: 1.55,
+                    fontSize: isWide ? 16 : 15,
+                    height: 1.5,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
-              SizedBox(height: isWide ? 40 : 32),
+              SizedBox(height: isWide ? 36 : 28),
               isWide
                   ? Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          flex: 1,
                           child: _ContactDetailsCard(
                             child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                _ContactItem(
+                                const _ContactCardHeader(),
+                                const SizedBox(height: 4),
+                                const _ContactItem(
                                   icon: Icons.location_on_outlined,
                                   label: 'Office Address',
                                   value: _officeAddress,
                                 ),
                                 _contactDivider(),
-                                _ContactItem(
+                                const _ContactItem(
                                   icon: Icons.phone_outlined,
                                   label: 'Contact Number',
                                   value: '(088) 3448-200',
                                 ),
                                 _contactDivider(),
-                                _ContactItem(
+                                const _ContactItem(
                                   icon: Icons.email_outlined,
                                   label: 'Official Email',
                                   value: _officialEmails,
                                 ),
                                 _contactDivider(),
-                                _ContactItem(
+                                const _ContactItem(
                                   icon: Icons.access_time_outlined,
                                   label: 'Office Hours',
                                   value: 'Monday - Friday, 8:00 AM - 5:00 PM',
@@ -130,15 +192,19 @@ class ContactSection extends StatelessWidget {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 28),
-                        const Expanded(flex: 1, child: _OfficeMap()),
+                        const SizedBox(width: 24),
+                        const Expanded(child: _OfficeMap()),
                       ],
                     )
                   : Column(
                       children: [
                         _ContactDetailsCard(
                           child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              const _ContactCardHeader(),
+                              const SizedBox(height: 4),
                               const _ContactItem(
                                 icon: Icons.location_on_outlined,
                                 label: 'Office Address',
@@ -177,13 +243,137 @@ class ContactSection extends StatelessWidget {
   }
 
   static Widget _contactDivider() => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
+    padding: const EdgeInsets.symmetric(vertical: 1),
     child: Divider(
       height: 1,
       thickness: 1,
-      color: AppTheme.lightGray.withValues(alpha: 0.85),
+      indent: 52,
+      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
     ),
   );
+}
+
+class _ContactCardHeader extends StatelessWidget {
+  const _ContactCardHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'HRMD OFFICE',
+                  style: TextStyle(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.55),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Reach us directly',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.14),
+              ),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.schedule_rounded,
+                  size: 14,
+                  color: AppTheme.primaryNavy,
+                ),
+                SizedBox(width: 5),
+                Text(
+                  'Mon–Fri',
+                  style: TextStyle(
+                    color: AppTheme.primaryNavy,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shared card chrome for contact list and map panel.
+class _ContactPanelCard extends StatelessWidget {
+  const _ContactPanelCard({required this.child});
+
+  final Widget child;
+
+  static const _radius = 18.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(_radius),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(_radius),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              height: 3,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+                ),
+              ),
+            ),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// White panel wrapping contact rows for clearer grouping.
@@ -194,33 +384,122 @@ class _ContactDetailsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE2E6EA)),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-            blurRadius: 28,
-            offset: const Offset(0, 12),
+    return _ContactPanelCard(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _MapCardHeader extends StatelessWidget {
+  const _MapCardHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'VISIT US',
+                  style: TextStyle(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.55),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Office location',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.15,
+                  ),
+                ),
+              ],
+            ),
           ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.14),
+              ),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.place_outlined,
+                  size: 14,
+                  color: AppTheme.primaryNavy,
+                ),
+                SizedBox(width: 5),
+                Text(
+                  'Municipal Hall',
+                  style: TextStyle(
+                    color: AppTheme.primaryNavy,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
-        child: child,
+    );
+  }
+}
+
+class _OpenInMapsChip extends StatelessWidget {
+  const _OpenInMapsChip({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppTheme.white,
+      elevation: 3,
+      shadowColor: Colors.black.withValues(alpha: 0.2),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.open_in_new_rounded,
+                size: 15,
+                color: AppTheme.primaryNavy,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Open in Maps',
+                style: TextStyle(
+                  color: AppTheme.primaryNavy,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -245,58 +524,46 @@ class _ContactItem extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  AppTheme.primaryNavy.withValues(alpha: 0.14),
+                  AppTheme.primaryNavy.withValues(alpha: 0.16),
                   AppTheme.primaryNavy.withValues(alpha: 0.06),
                 ],
               ),
               border: Border.all(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                color: AppTheme.primaryNavy.withValues(alpha: 0.14),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-                BoxShadow(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.07),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
             ),
-            child: Icon(icon, color: AppTheme.primaryNavy, size: 24),
+            child: Icon(icon, color: AppTheme.primaryNavy, size: 20),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  label,
-                  style: const TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.15,
+                  label.toUpperCase(),
+                  style: TextStyle(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.65),
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.6,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 SelectableText(
                   value,
                   style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: AppTheme.bodySize,
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
                     fontWeight: FontWeight.w500,
-                    height: 1.45,
+                    height: 1.35,
                   ),
                 ),
               ],
@@ -307,6 +574,8 @@ class _ContactItem extends StatelessWidget {
     );
   }
 }
+
+// ── Map embed (keep WebView init/load logic intact). ─────────────────────────
 
 /// WebView embed is used on web (iframe-only API) and on mobile/desktop with a
 /// full native WebView. Windows/Linux use the static fallback.
@@ -330,67 +599,81 @@ class _OfficeMapStaticFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Ink(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            AppTheme.offWhite,
-            AppTheme.lightGray.withValues(alpha: 0.65),
-          ],
-        ),
-      ),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 88,
-              height: 88,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppTheme.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.12),
-                    blurRadius: 20,
-                    offset: const Offset(0, 6),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _openPlaridelMunicipalHallMaps,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                AppTheme.offWhite,
+                AppTheme.lightGray.withValues(alpha: 0.65),
+              ],
+            ),
+          ),
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppTheme.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                    border: Border.all(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    ),
                   ),
-                ],
-                border: Border.all(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                  child: const Icon(
+                    Icons.location_on_rounded,
+                    size: 40,
+                    color: AppTheme.primaryNavy,
+                  ),
                 ),
-              ),
-              child: Icon(
-                Icons.location_on_rounded,
-                size: 48,
-                color: AppTheme.primaryNavy,
-              ),
+                const SizedBox(height: 14),
+                Text(
+                  'Municipal Hall of Plaridel',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: isWide ? 16 : 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Misamis Occidental',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Tap to open in Google Maps',
+                  style: TextStyle(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Municipal Hall of Plaridel',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: isWide ? 17 : 16,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.2,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Misamis Occidental',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -441,161 +724,111 @@ class _OfficeMapState extends State<_OfficeMap> {
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 800;
-    final mapHeight = isWide ? 248.0 : 212.0;
+    final mapHeight = isWide ? 280.0 : 240.0;
     final showWebView =
         _officeMapEmbedSupported() && !_embedFailed && _controller != null;
 
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE2E6EA)),
-        color: AppTheme.white,
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.primaryNavy.withValues(alpha: 0.09),
-            blurRadius: 30,
-            offset: const Offset(0, 12),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.065),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
+    return _ContactPanelCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
+          const _MapCardHeader(),
           SizedBox(
             width: double.infinity,
             height: mapHeight,
             child: showWebView
-                ? ClipRRect(
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(20),
-                    ),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        WebViewWidget(controller: _controller!),
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: IgnorePointer(
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Colors.transparent,
-                                    Colors.black.withValues(alpha: 0.62),
-                                  ],
-                                ),
+                ? Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      WebViewWidget(controller: _controller!),
+                      Positioned(
+                        top: 12,
+                        left: 12,
+                        child: _OpenInMapsChip(
+                          onTap: _openPlaridelMunicipalHallMaps,
+                        ),
+                      ),
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.55),
+                                ],
                               ),
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  28,
-                                  16,
-                                  12,
-                                ),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      'Municipal Hall of Plaridel',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: isWide ? 17 : 16,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: -0.2,
-                                        shadows: const [
-                                          Shadow(
-                                            color: Color(0x80000000),
-                                            blurRadius: 6,
-                                            offset: Offset(0, 1),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Misamis Occidental',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.92,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                24,
+                                16,
+                                10,
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Municipal Hall of Plaridel',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: isWide ? 16 : 15,
+                                      fontWeight: FontWeight.w700,
+                                      shadows: const [
+                                        Shadow(
+                                          color: Color(0x80000000),
+                                          blurRadius: 6,
+                                          offset: Offset(0, 1),
                                         ),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                        shadows: const [
-                                          Shadow(
-                                            color: Color(0x80000000),
-                                            blurRadius: 4,
-                                            offset: Offset(0, 1),
-                                          ),
-                                        ],
-                                      ),
+                                      ],
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Misamis Occidental',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.92,
+                                      ),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   )
                 : _OfficeMapStaticFallback(isWide: isWide),
           ),
-          Divider(height: 1, thickness: 1, color: AppTheme.lightGray),
-          Material(
-            color: AppTheme.white,
-            child: InkWell(
-              onTap: _openPlaridelMunicipalHallMaps,
-              hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.06),
-              splashColor: AppTheme.primaryNavy.withValues(alpha: 0.1),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 16,
-                  horizontal: 16,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.map_outlined,
-                      size: 20,
-                      color: AppTheme.primaryNavy,
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      'Open in Google Maps',
-                      style: TextStyle(
-                        color: AppTheme.primaryNavy,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.1,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Icon(
-                      Icons.open_in_new_rounded,
-                      size: 18,
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.85),
-                    ),
-                  ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _openPlaridelMunicipalHallMaps,
+                icon: const Icon(Icons.map_outlined, size: 18),
+                label: const Text('Open in Google Maps'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  elevation: 0,
                 ),
               ),
             ),

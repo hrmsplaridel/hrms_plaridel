@@ -30,17 +30,17 @@ class DocuTrackerAdminSectionHeader extends StatelessWidget {
           children: [
             Text(
               title,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w800,
-                color: DocuTrackerTokens.textPrimary,
+                color: DocuTrackerTokens.textPrimaryOf(context),
                 letterSpacing: -0.4,
               ),
             ),
             const SizedBox(height: 4),
             Text(
               subtitle,
-              style: DocuTrackerTokens.subtitleStyle(),
+              style: DocuTrackerTokens.subtitleStyle(context),
             ),
           ],
         );
@@ -129,7 +129,7 @@ class DocuTrackerAdminTonalButton extends StatelessWidget {
         icon: Icon(icon ?? Icons.history_rounded, size: 18),
         label: Text(label),
         style: OutlinedButton.styleFrom(
-          foregroundColor: DocuTrackerTokens.textPrimary,
+          foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
           backgroundColor: DocuTrackerTokens.highlightPeach,
           side: const BorderSide(color: DocuTrackerTokens.highlightPeachBorder),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
@@ -166,7 +166,7 @@ class DocuTrackerAdminFilterPill extends StatelessWidget {
       children: [
         Text(
           label,
-          style: DocuTrackerTokens.metaStyle().copyWith(
+          style: DocuTrackerTokens.metaStyle(context).copyWith(
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -187,7 +187,7 @@ class DocuTrackerAdminFilterPill extends StatelessWidget {
                   value: options[i],
                   child: Text(
                     optionLabels[i],
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                     ),
@@ -279,7 +279,7 @@ class DocuTrackerAdminStatTile extends StatelessWidget {
         ),
         Text(
           label,
-          style: DocuTrackerTokens.metaStyle(),
+          style: DocuTrackerTokens.metaStyle(context),
         ),
       ],
     );
@@ -329,10 +329,10 @@ class DocuTrackerAdminSidebarCard extends StatelessWidget {
               ],
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
-                  color: DocuTrackerTokens.textPrimary,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                 ),
               ),
             ],
@@ -374,10 +374,10 @@ class DocuTrackerAdminToolRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: DocuTrackerTokens.textPrimary,
+                    color: DocuTrackerTokens.textPrimaryOf(context),
                   ),
                 ),
               ),
@@ -409,7 +409,7 @@ class DocuTrackerWorkflowStepper extends StatelessWidget {
     if (steps.isEmpty) {
       return Text(
         'No routing defined yet — configure steps and assignees.',
-        style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 12),
+        style: DocuTrackerTokens.subtitleStyle(context).copyWith(fontSize: 12),
       );
     }
 
@@ -506,7 +506,7 @@ class _StepColumn extends StatelessWidget {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w800,
-            color: DocuTrackerTokens.textPrimary,
+            color: DocuTrackerTokens.textPrimaryOf(context),
           ),
         ),
         const SizedBox(height: 2),
@@ -515,7 +515,7 @@ class _StepColumn extends StatelessWidget {
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: DocuTrackerTokens.metaStyle().copyWith(fontSize: 11),
+          style: DocuTrackerTokens.metaStyle(context).copyWith(fontSize: 11),
         ),
       ],
     );
@@ -565,25 +565,32 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
         return Container(
           width: double.infinity,
           padding: const EdgeInsets.all(20),
-          decoration: DocuTrackerTokens.cardDecoration(),
+          decoration: DocuTrackerTokens.cardDecoration(context: context),
           child: wide
-              ? _buildWideLayout(steps, hasSteps)
-              : _buildStackedLayout(steps, hasSteps),
+              ? _buildWideLayout(context, steps, hasSteps)
+              : _buildStackedLayout(context, steps, hasSteps),
         );
       },
     );
   }
 
-  Widget _buildWideLayout(List<WorkflowStep> steps, bool hasSteps) {
+  Widget _buildWideLayout(
+    BuildContext context,
+    List<WorkflowStep> steps,
+    bool hasSteps,
+  ) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(width: 220, child: _buildTitleBlock(steps, hasSteps)),
+        SizedBox(
+          width: 220,
+          child: _buildTitleBlock(context, steps, hasSteps),
+        ),
         const SizedBox(width: 24),
         Expanded(
           child: hasSteps
               ? DocuTrackerWorkflowStepper(steps: steps, activeStepOrder: 1)
-              : _emptyRouteState(),
+              : _emptyRouteState(context),
         ),
         IconButton(
           onPressed: onMenu,
@@ -594,14 +601,18 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
     );
   }
 
-  Widget _buildStackedLayout(List<WorkflowStep> steps, bool hasSteps) {
+  Widget _buildStackedLayout(
+    BuildContext context,
+    List<WorkflowStep> steps,
+    bool hasSteps,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: _buildTitleBlock(steps, hasSteps)),
+            Expanded(child: _buildTitleBlock(context, steps, hasSteps)),
             IconButton(
               onPressed: onMenu,
               icon: const Icon(Icons.more_vert_rounded),
@@ -613,12 +624,16 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
         if (hasSteps)
           DocuTrackerWorkflowStepper(steps: steps, activeStepOrder: 1)
         else
-          _emptyRouteState(),
+          _emptyRouteState(context),
       ],
     );
   }
 
-  Widget _buildTitleBlock(List<WorkflowStep> steps, bool hasSteps) {
+  Widget _buildTitleBlock(
+    BuildContext context,
+    List<WorkflowStep> steps,
+    bool hasSteps,
+  ) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -641,10 +656,10 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
             children: [
               Text(
                 config.documentType.displayName,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
-                  color: DocuTrackerTokens.textPrimary,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                 ),
               ),
               const SizedBox(height: 6),
@@ -666,7 +681,7 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
     );
   }
 
-  Widget _emptyRouteState() {
+  Widget _emptyRouteState(BuildContext context) {
     return DocuTrackerPeachDashedBox(
       padding: const EdgeInsets.all(16),
       child: Row(
@@ -674,7 +689,7 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
           Expanded(
             child: Text(
               'No routing defined yet.',
-              style: DocuTrackerTokens.subtitleStyle(),
+              style: DocuTrackerTokens.subtitleStyle(context),
             ),
           ),
           TextButton.icon(
@@ -700,7 +715,7 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
       ),
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
           color: DocuTrackerTokens.textSecondary,
@@ -833,7 +848,7 @@ class DocuTrackerPermissionMatrixRow extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(child: _buildUserCell()),
+                    Expanded(child: _buildUserCell(context)),
                     _PermissionMatrixActions(onEdit: onEdit),
                   ],
                 ),
@@ -852,7 +867,7 @@ class DocuTrackerPermissionMatrixRow extends StatelessWidget {
                           children: [
                             Text(
                               permissionColumnHeader(col),
-                              style: DocuTrackerTokens.metaStyle().copyWith(
+                              style: DocuTrackerTokens.metaStyle(context).copyWith(
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -873,7 +888,7 @@ class DocuTrackerPermissionMatrixRow extends StatelessWidget {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(flex: 2, child: _buildUserCell()),
+              Expanded(flex: 2, child: _buildUserCell(context)),
               for (final col in columnTypes)
                 Expanded(
                   flex: 1,
@@ -893,7 +908,7 @@ class DocuTrackerPermissionMatrixRow extends StatelessWidget {
     );
   }
 
-  Widget _buildUserCell() {
+  Widget _buildUserCell(BuildContext context) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -902,7 +917,7 @@ class DocuTrackerPermissionMatrixRow extends StatelessWidget {
           backgroundColor: DocuTrackerTokens.brandSoft,
           child: Text(
             targetLabel.isNotEmpty ? targetLabel[0].toUpperCase() : '?',
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.w800,
               color: DocuTrackerTokens.brand,
             ),
@@ -915,10 +930,10 @@ class DocuTrackerPermissionMatrixRow extends StatelessWidget {
             children: [
               Text(
                 targetLabel,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
-                  color: DocuTrackerTokens.textPrimary,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -926,7 +941,7 @@ class DocuTrackerPermissionMatrixRow extends StatelessWidget {
               if (subtitle != null && subtitle!.isNotEmpty)
                 Text(
                   subtitle!,
-                  style: DocuTrackerTokens.metaStyle(),
+                  style: DocuTrackerTokens.metaStyle(context),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1007,7 +1022,7 @@ class _PermissionCell extends StatelessWidget {
     if (tags.isEmpty) {
       return Text(
         '—',
-        style: DocuTrackerTokens.metaStyle(),
+        style: DocuTrackerTokens.metaStyle(context),
       );
     }
 
