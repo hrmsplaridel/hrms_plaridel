@@ -47,6 +47,32 @@ class AppUser {
   final String? lastName;
   final String? suffix;
 
+  AppUser copyWith({String? avatarPath}) {
+    return AppUser(
+      id: id,
+      email: email,
+      role: role,
+      fullName: fullName,
+      avatarPath: avatarPath ?? this.avatarPath,
+      contactNumber: contactNumber,
+      employeeNumber: employeeNumber,
+      dateHired: dateHired,
+      employmentStatus: employmentStatus,
+      employmentType: employmentType,
+      departmentName: departmentName,
+      positionName: positionName,
+      sex: sex,
+      dateOfBirth: dateOfBirth,
+      address: address,
+      civilStatus: civilStatus,
+      nationality: nationality,
+      firstName: firstName,
+      middleName: middleName,
+      lastName: lastName,
+      suffix: suffix,
+    );
+  }
+
   /// For compatibility with code that used Supabase User.userMetadata.
   /// e.g. userMetadata['full_name'], userMetadata['avatar_path'], userMetadata['phone'].
   Map<String, dynamic> get userMetadata => {
