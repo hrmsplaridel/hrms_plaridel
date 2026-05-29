@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../api/app_user.dart';
+import '../../../api/avatar_url.dart';
 import '../../../api/client.dart';
-import '../../../api/config.dart';
 import '../../../landingpage/constants/app_theme.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../widgets/structured_address_fields.dart';
@@ -127,6 +127,8 @@ class _ProfileContentState extends State<ProfileContent> {
   String? _passwordMessage;
   String? _avatarPath;
   String? _avatarUrl;
+  Uint8List? _localAvatarPreview;
+  int _avatarCacheRevision = 0;
   bool _obscureCurrent = true;
   bool _obscureNew = true;
   bool _obscureConfirm = true;
@@ -195,7 +197,7 @@ class _ProfileContentState extends State<ProfileContent> {
         (u.nationality ?? '').trim().isEmpty ? null : u.nationality!.trim();
     _sexValue = _normalizeSex(u.sex);
     _civilStatusValue = _normalizeCivilStatus(u.civilStatus);
-    _avatarUrl = _avatarUrlFor(u.id);
+    _avatarUrl = _avatarDisplayUrl(u.id);
     _addressFormKey.currentState?.applyRawAddress(u.address);
   }
 
@@ -211,12 +213,45 @@ class _ProfileContentState extends State<ProfileContent> {
     }
   }
 
-  /// Build avatar URL with optional cache-bust. Pass [cacheBust] after upload to force reload.
-  String _avatarUrlFor(String userId, {bool cacheBust = false}) {
-    final base = '${ApiConfig.baseUrl}/api/files/avatar/$userId';
-    return cacheBust
-        ? '$base?t=${DateTime.now().millisecondsSinceEpoch}'
-        : base;
+  String? _avatarDisplayUrl(String userId, {String? pathOverride}) {
+    final path = (pathOverride ?? _avatarPath ?? '').trim();
+    if (path.isEmpty) return null;
+    return userAvatarImageUrl(
+      userId,
+      avatarPath: path,
+      cacheRevision: _avatarCacheRevision,
+    );
+  }
+
+  void _syncAvatarFromAuth(AppUser user) {
+    final path = (context.read<AuthProvider>().avatarPath ?? '').trim();
+    if (path.isEmpty) return;
+    _avatarPath = path;
+    _avatarUrl = _avatarDisplayUrl(user.id, pathOverride: path);
+  }
+
+  String? _parseUploadedAvatarPath(dynamic data) {
+    if (data is! Map) return null;
+    final path = data['path'];
+    if (path is String && path.trim().isNotEmpty) return path.trim();
+    return null;
+  }
+
+  void _showProfileSnackBar(String message) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) {
+      debugPrint('[profile] $message');
+      return;
+    }
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   @override
@@ -503,72 +538,84 @@ class _ProfileContentState extends State<ProfileContent> {
   Future<void> _pickAndUploadAvatar() async {
     final user = context.read<AuthProvider>().user;
     if (user == null) return;
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      allowMultiple: false,
-      withData: kIsWeb,
-    );
-    if (result == null || result.files.isEmpty) return;
-
-    final picked = result.files.single;
-    final uploadName = _avatarUploadFileName(picked.name);
-    final filePath = picked.path;
-    final canUploadFromPath =
-        !kIsWeb && filePath != null && filePath.isNotEmpty;
-    final bytes = picked.bytes;
-    const maxAvatarBytes = 5 * 1024 * 1024;
-    if (picked.size > maxAvatarBytes) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Profile photo must be 5 MB or smaller.'),
-        ),
-      );
-      return;
-    }
-    if (!canUploadFromPath && (bytes == null || bytes.isEmpty)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Could not read the selected image. Try another file (JPG or PNG).',
-          ),
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _imageLoading = true;
-      _message = null;
-    });
     try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: kIsWeb,
+      );
+      if (result == null || result.files.isEmpty) return;
+
+      final picked = result.files.single;
+      final uploadName = _avatarUploadFileName(picked.name);
+      // On web, reading PlatformFile.path throws — use bytes only.
+      final String? filePath = kIsWeb ? null : picked.path;
+      final canUploadFromPath =
+          !kIsWeb && filePath != null && filePath.isNotEmpty;
+      final bytes = picked.bytes;
+      const maxAvatarBytes = 5 * 1024 * 1024;
+      if (picked.size > maxAvatarBytes) {
+        if (!mounted) return;
+        _showProfileSnackBar('Profile photo must be 5 MB or smaller.');
+        return;
+      }
+      if (!canUploadFromPath && (bytes == null || bytes.isEmpty)) {
+        if (!mounted) return;
+        _showProfileSnackBar(
+          'Could not read the selected image. Try another file (JPG or PNG).',
+        );
+        return;
+      }
+
+      if (bytes != null && bytes.isNotEmpty) {
+        _localAvatarPreview = Uint8List.fromList(bytes);
+      }
+
+      setState(() {
+        _imageLoading = true;
+        _message = null;
+      });
+
+      final Response<Map<String, dynamic>> uploadRes;
       if (canUploadFromPath) {
-        await ApiClient.instance.uploadFile(
+        uploadRes = await ApiClient.instance.uploadFile<Map<String, dynamic>>(
           '/api/upload/avatar',
           filePath: filePath,
           fileName: uploadName,
         );
       } else {
-        await ApiClient.instance.uploadBytes(
+        uploadRes = await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
           '/api/upload/avatar',
           bytes: bytes!,
           fileName: uploadName,
         );
       }
-      if (mounted) {
-        await context.read<AuthProvider>().refreshUser();
-        _avatarPath = context.read<AuthProvider>().avatarPath;
-        _avatarUrl = _avatarUrlFor(user.id, cacheBust: true);
-        setState(() {
-          _imageLoading = false;
-          _message = null;
-        });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Profile photo updated.')));
+      if (!mounted) return;
+
+      final uploadedPath = _parseUploadedAvatarPath(uploadRes.data);
+      final auth = context.read<AuthProvider>();
+      if (uploadedPath != null) {
+        auth.applyAvatarPath(uploadedPath);
+      } else {
+        await auth.refreshUser();
       }
-    } catch (e) {
+
+      _avatarCacheRevision = DateTime.now().millisecondsSinceEpoch;
+      _syncAvatarFromAuth(user);
+      if (_avatarPath == null || _avatarPath!.isEmpty) {
+        await auth.refreshUser();
+        _syncAvatarFromAuth(user);
+      }
+
+      setState(() {
+        _imageLoading = false;
+        _message = null;
+        _localAvatarPreview = null;
+      });
+      if (!mounted) return;
+      _showProfileSnackBar('Profile photo updated successfully.');
+    } catch (e, st) {
+      debugPrint('Avatar upload failed: $e\n$st');
       if (!mounted) return;
       final msg = e is DioException
           ? (e.response?.data is Map
@@ -578,11 +625,10 @@ class _ProfileContentState extends State<ProfileContent> {
           : e.toString();
       setState(() {
         _imageLoading = false;
+        _localAvatarPreview = null;
         _message = 'Image upload failed: ${msg ?? e}';
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Image upload failed: ${msg ?? e}')),
-      );
+      _showProfileSnackBar('Profile photo upload failed: ${msg ?? e}');
     }
   }
 
@@ -638,9 +684,7 @@ class _ProfileContentState extends State<ProfileContent> {
           }
           _loading = false;
         });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Profile saved.')));
+        _showProfileSnackBar('Profile updated successfully.');
       }
     } catch (e) {
       if (mounted) {
@@ -764,11 +808,28 @@ class _ProfileContentState extends State<ProfileContent> {
     };
   }
 
-  Widget _buildAvatarCircle(double radius) {
-    return _avatarUrl != null
+  Widget _buildAvatarCircle(double radius, {AppUser? user}) {
+    if (_localAvatarPreview != null) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundImage: MemoryImage(_localAvatarPreview!),
+      );
+    }
+
+    final path = (_avatarPath ?? user?.avatarPath ?? '').trim();
+    final url = path.isNotEmpty
+        ? userAvatarImageUrl(
+            user?.id ?? '',
+            avatarPath: path,
+            cacheRevision: _avatarCacheRevision,
+          )
+        : _avatarUrl;
+
+    return url != null && url.isNotEmpty
         ? ClipOval(
             child: Image.network(
-              _avatarUrl!,
+              url,
+              key: ValueKey(url),
               width: radius * 2,
               height: radius * 2,
               fit: BoxFit.cover,
@@ -1528,11 +1589,17 @@ class _ProfileContentState extends State<ProfileContent> {
       return const SizedBox.shrink();
     }
 
-    return Selector<AuthProvider, ({String email, AppUser? user, String displayName})>(
+    return Selector<AuthProvider, ({
+      String email,
+      AppUser? user,
+      String displayName,
+      String? avatarPath,
+    })>(
       selector: (_, a) => (
         email: a.email,
         user: a.user,
         displayName: a.displayName,
+        avatarPath: a.avatarPath,
       ),
       builder: (context, auth, _) {
         return LayoutBuilder(
@@ -1604,7 +1671,7 @@ class _ProfileContentState extends State<ProfileContent> {
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    _buildAvatarCircle(52),
+                    _buildAvatarCircle(52, user: user),
                     if (_imageLoading)
                       Container(
                         width: 104,

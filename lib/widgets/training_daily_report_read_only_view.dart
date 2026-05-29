@@ -11,10 +11,36 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
 
   final TrainingDailyReport report;
 
+  InputDecoration _fieldDecoration(
+    BuildContext context, {
+    required String label,
+    String? hint,
+    Widget? prefixIcon,
+    bool alignLabelWithHint = false,
+  }) {
+    return AppTheme.dashInputDecoration(
+      context,
+      labelText: label,
+      hintText: hint,
+      prefixIcon: prefixIcon,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      radius: 12,
+    ).copyWith(
+      alignLabelWithHint: alignLabelWithHint,
+      floatingLabelBehavior: FloatingLabelBehavior.auto,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final r = report;
-    final hasFile = r.attachmentName != null && r.attachmentName!.trim().isNotEmpty;
+    final hasFile =
+        r.attachmentName != null && r.attachmentName!.trim().isNotEmpty;
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final dark = AppTheme.dashIsDark(context);
+    final accent =
+        dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
 
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -24,7 +50,7 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
           Text(
             'Daily Training Report',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: primary,
               fontSize: 18,
               fontWeight: FontWeight.w800,
             ),
@@ -33,25 +59,14 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
           Text(
             'Submitted record (read-only)',
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: secondary,
               fontSize: 13,
             ),
           ),
           const SizedBox(height: 20),
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppTheme.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
+            decoration: AppTheme.dashSurfaceCard(context, radius: 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -59,14 +74,14 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                   child: TextFormField(
                     initialValue: r.employeeName ?? '—',
                     readOnly: true,
-                    decoration: InputDecoration(
-                      labelText: 'Employee',
-                      prefixIcon: const Icon(Icons.person_outline_rounded),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    style: AppTheme.dashFieldTextStyle(context),
+                    decoration: _fieldDecoration(
+                      context,
+                      label: 'Employee',
+                      prefixIcon: Icon(
+                        Icons.person_outline_rounded,
+                        color: accent.withValues(alpha: 0.9),
                       ),
-                      filled: true,
-                      fillColor: AppTheme.offWhite,
                     ),
                   ),
                 ),
@@ -74,11 +89,13 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                   child: TextFormField(
                     initialValue: r.title,
                     readOnly: true,
-                    decoration: InputDecoration(
-                      labelText: 'Report title',
-                      prefixIcon: const Icon(Icons.article_outlined),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    style: AppTheme.dashFieldTextStyle(context),
+                    decoration: _fieldDecoration(
+                      context,
+                      label: 'Report title',
+                      prefixIcon: Icon(
+                        Icons.article_outlined,
+                        color: accent.withValues(alpha: 0.9),
                       ),
                     ),
                   ),
@@ -88,16 +105,15 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                     initialValue: r.description ?? '',
                     readOnly: true,
                     maxLines: 5,
-                    decoration: InputDecoration(
-                      labelText: 'Description',
-                      hintText:
-                          (r.description == null || r.description!.trim().isEmpty)
-                              ? 'No description provided.'
-                              : null,
+                    style: AppTheme.dashFieldTextStyle(context),
+                    decoration: _fieldDecoration(
+                      context,
+                      label: 'Description',
+                      hint: (r.description == null ||
+                              r.description!.trim().isEmpty)
+                          ? 'No description provided.'
+                          : null,
                       alignLabelWithHint: true,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
                     ),
                   ),
                 ),
@@ -106,16 +122,14 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.1),
-                    ),
-                    color: Colors.grey.shade50,
+                    border: Border.all(color: AppTheme.dashHairlineOf(context)),
+                    color: AppTheme.dashMutedSurfaceOf(context),
                   ),
                   child: Row(
                     children: [
                       Icon(
                         Icons.attach_file_rounded,
-                        color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                        color: secondary.withValues(alpha: 0.9),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -124,7 +138,7 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                               ? r.attachmentName!
                               : 'No attachment uploaded',
                           style: TextStyle(
-                            color: AppTheme.textSecondary,
+                            color: secondary,
                             fontSize: 13,
                           ),
                           overflow: TextOverflow.ellipsis,
@@ -134,8 +148,7 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                         TextButton(
                           onPressed: () async {
                             final uri = Uri.tryParse(r.attachmentUrl!);
-                            if (uri != null &&
-                                await canLaunchUrl(uri)) {
+                            if (uri != null && await canLaunchUrl(uri)) {
                               await launchUrl(
                                 uri,
                                 mode: LaunchMode.externalApplication,
@@ -161,7 +174,11 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                     _MetaChip(
                       icon: Icons.schedule_rounded,
                       label: 'Submitted',
-                      value: r.submittedAt.toLocal().toString().split('.').first,
+                      value: r.submittedAt
+                          .toLocal()
+                          .toString()
+                          .split('.')
+                          .first,
                     ),
                   ],
                 ),
@@ -187,19 +204,23 @@ class _MetaChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final accent =
+        dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+        color: accent.withValues(alpha: dark ? 0.18 : 0.08),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+          color: accent.withValues(alpha: dark ? 0.4 : 0.2),
         ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 18, color: AppTheme.primaryNavy),
+          Icon(icon, size: 18, color: accent),
           const SizedBox(width: 8),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -210,7 +231,7 @@ class _MetaChip extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                 ),
               ),
               Text(
@@ -218,7 +239,7 @@ class _MetaChip extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                 ),
               ),
             ],

@@ -82,7 +82,7 @@ class _MobileEmployeePortalState extends State<MobileEmployeePortal> {
     final panelHeight = (viewportHeight * 0.72).clamp(460.0, 760.0);
 
     return ColoredBox(
-      color: DocuTrackerTokens.canvas,
+      color: DocuTrackerTokens.canvasOf(context),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         child: Container(

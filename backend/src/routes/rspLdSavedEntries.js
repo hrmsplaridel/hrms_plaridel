@@ -190,6 +190,7 @@ function pickPayload(table, body) {
 
 /** JSON/JSONB columns: node-pg + some PG setups are more reliable with an explicit JSON string. */
 const TABLE_JSONB_COLUMNS = {
+  bi_form_entries: ['functional_areas'],
   performance_evaluation_entries: ['functional_areas'],
   training_need_analysis_entries: ['rows'],
   action_brainstorming_coaching_entries: ['rows'],

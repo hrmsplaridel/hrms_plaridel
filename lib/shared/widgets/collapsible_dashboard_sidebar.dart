@@ -600,7 +600,7 @@ class _CollapsedSidebarProfileOrbState extends State<CollapsedSidebarProfileOrb>
   @override
   Widget build(BuildContext context) {
     final panel = AppTheme.dashPanelOf(context);
-    final hairline = AppTheme.dashHairlineOf(context);
+    final primary = AppTheme.primaryNavy;
 
     return Tooltip(
       message: '${widget.displayName}\n${widget.subtitle}',
@@ -613,7 +613,10 @@ class _CollapsedSidebarProfileOrbState extends State<CollapsedSidebarProfileOrb>
             final wave = math.sin(_float.value * 2 * math.pi);
             final yOffset = wave * 1.6;
             final scale = 1 + (wave * 0.015);
-            final barWidth = 16 + ((wave + 1) * 1.5);
+            final barWidth = 16 + ((wave + 1) * 1.8);
+            final pulse = 0.5 + ((wave + 1) / 2) * 0.5;
+            final ringSize = 56.0 + pulse * 2.0;
+            final orbitAngle = _float.value * 2 * math.pi;
 
             return Transform.translate(
               offset: Offset(0, yOffset),
@@ -622,24 +625,75 @@ class _CollapsedSidebarProfileOrbState extends State<CollapsedSidebarProfileOrb>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: panel,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: hairline, width: 1.6),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.08),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
+                    SizedBox(
+                      width: 60,
+                      height: 60,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Container(
+                            width: ringSize,
+                            height: ringSize,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: RadialGradient(
+                                colors: [
+                                  primary.withValues(alpha: 0.16 * pulse),
+                                  primary.withValues(alpha: 0.01),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Transform.rotate(
+                            angle: orbitAngle,
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: primary.withValues(alpha: 0.9),
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: primary.withValues(alpha: 0.45),
+                                      blurRadius: 6,
+                                      spreadRadius: 0.4,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          Container(
+                            width: 48,
+                            height: 48,
+                            padding: const EdgeInsets.all(3.5),
+                            decoration: BoxDecoration(
+                              color: panel,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: primary.withValues(alpha: 0.35 + pulse * 0.2),
+                                width: 1.8,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.1),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
+                                ),
+                                BoxShadow(
+                                  color: primary.withValues(alpha: 0.12 + pulse * 0.1),
+                                  blurRadius: 10,
+                                  spreadRadius: 0.3,
+                                ),
+                              ],
+                            ),
+                            child: ClipOval(
+                              child: _CollapsedAvatar(avatarPath: widget.avatarPath),
+                            ),
                           ),
                         ],
-                      ),
-                      child: ClipOval(
-                        child: _CollapsedAvatar(avatarPath: widget.avatarPath),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -647,8 +701,12 @@ class _CollapsedSidebarProfileOrbState extends State<CollapsedSidebarProfileOrb>
                       width: barWidth,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: AppTheme.dashTextSecondaryOf(context).withValues(
-                          alpha: 0.35,
+                        gradient: LinearGradient(
+                          colors: [
+                            primary.withValues(alpha: 0.18),
+                            primary.withValues(alpha: 0.55),
+                            primary.withValues(alpha: 0.18),
+                          ],
                         ),
                         borderRadius: BorderRadius.circular(99),
                       ),

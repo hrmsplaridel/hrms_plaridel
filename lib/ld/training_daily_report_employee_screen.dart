@@ -62,23 +62,33 @@ class _TrainingDailyReportEmployeeScreenState
     return '${l.year}-${two(l.month)}-${two(l.day)} · ${two(l.hour)}:${two(l.minute)}';
   }
 
+  static bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
+
+  static Color _accent(BuildContext context) =>
+      _isDark(context) ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
+
+  static Color _accentSurface(BuildContext context) =>
+      AppTheme.primaryNavy.withValues(alpha: _isDark(context) ? 0.22 : 0.12);
+
   InputDecoration _inputDecoration(
     BuildContext context, {
-    required String label,
+    String? label,
     String? hint,
     Widget? prefixIcon,
     bool alignLabelWithHint = false,
   }) {
     return AppTheme.dashInputDecoration(
       context,
-      labelText: label,
+      labelText: label?.trim().isNotEmpty == true ? label : null,
       hintText: hint,
       prefixIcon: prefixIcon,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       radius: 14,
     ).copyWith(
       alignLabelWithHint: alignLabelWithHint,
-      floatingLabelBehavior: FloatingLabelBehavior.auto,
+      floatingLabelBehavior: label?.trim().isNotEmpty == true
+          ? FloatingLabelBehavior.auto
+          : FloatingLabelBehavior.never,
     );
   }
 
@@ -246,6 +256,8 @@ class _TrainingDailyReportEmployeeScreenState
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final hasFile = _selectedFile != null;
+    final dark = _isDark(context);
+    final accent = _accent(context);
 
     return Container(
       clipBehavior: Clip.antiAlias,
@@ -259,10 +271,15 @@ class _TrainingDailyReportEmployeeScreenState
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  AppTheme.primaryNavy.withValues(alpha: 0.06),
-                  AppTheme.dashMutedSurfaceOf(context),
-                ],
+                colors: dark
+                    ? [
+                        AppTheme.primaryNavy.withValues(alpha: 0.18),
+                        AppTheme.dashMutedSurfaceOf(context),
+                      ]
+                    : [
+                        AppTheme.primaryNavy.withValues(alpha: 0.06),
+                        AppTheme.dashMutedSurfaceOf(context),
+                      ],
               ),
               border: Border(
                 bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
@@ -273,12 +290,15 @@ class _TrainingDailyReportEmployeeScreenState
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    color: _accentSurface(context),
                     borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: accent.withValues(alpha: 0.25),
+                    ),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.post_add_rounded,
-                    color: AppTheme.primaryNavy,
+                    color: accent,
                     size: 22,
                   ),
                 ),
@@ -323,11 +343,10 @@ class _TrainingDailyReportEmployeeScreenState
                     style: AppTheme.dashFieldTextStyle(context),
                     decoration: _inputDecoration(
                       context,
-                      label: 'Report title',
-                      hint: 'e.g. Orientation on HRIS and records filing',
+                      hint: 'Report title',
                       prefixIcon: Icon(
                         Icons.article_outlined,
-                        color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                        color: accent.withValues(alpha: 0.9),
                       ),
                     ),
                   ),
@@ -340,8 +359,7 @@ class _TrainingDailyReportEmployeeScreenState
                     style: AppTheme.dashFieldTextStyle(context),
                     decoration: _inputDecoration(
                       context,
-                      label: 'Description',
-                      hint: 'Tasks, tools, and what you learned today.',
+                      hint: 'Description',
                       alignLabelWithHint: true,
                     ),
                   ),
@@ -364,15 +382,21 @@ class _TrainingDailyReportEmployeeScreenState
                         gradient: LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
-                          colors: [
-                            AppTheme.primaryNavy.withValues(alpha: 0.07),
-                            AppTheme.primaryNavyLight.withValues(alpha: 0.04),
-                          ],
+                          colors: dark
+                              ? [
+                                  AppTheme.primaryNavy.withValues(alpha: 0.16),
+                                  AppTheme.dashPanelOf(context),
+                                ]
+                              : [
+                                  AppTheme.primaryNavy.withValues(alpha: 0.07),
+                                  AppTheme.primaryNavyLight
+                                      .withValues(alpha: 0.04),
+                                ],
                         ),
                         border: Border.all(
                           color: hasFile
-                              ? AppTheme.primaryNavy.withValues(alpha: 0.45)
-                              : AppTheme.primaryNavy.withValues(alpha: 0.22),
+                              ? accent.withValues(alpha: 0.55)
+                              : accent.withValues(alpha: dark ? 0.35 : 0.22),
                           width: hasFile ? 1.5 : 1,
                         ),
                       ),
@@ -381,68 +405,110 @@ class _TrainingDailyReportEmployeeScreenState
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: AppTheme.primaryNavy
-                                        .withValues(alpha: 0.12),
-                                  ),
-                                  child: Icon(
-                                    hasFile
-                                        ? Icons.check_circle_outline_rounded
-                                        : Icons.cloud_upload_outlined,
-                                    size: 26,
-                                    color: AppTheme.primaryNavy,
-                                  ),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final stackBrowse =
+                                    constraints.maxWidth < 480;
+                                final uploadRow = Row(
+                                  crossAxisAlignment: stackBrowse
+                                      ? CrossAxisAlignment.start
+                                      : CrossAxisAlignment.center,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: _accentSurface(context),
+                                      ),
+                                      child: Icon(
                                         hasFile
-                                            ? 'File attached'
-                                            : 'Image or PDF',
-                                        style: TextStyle(
-                                          color: primary,
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 15,
-                                        ),
+                                            ? Icons
+                                                .check_circle_outline_rounded
+                                            : Icons.cloud_upload_outlined,
+                                        size: 26,
+                                        color: accent,
                                       ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'JPG, PNG, or PDF · optional · up to 10 MB',
-                                        style: TextStyle(
-                                          color: secondary,
-                                          fontSize: 12.5,
-                                          height: 1.35,
-                                        ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            hasFile
+                                                ? 'File attached'
+                                                : 'Image or PDF',
+                                            style: TextStyle(
+                                              color: primary,
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 15,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'JPG, PNG, or PDF · optional · up to 10 MB',
+                                            style: TextStyle(
+                                              color: secondary,
+                                              fontSize: 12.5,
+                                              height: 1.35,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
-                                ),
-                                FilledButton(
-                                  onPressed: _pickFile,
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: AppTheme.primaryNavy,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 18,
-                                      vertical: 10,
                                     ),
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20),
+                                    if (!stackBrowse)
+                                      FilledButton(
+                                        onPressed: _pickFile,
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor: AppTheme.primaryNavy,
+                                          foregroundColor: Colors.white,
+                                          padding:
+                                              const EdgeInsets.symmetric(
+                                            horizontal: 18,
+                                            vertical: 10,
+                                          ),
+                                          elevation: 0,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                          ),
+                                        ),
+                                        child: const Text('Browse'),
+                                      ),
+                                  ],
+                                );
+                                if (!stackBrowse) return uploadRow;
+                                return Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    uploadRow,
+                                    const SizedBox(height: 12),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: FilledButton(
+                                        onPressed: _pickFile,
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor:
+                                              AppTheme.primaryNavy,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 22,
+                                            vertical: 10,
+                                          ),
+                                          elevation: 0,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                          ),
+                                        ),
+                                        child: const Text('Browse'),
+                                      ),
                                     ),
-                                  ),
-                                  child: const Text('Browse'),
-                                ),
-                              ],
+                                  ],
+                                );
+                              },
                             ),
                             if (hasFile) ...[
                               const SizedBox(height: 14),
@@ -460,10 +526,10 @@ class _TrainingDailyReportEmployeeScreenState
                                 ),
                                 child: Row(
                                   children: [
-                                    const Icon(
+                                    Icon(
                                       Icons.insert_drive_file_rounded,
                                       size: 22,
-                                      color: AppTheme.primaryNavy,
+                                      color: accent,
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
@@ -512,18 +578,26 @@ class _TrainingDailyReportEmployeeScreenState
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(14),
-                      gradient: const LinearGradient(
+                      gradient: LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        colors: [
-                          Color(0xFFF0671A),
-                          AppTheme.primaryNavy,
-                          AppTheme.primaryNavyDark,
-                        ],
+                        colors: dark
+                            ? [
+                                AppTheme.primaryNavyLight,
+                                AppTheme.primaryNavy,
+                                AppTheme.primaryNavyDark,
+                              ]
+                            : const [
+                                Color(0xFFF0671A),
+                                AppTheme.primaryNavy,
+                                AppTheme.primaryNavyDark,
+                              ],
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+                          color: AppTheme.primaryNavy.withValues(
+                            alpha: dark ? 0.45 : 0.35,
+                          ),
                           blurRadius: 16,
                           offset: const Offset(0, 6),
                         ),
@@ -632,6 +706,7 @@ class _TrainingDailyReportEmployeeScreenState
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final dates = _datesWithReports;
     final filtering = _filterByDate != null;
+    final accent = _accent(context);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
@@ -644,7 +719,7 @@ class _TrainingDailyReportEmployeeScreenState
               Icon(
                 Icons.calendar_month_rounded,
                 size: 20,
-                color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                color: accent,
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -680,9 +755,9 @@ class _TrainingDailyReportEmployeeScreenState
               IconButton(
                 tooltip: 'Previous day',
                 onPressed: () => _shiftFilterDay(-1),
-                icon: const Icon(Icons.chevron_left_rounded),
+                icon: Icon(Icons.chevron_left_rounded, color: accent),
                 style: IconButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  backgroundColor: _accentSurface(context),
                 ),
               ),
               const SizedBox(width: 8),
@@ -701,9 +776,9 @@ class _TrainingDailyReportEmployeeScreenState
                   if (next.isAfter(_toLocalDate(DateTime.now()))) return;
                   setState(() => _filterByDate = next);
                 },
-                icon: const Icon(Icons.chevron_right_rounded),
+                icon: Icon(Icons.chevron_right_rounded, color: accent),
                 style: IconButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  backgroundColor: _accentSurface(context),
                 ),
               ),
             ],
@@ -741,9 +816,7 @@ class _TrainingDailyReportEmployeeScreenState
                     avatar: Icon(
                       Icons.calendar_today_rounded,
                       size: 16,
-                      color: selected
-                          ? _datePillAccent
-                          : AppTheme.primaryNavy.withValues(alpha: 0.7),
+                      color: selected ? _datePillAccent : accent,
                     ),
                     onPressed: () => setState(() => _filterByDate = day),
                     backgroundColor: selected
@@ -776,6 +849,8 @@ class _TrainingDailyReportEmployeeScreenState
       );
     }
 
+    final accent = _accent(context);
+
     if (_reports.isEmpty) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 28),
@@ -786,11 +861,11 @@ class _TrainingDailyReportEmployeeScreenState
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                color: _accentSurface(context),
               ),
               child: Icon(
                 Icons.inbox_outlined,
-                color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+                color: accent,
                 size: 28,
               ),
             ),
@@ -838,11 +913,11 @@ class _TrainingDailyReportEmployeeScreenState
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                color: _accentSurface(context),
               ),
               child: Icon(
                 Icons.event_busy_rounded,
-                color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+                color: accent,
                 size: 28,
               ),
             ),
@@ -904,7 +979,9 @@ class _TrainingDailyReportEmployeeScreenState
                   child: Ink(
                     decoration: EmployeeDashUi.summaryCard(
                       context: context,
-                      tint: const Color(0xFFFFF8F3),
+                      tint: _isDark(context)
+                          ? AppTheme.dashPanelOf(context)
+                          : const Color(0xFFFFF8F3),
                       accent: AppTheme.primaryNavy,
                     ),
                     child: Padding(

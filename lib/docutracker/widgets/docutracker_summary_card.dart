@@ -31,6 +31,7 @@ class DocuTrackerSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final displayValue = padValue && value.length < 2
         ? value.padLeft(2, '0')
         : value;
@@ -46,12 +47,16 @@ class DocuTrackerSummaryCard extends StatelessWidget {
               ? const EdgeInsets.all(12)
               : const EdgeInsets.fromLTRB(18, 16, 18, 16),
           decoration: BoxDecoration(
-            color: backgroundColor,
+            color: dark ? const Color(0xFF1F2937) : backgroundColor,
             borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
-            border: Border.all(color: DocuTrackerTokens.borderSubtle),
+            border: Border.all(
+              color: dark
+                  ? const Color(0xFF374151)
+                  : DocuTrackerTokens.borderSubtle,
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
+                color: Colors.black.withValues(alpha: dark ? 0.25 : 0.04),
                 blurRadius: 12,
                 offset: const Offset(0, 3),
               ),
@@ -109,7 +114,7 @@ class DocuTrackerSummaryCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: DocuTrackerStyles.cardLabelStyle(
-                  color: DocuTrackerTokens.textPrimary,
+                  color: dark ? Colors.white : DocuTrackerTokens.textPrimary,
                 ).copyWith(fontSize: useCompact ? 10.5 : 11.5),
               ),
               SizedBox(height: useCompact ? 4 : 6),
@@ -119,7 +124,9 @@ class DocuTrackerSummaryCard extends StatelessWidget {
                   Text(
                     displayValue,
                     style: DocuTrackerStyles.cardValueStyle(
-                      color: DocuTrackerTokens.textPrimary,
+                      color: dark
+                          ? Colors.white
+                          : DocuTrackerTokens.textPrimary,
                     ).copyWith(fontSize: useCompact ? 23 : 28),
                   ),
                   if (!useCompact && badge != null) ...[
@@ -132,9 +139,8 @@ class DocuTrackerSummaryCard extends StatelessWidget {
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
-                          color:
-                              (badgeColor ?? DocuTrackerTokens.alertOrange)
-                                  .withValues(alpha: 0.12),
+                          color: (badgeColor ?? DocuTrackerTokens.alertOrange)
+                              .withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
@@ -156,7 +162,9 @@ class DocuTrackerSummaryCard extends StatelessWidget {
                 maxLines: useCompact ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
                 style: DocuTrackerStyles.cardMetaStyle(
-                  color: DocuTrackerTokens.textMuted,
+                  color: dark
+                      ? Colors.white.withValues(alpha: 0.7)
+                      : DocuTrackerTokens.textMuted,
                 ).copyWith(fontSize: useCompact ? 10.5 : 11.5),
               ),
             ],

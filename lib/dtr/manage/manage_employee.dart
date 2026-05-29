@@ -8,8 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
 
+import '../../api/avatar_url.dart';
 import '../../api/client.dart';
-import '../../api/config.dart';
 import '../../data/recruitment_application.dart';
 import '../../providers/recruitment_hire_prefill.dart';
 import '../../widgets/structured_address_fields.dart';
@@ -2964,7 +2964,8 @@ class _ManageEmployeeState extends State<ManageEmployee> {
           hasSelection && (sel.avatarPath ?? '').isNotEmpty
               ? ClipOval(
                   child: Image.network(
-                    '${ApiConfig.baseUrl}/api/files/avatar/${sel.id}',
+                    userAvatarImageUrl(sel.id, avatarPath: sel.avatarPath),
+                    key: ValueKey(sel.avatarPath),
                     width: 96,
                     height: 96,
                     fit: BoxFit.cover,
@@ -3764,7 +3765,11 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                 : _profile.avatarPath != null && _profile.avatarPath!.isNotEmpty
                 ? ClipOval(
                     child: Image.network(
-                      '${ApiConfig.baseUrl}/api/files/avatar/${_profile.id}',
+                      userAvatarImageUrl(
+                        _profile.id,
+                        avatarPath: _profile.avatarPath,
+                      ),
+                      key: ValueKey(_profile.avatarPath),
                       width: 96,
                       height: 96,
                       fit: BoxFit.cover,

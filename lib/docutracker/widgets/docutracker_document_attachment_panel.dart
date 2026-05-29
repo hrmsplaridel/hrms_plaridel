@@ -191,10 +191,10 @@ class _DocuTrackerDocumentAttachmentPanelState
                 _displayName,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: DocuTrackerTokens.textPrimary,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                 ),
               ),
               trailing: Row(
@@ -246,12 +246,12 @@ class _DocuTrackerDocumentAttachmentPanelState
                       color: DocuTrackerTokens.brand.withValues(alpha: 0.85),
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       'Upload file',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: DocuTrackerTokens.textPrimary,
+                        color: DocuTrackerTokens.textPrimaryOf(context),
                       ),
                     ),
                   ],
@@ -261,7 +261,7 @@ class _DocuTrackerDocumentAttachmentPanelState
           else
             Text(
               'No file attached.',
-              style: DocuTrackerTokens.subtitleStyle(),
+              style: DocuTrackerTokens.subtitleStyle(context),
             ),
         ],
       ),

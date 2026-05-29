@@ -335,7 +335,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
             Text(
               'Admin controls',
               style: TextStyle(
-                color: DocuTrackerTokens.textPrimary,
+                color: DocuTrackerTokens.textPrimaryOf(context),
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
               ),
@@ -343,7 +343,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
             const SizedBox(height: 3),
             Text(
               'Switch between routing workflows and access permissions.',
-              style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 11.5),
+              style: DocuTrackerTokens.subtitleStyle(
+                context,
+              ).copyWith(fontSize: 11.5),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -458,7 +460,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
           DocuTrackerPeachDashedBox(
             child: Text(
               'No workflow definitions loaded. Tap New workflow to create one.',
-              style: DocuTrackerTokens.subtitleStyle(),
+              style: DocuTrackerTokens.subtitleStyle(context),
             ),
           )
         else
@@ -675,7 +677,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                               flex: 1,
                               child: Text(
                                 permissionColumnHeader(col),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w800,
                                   fontSize: 12,
                                   color: DocuTrackerTokens.textSecondary,
@@ -710,7 +712,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                         child: Center(
                           child: Text(
                             'No permissions yet',
-                            style: DocuTrackerTokens.subtitleStyle(),
+                            style: DocuTrackerTokens.subtitleStyle(context),
                           ),
                         ),
                       )
@@ -747,7 +749,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
         children: [
           Text(
             'Showing 1–$userCount of $userCount users',
-            style: DocuTrackerTokens.metaStyle(),
+            style: DocuTrackerTokens.metaStyle(context),
           ),
           const Spacer(),
           _PaginationPill(label: '‹', onTap: null),
@@ -836,9 +838,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               const SizedBox(height: 16),
               Text(
                 'Usage Health',
-                style: DocuTrackerTokens.metaStyle().copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: DocuTrackerTokens.metaStyle(
+                  context,
+                ).copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
               ClipRRect(
@@ -855,7 +857,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 totalRules == 0
                     ? 'No rules loaded yet.'
                     : '${(usagePct * 100).round()}% of rules grant access.',
-                style: DocuTrackerTokens.metaStyle().copyWith(fontSize: 11),
+                style: DocuTrackerTokens.metaStyle(
+                  context,
+                ).copyWith(fontSize: 11),
               ),
             ],
           ),
@@ -896,7 +900,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
           backgroundColor: DocuTrackerTokens.highlightPeach,
           child: Text(
             "Review 'Denied' permissions weekly to ensure orphan access is removed from terminated accounts.",
-            style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 13),
+            style: DocuTrackerTokens.subtitleStyle(
+              context,
+            ).copyWith(fontSize: 13),
           ),
         ),
       ],
@@ -968,10 +974,10 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 progress: totalSteps == 0 ? 0 : 0.85,
               ),
               const SizedBox(height: 8),
-              Text('Throughput', style: DocuTrackerTokens.metaStyle()),
+              Text('Throughput', style: DocuTrackerTokens.metaStyle(context)),
               Text(
                 configs.length >= 2 ? 'High' : 'Building',
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 16,
                   color: DocuTrackerTokens.brand,
@@ -1479,10 +1485,10 @@ class _RoleHierarchyRow extends StatelessWidget {
           const SizedBox(width: 10),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: DocuTrackerTokens.textPrimary,
+              color: DocuTrackerTokens.textPrimaryOf(context),
             ),
           ),
         ],
@@ -1510,12 +1516,12 @@ class _EfficiencyRow extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(label, style: DocuTrackerTokens.metaStyle()),
+            Text(label, style: DocuTrackerTokens.metaStyle(context)),
             Text(
               value,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w800,
-                color: DocuTrackerTokens.textPrimary,
+                color: DocuTrackerTokens.textPrimaryOf(context),
               ),
             ),
           ],

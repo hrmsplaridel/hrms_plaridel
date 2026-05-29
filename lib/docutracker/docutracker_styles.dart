@@ -13,25 +13,25 @@ class DocuTrackerStyles {
   static const EdgeInsets panelPadding = EdgeInsets.all(16);
 
   static TextStyle cardLabelStyle({Color? color}) => TextStyle(
-        color: color ?? AppTheme.textSecondary,
-        fontSize: 11.5,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.2,
-      );
+    color: color ?? AppTheme.textSecondary,
+    fontSize: 11.5,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.2,
+  );
 
   static TextStyle cardValueStyle({Color? color}) => TextStyle(
-        color: color ?? AppTheme.textPrimary,
-        fontSize: 22,
-        fontWeight: FontWeight.w800,
-        height: 1.15,
-      );
+    color: color ?? AppTheme.textPrimary,
+    fontSize: 22,
+    fontWeight: FontWeight.w800,
+    height: 1.15,
+  );
 
   static TextStyle cardMetaStyle({Color? color}) => TextStyle(
-        color: (color ?? AppTheme.textSecondary).withValues(alpha: 0.92),
-        fontSize: 11.5,
-        height: 1.3,
-        fontWeight: FontWeight.w500,
-      );
+    color: (color ?? AppTheme.textSecondary).withValues(alpha: 0.92),
+    fontSize: 11.5,
+    height: 1.3,
+    fontWeight: FontWeight.w500,
+  );
 
   static InputDecoration inputDecoration(
     BuildContext context,
@@ -60,14 +60,12 @@ class DocuTrackerStyles {
 
   /// Green primary (approve / success actions).
   static ButtonStyle primaryButtonStyle() => FilledButton.styleFrom(
-        backgroundColor: primaryGreen,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-        elevation: 0,
-      );
+    backgroundColor: primaryGreen,
+    foregroundColor: Colors.white,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    elevation: 0,
+  );
 
   /// Orange brand primary (module chrome, create, open, links).
   static ButtonStyle primaryBrandButtonStyle() =>
@@ -77,101 +75,89 @@ class DocuTrackerStyles {
   static ButtonStyle primaryButtonStyleNavy() => primaryBrandButtonStyle();
 
   static ButtonStyle outlinedButtonStyle() => OutlinedButton.styleFrom(
-        foregroundColor: AppTheme.textPrimary,
-        side: BorderSide(color: DocuTrackerTokens.brand.withValues(alpha: 0.6)),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      );
+    foregroundColor: AppTheme.textPrimary,
+    side: BorderSide(color: DocuTrackerTokens.brand.withValues(alpha: 0.6)),
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  );
 
   static ButtonStyle outlinedGreenStyle() => OutlinedButton.styleFrom(
-        foregroundColor: primaryGreen,
-        side: const BorderSide(color: primaryGreen),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      );
+    foregroundColor: primaryGreen,
+    side: const BorderSide(color: primaryGreen),
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  );
 
   static ButtonStyle outlinedRedStyle() => OutlinedButton.styleFrom(
-        foregroundColor: destructiveRed,
-        side: const BorderSide(color: destructiveRed),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      );
+    foregroundColor: destructiveRed,
+    side: const BorderSide(color: destructiveRed),
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  );
 
   static ButtonStyle destructiveButtonStyle() => FilledButton.styleFrom(
-        backgroundColor: destructiveRed,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-        elevation: 0,
-      );
+    backgroundColor: destructiveRed,
+    foregroundColor: Colors.white,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    elevation: 0,
+  );
 
   static ButtonStyle warningButtonStyle() => OutlinedButton.styleFrom(
-        foregroundColor: warningOrange,
-        side: const BorderSide(color: warningOrange),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      );
+    foregroundColor: warningOrange,
+    side: const BorderSide(color: warningOrange),
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  );
 
   static ButtonStyle secondaryButtonStyle() => OutlinedButton.styleFrom(
-        foregroundColor: secondaryBlue,
-        side: BorderSide(color: secondaryBlue.withValues(alpha: 0.8)),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      );
+    foregroundColor: secondaryBlue,
+    side: BorderSide(color: secondaryBlue.withValues(alpha: 0.8)),
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  );
 
   static ButtonStyle approveButtonStyle() => FilledButton.styleFrom(
-        backgroundColor: primaryGreen,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        elevation: 0,
-      );
+    backgroundColor: primaryGreen,
+    foregroundColor: Colors.white,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    elevation: 0,
+  );
 
   // Blue filled — Forward action
   static ButtonStyle forwardButtonStyle() => FilledButton.styleFrom(
-        backgroundColor: secondaryBlue,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        elevation: 0,
-      );
+    backgroundColor: secondaryBlue,
+    foregroundColor: Colors.white,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    elevation: 0,
+  );
 
   // Subtle text — Return action (least destructive)
   static ButtonStyle returnButtonStyle() => TextButton.styleFrom(
-        foregroundColor: const Color(0xFF6B7280),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      );
+    foregroundColor: const Color(0xFF6B7280),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  );
 
-  static ButtonStyle iconButtonStyle() => IconButton.styleFrom(
-        foregroundColor: DocuTrackerTokens.brand,
-      );
+  static ButtonStyle iconButtonStyle() =>
+      IconButton.styleFrom(foregroundColor: DocuTrackerTokens.brand);
 
   static Widget filterDropdownWrapper(Widget child) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        decoration: BoxDecoration(
-          color: DocuTrackerTokens.surfaceCream,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: DocuTrackerTokens.borderSubtle),
-        ),
-        child: child,
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    decoration: BoxDecoration(
+      color: DocuTrackerTokens.surfaceCream,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: DocuTrackerTokens.borderSubtle),
+    ),
+    child: child,
+  );
 
   static BoxDecoration cardDecoration() => DocuTrackerTokens.cardDecoration();
 
-  static BoxDecoration listCardDecoration() => DocuTrackerTokens.cardDecoration();
+  static BoxDecoration listCardDecoration() =>
+      DocuTrackerTokens.cardDecoration();
 
   static Widget stateMessage({
     required IconData icon,

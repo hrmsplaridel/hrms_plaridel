@@ -35,7 +35,7 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
     final useSidebarNav = widget.section != null;
 
     return ColoredBox(
-      color: DocuTrackerTokens.canvas,
+      color: DocuTrackerTokens.canvasOf(context),
       child: DocuTrackerResponsiveBody(
         maxWidth: DocuTrackerTokens.maxContentWidth,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
@@ -75,12 +75,7 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
         multiSelectionEnabled: false,
         emptySelectionAllowed: false,
         showSelectedIcon: false,
-        style: ButtonStyle(
-          visualDensity: VisualDensity.compact,
-          padding: WidgetStateProperty.all(
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          ),
-        ),
+        style: DocuTrackerTokens.sectionNavStyle(context),
         segments: [
           for (final s in sections)
             ButtonSegment<DocuTrackerSection>(

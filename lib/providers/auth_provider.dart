@@ -139,6 +139,14 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Apply a new avatar storage path immediately (e.g. right after upload).
+  void applyAvatarPath(String path) {
+    final trimmed = path.trim();
+    if (trimmed.isEmpty || _user == null) return;
+    _user = _user!.copyWith(avatarPath: trimmed);
+    notifyListeners();
+  }
+
   /// Refetch current user from API (e.g. after updating profile or avatar).
   Future<void> refreshUser() async {
     try {
@@ -150,8 +158,8 @@ class AuthProvider extends ChangeNotifier {
         _user = AppUser.fromJson(data);
         notifyListeners();
       }
-    } catch (_) {
-      // Keep existing state on error
+    } catch (e) {
+      debugPrint('AuthProvider.refreshUser failed: $e');
     }
   }
 

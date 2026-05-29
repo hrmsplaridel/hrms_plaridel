@@ -403,9 +403,8 @@ class _DocuTrackerSetupPermissionsScreenState
                                   _grantedByActionName[item.action.name] = v;
                                 });
                               },
-                              activeTrackColor: DocuTrackerTokens.brand.withValues(
-                                alpha: 0.6,
-                              ),
+                              activeTrackColor: DocuTrackerTokens.brand
+                                  .withValues(alpha: 0.6),
                             ),
                           ],
                         ),

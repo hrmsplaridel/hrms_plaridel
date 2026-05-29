@@ -55,6 +55,7 @@ class _DashboardNotificationBellButtonState
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final iconSize = widget.compact ? 20.0 : 22.0;
     final pad = widget.compact ? 8.0 : 10.0;
     final hrmsUnread = context.select<NotificationProvider, int>(
@@ -73,7 +74,7 @@ class _DashboardNotificationBellButtonState
       constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       padding: EdgeInsets.zero,
-      color: DocuTrackerTokens.surface,
+      color: dark ? const Color(0xFF1F2937) : DocuTrackerTokens.surface,
       onOpened: () {
         context.read<NotificationProvider>().loadNotifications();
         context.read<DocuTrackerProvider>().loadNotifications(
@@ -113,7 +114,9 @@ class _DashboardNotificationBellButtonState
           clipBehavior: Clip.none,
           children: [
             Material(
-              color: DocuTrackerTokens.surfaceCream,
+              color: dark
+                  ? const Color(0xFF111827)
+                  : DocuTrackerTokens.surfaceCream,
               shape: const CircleBorder(),
               clipBehavior: Clip.antiAlias,
               child: Padding(
@@ -135,7 +138,10 @@ class _DashboardNotificationBellButtonState
                   decoration: BoxDecoration(
                     color: DocuTrackerTokens.overdueAccent,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white, width: 1.2),
+                    border: Border.all(
+                      color: dark ? const Color(0xFF1F2937) : Colors.white,
+                      width: 1.2,
+                    ),
                   ),
                   child: Text(
                     unread > 99 ? '99+' : '$unread',
@@ -240,7 +246,7 @@ class DashboardNotificationsDropdownPanel extends StatelessWidget {
             onMarkAllRead: unread > 0 ? () => markAllRead() : null,
           ),
           SizedBox(
-            height: 240,
+            height: 248,
             child: _DropdownBody(
               loading: loading,
               hrmsError: np.loadError,
@@ -278,6 +284,7 @@ class _DropdownBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     if (loading) {
       return const Center(
         child: SizedBox(
@@ -303,7 +310,9 @@ class _DropdownBody extends StatelessWidget {
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: AppTheme.dashTextSecondaryOf(context),
+              color: dark
+                  ? Colors.white.withValues(alpha: 0.82)
+                  : AppTheme.dashTextSecondaryOf(context),
             ),
           ),
         ),
@@ -311,9 +320,9 @@ class _DropdownBody extends StatelessWidget {
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       itemCount: items.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 6),
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final item = items[index];
         return switch (item.source) {
@@ -410,6 +419,7 @@ class _NotificationTileShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -418,17 +428,23 @@ class _NotificationTileShell extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             color: unread
-                ? DocuTrackerTokens.highlightPeach.withValues(alpha: 0.65)
-                : DocuTrackerTokens.surfaceCream.withValues(alpha: 0.5),
+                ? (dark
+                      ? const Color(0xFF243145)
+                      : DocuTrackerTokens.highlightPeach.withValues(alpha: 0.65))
+                : (dark
+                      ? const Color(0xFF111827)
+                      : DocuTrackerTokens.surfaceCream.withValues(alpha: 0.5)),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: unread
-                  ? accentColor.withValues(alpha: 0.25)
-                  : DocuTrackerTokens.borderSubtle,
+                  ? accentColor.withValues(alpha: dark ? 0.45 : 0.25)
+                  : (dark
+                        ? const Color(0xFF374151)
+                        : DocuTrackerTokens.borderSubtle),
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -451,7 +467,7 @@ class _NotificationTileShell extends StatelessWidget {
                       Text(
                         sourceLabel,
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.3,
                           color: accentColor,
@@ -462,20 +478,26 @@ class _NotificationTileShell extends StatelessWidget {
                         title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
+                        style: TextStyle(
+                          fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: DocuTrackerTokens.textPrimary,
+                          color: dark ? Colors.white : DocuTrackerTokens.textPrimary,
                           height: 1.25,
                         ),
                       ),
                       if (body != null && body!.trim().isNotEmpty) ...[
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 6),
                         Text(
                           body!.trim(),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: DocuTrackerTokens.metaStyle(),
+                          style: DocuTrackerTokens.metaStyle(context).copyWith(
+                            color: dark
+                                ? Colors.white.withValues(alpha: 0.82)
+                                : DocuTrackerTokens.textMuted,
+                            fontSize: 13,
+                            height: 1.3,
+                          ),
                         ),
                       ],
                     ],
@@ -551,11 +573,18 @@ class _DropdownFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: DocuTrackerTokens.borderSubtle)),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+            color: dark
+                ? const Color(0xFF374151)
+                : DocuTrackerTokens.borderSubtle,
+          ),
+        ),
       ),
       child: Row(
         children: [

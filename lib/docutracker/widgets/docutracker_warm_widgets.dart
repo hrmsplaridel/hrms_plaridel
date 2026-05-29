@@ -19,10 +19,15 @@ class DocuTrackerWarmFilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return DocuTrackerPressScale(
       pressedScale: 0.975,
       child: Material(
-        color: selected ? DocuTrackerTokens.brandSoft : DocuTrackerTokens.surface,
+        color: selected
+            ? (dark
+                ? DocuTrackerTokens.brand.withValues(alpha: 0.22)
+                : DocuTrackerTokens.brandSoft)
+            : DocuTrackerTokens.surfaceOf(context),
         borderRadius: BorderRadius.circular(24),
         child: InkWell(
           onTap: onTap,
@@ -34,7 +39,7 @@ class DocuTrackerWarmFilterChip extends StatelessWidget {
               border: Border.all(
                 color: selected
                     ? DocuTrackerTokens.brand.withValues(alpha: 0.45)
-                    : DocuTrackerTokens.borderSubtle,
+                    : DocuTrackerTokens.borderSubtleOf(context),
               ),
             ),
             child: Row(
@@ -44,9 +49,9 @@ class DocuTrackerWarmFilterChip extends StatelessWidget {
                   Icon(
                     icon,
                     size: 16,
-                    color: selected
-                        ? DocuTrackerTokens.brandDark
-                        : DocuTrackerTokens.textMuted,
+                color: selected
+                    ? (dark ? DocuTrackerTokens.brandMuted : DocuTrackerTokens.brandDark)
+                    : DocuTrackerTokens.textMutedOf(context),
                   ),
                   const SizedBox(width: 6),
                 ],
@@ -56,8 +61,8 @@ class DocuTrackerWarmFilterChip extends StatelessWidget {
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
                 color: selected
-                    ? DocuTrackerTokens.brandDark
-                    : DocuTrackerTokens.textSecondary,
+                    ? (dark ? Colors.white : DocuTrackerTokens.brandDark)
+                    : DocuTrackerTokens.textSecondaryOf(context),
                   ),
                 ),
               ],
@@ -89,7 +94,7 @@ class DocuTrackerUtilityIconButton extends StatelessWidget {
       child: DocuTrackerPressScale(
         pressedScale: 0.96,
         child: Material(
-          color: DocuTrackerTokens.surface,
+          color: DocuTrackerTokens.surfaceOf(context),
           borderRadius: BorderRadius.circular(10),
           child: InkWell(
             onTap: onPressed,
@@ -99,14 +104,16 @@ class DocuTrackerUtilityIconButton extends StatelessWidget {
               height: 36,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: DocuTrackerTokens.borderSubtle),
+                border: Border.all(
+                  color: DocuTrackerTokens.borderSubtleOf(context),
+                ),
               ),
               child: Icon(
                 icon,
                 size: 18,
                 color: onPressed == null
-                    ? DocuTrackerTokens.textMuted.withValues(alpha: 0.4)
-                    : DocuTrackerTokens.textMuted,
+                    ? DocuTrackerTokens.textMutedOf(context).withValues(alpha: 0.4)
+                    : DocuTrackerTokens.textMutedOf(context),
               ),
             ),
           ),
@@ -134,7 +141,7 @@ class DocuTrackerWarmSurfaceCard extends StatelessWidget {
       curve: Curves.easeOutCubic,
       width: double.infinity,
       padding: padding,
-      decoration: DocuTrackerTokens.cardDecoration(),
+      decoration: DocuTrackerTokens.cardDecoration(context: context),
       child: child,
     );
   }

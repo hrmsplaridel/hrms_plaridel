@@ -918,7 +918,7 @@ class _DocuTrackerWorkflowEditorScreenState
             'Use the ⋮⋮ handle on the right: press, hold, and drag to reorder. '
             'Tap a card to highlight it, or tap a chip in the route preview to jump to that step in the list. '
             'Then use Edit to change people or deadlines.',
-            style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 12.5),
+            style: DocuTrackerTokens.subtitleStyle(context).copyWith(fontSize: 12.5),
           ),
           const SizedBox(height: 10),
         ],
@@ -935,7 +935,7 @@ class _DocuTrackerWorkflowEditorScreenState
         navigator.pop(false);
       },
       child: Scaffold(
-        backgroundColor: DocuTrackerTokens.canvas,
+        backgroundColor: DocuTrackerTokens.canvasOf(context),
         appBar: AppBar(
           backgroundColor: DocuTrackerTokens.surface,
           surfaceTintColor: Colors.transparent,
@@ -1134,7 +1134,7 @@ class _WorkflowEditorHeader extends StatelessWidget {
             children: [
               Text(
                 'BACK TO DOCUMENTS',
-                style: DocuTrackerTokens.metaStyle().copyWith(
+                style: DocuTrackerTokens.metaStyle(context).copyWith(
                   fontSize: 10,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 0.8,
@@ -1333,7 +1333,7 @@ class _WorkflowInsightPanel extends StatelessWidget {
           children: [
             Text(
               'ANALYTICS INSIGHT',
-              style: DocuTrackerTokens.metaStyle().copyWith(
+              style: DocuTrackerTokens.metaStyle(context).copyWith(
                 fontSize: 10,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 0.8,
@@ -1342,7 +1342,7 @@ class _WorkflowInsightPanel extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               insight,
-              style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 12),
+              style: DocuTrackerTokens.subtitleStyle(context).copyWith(fontSize: 12),
             ),
             const SizedBox(height: 14),
             ClipRRect(
@@ -1940,7 +1940,7 @@ class _WorkflowActiveSummaryCard extends StatelessWidget {
           children: [
             Text(
               'ACTIVE WORKFLOW',
-              style: DocuTrackerTokens.metaStyle().copyWith(
+              style: DocuTrackerTokens.metaStyle(context).copyWith(
                 fontSize: 10,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 0.8,
@@ -2018,7 +2018,7 @@ class _OverviewMiniStat extends StatelessWidget {
             ),
             Text(
               label,
-              style: DocuTrackerTokens.metaStyle().copyWith(fontSize: 11),
+              style: DocuTrackerTokens.metaStyle(context).copyWith(fontSize: 11),
             ),
           ],
         ),
@@ -2108,7 +2108,7 @@ class _OverviewMetricCard extends StatelessWidget {
             Text(
               label,
               textAlign: TextAlign.center,
-              style: DocuTrackerTokens.metaStyle().copyWith(
+              style: DocuTrackerTokens.metaStyle(context).copyWith(
                 fontSize: 10,
                 fontWeight: FontWeight.w800,
               ),
@@ -2254,7 +2254,7 @@ class _WorkflowPathPreviewStrip extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               'Same order as the builder · Tap a step to highlight it and scroll to its card',
-              style: DocuTrackerTokens.subtitleStyle().copyWith(fontSize: 11.5),
+              style: DocuTrackerTokens.subtitleStyle(context).copyWith(fontSize: 11.5),
             ),
             const SizedBox(height: 10),
             if (steps.isEmpty)

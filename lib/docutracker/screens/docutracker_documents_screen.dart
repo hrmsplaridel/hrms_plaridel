@@ -117,6 +117,7 @@ class _DocuTrackerDocumentsScreenState
                       setState(() => _searchQuery = val.toLowerCase());
                     },
                     decoration: DocuTrackerTokens.warmSearchDecoration(
+                      context,
                       'Search documents by title, number, or sender...',
                     ),
                   ),
@@ -131,6 +132,7 @@ class _DocuTrackerDocumentsScreenState
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             _warmDropdown(
+                              context,
                               DropdownButton<String?>(
                                 value: _filterType,
                                 hint: const Text('Type'),
@@ -156,6 +158,7 @@ class _DocuTrackerDocumentsScreenState
                               ),
                             ),
                             _warmDropdown(
+                              context,
                               DropdownButton<DocumentStatus?>(
                                 value: _filterStatus,
                                 hint: const Text('Status'),
@@ -181,6 +184,7 @@ class _DocuTrackerDocumentsScreenState
                               ),
                             ),
                             _warmDropdown(
+                              context,
                               DropdownButton<bool>(
                                 value: _sortByDeadline,
                                 underline: const SizedBox.shrink(),
@@ -276,10 +280,10 @@ class _DocuTrackerDocumentsScreenState
     );
   }
 
-  Widget _warmDropdown(Widget child) {
+  Widget _warmDropdown(BuildContext context, Widget child) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: DocuTrackerTokens.warmDropdownDecoration(),
+      decoration: DocuTrackerTokens.warmDropdownDecoration(context),
       child: DocuTrackerStyles.filterDropdownWrapper(child),
     );
   }
@@ -330,7 +334,7 @@ class _EmptyState extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  color: DocuTrackerTokens.textPrimary,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                   height: 1.3,
                 ),
                 textAlign: TextAlign.center,
@@ -342,7 +346,7 @@ class _EmptyState extends StatelessWidget {
                 canCreate
                     ? 'Create your first document to begin a workflow. It will be routed to the assigned reviewers automatically.'
                     : 'Documents assigned to you for review will appear here. You will also receive a notification when action is required.',
-                style: DocuTrackerTokens.subtitleStyle(),
+                style: DocuTrackerTokens.subtitleStyle(context),
                 textAlign: TextAlign.center,
               ),
 
@@ -371,7 +375,7 @@ class _EmptyState extends StatelessWidget {
                       Flexible(
                         child: Text(
                           'Only selected personnel are authorized to create documents.',
-                          style: DocuTrackerTokens.metaStyle(),
+                          style: DocuTrackerTokens.metaStyle(context),
                         ),
                       ),
                     ],
@@ -473,7 +477,7 @@ class _DocumentList extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               'Try adjusting your search or filter criteria.',
-              style: DocuTrackerTokens.subtitleStyle(),
+              style: DocuTrackerTokens.subtitleStyle(context),
               textAlign: TextAlign.center,
             ),
           ],
@@ -786,7 +790,9 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                                   fontWeight: FontWeight.w700,
                                   color: isOverdue
                                       ? const Color(0xFF991B1B)
-                                      : const Color(0xFF111827),
+                                      : DocuTrackerTokens.textPrimaryOf(
+                                          context,
+                                        ),
                                 ),
                               ),
                             ),
@@ -807,9 +813,9 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                             if (doc.documentNumber != null)
                               Text(
                                 doc.documentNumber!,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
-                                  color: Color(0xFF6B7280),
+                                  color: DocuTrackerTokens.textMutedOf(context),
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -843,9 +849,9 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                                 : 'From ${doc.creatorName}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12.5,
-                              color: Color(0xFF4B5563),
+                              color: DocuTrackerTokens.textSecondaryOf(context),
                             ),
                           ),
                         ],
@@ -917,7 +923,7 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                                 fontWeight: FontWeight.w600,
                                 color: isOverdue
                                     ? const Color(0xFF991B1B)
-                                    : const Color(0xFF111827),
+                                    : DocuTrackerTokens.textPrimaryOf(context),
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,

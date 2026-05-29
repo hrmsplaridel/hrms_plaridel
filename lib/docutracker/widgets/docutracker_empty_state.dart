@@ -16,6 +16,7 @@ class DocuTrackerEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = DocuTrackerTokens.isDark(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       child: Column(
@@ -25,7 +26,9 @@ class DocuTrackerEmptyState extends StatelessWidget {
             width: 72,
             height: 72,
             decoration: BoxDecoration(
-              color: DocuTrackerTokens.surfaceCream,
+              color: dark
+                  ? DocuTrackerTokens.surfaceDark
+                  : DocuTrackerTokens.surfaceCream,
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -38,17 +41,17 @@ class DocuTrackerEmptyState extends StatelessWidget {
           Text(
             title,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
-              color: DocuTrackerTokens.textPrimary,
+              color: DocuTrackerTokens.textPrimaryOf(context),
             ),
           ),
           const SizedBox(height: 8),
           Text(
             message,
             textAlign: TextAlign.center,
-            style: DocuTrackerTokens.subtitleStyle(),
+            style: DocuTrackerTokens.subtitleStyle(context),
           ),
         ],
       ),

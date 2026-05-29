@@ -34,6 +34,7 @@ router.get('/avatar/:userId', async (req, res) => {
       return res.status(404).json({ error: 'Avatar file not found' });
     }
 
+    res.setHeader('Cache-Control', 'private, no-store');
     res.sendFile(path.resolve(filePath));
   } catch (err) {
     console.error('[files avatar]', err);

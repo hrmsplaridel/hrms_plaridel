@@ -97,10 +97,10 @@ class _DocuTrackerSlideInPanelScaffold extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w800,
-                    color: DocuTrackerTokens.textPrimary,
+                    color: DocuTrackerTokens.textPrimaryOf(context),
                   ),
                 ),
               ),

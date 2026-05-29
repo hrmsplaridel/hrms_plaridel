@@ -95,7 +95,10 @@ class DocuTrackerSectionHeader extends StatelessWidget {
                       _CountBadge(count: count!, color: accent),
                     ] else if (subtitle != null && subtitle!.isNotEmpty) ...[
                       const SizedBox(width: 8),
-                      Text(subtitle!, style: DocuTrackerTokens.metaStyle()),
+                      Text(
+                        subtitle!,
+                        style: DocuTrackerTokens.metaStyle(context),
+                      ),
                     ],
                   ],
                 ),
@@ -112,7 +115,7 @@ class DocuTrackerSectionHeader extends StatelessWidget {
             Divider(
               height: 1,
               thickness: 1,
-              color: DocuTrackerTokens.borderSubtle,
+              color: DocuTrackerTokens.borderSubtleOf(context),
             ),
           ],
         ],
