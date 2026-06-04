@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/landing/presentation/widgets/section_container.dart';
 
-/// Header: Municipality logo, nav links (Home, Job Vacancies, Recruitment Process, Contact),
-/// and a single Login button. No public registration.
+/// Header: Municipality logo and nav links for the public applicant landing page.
 class HeaderSection extends StatelessWidget {
   const HeaderSection({
     super.key,
@@ -126,8 +125,10 @@ class HeaderSection extends StatelessWidget {
                               onTap: onContactTap,
                               lightOnColoredHeader: true,
                             ),
-                            const SizedBox(width: 10),
-                            _HeaderLoginButton(onLoginTap: onLoginTap),
+                            if (onLoginTap != null) ...[
+                              const SizedBox(width: 10),
+                              _HeaderLoginButton(onLoginTap: onLoginTap),
+                            ],
                           ],
                         ),
                       ),
@@ -145,10 +146,11 @@ class HeaderSection extends StatelessWidget {
                             showBackground: true,
                             lightOnColoredHeader: true,
                           ),
-                          _HeaderLoginButton(
-                            onLoginTap: onLoginTap,
-                            compact: true,
-                          ),
+                          if (onLoginTap != null)
+                            _HeaderLoginButton(
+                              onLoginTap: onLoginTap,
+                              compact: true,
+                            ),
                         ],
                       ),
                       if (!isNarrow) ...[
@@ -197,8 +199,7 @@ class HeaderSection extends StatelessWidget {
   }
 }
 
-/// Single login button, pill shape, and hover effect.
-/// On orange header uses white fill + orange text for contrast.
+/// Optional login button, pill shape, and hover effect.
 class _HeaderLoginButton extends StatefulWidget {
   const _HeaderLoginButton({this.onLoginTap, this.compact = false});
 

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
-import 'package:hrms_plaridel/features/auth/presentation/pages/login_page.dart';
 import 'package:hrms_plaridel/main.dart' as app;
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/pages/application_flow_page.dart';
 import 'package:hrms_plaridel/features/landing/presentation/sections/header_section.dart';
@@ -104,12 +103,6 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
     );
   }
 
-  void _onLogin() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (context) => const LoginPage()));
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -126,7 +119,6 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
               ),
             ),
             onContactTap: () => _scrollTo(_contactKey),
-            onLoginTap: _onLogin,
           ),
           Expanded(
             child: LayoutBuilder(

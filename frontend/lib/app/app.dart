@@ -165,7 +165,7 @@ Widget _initialHome(AuthProvider auth) {
   }
 
   if (kIsWeb) {
-    return const LandingPage();
+    return const LoginPage();
   }
   switch (defaultTargetPlatform) {
     case TargetPlatform.android:
