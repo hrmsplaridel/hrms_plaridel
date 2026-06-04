@@ -1,4 +1,4 @@
-import 'rsp_ld_saved_entries_api.dart';
+import 'package:hrms_plaridel/features/learning_development/data/repositories/rsp_ld_saved_entries_api.dart';
 
 /// One Background Investigation (BI) form entry: applicant, respondent,
 /// competencies (page 1), functional areas & performance (page 2),

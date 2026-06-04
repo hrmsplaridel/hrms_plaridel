@@ -52,6 +52,7 @@ dependencies:
   fl_chart: ^0.69.0
   package_info_plus: ^9.0.1
 
+  web: any
 dev_dependencies:
   flutter_test:
     sdk: flutter

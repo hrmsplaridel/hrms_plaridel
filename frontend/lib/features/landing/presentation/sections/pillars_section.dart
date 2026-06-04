@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:hrms_plaridel/features/recruitment/presentation/pages/application_flow_page.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/applicant/pages/application_flow_page.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/landing/presentation/widgets/section_container.dart';
 

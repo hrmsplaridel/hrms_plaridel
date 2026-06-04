@@ -1,4 +1,6 @@
 /// DocuTracker models barrel export.
+library;
+
 export 'document.dart';
 export 'document_action.dart';
 export 'document_ai_summary.dart';

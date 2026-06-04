@@ -184,8 +184,7 @@ class TimeRecord {
   }
 
   /// ISO string in UTC for API (so server stores correct time; display uses toLocal()).
-  static String? _toUtcIso(DateTime? dt) =>
-      dt == null ? null : dt.toUtc().toIso8601String();
+  static String? _toUtcIso(DateTime? dt) => dt?.toUtc().toIso8601String();
 
   /// Calendar date YYYY-MM-DD from local date components (avoids UTC off-by-one when sending to API).
   static String _toDateOnlyString(DateTime d) {
@@ -304,13 +303,16 @@ class TimeRecordRepo {
   }) async {
     try {
       final params = <String, dynamic>{};
-      if (startDate != null)
+      if (startDate != null) {
         params['start_date'] = TimeRecord._toDateOnlyString(startDate);
-      if (endDate != null)
+      }
+      if (endDate != null) {
         params['end_date'] = TimeRecord._toDateOnlyString(endDate);
+      }
       if (userId != null && userId.isNotEmpty) params['employee_id'] = userId;
-      if (departmentId != null && departmentId.isNotEmpty)
+      if (departmentId != null && departmentId.isNotEmpty) {
         params['department_id'] = departmentId;
+      }
       if (limit != null) params['limit'] = limit;
       if (offset != null) params['offset'] = offset;
       final res = await ApiClient.instance.get<List<dynamic>>(

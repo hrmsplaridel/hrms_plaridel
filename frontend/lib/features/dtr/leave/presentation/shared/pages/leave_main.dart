@@ -5,8 +5,8 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
-import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/pages/admin_leave_screen.dart';
-import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/pages/employee_leave_screen.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/admin_leave_screen.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/employee_leave_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/responsive_leave_form_host.dart';
 

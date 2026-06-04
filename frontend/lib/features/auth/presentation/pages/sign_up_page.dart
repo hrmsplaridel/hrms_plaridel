@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
-import 'package:hrms_plaridel/features/auth/data/login_theme.dart';
+import 'package:hrms_plaridel/features/auth/theme/login_theme.dart';
 import 'package:hrms_plaridel/features/auth/models/login_role.dart';
 
 /// Sign-up screen: same layout as login (branding left, form right).
@@ -153,7 +153,7 @@ class _BrandingSection extends StatelessWidget {
                     child: Container(
                       width: 56,
                       height: 56,
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withValues(alpha: 0.2),
                       child: Image.asset(
                         'assets/images/Plaridel Logo.jpg',
                         fit: BoxFit.cover,
@@ -183,7 +183,7 @@ class _BrandingSection extends StatelessWidget {
                       Text(
                         'HUMAN RESOURCE MANAGEMENT SYSTEM',
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.95),
+                          color: Colors.white.withValues(alpha: 0.95),
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.8,
@@ -198,7 +198,7 @@ class _BrandingSection extends StatelessWidget {
               Text(
                 'Modernizing Human Resource Services',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.95),
+                  color: Colors.white.withValues(alpha: 0.95),
                   fontSize: 18,
                   fontWeight: FontWeight.w500,
                   height: 1.3,
@@ -209,7 +209,7 @@ class _BrandingSection extends StatelessWidget {
                 child: Icon(
                   Icons.person_add_rounded,
                   size: 100,
-                  color: Colors.white.withOpacity(0.5),
+                  color: Colors.white.withValues(alpha: 0.5),
                 ),
               ),
               const SizedBox(height: 24),
@@ -568,15 +568,15 @@ class _SignUpButton extends StatelessWidget {
             colors: onPressed != null && !isLoading
                 ? [LoginTheme.blueLight, LoginTheme.blueDark]
                 : [
-                    LoginTheme.blueLight.withOpacity(0.7),
-                    LoginTheme.blueDark.withOpacity(0.7),
+                    LoginTheme.blueLight.withValues(alpha: 0.7),
+                    LoginTheme.blueDark.withValues(alpha: 0.7),
                   ],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
           boxShadow: [
             BoxShadow(
-              color: LoginTheme.bluePrimary.withOpacity(0.35),
+              color: LoginTheme.bluePrimary.withValues(alpha: 0.35),
               blurRadius: 8,
               offset: const Offset(0, 4),
             ),

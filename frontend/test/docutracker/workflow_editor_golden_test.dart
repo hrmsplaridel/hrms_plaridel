@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/pages/docutracker_workflow_editor_screen.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/admin/pages/docutracker_workflow_editor_screen.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

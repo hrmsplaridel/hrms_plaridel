@@ -13,6 +13,7 @@ import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/profile_account_tab_skeleton.dart';
 import 'package:hrms_plaridel/shared/widgets/profile_app_settings_panels.dart';
+import 'package:hrms_plaridel/shared/widgets/profile_mobile_layouts.dart';
 import 'package:hrms_plaridel/shared/widgets/profile_modern_ui.dart';
 import 'package:hrms_plaridel/shared/widgets/settings_password_security_extras.dart';
 
@@ -501,12 +502,13 @@ class _ProfileContentState extends State<ProfileContent> {
   Future<void> _sendPasswordReset() async {
     final email = context.read<AuthProvider>().email;
     if (email.isEmpty) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('No email on file. Cannot send reset link.'),
           ),
         );
+      }
       return;
     }
     setState(() => _resettingPassword = true);
@@ -672,14 +674,16 @@ class _ProfileContentState extends State<ProfileContent> {
         },
       );
       if (mounted) {
+        final authProvider = context.read<AuthProvider>();
         final patchedUser = res.data != null
             ? AppUser.fromJson(res.data!)
             : null;
         if (patchedUser != null) {
-          context.read<AuthProvider>().replaceUser(patchedUser);
+          authProvider.replaceUser(patchedUser);
         }
-        await context.read<AuthProvider>().refreshUser();
-        final refreshed = context.read<AuthProvider>().user ?? patchedUser;
+        await authProvider.refreshUser();
+        if (!mounted) return;
+        final refreshed = authProvider.user ?? patchedUser;
         setState(() {
           if (refreshed != null) {
             _applyUserProfile(refreshed);
@@ -1571,20 +1575,10 @@ class _ProfileContentState extends State<ProfileContent> {
     final about = _buildWorkAboutCard(context, email, user, isWide);
     final personal = _buildAccountSection(context, email, isWide, user);
 
-    if (isWide) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(flex: 34, child: about),
-          const SizedBox(width: 24),
-          Expanded(flex: 66, child: personal),
-        ],
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [about, const SizedBox(height: 16), personal],
+    return ProfileAccountResponsiveLayout(
+      isWide: isWide,
+      about: about,
+      personal: personal,
     );
   }
 
@@ -1695,13 +1689,8 @@ class _ProfileContentState extends State<ProfileContent> {
               onChangePhoto: _imageLoading ? null : _pickAndUploadAvatar,
               isUploading: _imageLoading,
             ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              isWide ? 28 : 16,
-              0,
-              isWide ? 28 : 16,
-              isWide ? 28 : 20,
-            ),
+          ProfileShellBodyPadding(
+            isWide: isWide,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

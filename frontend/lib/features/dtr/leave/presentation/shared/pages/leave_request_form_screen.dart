@@ -1106,7 +1106,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                             _buildSectionTitle('1. Leave Type'),
                             const SizedBox(height: 16),
                             DropdownButtonFormField<String>(
-                              value: _leaveTypeName,
+                              initialValue: _leaveTypeName,
                               isExpanded: true,
                               decoration: _inputDecoration('Select Leave Type'),
                               items: _leaveTypeDropdownItems(),
@@ -1527,17 +1527,21 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             color: AppTheme.dashTextPrimaryOf(context),
           ),
         ),
-        RadioListTile<LeaveLocationOption>(
-          title: const Text('Within Philippines'),
-          value: LeaveLocationOption.withinPhilippines,
+        RadioGroup<LeaveLocationOption>(
           groupValue: _locationOption,
           onChanged: (v) => setState(() => _locationOption = v),
-        ),
-        RadioListTile<LeaveLocationOption>(
-          title: const Text('Abroad'),
-          value: LeaveLocationOption.abroad,
-          groupValue: _locationOption,
-          onChanged: (v) => setState(() => _locationOption = v),
+          child: const Column(
+            children: [
+              RadioListTile<LeaveLocationOption>(
+                title: Text('Within Philippines'),
+                value: LeaveLocationOption.withinPhilippines,
+              ),
+              RadioListTile<LeaveLocationOption>(
+                title: Text('Abroad'),
+                value: LeaveLocationOption.abroad,
+              ),
+            ],
+          ),
         ),
         if (_locationOption != null) ...[
           const SizedBox(height: 8),
@@ -1559,17 +1563,21 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             color: AppTheme.dashTextPrimaryOf(context),
           ),
         ),
-        RadioListTile<SickLeaveNature>(
-          title: const Text('In Hospital'),
-          value: SickLeaveNature.inHospital,
+        RadioGroup<SickLeaveNature>(
           groupValue: _sickLeaveNature,
           onChanged: (v) => setState(() => _sickLeaveNature = v),
-        ),
-        RadioListTile<SickLeaveNature>(
-          title: const Text('Out Patient'),
-          value: SickLeaveNature.outPatient,
-          groupValue: _sickLeaveNature,
-          onChanged: (v) => setState(() => _sickLeaveNature = v),
+          child: const Column(
+            children: [
+              RadioListTile<SickLeaveNature>(
+                title: Text('In Hospital'),
+                value: SickLeaveNature.inHospital,
+              ),
+              RadioListTile<SickLeaveNature>(
+                title: Text('Out Patient'),
+                value: SickLeaveNature.outPatient,
+              ),
+            ],
+          ),
         ),
         if (_sickLeaveNature != null) ...[
           const SizedBox(height: 8),
@@ -1695,17 +1703,21 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             color: AppTheme.dashTextPrimaryOf(context),
           ),
         ),
-        RadioListTile<StudyLeavePurpose>(
-          title: const Text('Completion of Master\'s Degree'),
-          value: StudyLeavePurpose.completionOfMastersDegree,
+        RadioGroup<StudyLeavePurpose>(
           groupValue: _studyPurpose,
           onChanged: (v) => setState(() => _studyPurpose = v),
-        ),
-        RadioListTile<StudyLeavePurpose>(
-          title: const Text('BAR / Board Examination Review'),
-          value: StudyLeavePurpose.barBoardExaminationReview,
-          groupValue: _studyPurpose,
-          onChanged: (v) => setState(() => _studyPurpose = v),
+          child: const Column(
+            children: [
+              RadioListTile<StudyLeavePurpose>(
+                title: Text('Completion of Master\'s Degree'),
+                value: StudyLeavePurpose.completionOfMastersDegree,
+              ),
+              RadioListTile<StudyLeavePurpose>(
+                title: Text('BAR / Board Examination Review'),
+                value: StudyLeavePurpose.barBoardExaminationReview,
+              ),
+            ],
+          ),
         ),
         if (_studyPurpose != null) ...[
           const SizedBox(height: 8),

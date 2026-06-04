@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/widgets/docutracker_status_badge.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 
 void main() {
   Future<void> pumpBadge(

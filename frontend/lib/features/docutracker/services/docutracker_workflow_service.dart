@@ -1,5 +1,5 @@
-import 'package:hrms_plaridel/features/docutracker/data/docutracker_api_result.dart';
-import 'package:hrms_plaridel/features/docutracker/data/docutracker_repository.dart';
+import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
+import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 
 /// Backend workflow façade (all state transitions + remarks).

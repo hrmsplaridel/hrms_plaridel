@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/auth/presentation/pages/login_page.dart';
 import 'package:hrms_plaridel/main.dart' as app;
-import 'package:hrms_plaridel/features/recruitment/presentation/pages/application_flow_page.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/applicant/pages/application_flow_page.dart';
 import 'package:hrms_plaridel/features/landing/presentation/sections/header_section.dart';
 import 'package:hrms_plaridel/features/landing/presentation/sections/hero_section.dart';
 import 'package:hrms_plaridel/features/landing/presentation/sections/job_vacancies_section.dart';

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/pages/docutracker_permission_editor_screen.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/admin/pages/docutracker_permission_editor_screen.dart';
 
 void main() {
   const secureStorageChannel = MethodChannel(

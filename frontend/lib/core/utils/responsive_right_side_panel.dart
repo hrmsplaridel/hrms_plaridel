@@ -25,7 +25,7 @@ Future<T?> openResponsiveRightSidePanel<T>({
     barrierLabel: barrierLabel,
     barrierColor: Colors.black54,
     transitionDuration: const Duration(milliseconds: 220),
-    pageBuilder: (ctx, _a1, _a2) {
+    pageBuilder: (ctx, a1, a2) {
       final initialWidth = (viewportWidth * initialWidthFraction).clamp(
         minWidth,
         viewportWidth * 0.9,
@@ -40,7 +40,7 @@ Future<T?> openResponsiveRightSidePanel<T>({
         ),
       );
     },
-    transitionBuilder: (ctx, anim, _sec, child) {
+    transitionBuilder: (ctx, anim, sec, child) {
       final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
       return SlideTransition(
         position: Tween<Offset>(

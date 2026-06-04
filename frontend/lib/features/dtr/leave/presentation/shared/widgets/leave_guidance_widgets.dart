@@ -407,7 +407,9 @@ class _GuidelineSectionTile extends StatelessWidget {
                             width: 5,
                             height: 5,
                             decoration: BoxDecoration(
-                              color: AppTheme.primaryNavy.withOpacity(0.5),
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.5,
+                              ),
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -725,7 +727,11 @@ class _GuidanceRow extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 14, color: AppTheme.primaryNavy.withOpacity(0.7)),
+        Icon(
+          icon,
+          size: 14,
+          color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+        ),
         const SizedBox(width: 6),
         Text(
           '$label: ',

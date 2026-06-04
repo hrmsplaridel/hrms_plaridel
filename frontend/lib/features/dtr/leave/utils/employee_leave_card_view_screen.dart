@@ -255,7 +255,7 @@ class _EmployeeLeaveCardViewScreenState
                     color: const Color(0xFFE9EEB8),
                     borderRadius: BorderRadius.circular(4),
                     border: Border.all(
-                      color: Colors.black.withOpacity(0.35),
+                      color: Colors.black.withValues(alpha: 0.35),
                       width: 1.1,
                     ),
                   ),

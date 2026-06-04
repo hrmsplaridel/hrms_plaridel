@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'package:hrms_plaridel/features/docutracker/data/docutracker_notification_navigation.dart';
-import 'package:hrms_plaridel/features/docutracker/data/docutracker_provider.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/widgets/docutracker_notifications_panel.dart';
+import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_notification_navigation.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_notifications_panel.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/notifications/models/app_notification.dart';

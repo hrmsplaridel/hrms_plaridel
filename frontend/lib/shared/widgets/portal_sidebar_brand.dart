@@ -349,14 +349,3 @@ class _SidebarRailMedallion extends StatelessWidget {
     );
   }
 }
-
-class _SidebarRailLogoMark extends StatelessWidget {
-  const _SidebarRailLogoMark({required this.size});
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return PlaridelCircleLogo(size: size, showShadow: false);
-  }
-}

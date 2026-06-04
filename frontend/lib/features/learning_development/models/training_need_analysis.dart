@@ -1,4 +1,4 @@
-import 'rsp_ld_saved_entries_api.dart';
+import 'package:hrms_plaridel/features/learning_development/data/repositories/rsp_ld_saved_entries_api.dart';
 
 /// One row in the Training Need Analysis table.
 class TrainingNeedAnalysisRow {

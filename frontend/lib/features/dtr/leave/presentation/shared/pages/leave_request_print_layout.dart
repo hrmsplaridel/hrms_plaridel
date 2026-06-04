@@ -236,7 +236,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                           border: Border.all(color: Colors.black, width: 1),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.04),
+                              color: Colors.black.withValues(alpha: 0.04),
                               blurRadius: 8,
                               offset: const Offset(0, 2),
                             ),
@@ -394,7 +394,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                         color: AppTheme.white,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Colors.black.withOpacity(0.06),
+                          color: Colors.black.withValues(alpha: 0.06),
                         ),
                       ),
                       child: isDesktop
@@ -574,17 +574,19 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     );
     if (result == null ||
         result.files.isEmpty ||
-        result.files.single.bytes == null)
+        result.files.single.bytes == null) {
       return;
+    }
 
     final file = result.files.single;
     final bytes = file.bytes!;
     final name = file.name;
     if (name.isEmpty) return;
 
+    if (!mounted) return;
+    final provider = context.read<LeaveProvider>();
     setState(() => _attachmentUploading = true);
     try {
-      final provider = context.read<LeaveProvider>();
       final updated = await provider.attachFile(
         requestId: requestId,
         fileBytes: bytes,
@@ -802,8 +804,9 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                               decimal: true,
                             ),
                             validator: (value) {
-                              if ((value ?? '').trim().isEmpty)
+                              if ((value ?? '').trim().isEmpty) {
                                 return 'Required';
+                              }
                               if (double.tryParse(value!.trim()) == null) {
                                 return 'Invalid amount';
                               }
@@ -1316,7 +1319,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
         const SizedBox(height: 8),
         _approvalLine(
           others != null && others.isNotEmpty
-              ? '$others'
+              ? others
               : '_______ others (Specify)',
         ),
       ],
@@ -1587,7 +1590,9 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
               height: 14,
               decoration: BoxDecoration(
                 border: Border.all(color: Colors.black54, width: 1),
-                color: selected ? AppTheme.primaryNavy.withOpacity(0.15) : null,
+                color: selected
+                    ? AppTheme.primaryNavy.withValues(alpha: 0.15)
+                    : null,
               ),
               child: selected
                   ? Icon(Icons.check, size: 12, color: AppTheme.primaryNavyDark)
@@ -2154,7 +2159,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       decoration: BoxDecoration(
         color: AppTheme.offWhite,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2217,7 +2222,7 @@ class _DateField extends StatelessWidget {
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.black.withOpacity(0.08)),
+            borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
           ),
         ),
         child: Text(

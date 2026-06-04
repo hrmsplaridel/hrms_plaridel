@@ -1,16 +1,15 @@
 import 'dart:ui';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:hrms_plaridel/features/dashboard/presentation/pages/admin_dashboard.dart';
-import 'package:hrms_plaridel/features/dashboard/presentation/pages/employee_dashboard.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/admin/admin_dashboard.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/main.dart' show kLoginAsKey;
 import 'package:hrms_plaridel/providers/auth_provider.dart';
-import 'package:hrms_plaridel/features/auth/data/login_theme.dart';
+import 'package:hrms_plaridel/features/auth/theme/login_theme.dart';
 
 const _rememberKey = 'login_remember_v1';
 const _rememberEmailKey = 'login_remember_email_v1';

@@ -74,6 +74,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _currentUserId = context.watch<AuthProvider>().user?.id;
+    final leaveProvider = context.read<LeaveProvider>();
     _leaveRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
       event,
     ) {
@@ -88,7 +89,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       } else {
         if (!event.affectsUser(_currentUserId)) return;
       }
-      context.read<LeaveProvider>().invalidateCachedLeaveData();
+      leaveProvider.invalidateCachedLeaveData();
       unawaited(_refreshFromRealtime());
     });
   }
@@ -1231,7 +1232,7 @@ class _AdminFilterCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           DropdownButtonFormField<String?>(
-            value: draftEmployeeId,
+            initialValue: draftEmployeeId,
             decoration: adminLeaveInputDecoration(
               context,
               'Employee',
@@ -1248,7 +1249,7 @@ class _AdminFilterCard extends StatelessWidget {
     }
 
     return DropdownButtonFormField<String?>(
-      value: _safeEmployeeValue(draftEmployeeId, employees),
+      initialValue: _safeEmployeeValue(draftEmployeeId, employees),
       dropdownColor: AppTheme.dashPanelOf(context),
       style: AppTheme.dashFieldTextStyle(context),
       decoration: adminLeaveInputDecoration(
@@ -1292,7 +1293,7 @@ class _AdminFilterCard extends StatelessWidget {
 
   Widget _leaveTypeDropdown(BuildContext context) {
     return DropdownButtonFormField<String?>(
-      value: draftLeaveType,
+      initialValue: draftLeaveType,
       dropdownColor: AppTheme.dashPanelOf(context),
       style: AppTheme.dashFieldTextStyle(context),
       decoration: adminLeaveInputDecoration(

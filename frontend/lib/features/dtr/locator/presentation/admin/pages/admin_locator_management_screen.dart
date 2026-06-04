@@ -151,7 +151,7 @@ class _AdminLocatorManagementScreenState
             SizedBox(
               width: 190,
               child: DropdownButtonFormField<LocatorRequestType?>(
-                value: _requestTypeFilter,
+                initialValue: _requestTypeFilter,
                 decoration: AppTheme.dashInputDecoration(
                   context,
                   radius: 10,

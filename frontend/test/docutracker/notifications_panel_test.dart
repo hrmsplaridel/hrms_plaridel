@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/widgets/docutracker_notifications_panel.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_notifications_panel.dart';
 
 void main() {
   List<DocumentNotification> sampleNotifications() {

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -615,14 +614,6 @@ class FormPdf {
       ],
     );
   }
-
-  static pw.Widget _section(String title) => pw.Padding(
-    padding: const pw.EdgeInsets.only(top: 12, bottom: 6),
-    child: pw.Text(
-      title,
-      style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
-    ),
-  );
 
   static pw.Widget _row(String label, String value) => pw.Padding(
     padding: const pw.EdgeInsets.only(bottom: 4),
