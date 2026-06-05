@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/app/providers.dart';
 import 'package:hrms_plaridel/app/route_observer.dart';
@@ -7,7 +6,6 @@ import 'package:hrms_plaridel/features/auth/presentation/pages/login_page.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/admin_dashboard.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_access_policy.dart';
-import 'package:hrms_plaridel/features/landing/presentation/pages/landing_page.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/providers/theme_mode_provider.dart';
 import 'package:hrms_plaridel/shared/models/philippine_psgc_loader.dart';
@@ -164,14 +162,5 @@ Widget _initialHome(AuthProvider auth) {
     return isPrivileged ? const AdminDashboard() : const EmployeeDashboard();
   }
 
-  if (kIsWeb) {
-    return const LoginPage();
-  }
-  switch (defaultTargetPlatform) {
-    case TargetPlatform.android:
-    case TargetPlatform.iOS:
-      return const LoginPage();
-    default:
-      return const LandingPage();
-  }
+  return const LoginPage();
 }

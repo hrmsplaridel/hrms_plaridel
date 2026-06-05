@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -127,10 +128,39 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   String _employmentStatus = 'active';
   DateTime? _dateHired;
   bool _obscurePassword = true;
-  bool _obscureRepeatPassword = true;
   Uint8List? _selectedImageBytes;
   bool _saving = false;
   int? _lastAppliedPrefillStamp;
+
+  static final Random _secureRandom = Random.secure();
+  static const String _passwordChars =
+      'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#%';
+
+  @override
+  void initState() {
+    super.initState();
+    _generateTemporaryPassword();
+  }
+
+  String _newTemporaryPassword() {
+    final chars = List<String>.generate(
+      12,
+      (_) => _passwordChars[_secureRandom.nextInt(_passwordChars.length)],
+    );
+    return 'Pld-${chars.sublist(0, 4).join()}-${chars.sublist(4, 8).join()}-${chars.sublist(8, 12).join()}';
+  }
+
+  void _generateTemporaryPassword() {
+    final password = _newTemporaryPassword();
+    _passwordController.text = password;
+    _repeatPasswordController.text = password;
+  }
+
+  Future<void> _copyTemporaryPassword() async {
+    await Clipboard.setData(ClipboardData(text: _passwordController.text));
+    if (!mounted) return;
+    _showSnackBar('Temporary password copied.');
+  }
 
   @override
   void didChangeDependencies() {
@@ -306,6 +336,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       _employmentStatus = 'active';
       _dateHired = null;
       _selectedImageBytes = null;
+      _generateTemporaryPassword();
     });
   }
 
@@ -407,9 +438,14 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       if (widget.onAccountCreated != null) {
         widget.onAccountCreated!();
       } else {
-        _showSnackBar(
-          'Account created as $privilege. They can sign in with their email and password.',
-        );
+        final emailConfigured = data['account_email_configured'] == true;
+        final emailSent = data['account_email_sent'] == true;
+        final emailStatus = emailSent
+            ? ' Credentials were emailed to the employee.'
+            : emailConfigured
+            ? ' Account email failed; please share the login details manually.'
+            : ' Email is not configured; please share the login details manually.';
+        _showSnackBar('Account created as $privilege.$emailStatus');
       }
     } on DioException catch (e) {
       if (!mounted) return;
@@ -644,45 +680,51 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         const SizedBox(height: 18),
         TextFormField(
           controller: _passwordController,
-          decoration: _fieldDecoration('Password').copyWith(
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscurePassword
-                    ? Icons.visibility_rounded
-                    : Icons.visibility_off_rounded,
-                size: 20,
-                color: AppTheme.textSecondary,
+          readOnly: true,
+          decoration:
+              _fieldDecoration(
+                'Temporary password',
+                hint: 'Generated automatically',
+              ).copyWith(
+                helperText:
+                    'A strong temporary password is generated and emailed to the employee.',
+                helperMaxLines: 2,
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Regenerate password',
+                      icon: const Icon(Icons.refresh_rounded, size: 20),
+                      color: AppTheme.textSecondary,
+                      onPressed: () => setState(_generateTemporaryPassword),
+                    ),
+                    IconButton(
+                      tooltip: 'Copy temporary password',
+                      icon: const Icon(Icons.copy_rounded, size: 20),
+                      color: AppTheme.textSecondary,
+                      onPressed: _copyTemporaryPassword,
+                    ),
+                    IconButton(
+                      tooltip: _obscurePassword
+                          ? 'Show password'
+                          : 'Hide password',
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_rounded
+                            : Icons.visibility_off_rounded,
+                        size: 20,
+                      ),
+                      color: AppTheme.textSecondary,
+                      onPressed: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                  ],
+                ),
               ),
-              onPressed: () =>
-                  setState(() => _obscurePassword = !_obscurePassword),
-            ),
-          ),
           obscureText: _obscurePassword,
-          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-        ),
-        const SizedBox(height: 18),
-        TextFormField(
-          controller: _repeatPasswordController,
-          decoration: _fieldDecoration('Repeat password').copyWith(
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscureRepeatPassword
-                    ? Icons.visibility_rounded
-                    : Icons.visibility_off_rounded,
-                size: 20,
-                color: AppTheme.textSecondary,
-              ),
-              onPressed: () => setState(
-                () => _obscureRepeatPassword = !_obscureRepeatPassword,
-              ),
-            ),
-          ),
-          obscureText: _obscureRepeatPassword,
           validator: (v) {
-            if (v == null || v.isEmpty) return 'Required';
-            if (v != _passwordController.text) {
-              return 'Passwords do not match';
-            }
+            if (v == null || v.trim().isEmpty) return 'Required';
+            if (v.trim().length < 12) return 'Generate a stronger password';
             return null;
           },
         ),

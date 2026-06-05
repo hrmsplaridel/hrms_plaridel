@@ -1,11 +1,9 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'package:hrms_plaridel/features/landing/presentation/pages/landing_page.dart';
 import 'package:hrms_plaridel/features/auth/presentation/pages/login_page.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 
@@ -491,9 +489,8 @@ Future<void> performDashboardSignOut(BuildContext context) async {
 
   if (!context.mounted) return;
 
-  final dest = kIsWeb ? const LandingPage() : const LoginPage();
   await rootNav.pushAndRemoveUntil(
-    MaterialPageRoute(builder: (_) => dest),
+    MaterialPageRoute(builder: (_) => const LoginPage()),
     (route) => false,
   );
 }

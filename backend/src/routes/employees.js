@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { sendSmtpMail, isSmtpConfigured } = require('../utils/smtpMail');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -10,6 +11,22 @@ const protect = [authMiddleware];
 const SALT_ROUNDS = 10;
 const EMPLOYEE_ID_MIN = 100000;
 const EMPLOYEE_ID_MAX = 999999;
+
+function employeeAccountEmailText({ name, email, password, role }) {
+  const displayName = String(name || '').trim() || 'Employee';
+  const privilege = role === 'admin' ? 'administrator' : 'employee';
+  return (
+    `Dear ${displayName},\n\n` +
+    `Your LGU Plaridel HRMS ${privilege} account has been created.\n\n` +
+    'Your login details:\n' +
+    `Email: ${email}\n` +
+    `Temporary password: ${password}\n\n` +
+    'Please sign in to the HRMS and change your password after your first login.\n\n' +
+    'Best regards,\n' +
+    'Human Resources\n' +
+    'LGU Plaridel'
+  );
+}
 
 function randomEmployeeNumber() {
   return (
@@ -523,7 +540,38 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       console.warn('[employees POST] Could not create default leave balances:', lbErr.message);
     }
 
-    res.status(201).json(result.rows[0]);
+    const createdEmployee = result.rows[0];
+    let accountEmailSent = false;
+    let accountEmailError = null;
+
+    if (isSmtpConfigured()) {
+      try {
+        const employeeEmail = String(createdEmployee.email || '').trim();
+        await sendSmtpMail({
+          to: employeeEmail,
+          subject: 'Your LGU Plaridel HRMS account is ready',
+          text: employeeAccountEmailText({
+            name: createdEmployee.full_name,
+            email: employeeEmail,
+            password,
+            role: createdEmployee.role,
+          }),
+        });
+        accountEmailSent = true;
+      } catch (mailErr) {
+        accountEmailError = mailErr?.message
+          ? String(mailErr.message)
+          : 'Failed to send account email';
+        console.warn('[employees POST] Account email failed:', accountEmailError);
+      }
+    }
+
+    res.status(201).json({
+      ...createdEmployee,
+      account_email_sent: accountEmailSent,
+      account_email_configured: isSmtpConfigured(),
+      ...(accountEmailError ? { account_email_error: accountEmailError } : {}),
+    });
   } catch (err) {
     if (err.code === '23505') {
       const constraint = String(err.constraint || '');
