@@ -93,4 +93,28 @@ class RspScreeningScores {
   /// Clamp and round for display / API (1 decimal).
   static double roundOverall(double v) =>
       (math.min(100, math.max(0, v)) * 10).roundToDouble() / 10.0;
+
+  /// Perfect scores for all four screening sections when HR bypasses the exam.
+  static Map<String, dynamic> buildAdminExamBypassAnswersJson({
+    int beiQuestionCount = 8,
+  }) {
+    const perfect = 100.0;
+    final n = beiQuestionCount < 1 ? 8 : beiQuestionCount;
+    final section = <String, dynamic>{
+      'score': perfect,
+      'passed': true,
+      'admin_override': true,
+    };
+    return {
+      'general': Map<String, dynamic>.from(section),
+      'math': Map<String, dynamic>.from(section),
+      'general_info': Map<String, dynamic>.from(section),
+      'bei': {
+        'questions': List<String>.filled(n, 'Admin bypass'),
+        'answers': List<String>.filled(n, 'Admin bypass — waived by HR'),
+        'scores': List<double>.filled(n, perfect),
+        'admin_override': true,
+      },
+    };
+  }
 }

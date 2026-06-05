@@ -13,6 +13,8 @@ import 'package:hrms_plaridel/features/auth/presentation/pages/login_page.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_form_header_footer.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_application_status_timeline.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_applicant_exam_ui.dart';
+import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
+import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 
 /// Default BEI questions when DB has none (admin can edit and save from RSP).
 const _defaultBeiQuestions = [
@@ -63,7 +65,7 @@ const _answerKeyGeneralInfo = <String>[
   'No ex post facto law or bill of attainder shall not be enacted.',
 ];
 
-const _kRspStep1DraftKey = 'rsp_application_step1_draft_v1';
+const _kRspStep1DraftKey = 'rsp_application_step1_draft_v2';
 
 /// Recruitment flow. **Job application** (no [selectedPositionHeadline]) opens tracking only;
 /// **Apply now** on a vacancy includes Step 1 (basic info + documents).
@@ -107,8 +109,24 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   final _lastNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _courseController = TextEditingController();
+  final _ageController = TextEditingController();
+  final _streetController = TextEditingController();
   final _continueEmailController = TextEditingController();
+  final GlobalKey<StructuredAddressFormState> _addressFormKey =
+      GlobalKey<StructuredAddressFormState>();
   final Map<RspApplicationDocKind, PlatformFile> _pickedDocs = {};
+  final Map<RspFinalRequirementDocKind, PlatformFile> _pickedFinalReqDocs = {};
+  String? _docMedicalCertificatePath;
+  String? _docMedicalCertificateName;
+  String? _docDrugTestPath;
+  String? _docDrugTestName;
+  String? _docNbiClearancePath;
+  String? _docNbiClearanceName;
+  bool _finalRequirementsApproved = false;
+  DateTime? _orientationAt;
+  bool? _orientationAttended;
+  bool _finalReqUploading = false;
   List<String>? _beiQuestionsLoaded;
   List<TextEditingController> _beiControllers = [];
   bool _submitting = false;
@@ -139,6 +157,18 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   final _emailOtpController = TextEditingController();
   String? _suffixValue;
   String? _sexValue;
+  String? _civilStatusValue;
+
+  static const List<String> _civilStatusOptions = [
+    'Single',
+    'Married',
+    'Widowed',
+    'Separated',
+    'Legally Separated',
+    'Annulled',
+    'Divorced',
+    'Live-in / Common-law',
+  ];
 
   static const List<String> _suffixOptions = [
     'Jr.',
@@ -183,6 +213,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _emailController.addListener(_onEmailMaybeInvalidateOtp);
     _emailController.addListener(_scheduleDuplicateApplicantCheck);
     _phoneController.addListener(_scheduleDraftSave);
+    _courseController.addListener(_scheduleDraftSave);
+    _ageController.addListener(_scheduleDraftSave);
+    _streetController.addListener(_scheduleDraftSave);
     _continueEmailController.addListener(_scheduleDraftSave);
     _continueEmailController.addListener(_onContinueEmailChangedForPreview);
     _continueEmailController.addListener(_rebuildForContinueButtonEligibility);
@@ -653,6 +686,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           'lastName': _lastNameController.text,
           'suffix': _suffixValue,
           'sex': _sexValue,
+          'course': _courseController.text,
+          'age': _ageController.text,
+          'civilStatus': _civilStatusValue,
+          'address': _addressFormKey.currentState?.composeEncoded() ?? '',
+          'street': _streetController.text,
           'email': _emailController.text,
           'phone': _phoneController.text,
           'continueEmail': _continueEmailController.text,
@@ -677,6 +715,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         m['email']?.toString().trim(),
         m['phone']?.toString().trim(),
         m['continueEmail']?.toString().trim(),
+        m['course']?.toString().trim(),
+        m['age']?.toString().trim(),
+        m['civilStatus']?.toString().trim(),
+        m['address']?.toString().trim(),
       ].any((s) => s != null && s.isNotEmpty);
       if (hasText && mounted) setState(() => _hasLocalDraft = true);
     } catch (_) {}
@@ -698,11 +740,21 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         _sexValue = m['sex']?.toString().trim().isEmpty == true
             ? null
             : m['sex']?.toString();
+        _civilStatusValue = m['civilStatus']?.toString().trim().isEmpty == true
+            ? null
+            : m['civilStatus']?.toString();
+        _courseController.text = m['course']?.toString() ?? '';
+        _ageController.text = m['age']?.toString() ?? '';
+        _streetController.text = m['street']?.toString() ?? '';
         _emailController.text = m['email']?.toString() ?? '';
         _phoneController.text = m['phone']?.toString() ?? '';
         _continueEmailController.text = m['continueEmail']?.toString() ?? '';
         _hasLocalDraft = false;
       });
+      final draftAddress = m['address']?.toString();
+      if (draftAddress != null && draftAddress.trim().isNotEmpty) {
+        await _addressFormKey.currentState?.applyRawAddress(draftAddress);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Draft loaded into the form.')),
@@ -734,6 +786,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _emailController.removeListener(_onEmailMaybeInvalidateOtp);
     _emailController.removeListener(_scheduleDuplicateApplicantCheck);
     _phoneController.removeListener(_scheduleDraftSave);
+    _courseController.removeListener(_scheduleDraftSave);
+    _ageController.removeListener(_scheduleDraftSave);
+    _streetController.removeListener(_scheduleDraftSave);
     _continueEmailController.removeListener(_scheduleDraftSave);
     _continueEmailController.removeListener(_onContinueEmailChangedForPreview);
     _continueEmailController.removeListener(
@@ -745,6 +800,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _emailOtpController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
+    _courseController.dispose();
+    _ageController.dispose();
+    _streetController.dispose();
     _continueEmailController.dispose();
     for (final c in _beiControllers) {
       c.dispose();
@@ -830,6 +888,134 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     setState(() => _pickedDocs.remove(kind));
   }
 
+  void _syncPipelineFromApp(RecruitmentApplication app) {
+    _finalInterviewAt = app.finalInterviewAt;
+    _finalInterviewPassed = app.finalInterviewPassed;
+    _applicationStatus = app.status;
+    _hiredUserId = app.hiredUserId;
+    _hrAccountSetupDone = app.hrAccountSetupDone;
+    _docMedicalCertificatePath = app.docMedicalCertificatePath;
+    _docMedicalCertificateName = app.docMedicalCertificateName;
+    _docDrugTestPath = app.docDrugTestPath;
+    _docDrugTestName = app.docDrugTestName;
+    _docNbiClearancePath = app.docNbiClearancePath;
+    _docNbiClearanceName = app.docNbiClearanceName;
+    _finalRequirementsApproved = app.finalRequirementsApproved;
+    _orientationAt = app.orientationAt;
+    _orientationAttended = app.orientationAttended;
+  }
+
+  String? _finalReqStoredPath(RspFinalRequirementDocKind kind) {
+    switch (kind) {
+      case RspFinalRequirementDocKind.medicalCertificate:
+        return _docMedicalCertificatePath;
+      case RspFinalRequirementDocKind.drugTestResult:
+        return _docDrugTestPath;
+      case RspFinalRequirementDocKind.nbiClearance:
+        return _docNbiClearancePath;
+    }
+  }
+
+  String? _finalReqStoredName(RspFinalRequirementDocKind kind) {
+    switch (kind) {
+      case RspFinalRequirementDocKind.medicalCertificate:
+        return _docMedicalCertificateName;
+      case RspFinalRequirementDocKind.drugTestResult:
+        return _docDrugTestName;
+      case RspFinalRequirementDocKind.nbiClearance:
+        return _docNbiClearanceName;
+    }
+  }
+
+  bool get _allFinalRequirementsUploaded {
+    for (final kind in RspFinalRequirementDocKind.values) {
+      final path = _finalReqStoredPath(kind);
+      if (path == null || path.trim().isEmpty) return false;
+    }
+    return true;
+  }
+
+  Future<void> _pickFinalReqDoc(RspFinalRequirementDocKind kind) async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: false,
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty || !mounted) return;
+    final f = result.files.first;
+    if (f.name.isEmpty || f.bytes == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read that file.')),
+        );
+      }
+      return;
+    }
+    if (!_isPdfFileName(f.name)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Only PDF files (.pdf) are accepted.'),
+          ),
+        );
+      }
+      return;
+    }
+    setState(() => _pickedFinalReqDocs[kind] = f);
+  }
+
+  void _removeFinalReqDoc(RspFinalRequirementDocKind kind) {
+    setState(() => _pickedFinalReqDocs.remove(kind));
+  }
+
+  static String _finalReqKindLabel(RspFinalRequirementDocKind kind) {
+    switch (kind) {
+      case RspFinalRequirementDocKind.medicalCertificate:
+        return 'Medical Certificate';
+      case RspFinalRequirementDocKind.drugTestResult:
+        return 'Drug Test Result';
+      case RspFinalRequirementDocKind.nbiClearance:
+        return 'NBI Clearance';
+    }
+  }
+
+  Future<void> _uploadFinalRequirements() async {
+    final appId = _applicationId;
+    if (appId == null) return;
+    if (_pickedFinalReqDocs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choose at least one PDF to upload.')),
+      );
+      return;
+    }
+    setState(() => _finalReqUploading = true);
+    try {
+      for (final entry in _pickedFinalReqDocs.entries) {
+        final f = entry.value;
+        await RecruitmentRepo.instance.uploadFinalRequirementDocument(
+          appId,
+          entry.key,
+          f.bytes!,
+          f.name,
+        );
+      }
+      await _syncInterviewFromEmail();
+      if (!mounted) return;
+      setState(() => _pickedFinalReqDocs.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Final requirements uploaded.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Upload failed. ${userFacingApiError(e)}')),
+      );
+    } finally {
+      if (mounted) setState(() => _finalReqUploading = false);
+    }
+  }
+
   static bool _isValidEmailFormat(String email) {
     final e = email.trim();
     if (e.isEmpty) return false;
@@ -843,6 +1029,22 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   static bool _isValidPhoneDigits(String raw) {
     final digits = raw.replaceAll(RegExp(r'\D'), '');
     return digits.length >= 10 && digits.length <= 15;
+  }
+
+  static bool _isValidApplicantAge(String raw) {
+    final n = int.tryParse(raw.trim());
+    if (n == null) return false;
+    return n >= 18 && n <= 100;
+  }
+
+  bool _isStep1AddressComplete() {
+    final encoded = _addressFormKey.currentState?.composeEncoded() ?? '';
+    final p = parseStoredAddress(encoded);
+    return p.isStructured &&
+        p.province.isNotEmpty &&
+        p.city.isNotEmpty &&
+        p.barangay.isNotEmpty &&
+        p.street.isNotEmpty;
   }
 
   void _scheduleDuplicateApplicantCheck() {
@@ -933,16 +1135,32 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final last = _lastNameController.text.trim();
     final email = _emailController.text.trim();
     final phone = _phoneController.text.trim();
+    final course = _courseController.text.trim();
+    final age = _ageController.text.trim();
+    final encodedAddress =
+        _addressFormKey.currentState?.composeEncoded() ?? '';
     if (first.isEmpty ||
         last.isEmpty ||
         _sexValue == null ||
+        course.isEmpty ||
+        age.isEmpty ||
+        _civilStatusValue == null ||
+        !_isStep1AddressComplete() ||
         email.isEmpty ||
         phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Please enter your first name, last name, gender, email, and phone number.',
+            'Please complete personal information (including course, age, civil status, and address), email, and phone number.',
           ),
+        ),
+      );
+      return;
+    }
+    if (!_isValidApplicantAge(age)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid age (18–100).'),
         ),
       );
       return;
@@ -1061,6 +1279,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           lastName: last,
           suffix: _suffixValue,
           sex: _sexValue,
+          course: course,
+          address: encodedAddress,
+          age: age,
+          civilStatus: _civilStatusValue,
           email: email,
           phone: phone,
           resumeNotes: null,
@@ -1659,13 +1881,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       if (!mounted || lookup == null) return;
       final app = lookup.application;
       if (app.id == _applicationId) {
-        setState(() {
-          _finalInterviewAt = app.finalInterviewAt;
-          _finalInterviewPassed = app.finalInterviewPassed;
-          _applicationStatus = app.status;
-          _hiredUserId = app.hiredUserId;
-          _hrAccountSetupDone = app.hrAccountSetupDone;
-        });
+        setState(() => _syncPipelineFromApp(app));
       }
     } catch (_) {
       // Non-fatal: interview banner simply won’t update
@@ -1862,11 +2078,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           _step1StatusError = null;
         }
         _applicationId = app.id;
-        _applicationStatus = app.status;
-        _finalInterviewAt = app.finalInterviewAt;
-        _finalInterviewPassed = app.finalInterviewPassed;
-        _hiredUserId = app.hiredUserId;
-        _hrAccountSetupDone = app.hrAccountSetupDone;
+        _syncPipelineFromApp(app);
         final p = app.positionAppliedFor?.trim();
         _applicationPositionAppliedFor = (p != null && p.isNotEmpty) ? p : null;
         if (exam != null) {
@@ -2851,6 +3063,64 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             isExpanded: true,
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: TextField(
+            controller: _courseController,
+            decoration: _step1FieldDecoration(
+              'Course',
+              requiredMark: true,
+              hintText: 'e.g. BS Public Administration',
+              prefixIcon: Icons.school_outlined,
+            ),
+            textCapitalization: TextCapitalization.words,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: TextField(
+            controller: _ageController,
+            decoration: _step1FieldDecoration(
+              'Age',
+              requiredMark: true,
+              hintText: 'Your age in years',
+              prefixIcon: Icons.cake_outlined,
+            ),
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: DropdownButtonFormField<String>(
+            initialValue: _civilStatusValue,
+            items: _civilStatusOptions
+                .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                .toList(),
+            onChanged: (v) {
+              setState(() => _civilStatusValue = v);
+              _scheduleDraftSave();
+            },
+            decoration: _step1FieldDecoration(
+              'Civil status',
+              requiredMark: true,
+              hintText: 'Select civil status',
+              prefixIcon: Icons.family_restroom_outlined,
+            ),
+            isExpanded: true,
+          ),
+        ),
+        _step1FormSectionHeader('Address'),
+        const SizedBox(height: 14),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: StructuredAddressForm(
+            key: _addressFormKey,
+            streetController: _streetController,
+            initialRawAddress: null,
+            inputDecoration: _step1FieldDecoration,
+          ),
+        ),
         _step1FormSectionHeader(
           'Contact details',
           subtitle:
@@ -3504,10 +3774,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       children: [
         const RspApplicantStepHeader(
           stepNumber: 7,
-          title: 'View Exam Result',
+          title: 'Deliberation',
           subtitle:
-              'Your multiple-choice exams are submitted. HR must grade every BEI answer before your final screening result appears.',
-          icon: Icons.fact_check_rounded,
+              'Your multiple-choice exams are submitted. HR must grade every BEI answer before your screening result and deliberation update appear.',
+          icon: Icons.record_voice_over_rounded,
         ),
         const SizedBox(height: 20),
         RspApplicantStatusCard(
@@ -3552,10 +3822,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       children: [
         const RspApplicantStepHeader(
           stepNumber: 7,
-          title: 'View Exam Result',
+          title: 'Deliberation',
           subtitle:
-              'Review your screening score and any update on your final interview.',
-          icon: Icons.fact_check_rounded,
+              'Review your screening score and deliberation / final interview status.',
+          icon: Icons.record_voice_over_rounded,
         ),
         const SizedBox(height: 20),
         RspApplicantExamResultHero(passed: examOk, scorePercent: _examScore),
@@ -3585,7 +3855,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Final interview: Passed',
+                        'Deliberation: Passed',
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 16,
@@ -3595,7 +3865,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'HR has recorded that you passed the in-person final interview.',
+                        'HR has recorded that you passed deliberation.',
                         style: TextStyle(
                           fontSize: 14,
                           color: Colors.green.shade900.withValues(alpha: 0.92),
@@ -3604,15 +3874,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                         ),
                       ),
                       _step7Bullet(
-                        'Follow HR instructions for onboarding.',
+                        'Continue to Step 8 to upload final requirements: medical certificate, drug test result, and NBI clearance.',
                         bulletColor: Colors.green.shade700,
                       ),
                       _step7Bullet(
-                        'Employee accounts are created by HR only—not through this form.',
+                        'After HR approves your documents, they will schedule your orientation.',
                         bulletColor: Colors.green.shade700,
                       ),
                       _step7Bullet(
-                        'When your account is ready, continue to Step 8 and sign in with the email HR used for you.',
+                        'Employee accounts are created by HR only—sign in on Step 8 when HR marks your account ready.',
                         bulletColor: Colors.green.shade700,
                       ),
                     ],
@@ -3642,7 +3912,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                 const SizedBox(width: 14),
                 Expanded(
                   child: Text(
-                    'HR has recorded the result of your final interview. If you have questions, please contact the HR office.',
+                    'HR has recorded your deliberation result. If you have questions, please contact the HR office.',
                     style: TextStyle(
                       fontSize: 14,
                       color: AppTheme.textSecondary,
@@ -3679,7 +3949,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Final interview scheduled',
+                        'Deliberation scheduled',
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 16,
@@ -3756,7 +4026,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                   borderRadius: BorderRadius.circular(_step7CardRadius),
                 ),
               ),
-              child: const Text('Continue to final hiring'),
+              child: const Text('Continue to final requirements'),
             ),
           )
         else
@@ -3857,6 +4127,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     required bool passedFinal,
     required bool failedFinal,
     required bool hrSetupDone,
+    required bool finalReqApproved,
+    required bool allFinalReqUploaded,
   }) {
     late final String title;
     late final String body;
@@ -3875,18 +4147,30 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           'HR has recorded your final interview result. For questions, contact the HR office.';
       accent = Colors.red.shade800;
       icon = Icons.info_outline_rounded;
-    } else if (passedFinal && hrSetupDone) {
+    } else if (passedFinal && finalReqApproved && hrSetupDone) {
       title = 'Account setup complete';
       body =
           'HR marked your employee account as ready. Check your email, then use Go to login form with this application email.';
       accent = const Color(0xFF1565C0);
       icon = Icons.task_alt_rounded;
-    } else if (passedFinal) {
+    } else if (passedFinal && finalReqApproved) {
       title = 'Waiting for HR account setup';
       body =
-          'You passed the final interview. HR will create your account and email you when you can sign in—applicants cannot self-register. Check your inbox and spam folder, then tap Refresh status for updates.';
+          'Your final requirements are approved. HR will create your account and email you when you can sign in—applicants cannot self-register. Check your inbox and spam folder, then tap Refresh status for updates.';
       accent = const Color(0xFFE85D04);
       icon = Icons.hourglass_top_rounded;
+    } else if (passedFinal && allFinalReqUploaded) {
+      title = 'Final requirements submitted';
+      body =
+          'HR is reviewing your medical certificate, drug test result, and NBI clearance. You will proceed to account setup after approval.';
+      accent = const Color(0xFF1565C0);
+      icon = Icons.fact_check_rounded;
+    } else if (passedFinal) {
+      title = 'Submit final requirements';
+      body =
+          'You passed deliberation. Upload your medical certificate, drug test result, and NBI clearance below before HR can set up your employee account.';
+      accent = const Color(0xFFE85D04);
+      icon = Icons.health_and_safety_rounded;
     } else {
       title = 'Waiting for interview result';
       body =
@@ -3904,22 +4188,432 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     );
   }
 
+  Widget _buildFinalRequirementsSection() {
+    final approved = _finalRequirementsApproved;
+    final allUploaded = _allFinalRequirementsUploaded;
+    final pendingUpload = _pickedFinalReqDocs.isNotEmpty;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      decoration: BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.18),
+        ),
+        boxShadow: AppTheme.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.health_and_safety_rounded,
+                color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Final requirements',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              if (approved)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5E9),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Approved by HR',
+                    style: TextStyle(
+                      color: Colors.green.shade800,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                )
+              else if (allUploaded)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE3F2FD),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Text(
+                    'Submitted — awaiting HR review',
+                    style: TextStyle(
+                      color: Color(0xFF1565C0),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Upload PDF copies of your medical certificate, drug test result, '
+            'and NBI clearance. HR will review them before account setup.',
+            style: TextStyle(
+              fontSize: 14,
+              color: AppTheme.textSecondary.withValues(alpha: 0.95),
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 14),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final sideBySide = constraints.maxWidth >= 480;
+              final kinds = RspFinalRequirementDocKind.values;
+              final cards = kinds
+                  .map(
+                    (kind) => _buildFinalRequirementDocCard(
+                      kind: kind,
+                      approved: approved,
+                    ),
+                  )
+                  .toList();
+              if (sideBySide) {
+                return IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (int i = 0; i < cards.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 12),
+                        Expanded(child: cards[i]),
+                      ],
+                    ],
+                  ),
+                );
+              }
+              return Column(
+                children: [
+                  for (int i = 0; i < cards.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 12),
+                    cards[i],
+                  ],
+                ],
+              );
+            },
+          ),
+          if (!approved && pendingUpload)
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _finalReqUploading ? null : _uploadFinalRequirements,
+                icon: _finalReqUploading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.cloud_upload_rounded),
+                label: Text(
+                  _finalReqUploading ? 'Uploading…' : 'Upload documents',
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFinalRequirementDocCard({
+    required RspFinalRequirementDocKind kind,
+    required bool approved,
+  }) {
+    final storedPath = _finalReqStoredPath(kind);
+    final storedName = _finalReqStoredName(kind);
+    final hasStored = storedPath != null && storedPath.trim().isNotEmpty;
+    final picked = _pickedFinalReqDocs[kind];
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppTheme.lightGray.withValues(alpha: 0.9),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _finalReqKindLabel(kind),
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (hasStored)
+              Row(
+                children: [
+                  Icon(
+                    Icons.check_circle_rounded,
+                    size: 18,
+                    color: Colors.green.shade700,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      storedName ?? 'Uploaded',
+                      style: const TextStyle(fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                    ),
+                  ),
+                ],
+              )
+            else if (picked != null)
+              Row(
+                children: [
+                  const Icon(Icons.insert_drive_file_outlined, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      picked.name,
+                      style: const TextStyle(fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed:
+                        _finalReqUploading ? null : () => _removeFinalReqDoc(kind),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    tooltip: 'Remove',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              )
+            else
+              FilledButton.tonalIcon(
+                onPressed:
+                    _finalReqUploading || approved ? null : () => _pickFinalReqDoc(kind),
+                icon: const Icon(Icons.upload_file_rounded, size: 20),
+                label: const Text('Choose PDF'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrientationScheduleCard() {
+    final at = _orientationAt!.toLocal();
+    final attended = _orientationAttended;
+
+    if (attended == true) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE8F5E9),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFF2E7D32).withValues(alpha: 0.4),
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.check_circle_rounded, color: Colors.green.shade800, size: 30),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Orientation attended',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                      color: Colors.green.shade900,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${MaterialLocalizations.of(context).formatFullDate(at)} · ${TimeOfDay.fromDateTime(at).format(context)}',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.green.shade900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'HR confirmed your attendance. Your employee account will be set up next.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.green.shade900.withValues(alpha: 0.9),
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (attended == false) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFEBEE),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFFC62828).withValues(alpha: 0.4),
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.cancel_rounded, color: Colors.red.shade800, size: 30),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Orientation not attended',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                      color: Colors.red.shade900,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${MaterialLocalizations.of(context).formatFullDate(at)} · ${TimeOfDay.fromDateTime(at).format(context)}',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.red.shade900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'HR recorded that you did not attend orientation. Contact the HR office for next steps.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.red.shade900.withValues(alpha: 0.9),
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE3F2FD),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFF1565C0).withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.school_rounded, color: Colors.blue.shade800, size: 30),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Orientation scheduled',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    color: Colors.blue.shade900,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${MaterialLocalizations.of(context).formatFullDate(at)} · ${TimeOfDay.fromDateTime(at).format(context)}',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.blue.shade900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Attend orientation as instructed by HR. Your employee account will be set up after this step.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.blue.shade900.withValues(alpha: 0.9),
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStep8FinalHiring() {
     final linked = _employeeAccountLinked;
     final passedFinal = _finalInterviewPassed == true;
     final failedFinal = _finalInterviewPassed == false;
+    final finalReqApproved = _finalRequirementsApproved;
+    final allFinalReqUploaded = _allFinalRequirementsUploaded;
 
     String headerSubtitle;
     if (failedFinal) {
       headerSubtitle = 'Your current hiring status from HR.';
     } else if (linked) {
       headerSubtitle = 'You can sign in with your employee account.';
+    } else if (passedFinal && finalReqApproved && _orientationAttended == true) {
+      headerSubtitle =
+          'Orientation attended. HR is setting up your employee account.';
+    } else if (passedFinal && finalReqApproved && _orientationAttended == false) {
+      headerSubtitle =
+          'HR recorded that you did not attend orientation. Contact HR for next steps.';
+    } else if (passedFinal && finalReqApproved && _orientationAt != null) {
+      headerSubtitle =
+          'Final requirements approved. Attend your orientation, then HR will set up your employee account.';
+    } else if (passedFinal && finalReqApproved) {
+      headerSubtitle =
+          'Final requirements approved. HR will schedule orientation, then set up your employee account.';
     } else if (passedFinal) {
       headerSubtitle =
-          'You passed screening and the final interview. HR will set up your account.';
+          'Upload final requirements, then wait for HR approval, orientation, and account setup.';
     } else {
       headerSubtitle =
-          'Track your final interview result and account setup in one place.';
+          'Track your deliberation result and hiring progress in one place.';
     }
 
     return Column(
@@ -3927,19 +4621,34 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       children: [
         RspApplicantStepHeader(
           stepNumber: 8,
-          title: 'Final hiring & your account',
+          title: 'Final requirements, orientation & account',
           subtitle: headerSubtitle,
-          icon: Icons.badge_rounded,
+          icon: Icons.health_and_safety_rounded,
         ),
         const SizedBox(height: 20),
+        if (passedFinal && !finalReqApproved) ...[
+          _buildFinalRequirementsSection(),
+          const SizedBox(height: 24),
+        ],
         _buildHiringStatusCard(
           linked: linked,
           passedFinal: passedFinal,
           failedFinal: failedFinal,
           hrSetupDone: _hrAccountSetupDone,
+          finalReqApproved: finalReqApproved,
+          allFinalReqUploaded: allFinalReqUploaded,
         ),
+        if (passedFinal && finalReqApproved) ...[
+          const SizedBox(height: 24),
+          _buildFinalRequirementsSection(),
+        ],
+        if (passedFinal && _orientationAt != null) ...[
+          const SizedBox(height: 16),
+          _buildOrientationScheduleCard(),
+        ],
         const SizedBox(height: 24),
-        if (linked || (passedFinal && _hrAccountSetupDone))
+        if (linked ||
+            (passedFinal && finalReqApproved && _hrAccountSetupDone))
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(

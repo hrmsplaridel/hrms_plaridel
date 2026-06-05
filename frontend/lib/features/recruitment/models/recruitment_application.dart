@@ -23,6 +23,23 @@ enum RspApplicationDocKind {
   }
 }
 
+/// Post-deliberation documents applicants must submit before onboarding.
+enum RspFinalRequirementDocKind {
+  medicalCertificate('medical_certificate'),
+  drugTestResult('drug_test_result'),
+  nbiClearance('nbi_clearance');
+
+  const RspFinalRequirementDocKind(this.apiValue);
+  final String apiValue;
+
+  static RspFinalRequirementDocKind? fromStorageFileName(String fileName) {
+    for (final k in RspFinalRequirementDocKind.values) {
+      if (fileName.startsWith('${k.apiValue}_')) return k;
+    }
+    return null;
+  }
+}
+
 /// One recruitment application (Step 1: basic info / documents).
 class RecruitmentApplication {
   const RecruitmentApplication({
@@ -33,6 +50,10 @@ class RecruitmentApplication {
     this.lastName,
     this.suffix,
     this.sex,
+    this.course,
+    this.address,
+    this.age,
+    this.civilStatus,
     required this.email,
     this.phone,
     this.resumeNotes,
@@ -47,6 +68,15 @@ class RecruitmentApplication {
     this.docTorName,
     this.docEligibilityTrainingsPath,
     this.docEligibilityTrainingsName,
+    this.docMedicalCertificatePath,
+    this.docMedicalCertificateName,
+    this.docDrugTestPath,
+    this.docDrugTestName,
+    this.docNbiClearancePath,
+    this.docNbiClearanceName,
+    this.finalRequirementsApproved = false,
+    this.orientationAt,
+    this.orientationAttended,
     required this.status,
     this.finalInterviewAt,
     this.finalInterviewPassed,
@@ -64,6 +94,10 @@ class RecruitmentApplication {
   final String? lastName;
   final String? suffix;
   final String? sex;
+  final String? course;
+  final String? address;
+  final String? age;
+  final String? civilStatus;
   final String email;
   final String? phone;
   final String? resumeNotes;
@@ -80,8 +114,24 @@ class RecruitmentApplication {
   final String? docTorName;
   final String? docEligibilityTrainingsPath;
   final String? docEligibilityTrainingsName;
+  final String? docMedicalCertificatePath;
+  final String? docMedicalCertificateName;
+  final String? docDrugTestPath;
+  final String? docDrugTestName;
+  final String? docNbiClearancePath;
+  final String? docNbiClearanceName;
+
+  /// HR marks all three final requirement PDFs as approved.
+  final bool finalRequirementsApproved;
+
+  /// Orientation date/time after final requirements are approved.
+  final DateTime? orientationAt;
+
+  /// Orientation attendance: null = pending, true = attended, false = no-show.
+  final bool? orientationAttended;
+
   final String status; // submitted, exam_taken, passed, failed, registered
-  /// Set by HR after the applicant passes the screening exam (final interview appointment).
+  /// Set by HR after the applicant passes the screening exam (deliberation appointment).
   final DateTime? finalInterviewAt;
 
   /// In-person final interview result: null = not recorded, true/false = pass/fail.
@@ -97,6 +147,19 @@ class RecruitmentApplication {
   final DateTime? hireCredentialsEmailSentAt;
 
   bool get hireCredentialsEmailSent => hireCredentialsEmailSentAt != null;
+
+  /// Awaiting HR document approve/decline (RSP Applications).
+  bool get isAwaitingDocumentReview => status == 'submitted';
+
+  /// Still moving through recruitment (not hired or closed out).
+  bool get isActiveInPipeline {
+    if (hiredUserId != null || status == 'registered') return false;
+    if (status == 'failed' || status == 'document_declined') return false;
+    return status == 'submitted' ||
+        status == 'document_approved' ||
+        status == 'exam_taken' ||
+        status == 'passed';
+  }
 
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -127,6 +190,36 @@ class RecruitmentApplication {
     }
   }
 
+  String? finalRequirementPath(RspFinalRequirementDocKind kind) {
+    switch (kind) {
+      case RspFinalRequirementDocKind.medicalCertificate:
+        return docMedicalCertificatePath;
+      case RspFinalRequirementDocKind.drugTestResult:
+        return docDrugTestPath;
+      case RspFinalRequirementDocKind.nbiClearance:
+        return docNbiClearancePath;
+    }
+  }
+
+  String? finalRequirementDisplayName(RspFinalRequirementDocKind kind) {
+    switch (kind) {
+      case RspFinalRequirementDocKind.medicalCertificate:
+        return docMedicalCertificateName;
+      case RspFinalRequirementDocKind.drugTestResult:
+        return docDrugTestName;
+      case RspFinalRequirementDocKind.nbiClearance:
+        return docNbiClearanceName;
+    }
+  }
+
+  bool get hasAllFinalRequirementsUploaded {
+    for (final kind in RspFinalRequirementDocKind.values) {
+      final path = finalRequirementPath(kind);
+      if (path == null || path.trim().isEmpty) return false;
+    }
+    return true;
+  }
+
   static const String tableName = 'recruitment_applications';
   static bool? _parseTriStateBool(dynamic v) {
     if (v == null) return null;
@@ -152,6 +245,10 @@ class RecruitmentApplication {
       lastName: json['last_name'] as String?,
       suffix: json['suffix'] as String?,
       sex: json['sex'] as String?,
+      course: json['course'] as String?,
+      address: json['address'] as String?,
+      age: json['age'] as String?,
+      civilStatus: json['civil_status'] as String?,
       email: json['email'] as String? ?? '',
       phone: json['phone'] as String?,
       resumeNotes: json['resume_notes'] as String?,
@@ -168,6 +265,19 @@ class RecruitmentApplication {
           json['doc_eligibility_trainings_path'] as String?,
       docEligibilityTrainingsName:
           json['doc_eligibility_trainings_name'] as String?,
+      docMedicalCertificatePath:
+          json['doc_medical_certificate_path'] as String?,
+      docMedicalCertificateName:
+          json['doc_medical_certificate_name'] as String?,
+      docDrugTestPath: json['doc_drug_test_path'] as String?,
+      docDrugTestName: json['doc_drug_test_name'] as String?,
+      docNbiClearancePath: json['doc_nbi_clearance_path'] as String?,
+      docNbiClearanceName: json['doc_nbi_clearance_name'] as String?,
+      finalRequirementsApproved: json['final_requirements_approved'] == true,
+      orientationAt: json['orientation_at'] != null
+          ? DateTime.tryParse(json['orientation_at'].toString())
+          : null,
+      orientationAttended: _parseTriStateBool(json['orientation_attended']),
       status: json['status'] as String? ?? 'submitted',
       finalInterviewAt: json['final_interview_at'] != null
           ? DateTime.tryParse(json['final_interview_at'].toString())
@@ -195,6 +305,10 @@ class RecruitmentApplication {
       'lastName': lastName,
       'suffix': suffix,
       'sex': sex,
+      'course': course,
+      'address': address,
+      'age': age,
+      'civilStatus': civilStatus,
       'fullName': fullName,
       'email': email,
       'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
@@ -407,6 +521,10 @@ class RecruitmentRepo {
         'lastName': app.lastName,
         'suffix': app.suffix,
         'sex': app.sex,
+        'course': app.course,
+        'address': app.address,
+        'age': app.age,
+        'civilStatus': app.civilStatus,
         'fullName': app.fullName, // legacy fallback
         'email': email.isEmpty ? '' : email.toLowerCase(),
         'phone': app.phone,
@@ -446,7 +564,7 @@ class RecruitmentRepo {
     );
   }
 
-  /// Admin: set or clear final interview date/time for an applicant (after they passed the exam).
+  /// Admin: set or clear deliberation date/time for an applicant (after they passed the exam).
   Future<void> updateFinalInterviewAt(
     String applicationId,
     DateTime? at,
@@ -461,6 +579,32 @@ class RecruitmentRepo {
     );
   }
 
+  /// Admin: set or clear orientation date/time (after final requirements are approved).
+  Future<void> updateOrientationAt(
+    String applicationId,
+    DateTime? at,
+  ) async {
+    await ApiClient.instance.put<void>(
+      '/api/rsp/applications/$applicationId/orientation',
+      data: <String, dynamic>{
+        'orientationAt': at == null
+            ? null
+            : (at.isUtc ? at : at.toUtc()).toIso8601String(),
+      },
+    );
+  }
+
+  /// Admin: record orientation attendance (null = pending, true/false = attended/no-show).
+  Future<void> updateOrientationAttended(
+    String applicationId,
+    bool? attended,
+  ) async {
+    await ApiClient.instance.put<void>(
+      '/api/rsp/applications/$applicationId/orientation-attendance',
+      data: <String, dynamic>{'attended': attended},
+    );
+  }
+
   /// Admin: record final interview pass/fail, or `null` to clear (pending).
   Future<void> updateFinalInterviewPassed(
     String applicationId,
@@ -469,6 +613,38 @@ class RecruitmentRepo {
     await ApiClient.instance.put<void>(
       '/api/rsp/applications/$applicationId/final-interview-outcome',
       data: <String, dynamic>{'passed': passed},
+    );
+  }
+
+  /// Admin: approve or revoke final requirements compliance (all three PDFs required to approve).
+  Future<void> updateFinalRequirementsApproved(
+    String applicationId,
+    bool approved,
+  ) async {
+    await ApiClient.instance.put<void>(
+      '/api/rsp/applications/$applicationId/final-requirements-approval',
+      data: <String, dynamic>{'approved': approved},
+    );
+  }
+
+  /// Upload one final requirement PDF (after passing deliberation).
+  Future<void> uploadFinalRequirementDocument(
+    String applicationId,
+    RspFinalRequirementDocKind kind,
+    List<int> fileBytes,
+    String fileName,
+  ) async {
+    if (fileName.trim().isEmpty) {
+      throw ArgumentError('fileName is required');
+    }
+    if (!fileName.trim().toLowerCase().endsWith('.pdf')) {
+      throw ArgumentError('Recruitment attachments must be PDF files (.pdf).');
+    }
+    final kindParam = Uri.encodeQueryComponent(kind.apiValue);
+    await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/attachment-file?kind=$kindParam',
+      bytes: fileBytes,
+      fileName: fileName,
     );
   }
 
@@ -716,6 +892,26 @@ class RecruitmentRepo {
     }
   }
 
+  /// Backfill a final requirement slot from storage when the filename starts with `{kind}_`.
+  Future<bool> setApplicationFinalRequirementIfMissing(
+    String applicationId,
+    String path,
+    String fileName,
+    RspFinalRequirementDocKind kind,
+  ) async {
+    try {
+      final res = await ApiClient.instance.put<Map<String, dynamic>>(
+        '/api/rsp/applications/$applicationId/attachment-if-missing',
+        data: {'path': path, 'fileName': fileName, 'docKind': kind.apiValue},
+      );
+      final updated = res.data?['updated'];
+      if (updated is bool) return updated;
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Backfill a typed document slot from storage when the filename starts with `{kind}_`.
   Future<bool> setApplicationTypedAttachmentIfMissing(
     String applicationId,
@@ -756,21 +952,17 @@ class RecruitmentRepo {
 
   /// List all applications (for admin). Newest first.
   Future<List<RecruitmentApplication>> listApplications() async {
-    try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/rsp/applications',
-      );
-      final rows = res.data?['applications'] as List<dynamic>? ?? [];
-      return rows
-          .map(
-            (e) => RecruitmentApplication.fromJson(
-              Map<String, dynamic>.from(e as Map),
-            ),
-          )
-          .toList();
-    } catch (_) {
-      return [];
-    }
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications',
+    );
+    final rows = res.data?['applications'] as List<dynamic>? ?? [];
+    return rows
+        .map(
+          (e) => RecruitmentApplication.fromJson(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
   }
 
   /// Get the latest application by email (for applicant "Continue application").

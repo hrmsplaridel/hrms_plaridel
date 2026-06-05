@@ -1,15 +1,19 @@
+import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/admin_dashboard.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/main.dart' show kLoginAsKey;
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/auth/theme/login_theme.dart';
+import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
 
 const _rememberKey = 'login_remember_v1';
 const _rememberEmailKey = 'login_remember_email_v1';
@@ -42,7 +46,7 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _passwordFocusNode = FocusNode();
@@ -51,20 +55,38 @@ class _LoginPageState extends State<LoginPage>
 
   late final AnimationController _entranceCtrl;
   late final Animation<double> _entranceFade;
+  late final AnimationController _shakeCtrl;
 
   @override
   void initState() {
     super.initState();
     _entranceCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 750),
+      duration: const Duration(milliseconds: 900),
     );
     _entranceFade = CurvedAnimation(
       parent: _entranceCtrl,
       curve: Curves.easeOutCubic,
     );
+    _shakeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 480),
+    );
     _entranceCtrl.forward();
     _loadRememberedCredentials();
+  }
+
+  Animation<double> _stagger(int index, {int steps = 10}) {
+    final start = (index / steps).clamp(0.0, 0.85);
+    final end = ((index + 1.4) / steps).clamp(0.15, 1.0);
+    return CurvedAnimation(
+      parent: _entranceCtrl,
+      curve: Interval(start, end, curve: Curves.easeOutCubic),
+    );
+  }
+
+  void _triggerShake() {
+    _shakeCtrl.forward(from: 0);
   }
 
   Future<void> _loadRememberedCredentials() async {
@@ -94,6 +116,7 @@ class _LoginPageState extends State<LoginPage>
   @override
   void dispose() {
     _entranceCtrl.dispose();
+    _shakeCtrl.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _passwordFocusNode.dispose();
@@ -115,7 +138,22 @@ class _LoginPageState extends State<LoginPage>
       onForgotPassword: _onForgotPassword,
       isWebLayout: isWide,
       isMobileLayout: !isWide,
+      stagger: _stagger,
     );
+
+    Widget shakeForm(Widget child) {
+      return AnimatedBuilder(
+        animation: _shakeCtrl,
+        builder: (context, child) {
+          final t = _shakeCtrl.value;
+          final dx = t == 0
+              ? 0.0
+              : math.sin(t * math.pi * 6) * 8 * (1 - t);
+          return Transform.translate(offset: Offset(dx, 0), child: child);
+        },
+        child: child,
+      );
+    }
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -125,85 +163,109 @@ class _LoginPageState extends State<LoginPage>
               children: [
                 Expanded(
                   flex: _kLoginHeroFlex,
-                  child: FadeTransition(
-                    opacity: _entranceFade,
-                    child: const _LoginHeroPanel(),
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(-0.04, 0),
+                      end: Offset.zero,
+                    ).animate(_entranceFade),
+                    child: FadeTransition(
+                      opacity: _entranceFade,
+                      child: const _LoginHeroPanel(),
+                    ),
                   ),
                 ),
                 Expanded(
                   flex: _kLoginFormFlex,
-                  child: _LoginFormShell(
-                    isWeb: true,
-                    maxContentWidth: _kLoginFormMaxWidth,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 16,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0.05, 0),
+                      end: Offset.zero,
+                    ).animate(_entranceFade),
+                    child: _LoginFormShell(
+                      isWeb: true,
+                      maxContentWidth: _kLoginFormMaxWidth,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 16,
+                      ),
+                      child: FadeTransition(
+                        opacity: _entranceFade,
+                        child: shakeForm(form),
+                      ),
                     ),
-                    child: FadeTransition(opacity: _entranceFade, child: form),
                   ),
                 ),
               ],
             )
-          : _LoginFormShell(
-              isWeb: true,
-              contentPadding: EdgeInsets.zero,
-              maxContentWidth: null,
-              child: Stack(
-                children: [
-                  SafeArea(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final viewInsets = MediaQuery.viewInsetsOf(context);
-                        final viewport = MediaQuery.sizeOf(context);
-                        final keyboardOpen = viewInsets.bottom > 80;
-                        final compactMobile =
-                            viewport.width < 430 || viewport.height < 820;
-                        final formChild = FadeTransition(
-                          opacity: _entranceFade,
-                          child: form,
-                        );
-                        final horizontalInset = compactMobile ? 8.0 : 10.0;
-                        final verticalInset = compactMobile ? 8.0 : 12.0;
-                        final cardWidth =
-                            constraints.maxWidth - horizontalInset * 2;
-
-                        if (keyboardOpen) {
-                          return SingleChildScrollView(
-                            keyboardDismissBehavior:
-                                ScrollViewKeyboardDismissBehavior.onDrag,
-                            padding: EdgeInsets.fromLTRB(
-                              horizontalInset,
-                              verticalInset,
-                              horizontalInset,
-                              viewInsets.bottom + verticalInset,
-                            ),
-                            child: SizedBox(width: cardWidth, child: formChild),
-                          );
-                        }
-
-                        return Center(
-                          child: SingleChildScrollView(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: horizontalInset,
-                              vertical: verticalInset,
-                            ),
-                            child: SizedBox(width: cardWidth, child: formChild),
-                          ),
-                        );
-                      },
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                const _LoginHeroBackground(),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.18),
+                        Colors.black.withValues(alpha: 0.52),
+                      ],
                     ),
                   ),
-                  if (Navigator.of(context).canPop())
-                    SafeArea(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 8, 0, 0),
-                        child: _LoginMobileBackButton(
-                          onPressed: () => Navigator.of(context).pop(),
+                ),
+                SafeArea(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final viewInsets = MediaQuery.viewInsetsOf(context);
+                      final viewport = MediaQuery.sizeOf(context);
+                      final keyboardOpen = viewInsets.bottom > 80;
+                      final compactMobile =
+                          viewport.width < 430 || viewport.height < 820;
+                      final formChild = FadeTransition(
+                        opacity: _entranceFade,
+                        child: shakeForm(form),
+                      );
+                      final horizontalInset = compactMobile ? 12.0 : 16.0;
+                      final verticalInset = compactMobile ? 12.0 : 20.0;
+                      final cardWidth =
+                          constraints.maxWidth - horizontalInset * 2;
+
+                      if (keyboardOpen) {
+                        return SingleChildScrollView(
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: EdgeInsets.fromLTRB(
+                            horizontalInset,
+                            verticalInset,
+                            horizontalInset,
+                            viewInsets.bottom + verticalInset,
+                          ),
+                          child: SizedBox(width: cardWidth, child: formChild),
+                        );
+                      }
+
+                      return Center(
+                        child: SingleChildScrollView(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalInset,
+                            vertical: verticalInset,
+                          ),
+                          child: SizedBox(width: cardWidth, child: formChild),
                         ),
+                      );
+                    },
+                  ),
+                ),
+                if (Navigator.of(context).canPop())
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 8, 0, 0),
+                      child: _LoginMobileBackButton(
+                        onPressed: () => Navigator.of(context).pop(),
                       ),
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
     );
   }
@@ -214,6 +276,7 @@ class _LoginPageState extends State<LoginPage>
 
     if (email.isEmpty || password.isEmpty) {
       if (mounted) {
+        _triggerShake();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Please enter email and password')),
         );
@@ -244,12 +307,14 @@ class _LoginPageState extends State<LoginPage>
           ),
         );
       } else {
+        _triggerShake();
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(errorMessage)));
       }
     } catch (e) {
       if (mounted) {
+        _triggerShake();
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Login failed: $e')));
@@ -259,33 +324,93 @@ class _LoginPageState extends State<LoginPage>
     }
   }
 
-  void _onForgotPassword() {
-    // Ready for forgot-password flow.
+  Future<void> _onForgotPassword() async {
+    final email = _emailController.text.trim();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => _ForgotPasswordDialog(initialEmail: email),
+    );
+    if (result == null || result.isEmpty || !mounted) return;
+
+    try {
+      await ApiClient.instance.post(
+        '/auth/forgot-password',
+        data: {'email': result},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'If that email is registered, a password reset link has been sent.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not send reset link: $e')),
+      );
+    }
   }
 }
 
-/// Building photo + orange wash + bottom scrim.
-class _LoginHeroBackground extends StatelessWidget {
+/// Building photo + orange wash + bottom scrim, with a slow Ken Burns zoom.
+class _LoginHeroBackground extends StatefulWidget {
   const _LoginHeroBackground();
+
+  @override
+  State<_LoginHeroBackground> createState() => _LoginHeroBackgroundState();
+}
+
+class _LoginHeroBackgroundState extends State<_LoginHeroBackground>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _zoomCtrl;
+  late final Animation<double> _zoom;
+
+  @override
+  void initState() {
+    super.initState();
+    _zoomCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 22),
+    )..repeat(reverse: true);
+    _zoom = Tween<double>(begin: 1.0, end: 1.08).animate(
+      CurvedAnimation(parent: _zoomCtrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _zoomCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Image.asset(
-          _kLoginHeroImageAsset,
-          fit: BoxFit.cover,
-          alignment: const Alignment(0.05, -0.1),
-          errorBuilder: (_, __, ___) => Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  LoginTheme.brandingGradientStart,
-                  LoginTheme.brandingGradientEnd,
-                ],
+        AnimatedBuilder(
+          animation: _zoom,
+          builder: (context, child) => Transform.scale(
+            scale: _zoom.value,
+            alignment: const Alignment(0.05, -0.1),
+            child: child,
+          ),
+          child: Image.asset(
+            _kLoginHeroImageAsset,
+            fit: BoxFit.cover,
+            alignment: const Alignment(0.05, -0.1),
+            errorBuilder: (_, __, ___) => Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    LoginTheme.brandingGradientStart,
+                    LoginTheme.brandingGradientEnd,
+                  ],
+                ),
               ),
             ),
           ),
@@ -469,39 +594,57 @@ class _LoginHeroFeatureRow extends StatelessWidget {
   }
 }
 
-class _LoginHeroFeatureChip extends StatelessWidget {
+class _LoginHeroFeatureChip extends StatefulWidget {
   const _LoginHeroFeatureChip({required this.icon, required this.label});
 
   final IconData icon;
   final String label;
 
   @override
+  State<_LoginHeroFeatureChip> createState() => _LoginHeroFeatureChipState();
+}
+
+class _LoginHeroFeatureChipState extends State<_LoginHeroFeatureChip> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(999),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 16, color: Colors.white),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedScale(
+        scale: _hover ? 1.04 : 1,
+        duration: const Duration(milliseconds: 180),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: _hover ? 0.22 : 0.14),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: _hover ? 0.45 : 0.28),
                 ),
               ),
-            ],
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(widget.icon, size: 16, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -873,6 +1016,7 @@ class _LoginFormContent extends StatelessWidget {
     required this.onForgotPassword,
     this.isWebLayout = false,
     this.isMobileLayout = false,
+    this.stagger,
   });
 
   final TextEditingController emailController;
@@ -885,6 +1029,7 @@ class _LoginFormContent extends StatelessWidget {
   final VoidCallback onForgotPassword;
   final bool isWebLayout;
   final bool isMobileLayout;
+  final Animation<double> Function(int index, {int steps})? stagger;
 
   @override
   Widget build(BuildContext context) {
@@ -910,97 +1055,153 @@ class _LoginFormContent extends StatelessWidget {
     final buttonGap = veryCompactMobile ? 14.0 : (compact ? 16.0 : 20.0);
     final footerTopGap = veryCompactMobile ? 8.0 : (compact ? 10.0 : 14.0);
     final footerBottomGap = veryCompactMobile ? 8.0 : (compact ? 10.0 : 16.0);
+    final greeting = timeOfDayGreeting();
+
+    Widget staggered(int index, Widget child) {
+      final animation = stagger?.call(index);
+      if (animation == null) return child;
+      return FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.08),
+            end: Offset.zero,
+          ).animate(animation),
+          child: child,
+        ),
+      );
+    }
 
     final fields = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         if (isCardForm) ...[
-          Center(child: _LoginFormLogo(compact: compact)),
-          SizedBox(height: logoGap),
-          Center(child: _LoginWebPortalBadge()),
-          SizedBox(height: badgeGap),
-        ],
-        Text(
-          'Welcome back',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: compact
-                ? (veryCompactMobile ? 25 : 26)
-                : (isWebLayout ? 26 : 34),
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.8,
-            height: 1.05,
-          ),
-        ),
-        SizedBox(height: titleGap),
-        Center(
-          child: Container(
-            width: compact ? 44 : 52,
-            height: 3,
-            margin: EdgeInsets.only(bottom: dividerBottomGap),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(2),
-              gradient: const LinearGradient(
-                colors: [LoginTheme.bluePrimary, LoginTheme.blueLight],
-              ),
+          staggered(
+            0,
+            Center(
+              child: _LoginFormLogoAnimated(compact: compact),
             ),
           ),
-        ),
-        Text(
-          'Sign in to continue to your HRMS portal',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: subtitleColor.withValues(alpha: 0.95),
-            fontSize: compact ? 14 : 16,
-            height: 1.35,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        SizedBox(height: subtitleGap),
-        AutofillGroup(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          SizedBox(height: logoGap),
+          staggered(1, Center(child: _LoginWebPortalBadge())),
+          SizedBox(height: badgeGap),
+        ],
+        staggered(
+          2,
+          Column(
             children: [
-              _LoginTextField(
-                controller: emailController,
-                label: 'Email',
-                hintText: 'name@plaridel.gov.ph',
-                icon: Icons.mail_outline_rounded,
-                nextFocusNode: passwordFocusNode,
-                autofillHints: const [AutofillHints.email],
-                premium: isCardForm,
+              _LoginLiveDateTime(compact: compact),
+              SizedBox(height: compact ? 12 : 16),
+              Text(
+                greeting,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: LoginTheme.bluePrimary.withValues(alpha: 0.9),
+                  fontSize: compact ? 13 : 14,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.2,
+                ),
               ),
-              SizedBox(height: fieldGap),
-              _PasswordTextField(
-                controller: passwordController,
-                focusNode: passwordFocusNode,
-                onSubmitted: onLogin,
-                premium: isCardForm,
+              SizedBox(height: compact ? 4 : 6),
+              Text(
+                'Welcome back',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: compact
+                      ? (veryCompactMobile ? 25 : 26)
+                      : (isWebLayout ? 26 : 34),
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.8,
+                  height: 1.05,
+                ),
               ),
             ],
           ),
         ),
+        SizedBox(height: titleGap),
+        staggered(
+          3,
+          Center(
+            child: Container(
+              width: compact ? 44 : 52,
+              height: 3,
+              margin: EdgeInsets.only(bottom: dividerBottomGap),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(2),
+                gradient: const LinearGradient(
+                  colors: [LoginTheme.bluePrimary, LoginTheme.blueLight],
+                ),
+              ),
+            ),
+          ),
+        ),
+        staggered(
+          4,
+          Text(
+            'Sign in to continue to your HRMS portal',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: subtitleColor.withValues(alpha: 0.95),
+              fontSize: compact ? 14 : 16,
+              height: 1.35,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        SizedBox(height: subtitleGap),
+        staggered(
+          5,
+          AutofillGroup(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _LoginTextField(
+                  controller: emailController,
+                  label: 'Email',
+                  hintText: 'name@plaridel.gov.ph',
+                  icon: Icons.mail_outline_rounded,
+                  nextFocusNode: passwordFocusNode,
+                  autofillHints: const [AutofillHints.email],
+                  premium: isCardForm,
+                ),
+                SizedBox(height: fieldGap),
+                _PasswordTextField(
+                  controller: passwordController,
+                  focusNode: passwordFocusNode,
+                  onSubmitted: onLogin,
+                  premium: isCardForm,
+                ),
+              ],
+            ),
+          ),
+        ),
         SizedBox(height: actionGap),
-        _LoginRememberForgotRow(
-          rememberMe: rememberMe,
-          onRememberMeChanged: onRememberMeChanged,
-          onForgotPassword: onForgotPassword,
-          compact: compactMobile,
+        staggered(
+          6,
+          _LoginRememberForgotRow(
+            rememberMe: rememberMe,
+            onRememberMeChanged: onRememberMeChanged,
+            onForgotPassword: onForgotPassword,
+            compact: compactMobile,
+          ),
         ),
         SizedBox(height: buttonGap),
-        _LoginToHrmsButton(
-          onPressed: isLoading ? null : onLogin,
-          isLoading: isLoading,
-          premium: isCardForm,
-          compact: compact,
+        staggered(
+          7,
+          _LoginToHrmsButton(
+            onPressed: isLoading ? null : onLogin,
+            isLoading: isLoading,
+            premium: isCardForm,
+            compact: compact,
+          ),
         ),
         if (!keyboardOpen) ...[
           SizedBox(height: footerTopGap),
           const Divider(height: 1, color: Color(0xFFEBEEF2)),
           SizedBox(height: footerBottomGap),
-          _LoginFooterLinks(compact: compactMobile),
+          staggered(8, _LoginFooterLinks(compact: compactMobile)),
         ],
       ],
     );
@@ -1177,14 +1378,14 @@ class _LoginFormCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: LoginTheme.bluePrimary.withValues(alpha: 0.1),
-            blurRadius: isMobileLayout ? 40 : 56,
-            offset: Offset(0, isMobileLayout ? 14 : 20),
+            color: LoginTheme.bluePrimary.withValues(alpha: 0.14),
+            blurRadius: isMobileLayout ? 44 : 60,
+            offset: Offset(0, isMobileLayout ? 16 : 22),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: isMobileLayout ? 24 : 32,
-            offset: const Offset(0, 8),
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: isMobileLayout ? 28 : 36,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -1202,6 +1403,167 @@ class _LoginFormCard extends StatelessWidget {
   }
 }
 
+/// Live clock and calendar on the login card greeting area.
+class _LoginLiveDateTime extends StatefulWidget {
+  const _LoginLiveDateTime({this.compact = false});
+
+  final bool compact;
+
+  @override
+  State<_LoginLiveDateTime> createState() => _LoginLiveDateTimeState();
+}
+
+class _LoginLiveDateTimeState extends State<_LoginLiveDateTime> {
+  late Timer _timer;
+  late DateTime _now;
+
+  static const _weekdays = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
+
+  static const _months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _now = DateTime.now();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _now = DateTime.now());
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  String get _timeLabel {
+    final h = _now.hour == 0
+        ? 12
+        : (_now.hour > 12 ? _now.hour - 12 : _now.hour);
+    final m = _now.minute.toString().padLeft(2, '0');
+    final s = _now.second.toString().padLeft(2, '0');
+    final ampm = _now.hour < 12 ? 'AM' : 'PM';
+    return '$h:$m:$s $ampm';
+  }
+
+  String get _dateLabel {
+    final weekday = _weekdays[_now.weekday - 1];
+    final month = _months[_now.month - 1];
+    return '$weekday, $month ${_now.day}, ${_now.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = widget.compact;
+
+    return Center(
+      child: Container(
+        constraints: BoxConstraints(maxWidth: compact ? 300 : 360),
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 14 : 18,
+          vertical: compact ? 10 : 12,
+        ),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              LoginTheme.bluePrimary.withValues(alpha: 0.1),
+              AppTheme.letterheadNavy.withValues(alpha: 0.04),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(compact ? 14 : 16),
+          border: Border.all(
+            color: LoginTheme.bluePrimary.withValues(alpha: 0.2),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: LoginTheme.bluePrimary.withValues(alpha: 0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.schedule_rounded,
+                  size: compact ? 18 : 20,
+                  color: LoginTheme.bluePrimary,
+                ),
+                SizedBox(width: compact ? 8 : 10),
+                Text(
+                  _timeLabel,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: compact ? 22 : 26,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: compact ? 6 : 8),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.calendar_today_rounded,
+                  size: compact ? 14 : 15,
+                  color: LoginTheme.bluePrimary.withValues(alpha: 0.85),
+                ),
+                SizedBox(width: compact ? 6 : 8),
+                Flexible(
+                  child: Text(
+                    _dateLabel,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                      fontSize: compact ? 12 : 13,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Web form portal badge above the welcome heading.
 class _LoginWebPortalBadge extends StatelessWidget {
   @override
@@ -1211,19 +1573,30 @@ class _LoginWebPortalBadge extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            LoginTheme.bluePrimary.withValues(alpha: 0.12),
-            AppTheme.letterheadNavy.withValues(alpha: 0.06),
+            LoginTheme.bluePrimary.withValues(alpha: 0.14),
+            LoginTheme.blueLight.withValues(alpha: 0.08),
           ],
         ),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: LoginTheme.bluePrimary.withValues(alpha: 0.22),
+          color: LoginTheme.bluePrimary.withValues(alpha: 0.28),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: LoginTheme.bluePrimary.withValues(alpha: 0.12),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.hub_rounded, size: 16, color: LoginTheme.bluePrimary),
+          Icon(
+            Icons.verified_rounded,
+            size: 16,
+            color: LoginTheme.bluePrimary,
+          ),
           const SizedBox(width: 8),
           Text(
             'Official HRMS Portal',
@@ -1242,7 +1615,9 @@ class _LoginWebPortalBadge extends StatelessWidget {
 
 /// Subtle pulse on the web login crest.
 class _LoginFormLogoAnimated extends StatefulWidget {
-  const _LoginFormLogoAnimated();
+  const _LoginFormLogoAnimated({this.compact = false});
+
+  final bool compact;
 
   @override
   State<_LoginFormLogoAnimated> createState() => _LoginFormLogoAnimatedState();
@@ -1278,7 +1653,7 @@ class _LoginFormLogoAnimatedState extends State<_LoginFormLogoAnimated>
       animation: _scale,
       builder: (context, child) =>
           Transform.scale(scale: _scale.value, child: child),
-      child: const _LoginFormLogo(),
+      child: _LoginFormLogo(compact: widget.compact),
     );
   }
 }
@@ -1921,4 +2296,113 @@ class _LoginButtonShinePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _LoginButtonShinePainter oldDelegate) =>
       oldDelegate.progress != progress;
+}
+
+class _ForgotPasswordDialog extends StatefulWidget {
+  const _ForgotPasswordDialog({required this.initialEmail});
+
+  final String initialEmail;
+
+  @override
+  State<_ForgotPasswordDialog> createState() => _ForgotPasswordDialogState();
+}
+
+class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
+  late final TextEditingController _emailController;
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController(text: widget.initialEmail);
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) return;
+    Navigator.of(context).pop(email);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: LoginTheme.bluePrimary.withValues(alpha: 0.12),
+            ),
+            child: Icon(
+              Icons.lock_reset_rounded,
+              color: LoginTheme.bluePrimary,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Reset password',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Enter your municipal email and we\'ll send a secure reset link if '
+            'the account is registered.',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 14,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 18),
+          TextField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            autofillHints: const [AutofillHints.email],
+            decoration: InputDecoration(
+              labelText: 'Email',
+              hintText: 'name@plaridel.gov.ph',
+              prefixIcon: const Icon(Icons.mail_outline_rounded),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          style: FilledButton.styleFrom(
+            backgroundColor: LoginTheme.bluePrimary,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: const Text('Send reset link'),
+        ),
+      ],
+    );
+  }
 }

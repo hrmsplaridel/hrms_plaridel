@@ -26,6 +26,9 @@ AS $$
         OR btrim(p_path) = btrim(COALESCE(ra.doc_resume_path, ''))
         OR btrim(p_path) = btrim(COALESCE(ra.doc_tor_path, ''))
         OR btrim(p_path) = btrim(COALESCE(ra.doc_eligibility_trainings_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_medical_certificate_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_drug_test_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_nbi_clearance_path, ''))
         OR btrim(p_path) LIKE ra.id::text || '/%'
       )
   );

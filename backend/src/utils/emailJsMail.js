@@ -6,6 +6,13 @@
  * Template parameter names below must match what you use in the template body/subject.
  */
 
+const path = require('path');
+require('dotenv').config({
+  path: path.resolve(__dirname, '../../.env'),
+  override: true,
+});
+
+const emailjs = require('@emailjs/nodejs');
 const https = require('https');
 const { URL } = require('url');
 
@@ -78,16 +85,22 @@ function postEmailJsJson(jsonBody) {
 }
 
 function getPrivateKey() {
-  return (
-    process.env.EMAILJS_PRIVATE_KEY ||
-    process.env.EMAILJS_ACCESS_TOKEN ||
-    ''
-  ).trim();
+  return normalizeEmailJsCredential(
+    process.env.EMAILJS_PRIVATE_KEY || process.env.EMAILJS_ACCESS_TOKEN || '',
+  );
+}
+
+function normalizeEmailJsCredential(value) {
+  const trimmed = (value || '').trim();
+  if (!trimmed || /your_|placeholder|from_emailjs/i.test(trimmed)) {
+    return '';
+  }
+  return trimmed;
 }
 
 function getConfig() {
-  const serviceId = (process.env.EMAILJS_SERVICE_ID || '').trim();
-  const publicKey = (process.env.EMAILJS_PUBLIC_KEY || '').trim();
+  const serviceId = normalizeEmailJsCredential(process.env.EMAILJS_SERVICE_ID);
+  const publicKey = normalizeEmailJsCredential(process.env.EMAILJS_PUBLIC_KEY);
   return { serviceId, publicKey };
 }
 
@@ -103,6 +116,30 @@ function isEmailJsConfiguredForApplicant() {
   return !!(serviceId && publicKey && templateId);
 }
 
+function formatEmailJsError(status, text) {
+  let msg = `EmailJS HTTP ${status}: ${text}`;
+  if (status === 403 && /non-browser|browser environments/i.test(text)) {
+    msg +=
+      ' — Enable “Allow EmailJS API for non-browser applications” under EmailJS Account → Security: https://dashboard.emailjs.com/admin/account/security';
+  }
+  if (status === 403 && /strict mode|private key|Private Key|accessToken/i.test(text)) {
+    msg +=
+      ' — In EmailJS → Account → Security: enable “Allow EmailJS API for non-browser applications”, copy the Private Key into EMAILJS_PRIVATE_KEY in backend/.env, or disable “Use Private Key” (strict mode).';
+  }
+  if (status === 400 && /public key|user_id/i.test(text)) {
+    msg +=
+      ' — Set EMAILJS_PUBLIC_KEY in backend/.env from EmailJS → Account → API keys → Public Key.';
+  }
+  if (status === 412 && /Gmail|insufficient authentication scopes|scopes/i.test(text)) {
+    msg +=
+      ' — Reconnect Gmail in EmailJS → Email Services and grant send-mail permissions.';
+  }
+  const err = new Error(msg);
+  err.code = 'EMAILJS_HTTP_ERROR';
+  err.httpStatus = status;
+  return err;
+}
+
 /**
  * @param {{ templateId: string, templateParams: Record<string, string> }} opts
  */
@@ -115,21 +152,23 @@ async function sendEmailJs(opts) {
     throw err;
   }
 
-  const payload = {
-    service_id: serviceId,
-    template_id: templateId,
-    user_id: publicKey,
-    template_params: opts.templateParams,
-  };
   const privateKey = getPrivateKey();
-  if (privateKey) {
-    payload.accessToken = privateKey;
+  if (!privateKey) {
+    throw formatEmailJsError(
+      403,
+      'API access in strict mode, but no Private Key was provided',
+    );
   }
+  const sdkOptions = { publicKey, privateKey };
 
-  const body = JSON.stringify(payload);
-
-  await postEmailJsJson(body);
-  return { ok: true };
+  try {
+    await emailjs.send(serviceId, templateId, opts.templateParams, sdkOptions);
+    return { ok: true };
+  } catch (sdkErr) {
+    const status = sdkErr?.status || sdkErr?.httpStatus || 0;
+    const text = sdkErr?.text || sdkErr?.message || String(sdkErr);
+    throw formatEmailJsError(status, text);
+  }
 }
 
 /**

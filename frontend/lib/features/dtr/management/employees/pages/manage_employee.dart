@@ -92,6 +92,16 @@ class _EmployeeProfile {
   }
 }
 
+/// Default initial passwords for new accounts (Create Account / import).
+const String kDefaultAdminPassword = kDefaultAdminAccountPassword;
+const String kDefaultEmployeePassword = kDefaultEmployeeAccountPassword;
+
+String defaultPasswordForPrivilege(String? privilege) =>
+    privilege == 'Admin' ? kDefaultAdminPassword : kDefaultEmployeePassword;
+
+String defaultPasswordForRoleKey(String role) =>
+    role == 'admin' ? kDefaultAdminPassword : kDefaultEmployeePassword;
+
 /// Create Account form. Use inline in Dashboard. Single place for adding employees.
 class AddEmployeeForm extends StatefulWidget {
   const AddEmployeeForm({super.key, this.onAccountCreated});
@@ -118,8 +128,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   final _salaryGradeController = TextEditingController();
   final _biometricIdController = TextEditingController();
 
-  /// Defaults to Employee so new hires are not accidentally saved as admin.
-  String? _privilege = 'Employee';
+  /// No role until HR picks one — password fields appear after selection.
+  String? _privilege;
   String? _suffix;
   String? _sex;
   DateTime? _dateOfBirth;
@@ -131,6 +141,17 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   Uint8List? _selectedImageBytes;
   bool _saving = false;
   int? _lastAppliedPrefillStamp;
+
+  void _applyDefaultPasswords() {
+    if (_privilege == null) {
+      _passwordController.clear();
+      _repeatPasswordController.clear();
+      return;
+    }
+    final pwd = defaultPasswordForPrivilege(_privilege);
+    _passwordController.text = pwd;
+    _repeatPasswordController.text = pwd;
+  }
 
   @override
   void didChangeDependencies() {
@@ -173,7 +194,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     if (ph != null && ph.isNotEmpty) {
       _contactController.text = ph;
     }
-    setState(() {});
+    setState(() {
+      _privilege = 'Employee';
+      _applyDefaultPasswords();
+    });
   }
 
   @override
@@ -287,8 +311,6 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
 
   void _clearForm() {
     _emailController.clear();
-    _passwordController.clear();
-    _repeatPasswordController.clear();
     _firstNameController.clear();
     _middleNameController.clear();
     _lastNameController.clear();
@@ -298,7 +320,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _biometricIdController.clear();
     setState(() {
       _addressFormKey = GlobalKey<StructuredAddressFormState>();
-      _privilege = 'Employee';
+      _privilege = null;
       _suffix = null;
       _sex = null;
       _dateOfBirth = null;
@@ -306,6 +328,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       _employmentStatus = 'active';
       _dateHired = null;
       _selectedImageBytes = null;
+      _passwordController.clear();
+      _repeatPasswordController.clear();
     });
   }
 
@@ -373,6 +397,11 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           await RecruitmentRepo.instance.linkHiredUser(
             hire.applicationId!,
             userId,
+          );
+          hire.recordCreatedCredentials(
+            applicationId: hire.applicationId!,
+            loginEmail: email,
+            password: password,
           );
           hire.clear();
           _lastAppliedPrefillStamp = null;
@@ -642,62 +671,72 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
         ),
         const SizedBox(height: 18),
-        TextFormField(
-          controller: _passwordController,
-          decoration: _fieldDecoration('Password').copyWith(
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscurePassword
-                    ? Icons.visibility_rounded
-                    : Icons.visibility_off_rounded,
-                size: 20,
-                color: AppTheme.textSecondary,
-              ),
-              onPressed: () =>
-                  setState(() => _obscurePassword = !_obscurePassword),
-            ),
-          ),
-          obscureText: _obscurePassword,
-          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-        ),
-        const SizedBox(height: 18),
-        TextFormField(
-          controller: _repeatPasswordController,
-          decoration: _fieldDecoration('Repeat password').copyWith(
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscureRepeatPassword
-                    ? Icons.visibility_rounded
-                    : Icons.visibility_off_rounded,
-                size: 20,
-                color: AppTheme.textSecondary,
-              ),
-              onPressed: () => setState(
-                () => _obscureRepeatPassword = !_obscureRepeatPassword,
-              ),
-            ),
-          ),
-          obscureText: _obscureRepeatPassword,
-          validator: (v) {
-            if (v == null || v.isEmpty) return 'Required';
-            if (v != _passwordController.text) {
-              return 'Passwords do not match';
-            }
-            return null;
-          },
-        ),
-        const SizedBox(height: 18),
         DropdownButtonFormField<String>(
-          initialValue: _privilege,
+          value: _privilege,
           isExpanded: true,
-          decoration: _fieldDecoration('Role', hint: 'Employee (recommended)'),
+          decoration: _fieldDecoration('Role', hint: 'Select role first'),
+          hint: Text(
+            'Select role first',
+            style: TextStyle(color: _chromeMutedColor(context)),
+          ),
           items: const [
             DropdownMenuItem(value: 'Employee', child: Text('Employee')),
             DropdownMenuItem(value: 'Admin', child: Text('Administrator')),
           ],
-          onChanged: (v) => setState(() => _privilege = v),
-          validator: (v) => v == null ? 'Required' : null,
+          onChanged: (v) => setState(() {
+            _privilege = v;
+            _applyDefaultPasswords();
+          }),
+          validator: (v) => v == null ? 'Select a role first' : null,
         ),
+        if (_privilege != null) ...[
+          const SizedBox(height: 18),
+          TextFormField(
+            controller: _passwordController,
+            decoration: _fieldDecoration('Password').copyWith(
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscurePassword
+                      ? Icons.visibility_rounded
+                      : Icons.visibility_off_rounded,
+                  size: 20,
+                  color: AppTheme.textSecondary,
+                ),
+                onPressed: () =>
+                    setState(() => _obscurePassword = !_obscurePassword),
+              ),
+            ),
+            obscureText: _obscurePassword,
+            validator: (v) =>
+                (v == null || v.trim().isEmpty) ? 'Required' : null,
+          ),
+          const SizedBox(height: 18),
+          TextFormField(
+            controller: _repeatPasswordController,
+            decoration: _fieldDecoration('Repeat password').copyWith(
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscureRepeatPassword
+                      ? Icons.visibility_rounded
+                      : Icons.visibility_off_rounded,
+                  size: 20,
+                  color: AppTheme.textSecondary,
+                ),
+                onPressed: () => setState(
+                  () => _obscureRepeatPassword = !_obscureRepeatPassword,
+                ),
+              ),
+            ),
+            obscureText: _obscureRepeatPassword,
+            validator: (v) {
+              if (v == null || v.isEmpty) return 'Required';
+              if (v != _passwordController.text) {
+                return 'Passwords do not match';
+              }
+              return null;
+            },
+          ),
+        ],
         if (_privilege == 'Admin') ...[
           const SizedBox(height: 10),
           Container(
@@ -4419,6 +4458,13 @@ class _SingleUserImportModalState extends State<_SingleUserImportModal> {
     super.initState();
     _nameController.text =
         widget.user['full_name']?.toString() ?? 'Imported User';
+    _applyImportDefaultPasswords();
+  }
+
+  void _applyImportDefaultPasswords() {
+    final pwd = defaultPasswordForRoleKey(_role);
+    _passwordController.text = pwd;
+    _confirmController.text = pwd;
   }
 
   @override
@@ -4574,7 +4620,10 @@ class _SingleUserImportModalState extends State<_SingleUserImportModal> {
                       ),
                     )
                     .toList(),
-                onChanged: (v) => setState(() => _role = v ?? 'employee'),
+                onChanged: (v) => setState(() {
+                  _role = v ?? 'employee';
+                  _applyImportDefaultPasswords();
+                }),
               ),
               const SizedBox(height: 24),
 

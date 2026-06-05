@@ -1,22 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'package:hrms_plaridel/features/recruitment/data/recruitment_hire_prefill.dart';
-import 'rsp_hire_email_dialog.dart';
 import 'package:hrms_plaridel/features/recruitment/utils/rsp_final_interview_report_export.dart';
 import 'rsp_final_interview_report_preview_screen.dart';
 import 'rsp_generate_report_dialog.dart';
 
-/// Admin: applicants who passed the screening exam — schedule final interview,
-/// record pass/fail, then open Create Account (sidebar) using the shared form.
+/// Admin: applicants who passed the screening exam — schedule deliberation and record results.
 class RspFinalInterviewScheduler extends StatefulWidget {
-  const RspFinalInterviewScheduler({super.key, this.onGoToCreateAccount});
+  const RspFinalInterviewScheduler({super.key, this.embedded = false});
 
-  /// Opens the admin **Create Account** screen (sidebar); parent supplies navigation.
-  final VoidCallback? onGoToCreateAccount;
+  /// When true, hides the page hero (used inside [RspSchedulingSection]).
+  final bool embedded;
 
   @override
   State<RspFinalInterviewScheduler> createState() =>
@@ -282,7 +278,7 @@ class _RspFinalInterviewSchedulerState
     }
     if (outcome == true && hrDone) {
       return (
-        label: 'Final passed · Step 8 done',
+        label: 'Deliberation passed · Step 8 done',
         icon: Icons.task_alt_rounded,
         fg: dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20),
         bg: dark ? const Color(0xFF1E3A24) : const Color(0xFFE8F5E9),
@@ -292,7 +288,7 @@ class _RspFinalInterviewSchedulerState
     }
     if (outcome == true) {
       return (
-        label: 'Final interview passed · Pending account',
+        label: 'Deliberation passed · Final requirements',
         icon: Icons.hourglass_bottom_rounded,
         fg: dark ? const Color(0xFF90CAF9) : const Color(0xFF0D47A1),
         bg: dark ? const Color(0xFF1A2940) : const Color(0xFFE3F2FD),
@@ -302,7 +298,7 @@ class _RspFinalInterviewSchedulerState
     }
     if (outcome == false) {
       return (
-        label: 'Final interview: Not passed',
+        label: 'Deliberation: Not passed',
         icon: Icons.cancel_rounded,
         fg: dark ? const Color(0xFFEF9A9A) : const Color(0xFFB71C1C),
         bg: dark ? const Color(0xFF3A2020) : const Color(0xFFFFEBEE),
@@ -312,7 +308,7 @@ class _RspFinalInterviewSchedulerState
     }
     if (scheduled != null) {
       return (
-        label: 'Final interview scheduled',
+        label: 'Deliberation scheduled',
         icon: Icons.event_available_rounded,
         fg: dark ? const Color(0xFFFFB74D) : const Color(0xFF7A3E00),
         bg: dark ? const Color(0xFF3A2E1A) : const Color(0xFFFFF3E0),
@@ -321,7 +317,7 @@ class _RspFinalInterviewSchedulerState
       );
     }
     return (
-      label: 'Waiting for final interview schedule',
+      label: 'Waiting for deliberation schedule',
       icon: Icons.schedule_rounded,
       fg: dark
           ? const Color(0xFFB0BEC5)
@@ -420,7 +416,7 @@ class _RspFinalInterviewSchedulerState
       await RecruitmentRepo.instance.updateFinalInterviewAt(app.id, dt);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Final interview date saved.')),
+          const SnackBar(content: Text('Deliberation schedule saved.')),
         );
       }
     });
@@ -431,7 +427,7 @@ class _RspFinalInterviewSchedulerState
       await RecruitmentRepo.instance.updateFinalInterviewAt(app.id, null);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Interview schedule cleared.')),
+          const SnackBar(content: Text('Deliberation schedule cleared.')),
         );
       }
     });
@@ -444,85 +440,11 @@ class _RspFinalInterviewSchedulerState
         final msg = passed == null
             ? 'Outcome cleared (pending).'
             : passed
-            ? 'Marked as passed final interview.'
-            : 'Marked as did not pass final interview.';
+            ? 'Marked as passed deliberation.'
+            : 'Marked as did not pass deliberation.';
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(msg)));
-      }
-    });
-  }
-
-  void _goToCreateAccountFor(RecruitmentApplication app) {
-    context.read<RecruitmentHirePrefill>().arm(
-      applicationId: app.id,
-      email: app.email,
-      fullName: app.fullName,
-      phone: app.phone,
-    );
-    widget.onGoToCreateAccount?.call();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Create Account is open in the sidebar. The form is prefilled; after you save, this applicant is linked automatically.',
-          ),
-        ),
-      );
-    }
-  }
-
-  /// Shows a short form (username + password), then opens the admin’s mail app
-  /// with **To:** set to the applicant’s email.
-  Future<void> _openHireEmailForm(RecruitmentApplication app) async {
-    final to = app.email.trim();
-    if (to.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This applicant has no email on file.')),
-      );
-      return;
-    }
-    final sent = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => RspHireApplicantEmailDialog(
-        applicantEmail: to,
-        applicantName: app.fullName.trim().isEmpty
-            ? 'Applicant'
-            : app.fullName.trim(),
-        sendHireEmail: (username, password) => RecruitmentRepo.instance
-            .sendHireCredentialEmail(app.id, username, password),
-      ),
-    );
-    if (sent == true && mounted) {
-      await _load();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Email sent to the applicant.')),
-      );
-    }
-  }
-
-  Future<void> _setHrAccountMonitoring(
-    RecruitmentApplication app,
-    bool done,
-  ) async {
-    await _withSaveLock(app.id, () async {
-      await RecruitmentRepo.instance.updateHrAccountSetupMonitoring(
-        app.id,
-        done,
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              done
-                  ? 'Step 8 monitoring: Done creating account — applicants see this after they refresh.'
-                  : 'Step 8 monitoring: Not yet — applicants see waiting until you choose Done.',
-            ),
-          ),
-        );
       }
     });
   }
@@ -545,7 +467,7 @@ class _RspFinalInterviewSchedulerState
         icon = Icons.check_circle_outline_rounded;
         headline = 'Passed';
         detail =
-            'You can create their employee account from the sidebar when ready.';
+            'Applicant proceeds to Final Requirements to submit medical certificate, drug test, and NBI clearance.';
         break;
       case false:
         accent = const Color(0xFFC62828);
@@ -715,238 +637,6 @@ class _RspFinalInterviewSchedulerState
     ];
   }
 
-  Widget _accountSetupStep({
-    required RecruitmentApplication app,
-    required bool busy,
-    required bool canNavigate,
-    required bool accountLinked,
-  }) {
-    final navy = AppTheme.primaryNavy;
-    final monitoringDone = app.hrAccountSetupDone;
-    final emailSent = app.hireCredentialsEmailSent;
-    return LayoutBuilder(
-      builder: (context, c) {
-        final wide = c.maxWidth >= 560;
-        final openBtn = FilledButton.icon(
-          onPressed: !canNavigate || busy || accountLinked
-              ? null
-              : () => _goToCreateAccountFor(app),
-          icon: Icon(
-            accountLinked ? Icons.link_rounded : Icons.open_in_new_rounded,
-            size: 20,
-          ),
-          label: Text(accountLinked ? 'Account linked' : 'Open Create Account'),
-          style: FilledButton.styleFrom(
-            backgroundColor: navy,
-            disabledBackgroundColor: navy.withValues(alpha: 0.25),
-            foregroundColor: Colors.white,
-            disabledForegroundColor: Colors.white.withValues(alpha: 0.7),
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-          ),
-        );
-        final emailBtn = OutlinedButton.icon(
-          onPressed: busy || emailSent ? null : () => _openHireEmailForm(app),
-          icon: Icon(
-            emailSent
-                ? Icons.mark_email_read_rounded
-                : Icons.mark_email_read_outlined,
-            size: 20,
-          ),
-          label: Text(emailSent ? 'Email sent' : 'Email applicant'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: emailSent
-                ? AppTheme.dashTextSecondaryOf(context)
-                : navy,
-            disabledForegroundColor: AppTheme.dashTextSecondaryOf(context),
-            side: BorderSide(
-              color: emailSent
-                  ? AppTheme.dashTextSecondaryOf(
-                      context,
-                    ).withValues(alpha: 0.35)
-                  : navy.withValues(alpha: 0.55),
-            ),
-            backgroundColor: emailSent
-                ? AppTheme.offWhite.withValues(alpha: 0.6)
-                : null,
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-          ),
-        );
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (accountLinked) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8F5E9).withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: const Color(0xFF2E7D32).withValues(alpha: 0.35),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.check_circle_rounded,
-                      size: 22,
-                      color: Colors.green.shade800,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Employee account is linked to this application.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.green.shade900,
-                          height: 1.35,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            if (emailSent) ...[
-              Text(
-                'Credentials email was sent${app.hireCredentialsEmailSentAt != null ? ' on ${_formatSchedule(app.hireCredentialsEmailSentAt!, context)}' : ''}. The button stays disabled so HR can see this step is complete.',
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.4,
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            Text(
-              'Email applicant sends from the HRMS server to ${app.email.trim().isEmpty ? '—' : app.email.trim()} (congratulations + hired + login details). SMTP must be set in the API .env.',
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.4,
-                color: AppTheme.dashTextSecondaryOf(
-                  context,
-                ).withValues(alpha: 0.95),
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (wide)
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Open Create Account in the admin sidebar (below DocuTracker) to link this user. Use Email applicant to enter login details; the server emails them automatically.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.45,
-                        color: AppTheme.dashTextSecondaryOf(context),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    alignment: WrapAlignment.end,
-                    children: [emailBtn, openBtn],
-                  ),
-                ],
-              )
-            else ...[
-              Text(
-                'Create Account opens in the sidebar (prefilled). Email applicant sends username/password to the address above via the server.',
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.45,
-                  color: AppTheme.dashTextSecondaryOf(context),
-                ),
-              ),
-              const SizedBox(height: 14),
-              SizedBox(width: double.infinity, child: emailBtn),
-              const SizedBox(height: 10),
-              SizedBox(width: double.infinity, child: openBtn),
-            ],
-            const SizedBox(height: 22),
-            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-            const SizedBox(height: 18),
-            Text(
-              'What applicants see (Step 8)',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.dashTextPrimaryOf(context),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Choose the message shown after they refresh their application status. This is only a label for the applicant — it does not create the account.',
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.45,
-                color: AppTheme.dashTextSecondaryOf(context),
-              ),
-            ),
-            const SizedBox(height: 14),
-            IgnorePointer(
-              ignoring: busy,
-              child: Opacity(
-                opacity: busy ? 0.45 : 1,
-                child: SegmentedButton<int>(
-                  segments: const [
-                    ButtonSegment<int>(
-                      value: 0,
-                      label: Text('Not yet'),
-                      icon: Icon(Icons.schedule_rounded, size: 18),
-                    ),
-                    ButtonSegment<int>(
-                      value: 1,
-                      label: Text('Done'),
-                      icon: Icon(Icons.check_rounded, size: 18),
-                    ),
-                  ],
-                  selected: {monitoringDone ? 1 : 0},
-                  onSelectionChanged: (s) {
-                    if (busy) return;
-                    final v = s.first;
-                    final wantDone = v == 1;
-                    if (wantDone == monitoringDone) return;
-                    _setHrAccountMonitoring(app, wantDone);
-                  },
-                  style: ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    padding: WidgetStateProperty.all(
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              monitoringDone
-                  ? 'Applicants currently see: account setup complete.'
-                  : 'Applicants currently see: still setting up account.',
-              style: TextStyle(
-                fontSize: 12,
-                fontStyle: FontStyle.italic,
-                color: AppTheme.dashTextSecondaryOf(
-                  context,
-                ).withValues(alpha: 0.92),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
   BoxDecoration _shellCardDecoration(BuildContext context) {
     final hairline = AppTheme.dashHairlineOf(context);
     final panel = AppTheme.dashPanelOf(context);
@@ -1074,101 +764,105 @@ class _RspFinalInterviewSchedulerState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    AppTheme.primaryNavy.withValues(alpha: 0.14),
-                    AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+        if (!widget.embedded) ...[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppTheme.primaryNavy.withValues(alpha: 0.14),
+                      AppTheme.primaryNavyLight.withValues(alpha: 0.08),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: Icon(
+                  Icons.event_available_outlined,
+                  size: 26,
+                  color: AppTheme.dashIsDark(context)
+                      ? AppTheme.primaryNavyLight
+                      : AppTheme.primaryNavy,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Scheduling',
+                      style: TextStyle(
+                        fontFamily: 'NotoSans',
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.4,
+                        height: 1.15,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Applicants listed here already passed the screening exam. Schedule deliberation and record the result.',
+                      style: TextStyle(
+                        fontFamily: 'NotoSans',
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 14,
+                        height: 1.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ],
                 ),
-                border: Border.all(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
-                ),
               ),
-              child: Icon(
-                Icons.event_available_outlined,
-                size: 26,
-                color: AppTheme.dashIsDark(context)
-                    ? AppTheme.primaryNavyLight
-                    : AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              const SizedBox(width: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  Text(
-                    'Final interview (passed exam)',
-                    style: TextStyle(
-                      fontFamily: 'NotoSans',
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.4,
-                      height: 1.15,
+                  OutlinedButton.icon(
+                    onPressed: (_loading || _exportingReport)
+                        ? null
+                        : _showGenerateReportDialog,
+                    icon: _exportingReport
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.summarize_outlined, size: 18),
+                    label: Text(
+                      _exportingReport ? 'Generating…' : 'Generate report',
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: accentNavy,
+                      side: BorderSide(
+                        color: accentNavy.withValues(alpha: 0.35),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Applicants listed here already passed the screening exam. Schedule the in-person interview, record the result, then open Create Account when they pass.',
-                    style: TextStyle(
-                      fontFamily: 'NotoSans',
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 14,
-                      height: 1.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                  refreshBtn,
                 ],
               ),
-            ),
-            const SizedBox(width: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: (_loading || _exportingReport)
-                      ? null
-                      : _showGenerateReportDialog,
-                  icon: _exportingReport
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.summarize_outlined, size: 18),
-                  label: Text(
-                    _exportingReport ? 'Generating…' : 'Generate report',
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: accentNavy,
-                    side: BorderSide(color: accentNavy.withValues(alpha: 0.35)),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-                refreshBtn,
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
+            ],
+          ),
+          const SizedBox(height: 14),
+        ],
         Wrap(
           spacing: 10,
           runSpacing: 10,
@@ -1241,6 +935,28 @@ class _RspFinalInterviewSchedulerState
                 fontWeight: FontWeight.w600,
               ),
             ),
+            if (widget.embedded) ...[
+              refreshBtn,
+              OutlinedButton.icon(
+                onPressed: (_loading || _exportingReport)
+                    ? null
+                    : _showGenerateReportDialog,
+                icon: _exportingReport
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.summarize_outlined, size: 18),
+                label: Text(
+                  _exportingReport ? 'Generating…' : 'Generate report',
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: accentNavy,
+                  side: BorderSide(color: accentNavy.withValues(alpha: 0.35)),
+                ),
+              ),
+            ],
           ],
         ),
         const SizedBox(height: 24),
@@ -1332,25 +1048,15 @@ class _RspFinalInterviewSchedulerState
               final registered = _isRegistered(app);
               final scheduled = app.finalInterviewAt;
               final outcome = app.finalInterviewPassed;
-              final canNavigate = widget.onGoToCreateAccount != null;
               final actions = _outcomeActions(app, outcome, registered, busy);
-              final showStep3 = outcome == true;
               final step1Summary = scheduled == null
                   ? 'No date scheduled'
                   : _formatSchedule(scheduled, context);
               final step2Summary = outcome == null
                   ? 'Pending — record result'
                   : (outcome == true ? 'Passed' : 'Not passed');
-              final step3Summary = app.hireCredentialsEmailSent
-                  ? (registered
-                        ? 'Account linked · credentials email sent'
-                        : 'Credentials email sent')
-                  : (registered
-                        ? 'Account linked · send credentials email'
-                        : 'Create account & email login details');
               final expandStep1 = scheduled == null;
               final expandStep2 = !expandStep1 && outcome == null;
-              final expandStep3 = showStep3 && !expandStep1 && !expandStep2;
               final useMinimalApplicantRow = !_expandedHiredApplicantIds
                   .contains(app.id);
 
@@ -1705,7 +1411,7 @@ class _RspFinalInterviewSchedulerState
                           _CollapsibleWorkflowStep(
                             key: ValueKey('${app.id}-wf1'),
                             number: 1,
-                            title: 'Interview appointment',
+                            title: 'Deliberation appointment',
                             subtitle:
                                 'Applicants see this date when they continue their application with the same email.',
                             collapsedSummary: step1Summary,
@@ -1800,7 +1506,7 @@ class _RspFinalInterviewSchedulerState
                                                                 top: 4,
                                                               ),
                                                           child: Text(
-                                                            'Pick a date and time for the in-person final interview.',
+                                                            'Pick a date and time for deliberation.',
                                                             style: TextStyle(
                                                               fontFamily:
                                                                   'NotoSans',
@@ -1882,9 +1588,9 @@ class _RspFinalInterviewSchedulerState
                           _CollapsibleWorkflowStep(
                             key: ValueKey('${app.id}-wf2'),
                             number: 2,
-                            title: 'Final interview result',
+                            title: 'Deliberation result',
                             subtitle:
-                                'After the interview, record whether the applicant passed.',
+                                'After deliberation, record whether the applicant passed.',
                             collapsedSummary: step2Summary,
                             initiallyExpanded: expandStep2,
                             child: Column(
@@ -1904,38 +1610,6 @@ class _RspFinalInterviewSchedulerState
                               ],
                             ),
                           ),
-                          if (outcome == true) ...[
-                            SizedBox(height: _kSectionGap + 4),
-                            _CollapsibleWorkflowStep(
-                              key: ValueKey('${app.id}-wf3'),
-                              number: 3,
-                              title: 'Employee account',
-                              subtitle: registered
-                                  ? 'Account linked. Send or confirm credentials email and Step 8 applicant message.'
-                                  : 'Create their login from the sidebar, then email credentials.',
-                              collapsedSummary: step3Summary,
-                              initiallyExpanded: expandStep3,
-                              child: _accountSetupStep(
-                                app: app,
-                                busy: busy,
-                                canNavigate: canNavigate,
-                                accountLinked: registered,
-                              ),
-                            ),
-                            if (!canNavigate)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 12),
-                                child: Text(
-                                  'Create Account shortcut is not available here. Use the full admin sidebar.',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppTheme.dashTextSecondaryOf(
-                                      context,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
                         ],
                       ),
                     ),

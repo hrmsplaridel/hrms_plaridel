@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
@@ -10,23 +10,24 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
 import 'package:hrms_plaridel/features/learning_development/models/bi_form.dart';
 import 'package:hrms_plaridel/features/learning_development/models/comparative_assessment.dart';
-import 'package:hrms_plaridel/features/learning_development/models/individual_development_plan.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/learning_development/models/performance_evaluation_form.dart';
 import 'package:hrms_plaridel/features/learning_development/models/promotion_certification.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
 import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/computation_of_points_section.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/rsp_final_requirements_section.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/work_experience_sheet_section.dart';
 import 'package:hrms_plaridel/features/learning_development/models/turn_around_time.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
-import 'package:hrms_plaridel/shared/widgets/feature_card.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_form_header_footer.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_bei_grading_dialog.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_exam_editor_ui.dart';
-import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_final_interview_scheduler.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/rsp_scheduling_section.dart';
 import 'package:hrms_plaridel/features/recruitment/utils/rsp_applications_report_export.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_generate_report_dialog.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_applications_report_preview_screen.dart';
@@ -34,8 +35,10 @@ import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_iframe_preview.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_admin_hub.dart';
+import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 
-/// RSP module: hub with buttons for each RSP feature (Job Vacancies, Applications & Exam Results).
+/// RSP module: hub with buttons for each RSP feature (Job Vacancies, Applications, Exam Results).
 class RspAdminContent extends StatefulWidget {
   const RspAdminContent({super.key, this.onOpenCreateAccount});
 
@@ -47,8 +50,8 @@ class RspAdminContent extends StatefulWidget {
 }
 
 class _RspAdminContentState extends State<RspAdminContent> {
-  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, … 14 = Turn-Around Time,
-  /// 15 = Final interview (passed exam).
+  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, 16 = Exam Results,
+  /// â€¦ 14 = Turn-Around Time, 15 = Scheduling (deliberation + orientation).
   int _rspSectionIndex = 0;
 
   @override
@@ -65,137 +68,16 @@ class _RspAdminContentState extends State<RspAdminContent> {
           ),
           const SizedBox(height: 18),
         ],
-        if (_rspSectionIndex == 0) ...[
-          Text(
-            'RSP',
-            style: TextStyle(
-              color: AppTheme.dashTextPrimaryOf(context),
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Recruitment, Selection, and Placement. Choose a feature below.',
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 14,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 24),
-          FeatureCardGrid(
-            children: [
-              FeatureCard(
-                title: 'Job Vacancies (Landing Page)',
-                subtitle: 'Edit the announcement shown on the landing page.',
-                icon: Icons.work_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 1),
-              ),
-              FeatureCard(
-                title: 'Applications & Exam Results',
-                subtitle: 'View applicants, attachments, and exam results.',
-                icon: Icons.assignment_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 2),
-              ),
-              FeatureCard(
-                title: 'Final interview (passed exam)',
-                subtitle:
-                    'Set the final interview date and time for applicants who passed the screening exam.',
-                icon: Icons.event_available_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 15),
-              ),
-              FeatureCard(
-                title: 'BEI / Exam Questions',
-                subtitle:
-                    'View and edit the 8 Behavioral Event Interview questions applicants answer.',
-                icon: Icons.quiz_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 3),
-              ),
-              FeatureCard(
-                title: 'General Exam (LGU-Plaridel)',
-                subtitle:
-                    'View and edit the General Exam multiple-choice questions for applicants.',
-                icon: Icons.assignment_turned_in_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 4),
-              ),
-              FeatureCard(
-                title: 'Mathematics Exam',
-                subtitle:
-                    'View and edit the Mathematics exam questions for applicants.',
-                icon: Icons.calculate_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 5),
-              ),
-              FeatureCard(
-                title: 'General Information Exam',
-                subtitle:
-                    'View and edit the General Information exam questions for applicants.',
-                icon: Icons.info_outline_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 6),
-              ),
-              FeatureCard(
-                title: 'Background Investigation (BI) Form',
-                subtitle:
-                    'Record BI form entries: applicant, respondent, and competency ratings.',
-                icon: Icons.verified_user_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 7),
-              ),
-              FeatureCard(
-                title: 'Performance / Functional Evaluation',
-                subtitle:
-                    'Record functional areas and performance narratives for applicants.',
-                icon: Icons.assessment_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 8),
-              ),
-              FeatureCard(
-                title: 'Individual Development Plan (IDP)',
-                subtitle:
-                    'Record employee IDP: qualifications, succession analysis, development plan.',
-                icon: Icons.trending_up_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 9),
-              ),
-              FeatureCard(
-                title: 'Applicants Profile',
-                subtitle:
-                    'Job vacancy details and list of applicants (name, course, address, sex, age, civil status, remark).',
-                icon: Icons.people_alt_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 10),
-              ),
-              FeatureCard(
-                title: 'Comparative Assessment (Promotion)',
-                subtitle:
-                    'Merit Promotion Board: position, minimum requirements, and candidate comparison table. Form only, no pre-filled names.',
-                icon: Icons.balance_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 11),
-              ),
-              FeatureCard(
-                title: 'Promotion Certification / Screening',
-                subtitle:
-                    'Certification that candidates have been screened and found qualified. Form only, no pre-filled names.',
-                icon: Icons.verified_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 12),
-              ),
-              FeatureCard(
-                title: 'Selection Line-up',
-                subtitle:
-                    'Date, agency/office, vacant position, item no., and applicants table (name, education, experience, training, eligibility). Form only.',
-                icon: Icons.format_list_numbered_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 13),
-              ),
-              FeatureCard(
-                title: 'Turn-Around Time',
-                subtitle:
-                    'Merit Promotion Board: position, office, dates, and applicant tracking table (assessment, exam, deliberation, job offer, assumption, cost). Form only.',
-                icon: Icons.schedule_rounded,
-                onTap: () => setState(() => _rspSectionIndex = 14),
-              ),
-            ],
-          ),
-        ] else if (_rspSectionIndex == 1)
+        if (_rspSectionIndex == 0)
+          RspAdminHub(
+            onOpenSection: (index) => setState(() => _rspSectionIndex = index),
+          )
+        else if (_rspSectionIndex == 1)
           const _RspJobVacanciesForm()
         else if (_rspSectionIndex == 2)
-          _RspApplicationsMonitor()
+          const _RspApplicationsMonitor(view: _RspMonitorView.applications)
+        else if (_rspSectionIndex == 16)
+          const _RspApplicationsMonitor(view: _RspMonitorView.examResults)
         else if (_rspSectionIndex == 3)
           const _RspBeiQuestionsEditor()
         else if (_rspSectionIndex == 4)
@@ -208,8 +90,6 @@ class _RspAdminContentState extends State<RspAdminContent> {
           const _RspBiFormSection()
         else if (_rspSectionIndex == 8)
           const _RspPerformanceEvaluationSection()
-        else if (_rspSectionIndex == 9)
-          const _RspIdpSection()
         else if (_rspSectionIndex == 10)
           const _RspApplicantsProfileSection()
         else if (_rspSectionIndex == 11)
@@ -218,10 +98,16 @@ class _RspAdminContentState extends State<RspAdminContent> {
           const _RspPromotionCertificationSection()
         else if (_rspSectionIndex == 13)
           const _RspSelectionLineupSection()
+        else if (_rspSectionIndex == 17)
+          const RspComputationOfPointsSection()
+        else if (_rspSectionIndex == 18)
+          const RspWorkExperienceSheetSection()
         else if (_rspSectionIndex == 14)
           const _RspTurnAroundTimeSection()
         else if (_rspSectionIndex == 15)
-          RspFinalInterviewScheduler(
+          const RspSchedulingSection()
+        else if (_rspSectionIndex == 19)
+          RspFinalRequirementsSection(
             onGoToCreateAccount: widget.onOpenCreateAccount,
           )
         else
@@ -530,7 +416,7 @@ Widget _rspMcqQuestionsPanel({
                   style: AppTheme.dashFieldTextStyle(context),
                   decoration: RspExamEditorUi.inputDecoration(
                     context,
-                    hintText: 'Question text…',
+                    hintText: 'Question textâ€¦',
                   ).copyWith(labelText: null),
                 ),
                 const SizedBox(height: 14),
@@ -1096,7 +982,7 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
   }
 }
 
-/// RSP: Background Investigation (BI) Form â€” list entries and add/edit form.
+/// RSP: Background Investigation (BI) Form Ã¢â‚¬â€ list entries and add/edit form.
 class _RspBiFormSection extends StatefulWidget {
   const _RspBiFormSection();
 
@@ -1165,8 +1051,8 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
               title: e.applicantName.trim().isEmpty
                   ? '(No applicant name)'
                   : e.applicantName,
-              subtitle: '${e.respondentName} · ${e.respondentRelationship}',
-              detailDialogTitle: 'BI form — ${e.applicantName}',
+              subtitle: '${e.respondentName} Â· ${e.respondentRelationship}',
+              detailDialogTitle: 'BI form â€” ${e.applicantName}',
               previewContentWidth: 920,
               previewBuilder: () => _BiFormEditor(
                 readOnly: true,
@@ -1753,7 +1639,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               Divider(color: AppTheme.lightGray, height: 1),
               const SizedBox(height: 20),
               Text(
-                'Page 2 — Functional areas & performance',
+                'Page 2 â€” Functional areas & performance',
                 style: TextStyle(
                   color: AppTheme.primaryNavy,
                   fontSize: 13,
@@ -1903,7 +1789,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               Divider(color: AppTheme.lightGray, height: 1),
               const SizedBox(height: 20),
               Text(
-                'Page 3 — Other relevant information',
+                'Page 3 â€” Other relevant information',
                 style: TextStyle(
                   color: AppTheme.primaryNavy,
                   fontSize: 13,
@@ -2042,8 +1928,8 @@ class _BiFormList extends StatelessWidget {
               RspRecordsCrudActions(
                 onView: () => showReadOnlySavedEntryDialog(
                   context,
-                  title: 'BI form — ${e.applicantName}',
-                  subtitle: '${e.respondentName} · ${e.respondentRelationship}',
+                  title: 'BI form â€” ${e.applicantName}',
+                  subtitle: '${e.respondentName} Â· ${e.respondentRelationship}',
                   previewBuilder: () => _BiFormEditor(
                     readOnly: true,
                     entry: e,
@@ -2070,7 +1956,7 @@ class _BiFormList extends StatelessWidget {
   }
 }
 
-/// RSP: Performance / Functional Evaluation â€” list entries and add/edit form.
+/// RSP: Performance / Functional Evaluation Ã¢â‚¬â€ list entries and add/edit form.
 class _RspPerformanceEvaluationSection extends StatefulWidget {
   const _RspPerformanceEvaluationSection();
 
@@ -2131,7 +2017,7 @@ class _RspPerformanceEvaluationSectionState
       loading: _loading,
       items: _entries.map((e) {
         final areas = e.functionalAreas.isEmpty
-            ? '—'
+            ? 'â€”'
             : e.functionalAreas.join(', ');
         final name = (e.applicantName?.trim().isNotEmpty ?? false)
             ? e.applicantName!
@@ -2139,7 +2025,7 @@ class _RspPerformanceEvaluationSectionState
         return SavedRecordListItem(
           title: name,
           subtitle: areas,
-          detailDialogTitle: 'Performance evaluation — $name',
+          detailDialogTitle: 'Performance evaluation â€” $name',
           previewContentWidth: 880,
           previewBuilder: () => _PerformanceFormEditor(
             readOnly: true,
@@ -2657,918 +2543,8 @@ class _PerformanceFormList extends StatelessWidget {
   }
 }
 
-/// RSP: Individual Development Plan (IDP) â€” list entries and add/edit form.
-class _RspIdpSection extends StatefulWidget {
-  const _RspIdpSection();
 
-  @override
-  State<_RspIdpSection> createState() => _RspIdpSectionState();
-}
-
-class _RspIdpSectionState extends State<_RspIdpSection> {
-  List<IdpEntry> _entries = [];
-  bool _loading = true;
-  IdpEntry? _editing;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
-      final list = await IdpRepo.instance.list();
-      if (mounted) {
-        setState(() {
-          _entries = list;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _entries = [];
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  void _startNew() => setState(() => _editing = const IdpEntry());
-  void _edit(IdpEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
-
-  Future<void> _onSave(IdpEntry entry) async {
-    try {
-      if (entry.id == null) {
-        await IdpRepo.instance.insert(entry);
-      } else {
-        await IdpRepo.instance.update(entry);
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('IDP saved.')));
-        setState(() => _editing = null);
-        _load();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
-        );
-      }
-    }
-  }
-
-  Future<void> _onDelete(String id) async {
-    try {
-      await IdpRepo.instance.delete(id);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('IDP deleted.')));
-        _load();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
-      }
-    }
-  }
-
-  Future<void> _printIdp(IdpEntry entry) async {
-    try {
-      await FormPdf.printIdpPdf(context, entry);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _downloadIdp(IdpEntry entry) async {
-    try {
-      final doc = await FormPdf.buildIdpPdf(entry);
-      await FormPdf.sharePdf(doc, name: 'IDP.pdf');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF ready to save or share.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
-      }
-    }
-  }
-
-  void _openSavedRecordsBrowser() {
-    showRspLdSavedRecordsBrowser(
-      context,
-      sheetTitle: 'Saved IDP records',
-      emptyMessage: 'No IDP entries yet.',
-      loading: _loading,
-      items: _entries.map((e) {
-        final name = (e.name?.trim().isNotEmpty ?? false)
-            ? e.name!
-            : '(No name)';
-        final sub = '${e.position ?? "—"} · ${e.department ?? "—"}';
-        return SavedRecordListItem(
-          title: name,
-          subtitle: sub,
-          detailDialogTitle: 'IDP — $name',
-          previewContentWidth: 920,
-          previewBuilder: () => _IdpFormEditor(
-            readOnly: true,
-            entry: e,
-            onSave: (_) {},
-            onCancel: () {},
-            onPrint: (_) async {},
-            onDownloadPdf: (_) async {},
-          ),
-          onPrint: () => _printIdp(e),
-        );
-      }).toList(),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Individual Development Plan (IDP)',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Record employee IDP: personal/position info, qualifications, succession analysis, and development plan rows.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 24),
-        if (_editing != null) ...[
-          _IdpFormEditor(
-            key: ValueKey(_editing?.id ?? 'new'),
-            entry: _editing!,
-            onSave: _onSave,
-            onCancel: _cancelEdit,
-            onPrint: _printIdp,
-            onDownloadPdf: _downloadIdp,
-          ),
-          const SizedBox(height: 24),
-        ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add IDP'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message: 'No IDP entries yet. Tap "Add IDP" to add one.',
-            icon: Icons.school_outlined,
-          )
-        else
-          _IdpList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _printIdp,
-            onDownloadPdf: _downloadIdp,
-          ),
-      ],
-    );
-  }
-}
-
-class _IdpFormEditor extends StatefulWidget {
-  const _IdpFormEditor({
-    super.key,
-    required this.entry,
-    this.readOnly = false,
-    required this.onSave,
-    required this.onCancel,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final IdpEntry entry;
-  final bool readOnly;
-  final void Function(IdpEntry) onSave;
-  final VoidCallback onCancel;
-  final Future<void> Function(IdpEntry) onPrint;
-  final Future<void> Function(IdpEntry) onDownloadPdf;
-
-  @override
-  State<_IdpFormEditor> createState() => _IdpFormEditorState();
-}
-
-class _IdpFormEditorState extends State<_IdpFormEditor> {
-  late List<TextEditingController> _controllers;
-  late String? _performanceRating;
-  late String? _competenceRating;
-  late String? _successionPriorityRating;
-  late List<Map<String, TextEditingController>> _planRows;
-
-  @override
-  void initState() {
-    super.initState();
-    final e = widget.entry;
-    _controllers = [
-      TextEditingController(text: e.name ?? ''),
-      TextEditingController(text: e.position ?? ''),
-      TextEditingController(text: e.category ?? ''),
-      TextEditingController(text: e.division ?? ''),
-      TextEditingController(text: e.department ?? ''),
-      TextEditingController(text: e.education ?? ''),
-      TextEditingController(text: e.experience ?? ''),
-      TextEditingController(text: e.training ?? ''),
-      TextEditingController(text: e.eligibility ?? ''),
-      TextEditingController(text: e.significantAccomplishments ?? ''),
-      TextEditingController(text: e.targetPosition1 ?? ''),
-      TextEditingController(text: e.targetPosition2 ?? ''),
-      TextEditingController(text: e.avgRating ?? ''),
-      TextEditingController(text: e.opcr ?? ''),
-      TextEditingController(text: e.ipcr ?? ''),
-      TextEditingController(text: e.competencyDescription ?? ''),
-      TextEditingController(text: e.successionPriorityScore ?? ''),
-      TextEditingController(text: e.preparedBy ?? ''),
-      TextEditingController(text: e.reviewedBy ?? ''),
-      TextEditingController(text: e.notedBy ?? ''),
-      TextEditingController(text: e.approvedBy ?? ''),
-    ];
-    _performanceRating = e.performanceRating;
-    _competenceRating = e.competenceRating;
-    _successionPriorityRating = e.successionPriorityRating;
-    final plan = e.developmentPlanRows.isEmpty
-        ? <IdpPlanRow>[const IdpPlanRow(), const IdpPlanRow()]
-        : List<IdpPlanRow>.from(e.developmentPlanRows);
-    while (plan.length < 2) {
-      plan.add(const IdpPlanRow());
-    }
-    _planRows = plan
-        .take(2)
-        .map(
-          (r) => _rowControllers(
-            r.objectives ?? '',
-            r.ldProgram ?? '',
-            r.requirements ?? '',
-            r.timeFrame ?? '',
-          ),
-        )
-        .toList();
-  }
-
-  Map<String, TextEditingController> _rowControllers(
-    String obj,
-    String ld,
-    String req,
-    String tf,
-  ) {
-    return {
-      'objectives': TextEditingController(text: obj),
-      'ld_program': TextEditingController(text: ld),
-      'requirements': TextEditingController(text: req),
-      'time_frame': TextEditingController(text: tf),
-    };
-  }
-
-  @override
-  void dispose() {
-    for (final c in _controllers) {
-      c.dispose();
-    }
-    for (final row in _planRows) {
-      for (final c in row.values) {
-        c.dispose();
-      }
-    }
-    super.dispose();
-  }
-
-  IdpEntry _buildCurrentEntry() {
-    final rows = _planRows
-        .map(
-          (r) => IdpPlanRow(
-            objectives: r['objectives']!.text.trim().isEmpty
-                ? null
-                : r['objectives']!.text.trim(),
-            ldProgram: r['ld_program']!.text.trim().isEmpty
-                ? null
-                : r['ld_program']!.text.trim(),
-            requirements: r['requirements']!.text.trim().isEmpty
-                ? null
-                : r['requirements']!.text.trim(),
-            timeFrame: r['time_frame']!.text.trim().isEmpty
-                ? null
-                : r['time_frame']!.text.trim(),
-          ),
-        )
-        .toList();
-    return IdpEntry(
-      id: widget.entry.id,
-      name: _controllers[0].text.trim().isEmpty
-          ? null
-          : _controllers[0].text.trim(),
-      position: _controllers[1].text.trim().isEmpty
-          ? null
-          : _controllers[1].text.trim(),
-      category: _controllers[2].text.trim().isEmpty
-          ? null
-          : _controllers[2].text.trim(),
-      division: _controllers[3].text.trim().isEmpty
-          ? null
-          : _controllers[3].text.trim(),
-      department: _controllers[4].text.trim().isEmpty
-          ? null
-          : _controllers[4].text.trim(),
-      education: _controllers[5].text.trim().isEmpty
-          ? null
-          : _controllers[5].text.trim(),
-      experience: _controllers[6].text.trim().isEmpty
-          ? null
-          : _controllers[6].text.trim(),
-      training: _controllers[7].text.trim().isEmpty
-          ? null
-          : _controllers[7].text.trim(),
-      eligibility: _controllers[8].text.trim().isEmpty
-          ? null
-          : _controllers[8].text.trim(),
-      significantAccomplishments: _controllers[9].text.trim().isEmpty
-          ? null
-          : _controllers[9].text.trim(),
-      targetPosition1: _controllers[10].text.trim().isEmpty
-          ? null
-          : _controllers[10].text.trim(),
-      targetPosition2: _controllers[11].text.trim().isEmpty
-          ? null
-          : _controllers[11].text.trim(),
-      avgRating: _controllers[12].text.trim().isEmpty
-          ? null
-          : _controllers[12].text.trim(),
-      opcr: _controllers[13].text.trim().isEmpty
-          ? null
-          : _controllers[13].text.trim(),
-      ipcr: _controllers[14].text.trim().isEmpty
-          ? null
-          : _controllers[14].text.trim(),
-      performanceRating: _performanceRating,
-      competencyDescription: _controllers[15].text.trim().isEmpty
-          ? null
-          : _controllers[15].text.trim(),
-      competenceRating: _competenceRating,
-      successionPriorityScore: _controllers[16].text.trim().isEmpty
-          ? null
-          : _controllers[16].text.trim(),
-      successionPriorityRating: _successionPriorityRating,
-      developmentPlanRows: rows,
-      preparedBy: _controllers[17].text.trim().isEmpty
-          ? null
-          : _controllers[17].text.trim(),
-      reviewedBy: _controllers[18].text.trim().isEmpty
-          ? null
-          : _controllers[18].text.trim(),
-      notedBy: _controllers[19].text.trim().isEmpty
-          ? null
-          : _controllers[19].text.trim(),
-      approvedBy: _controllers[20].text.trim().isEmpty
-          ? null
-          : _controllers[20].text.trim(),
-      createdAt: widget.entry.createdAt,
-      updatedAt: widget.entry.updatedAt,
-    );
-  }
-
-  void _save() {
-    if (widget.readOnly) return;
-    widget.onSave(_buildCurrentEntry());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ro = widget.readOnly;
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const RspFormHeader(
-              formTitle: 'INDIVIDUAL DEVELOPMENT PLAN',
-              subtitle: 'LOCAL GOVERNMENT UNIT OF PLARIDEL',
-            ),
-            const SizedBox(height: 16),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _field('NAME', _controllers[0]),
-                      _field('POSITION', _controllers[1]),
-                      _field('CATEGORY', _controllers[2]),
-                      _field('DIVISION', _controllers[3]),
-                      _field('DEPARTMENT', _controllers[4]),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 24),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'QUALIFICATIONS',
-                        style: TextStyle(
-                          color: AppTheme.primaryNavy,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      _field('EDUCATION', _controllers[5]),
-                      _field('EXPERIENCE', _controllers[6]),
-                      _field('TRAINING', _controllers[7]),
-                      _field('ELIGIBILITY', _controllers[8]),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'SIGNIFICANT ACCOMPLISHMENTS:',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            _field('Significant accomplishments', _controllers[9]),
-            const SizedBox(height: 8),
-            Text(
-              'SUCCESSION ANALYSIS (RESULTS OF THE COMPETENCY-BASED SUCCESSION PRIORITY MATRIX)',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _field('Target position 1', _controllers[10]),
-            _field('Target position 2', _controllers[11]),
-            const SizedBox(height: 8),
-            Text(
-              'Required qualifications (reference on printed form)',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Performance, average 2 latest previous SPMS-IPCR Rating',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(child: _field('OPCR', _controllers[13])),
-                const SizedBox(width: 12),
-                Expanded(child: _field('IPCR', _controllers[14])),
-                const SizedBox(width: 12),
-                Expanded(child: _field('Average rating', _controllers[12])),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: IdpEntry.performanceRatingOptions.map((v) {
-                final label = switch (v) {
-                  'very_satisfactory' => 'Very Satisfactory',
-                  _ => v[0].toUpperCase() + v.substring(1),
-                };
-                return ChoiceChip(
-                  label: Text(label),
-                  selected: _performanceRating == v,
-                  onSelected: ro
-                      ? null
-                      : (_) => setState(() => _performanceRating = v),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 12),
-            _field('Competency', _controllers[15]),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: IdpEntry.competenceRatingOptions.map((v) {
-                final label = switch (v) {
-                  'immediate' => 'Immediate',
-                  _ => v[0].toUpperCase() + v.substring(1),
-                };
-                return ChoiceChip(
-                  label: Text(label),
-                  selected: _competenceRating == v,
-                  onSelected: ro
-                      ? null
-                      : (_) => setState(() => _competenceRating = v),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 12),
-            _field('Succession priority total score', _controllers[16]),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: IdpEntry.successionPriorityOptions.map((v) {
-                final label = switch (v) {
-                  'priority_2' => 'Priority 2',
-                  'priority_3' => 'Priority 3',
-                  _ => 'Priority',
-                };
-                return ChoiceChip(
-                  label: Text(label),
-                  selected: _successionPriorityRating == v,
-                  onSelected: ro
-                      ? null
-                      : (_) => setState(() => _successionPriorityRating = v),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'Development plan — Short Term (6 months)',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 10),
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    width: 88,
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.black54),
-                    ),
-                    child: const Text(
-                      'Short Term\n(6 months)',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Table(
-                      border: TableBorder.all(color: Colors.black54),
-                      columnWidths: const {
-                        0: FlexColumnWidth(1.4),
-                        1: FlexColumnWidth(1.2),
-                        2: FlexColumnWidth(1.2),
-                        3: FlexColumnWidth(0.9),
-                      },
-                      children: [
-                        TableRow(
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                          ),
-                          children: const [
-                            Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text(
-                                'OBJECTIVES',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text(
-                                'L & D PROGRAM',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text(
-                                'REQUIREMENTS',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text(
-                                'TIME FRAME',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        ...List.generate(_planRows.length, (i) {
-                          final r = _planRows[i];
-                          return TableRow(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.all(6),
-                                child: TextFormField(
-                                  controller: r['objectives'],
-                                  readOnly: ro,
-                                  decoration: rspUnderlinedField(''),
-                                  maxLines: 2,
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(6),
-                                child: TextFormField(
-                                  controller: r['ld_program'],
-                                  readOnly: ro,
-                                  decoration: rspUnderlinedField(''),
-                                  maxLines: 2,
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(6),
-                                child: TextFormField(
-                                  controller: r['requirements'],
-                                  readOnly: ro,
-                                  decoration: rspUnderlinedField(''),
-                                  maxLines: 2,
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(6),
-                                child: TextFormField(
-                                  controller: r['time_frame'],
-                                  readOnly: ro,
-                                  decoration: rspUnderlinedField(''),
-                                ),
-                              ),
-                            ],
-                          );
-                        }),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'Signatures',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _field('Prepared by (Employee)', _controllers[17]),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _field(
-                    'Reviewed by (Department Head)',
-                    _controllers[18],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _field('Noted by', _controllers[19]),
-                      Text(
-                        IdpEntry.defaultNotedByName,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      Text(
-                        IdpEntry.defaultNotedByTitle,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _field('Approved by', _controllers[20]),
-                      Text(
-                        IdpEntry.defaultApprovedByName,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      Text(
-                        IdpEntry.defaultApprovedByTitle,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            const RspFormFooter(),
-            const SizedBox(height: 24),
-            if (!ro) ...[
-              Row(
-                children: [
-                  FilledButton(onPressed: _save, child: const Text('Save')),
-                  const SizedBox(width: 12),
-                  TextButton(
-                    onPressed: widget.onCancel,
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                    icon: const Icon(Icons.print_rounded),
-                    tooltip: 'Print',
-                  ),
-                  IconButton(
-                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                    icon: const Icon(Icons.picture_as_pdf_rounded),
-                    tooltip: 'Download PDF',
-                  ),
-                ],
-              ),
-            ] else ...[
-              if (widget.entry.createdAt != null)
-                Text(
-                  'Created: ${widget.entry.createdAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-              if (widget.entry.updatedAt != null)
-                Text(
-                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _field(String label, TextEditingController c) {
-    return RspSpacedOutlineField(
-      child: TextFormField(
-        controller: c,
-        readOnly: widget.readOnly,
-        decoration: rspUnderlinedField(label),
-      ),
-    );
-  }
-}
-
-class _IdpList extends StatelessWidget {
-  const _IdpList({
-    required this.entries,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final List<IdpEntry> entries;
-  final void Function(IdpEntry) onEdit;
-  final void Function(String id) onDelete;
-  final Future<void> Function(IdpEntry) onPrint;
-  final Future<void> Function(IdpEntry) onDownloadPdf;
-
-  @override
-  Widget build(BuildContext context) {
-    const columns = [
-      RspRecordsColumn('Name', flex: 2),
-      RspRecordsColumn('Position', flex: 2.2),
-      RspRecordsColumn('Department', flex: 1.8),
-      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
-    ];
-    return RspRecordsListTable(
-      columns: columns,
-      rows: entries
-          .map(
-            (e) => [
-              rspRecordsTextCell(e.name ?? '', bold: true),
-              rspRecordsTextCell(e.position ?? ''),
-              rspRecordsTextCell(e.department ?? ''),
-              RspRecordsCrudActions(
-                onView: () => showReadOnlySavedEntryDialog(
-                  context,
-                  title: 'Individual development plan',
-                  subtitle: '${e.name} · ${e.position ?? ''}',
-                  previewBuilder: () => _IdpFormEditor(
-                    readOnly: true,
-                    entry: e,
-                    onSave: (_) {},
-                    onCancel: () {},
-                    onPrint: (_) async {},
-                    onDownloadPdf: (_) async {},
-                  ),
-                  contentWidth: 920,
-                  onPrint: () => onPrint(e),
-                ),
-                onEdit: () => onEdit(e),
-                onPrint: () => onPrint(e),
-                onDownloadPdf: () => onDownloadPdf(e),
-                onDelete: () async {
-                  if (e.id != null) onDelete(e.id!);
-                },
-                deleteDialogTitle: 'Delete IDP?',
-              ),
-            ],
-          )
-          .toList(),
-    );
-  }
-}
-
-/// RSP: Applicants Profile â€” job vacancy details + list of applicants.
+/// RSP: Applicants Profile Ã¢â‚¬â€ job vacancy details + list of applicants.
 class _RspApplicantsProfileSection extends StatefulWidget {
   const _RspApplicantsProfileSection();
 
@@ -3701,8 +2677,8 @@ class _RspApplicantsProfileSectionState
         return SavedRecordListItem(
           title: pos,
           subtitle:
-              '${e.applicants.length} applicant(s) · Posted ${e.dateOfPosting ?? "—"}',
-          detailDialogTitle: 'Applicants profile — $pos',
+              '${e.applicants.length} applicant(s) Â· Posted ${e.dateOfPosting ?? "â€”"}',
+          detailDialogTitle: 'Applicants profile â€” $pos',
           previewContentWidth: 960,
           previewBuilder: () => _ApplicantsProfileFormEditor(
             readOnly: true,
@@ -3825,6 +2801,9 @@ class _ApplicantsProfileFormEditor extends StatefulWidget {
 
 class _ApplicantsProfileFormEditorState
     extends State<_ApplicantsProfileFormEditor> {
+  static const _kApplicantsPerPage =
+      ApplicantsProfileEntry.applicantsPerFormPage;
+
   late TextEditingController _positionApplied;
   late TextEditingController _minRequirements;
   late TextEditingController _datePosting;
@@ -3832,6 +2811,7 @@ class _ApplicantsProfileFormEditorState
   late TextEditingController _preparedBy;
   late TextEditingController _checkedBy;
   late List<Map<String, TextEditingController>> _applicantRows;
+  int _currentFormPage = 0;
 
   @override
   void initState() {
@@ -3896,22 +2876,46 @@ class _ApplicantsProfileFormEditorState
     super.dispose();
   }
 
-  void _addApplicant() {
-    if (widget.readOnly) return;
-    setState(
-      () => _applicantRows.add(_applicantRow('', '', '', '', '', '', '')),
-    );
+  int get _formPageCount {
+    final n = _applicantRows.length;
+    return n == 0 ? 1 : ((n - 1) ~/ _kApplicantsPerPage) + 1;
   }
 
-  void _removeApplicant(int index) {
+  int get _currentPageStart => _currentFormPage * _kApplicantsPerPage;
+
+  int get _currentPageEnd =>
+      (_currentPageStart + _kApplicantsPerPage).clamp(0, _applicantRows.length);
+
+  List<Map<String, TextEditingController>> get _currentPageRows =>
+      _applicantRows.sublist(_currentPageStart, _currentPageEnd);
+
+  void _addApplicant() {
+    if (widget.readOnly) return;
+    setState(() {
+      _applicantRows.add(_applicantRow('', '', '', '', '', '', ''));
+      _currentFormPage = (_applicantRows.length - 1) ~/ _kApplicantsPerPage;
+    });
+  }
+
+  void _removeApplicant(int pageLocalIndex) {
     if (widget.readOnly) return;
     if (_applicantRows.length <= 1) return;
+    final globalIndex = _currentPageStart + pageLocalIndex;
     setState(() {
-      for (final c in _applicantRows[index].values) {
+      for (final c in _applicantRows[globalIndex].values) {
         c.dispose();
       }
-      _applicantRows.removeAt(index);
+      _applicantRows.removeAt(globalIndex);
+      final maxPage = _formPageCount - 1;
+      if (_currentFormPage > maxPage) {
+        _currentFormPage = maxPage.clamp(0, maxPage);
+      }
     });
+  }
+
+  void _goToFormPage(int page) {
+    final maxPage = _formPageCount - 1;
+    setState(() => _currentFormPage = page.clamp(0, maxPage));
   }
 
   ApplicantsProfileEntry _buildCurrentEntry() {
@@ -4016,13 +3020,27 @@ class _ApplicantsProfileFormEditorState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Text(
-                    'Applicants',
-                    style: TextStyle(
-                      color: AppTheme.primaryNavy,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Applicants',
+                        style: TextStyle(
+                          color: AppTheme.primaryNavy,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Up to $_kApplicantsPerPage rows per form. Row 11+ opens the next form automatically.',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 if (!ro) ...[
@@ -4035,6 +3053,56 @@ class _ApplicantsProfileFormEditorState
                 ],
               ],
             ),
+            if (_formPageCount > 1) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Previous form',
+                    onPressed: _currentFormPage > 0
+                        ? () => _goToFormPage(_currentFormPage - 1)
+                        : null,
+                    icon: const Icon(Icons.chevron_left_rounded),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Text(
+                      'Form ${_currentFormPage + 1} of $_formPageCount',
+                      style: const TextStyle(
+                        color: AppTheme.primaryNavy,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Next form',
+                    onPressed: _currentFormPage < _formPageCount - 1
+                        ? () => _goToFormPage(_currentFormPage + 1)
+                        : null,
+                    icon: const Icon(Icons.chevron_right_rounded),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Rows ${_currentPageStart + 1}–$_currentPageEnd of ${_applicantRows.length}',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 8),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -4049,8 +3117,8 @@ class _ApplicantsProfileFormEditorState
                   DataColumn(label: Text('REMARK (DISABILITY)')),
                   DataColumn(label: Text('')),
                 ],
-                rows: List.generate(_applicantRows.length, (i) {
-                  final r = _applicantRows[i];
+                rows: List.generate(_currentPageRows.length, (i) {
+                  final r = _currentPageRows[i];
                   return DataRow(
                     cells: [
                       DataCell(
@@ -4316,7 +3384,7 @@ class _ApplicantsProfileList extends StatelessWidget {
   }
 }
 
-/// RSP: Comparative Assessment of Candidates for Promotion â€” form only, no names/values pre-filled.
+/// RSP: Comparative Assessment of Candidates for Promotion Ã¢â‚¬â€ form only, no names/values pre-filled.
 class _RspComparativeAssessmentSection extends StatefulWidget {
   const _RspComparativeAssessmentSection();
 
@@ -4450,7 +3518,7 @@ class _RspComparativeAssessmentSectionState
         return SavedRecordListItem(
           title: pos,
           subtitle: '${e.candidates.length} candidate(s)',
-          detailDialogTitle: 'Comparative assessment — $pos',
+          detailDialogTitle: 'Comparative assessment â€” $pos',
           previewContentWidth: 960,
           previewBuilder: () => _ComparativeAssessmentEditor(
             readOnly: true,
@@ -5428,7 +4496,7 @@ class _RspSavedEntryCard extends StatelessWidget {
   }
 }
 
-/// RSP: Promotion Certification / Screening — form only, no names/values pre-filled.
+/// RSP: Promotion Certification / Screening â€” form only, no names/values pre-filled.
 class _RspPromotionCertificationSection extends StatefulWidget {
   const _RspPromotionCertificationSection();
 
@@ -5561,7 +4629,7 @@ class _RspPromotionCertificationSectionState
         return SavedRecordListItem(
           title: pos,
           subtitle: '${e.candidates.length} candidate(s)',
-          detailDialogTitle: 'Promotion certification — $pos',
+          detailDialogTitle: 'Promotion certification â€” $pos',
           previewContentWidth: 960,
           previewBuilder: () => _PromotionCertificationEditor(
             readOnly: true,
@@ -5587,7 +4655,7 @@ class _RspPromotionCertificationSectionState
           icon: Icons.verified_outlined,
           title: 'Promotion Certification / Screening',
           subtitle:
-              'Certification that candidate(s) have been screened and found qualified for promotion. Form only—no names or values pre-filled.',
+              'Certification that candidate(s) have been screened and found qualified for promotion. Form onlyâ€”no names or values pre-filled.',
         ),
         const SizedBox(height: 22),
         _rspSectionToolbar(
@@ -6290,7 +5358,7 @@ class _PromotionCertificationList extends StatelessWidget {
   }
 }
 
-/// RSP: Selection Line-up â€” date, agency/office, vacant position, item no., applicants table. Form only, no pre-filled names.
+/// RSP: Selection Line-up Ã¢â‚¬â€ date, agency/office, vacant position, item no., applicants table. Form only, no pre-filled names.
 class _RspSelectionLineupSection extends StatefulWidget {
   const _RspSelectionLineupSection();
 
@@ -6422,8 +5490,8 @@ class _RspSelectionLineupSectionState
             : '(No position)';
         return SavedRecordListItem(
           title: pos,
-          subtitle: '${e.date ?? "—"} · ${e.applicants.length} applicant(s)',
-          detailDialogTitle: 'Selection line-up — $pos',
+          subtitle: '${e.date ?? "â€”"} Â· ${e.applicants.length} applicant(s)',
+          detailDialogTitle: 'Selection line-up â€” $pos',
           previewContentWidth: 1000,
           previewBuilder: () => _SelectionLineupEditor(
             readOnly: true,
@@ -6978,7 +6046,7 @@ class _SelectionLineupList extends StatelessWidget {
   }
 }
 
-/// RSP: Turn-Around Time â€” position, office, dates, applicant tracking table. Form only, no pre-filled names.
+/// RSP: Turn-Around Time Ã¢â‚¬â€ position, office, dates, applicant tracking table. Form only, no pre-filled names.
 class _RspTurnAroundTimeSection extends StatefulWidget {
   const _RspTurnAroundTimeSection();
 
@@ -7109,8 +6177,8 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
             : '(No position)';
         return SavedRecordListItem(
           title: pos,
-          subtitle: '${e.office ?? "—"} · ${e.applicants.length} applicant(s)',
-          detailDialogTitle: 'Turn-around time — $pos',
+          subtitle: '${e.office ?? "â€”"} Â· ${e.applicants.length} applicant(s)',
+          detailDialogTitle: 'Turn-around time â€” $pos',
           previewContentWidth: 1200,
           previewBuilder: () => _TurnAroundTimeEditor(
             readOnly: true,
@@ -7141,7 +6209,7 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Position, office, dates, and applicant tracking (assessment, exam, deliberation, job offer, assumption, cost). Form onlyâ€”no pre-filled names.',
+          'Position, office, dates, and applicant tracking (assessment, exam, deliberation, job offer, assumption, cost). Form onlyÃ¢â‚¬â€no pre-filled names.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
         const SizedBox(height: 24),
@@ -7751,7 +6819,7 @@ class _TurnAroundTimeList extends StatelessWidget {
                 onView: () => showReadOnlySavedEntryDialog(
                   context,
                   title: 'Turn-around time',
-                  subtitle: '${e.position ?? ''} · ${e.office ?? ''}',
+                  subtitle: '${e.position ?? ''} Â· ${e.office ?? ''}',
                   previewBuilder: () => _TurnAroundTimeEditor(
                     readOnly: true,
                     entry: e,
@@ -7884,7 +6952,7 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   String _vacancyEntrySummary(_VacancyFormItem v) {
     final h = v.headline.text.trim();
     if (h.isNotEmpty) {
-      return h.length > 52 ? '${h.substring(0, 52)}…' : h;
+      return h.length > 52 ? '${h.substring(0, 52)}â€¦' : h;
     }
     final parts = <String>[
       v.education.text.trim(),
@@ -7892,12 +6960,12 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
       v.training.text.trim(),
     ].where((s) => s.isNotEmpty).toList();
     if (parts.isNotEmpty) {
-      final joined = parts.join(' · ');
-      return joined.length > 64 ? '${joined.substring(0, 64)}…' : joined;
+      final joined = parts.join(' Â· ');
+      return joined.length > 64 ? '${joined.substring(0, 64)}â€¦' : joined;
     }
     final m = v.maxApplicants.text.trim();
     if (m.isNotEmpty) return 'Max applicants: $m';
-    return 'No headline yet — expand to edit';
+    return 'No headline yet â€” expand to edit';
   }
 
   @override
@@ -8991,8 +8059,14 @@ class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
   }
 }
 
-/// RSP: List of applications and exam results for admin monitoring.
+enum _RspMonitorView { applications, examResults }
+
+/// RSP: Applications monitor or exam-results monitor (shared data loader).
 class _RspApplicationsMonitor extends StatefulWidget {
+  const _RspApplicationsMonitor({required this.view});
+
+  final _RspMonitorView view;
+
   @override
   State<_RspApplicationsMonitor> createState() =>
       _RspApplicationsMonitorState();
@@ -9007,6 +8081,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   bool _loading = true;
   bool _syncing = false;
   bool _exportingReport = false;
+  String? _adminPassingApplicantId;
   final ScrollController _horizontalScrollController = ScrollController();
 
   Set<String> get _positionFilterOptions {
@@ -9092,6 +8167,64 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     final bei = _examAnswersSubsection(exam.answersJson, 'bei');
     final a = bei?['answers'];
     return a is List && a.isNotEmpty;
+  }
+
+  Future<void> _confirmAndAdminPassExam(
+    RecruitmentApplication app,
+    RecruitmentExamResult? existing,
+  ) async {
+    if (_adminPassingApplicantId != null) return;
+    final ok = await _AdminExamBypassDialog.show(
+      context,
+      app: app,
+      existing: existing,
+    );
+    if (ok != true || !mounted) return;
+    await _adminPassExamPerfect(app);
+  }
+
+  Future<void> _adminPassExamPerfect(RecruitmentApplication app) async {
+    setState(() => _adminPassingApplicantId = app.id.toLowerCase());
+    try {
+      var beiCount = 8;
+      try {
+        final beiQs = await RecruitmentRepo.instance.getExamQuestions('bei');
+        if (beiQs.isNotEmpty) beiCount = beiQs.length;
+      } catch (_) {}
+
+      final answersJson = RspScreeningScores.buildAdminExamBypassAnswersJson(
+        beiQuestionCount: beiCount,
+      );
+
+      await RecruitmentRepo.instance.submitExamResult(
+        applicationId: app.id,
+        scorePercent: 100.0,
+        passed: true,
+        answersJson: answersJson,
+      );
+
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${app.fullName.trim().isEmpty ? 'Applicant' : app.fullName.trim()} marked passed — 100% on all four exams.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not mark as passed. ${userFacingApiError(e)}',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _adminPassingApplicantId = null);
+    }
   }
 
   static const Color _kPassBg = Color(0xFFE8F5E9);
@@ -9183,6 +8316,49 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _examResultColumnCell(
+    BuildContext context, {
+    required RecruitmentApplication app,
+    required RecruitmentExamResult? exam,
+    required bool isPassing,
+  }) {
+    if (isPassing) {
+      return const SizedBox(
+        width: 22,
+        height: 22,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+
+    if (exam?.passed == true) {
+      return _scoreBreakdownStatusPill(context, exam: exam);
+    }
+
+    return Tooltip(
+      message:
+          'Admin bypass: mark passed with 100% on General, Math, Gen. info, and BEI',
+      child: FilledButton.tonal(
+        onPressed: () => _confirmAndAdminPassExam(app, exam),
+        style: FilledButton.styleFrom(
+          backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
+          foregroundColor: AppTheme.dashIsDark(context)
+              ? AppTheme.primaryNavyLight
+              : AppTheme.primaryNavy,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          minimumSize: const Size(0, 32),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+        child: Text(
+          exam == null ? 'Mark passed' : 'Override pass',
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }
@@ -9279,7 +8455,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               ),
               _scoreBreakdownHeaderCell(
                 dialogContext,
-                'Grade',
+                'Grade BEI',
                 align: TextAlign.center,
               ),
               _scoreBreakdownHeaderCell(
@@ -9289,7 +8465,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               ),
             ],
           ),
-          ..._applications.asMap().entries.map((entry) {
+          ..._filteredApplications.asMap().entries.map((entry) {
             final index = entry.key;
             final app = entry.value;
             final exam = _examResults[app.id.toLowerCase()];
@@ -9306,7 +8482,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
             }
 
             String scoreLabel(double? v) =>
-                v == null ? '—' : '${v.toStringAsFixed(0)}%';
+                v == null ? _kNa : '${v.toStringAsFixed(0)}%';
 
             final canGradeBei = exam != null && _hasBeiAnswers(exam);
             final rowBg = index.isOdd
@@ -9322,6 +8498,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 value: value,
               ),
             );
+
+            final isPassingThis =
+                _adminPassingApplicantId == app.id.toLowerCase();
+            final isExamView = widget.view == _RspMonitorView.examResults;
 
             return TableRow(
               decoration: BoxDecoration(color: rowBg),
@@ -9342,10 +8522,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 ),
                 _scoreBreakdownBodyCell(
                   Text(
-                    (app.positionAppliedFor != null &&
-                            app.positionAppliedFor!.trim().isNotEmpty)
-                        ? app.positionAppliedFor!.trim()
-                        : '—',
+                    _displayOrNa(app.positionAppliedFor),
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     softWrap: true,
@@ -9430,7 +8607,17 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 _scoreBreakdownBodyCell(
                   Align(
                     alignment: Alignment.center,
-                    child: _scoreBreakdownStatusPill(dialogContext, exam: exam),
+                    child: isExamView
+                        ? _examResultColumnCell(
+                            dialogContext,
+                            app: app,
+                            exam: exam,
+                            isPassing: isPassingThis,
+                          )
+                        : _scoreBreakdownStatusPill(
+                            dialogContext,
+                            exam: exam,
+                          ),
                   ),
                   background: rowBg,
                   padding: const EdgeInsets.symmetric(
@@ -9467,203 +8654,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               ),
             ),
           ),
-        );
-      },
-    );
-  }
-
-  Future<void> _showApplicantScoreBreakdownDialog() async {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        final hasData = _applications.isNotEmpty;
-        final hairline = AppTheme.dashHairlineOf(ctx);
-        final panel = AppTheme.dashPanelOf(ctx);
-        return AlertDialog(
-          backgroundColor: panel,
-          surfaceTintColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 22,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: BorderSide(color: hairline),
-          ),
-          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-          contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-          actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-          title: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      AppTheme.primaryNavy.withValues(alpha: 0.16),
-                      AppTheme.primaryNavyLight.withValues(alpha: 0.08),
-                    ],
-                  ),
-                  border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.22),
-                  ),
-                ),
-                child: Icon(
-                  Icons.analytics_outlined,
-                  size: 26,
-                  color: AppTheme.dashIsDark(ctx)
-                      ? AppTheme.primaryNavyLight
-                      : AppTheme.primaryNavy,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Applicant score breakdown',
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(ctx),
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.4,
-                        height: 1.15,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'View section scores below. Grade BEI from the Grade column when answers exist; overall scores update automatically.',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(ctx),
-                        fontSize: 14,
-                        height: 1.5,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          content: hasData
-              ? Builder(
-                  builder: (_) {
-                    final mq = MediaQuery.sizeOf(ctx);
-                    final contentWidth = (mq.width * 0.94 - 24).clamp(
-                      560.0,
-                      1100.0,
-                    );
-                    final contentHeight = (mq.height * 0.68).clamp(
-                      360.0,
-                      720.0,
-                    );
-                    return SizedBox(
-                      width: contentWidth,
-                      height: contentHeight,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          color: AppTheme.dashMutedSurfaceOf(ctx),
-                          border: Border.all(color: hairline),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Container(
-                                height: 3,
-                                decoration: const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      AppTheme.primaryNavy,
-                                      AppTheme.primaryNavyLight,
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        color: panel,
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: hairline),
-                                      ),
-                                      child: _buildScoreBreakdownDataTable(ctx),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                )
-              : SizedBox(
-                  width: 320,
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      'No applicants yet.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: AppTheme.dashTextSecondaryOf(
-                          ctx,
-                        ).withValues(alpha: 0.9),
-                      ),
-                    ),
-                  ),
-                ),
-          actions: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: const LinearGradient(
-                  colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.25),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: FilledButton.icon(
-                onPressed: () => Navigator.of(ctx).pop(),
-                icon: const Icon(Icons.check_rounded, size: 20),
-                label: const Text(
-                  'Close',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.transparent,
-                  foregroundColor: Colors.white,
-                  shadowColor: Colors.transparent,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 14,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
-          ],
         );
       },
     );
@@ -9797,7 +8787,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       parts.add('Applied date: ${_formatDateShort(_selectedAppliedDate!)}');
     }
     if (parts.isEmpty) return 'Filters: none (all applications)';
-    return 'Filters: ${parts.join(' · ')}';
+    return 'Filters: ${parts.join(' Â· ')}';
   }
 
   List<RspApplicationsReportRow> _reportRows() {
@@ -9942,19 +8932,32 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         final e = entries[i];
         final fileName = e['fileName']!;
         final kind = RspApplicationDocKind.fromStorageFileName(fileName);
-        final ok = kind != null
-            ? await RecruitmentRepo.instance
-                  .setApplicationTypedAttachmentIfMissing(
-                    e['applicationId']!,
-                    e['path']!,
-                    fileName,
-                    kind,
-                  )
-            : await RecruitmentRepo.instance.setApplicationAttachmentIfMissing(
-                e['applicationId']!,
-                e['path']!,
-                fileName,
-              );
+        final finalReqKind =
+            RspFinalRequirementDocKind.fromStorageFileName(fileName);
+        final bool ok;
+        if (kind != null) {
+          ok = await RecruitmentRepo.instance
+              .setApplicationTypedAttachmentIfMissing(
+            e['applicationId']!,
+            e['path']!,
+            fileName,
+            kind,
+          );
+        } else if (finalReqKind != null) {
+          ok = await RecruitmentRepo.instance
+              .setApplicationFinalRequirementIfMissing(
+            e['applicationId']!,
+            e['path']!,
+            fileName,
+            finalReqKind,
+          );
+        } else {
+          ok = await RecruitmentRepo.instance.setApplicationAttachmentIfMissing(
+            e['applicationId']!,
+            e['path']!,
+            fileName,
+          );
+        }
         if (ok) linked++;
         if (i > 0 && i % 5 == 0) {
           await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -9993,6 +8996,23 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   }
 
   static const _kNa = 'N/A';
+
+  ({String city, String barangay, String street}) _appAddressParts(
+    RecruitmentApplication app,
+  ) {
+    final p = parseStoredAddress(app.address);
+    return (city: p.city, barangay: p.barangay, street: p.street);
+  }
+
+  String _displayOrNa(String? value) {
+    final v = (value ?? '').trim();
+    if (v.isEmpty) return _kNa;
+    final lower = v.toLowerCase();
+    if (lower == 'none' || lower == 'null') return _kNa;
+    if (v == '\u2014' || v == '\u2013' || v == '-') return _kNa;
+    if (v.contains('\u00e2\u20ac')) return _kNa;
+    return v;
+  }
 
   Widget _tableCell(double width, Widget child) {
     return TableCell(
@@ -10084,32 +9104,17 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     );
   }
 
-  Widget _examOutcomeChip(BuildContext context, bool passed) {
-    final dark = AppTheme.dashIsDark(context);
-    final fg = passed
-        ? (dark ? const Color(0xFF81C784) : const Color(0xFF2E7D32))
-        : (dark ? const Color(0xFFEF9A9A) : const Color(0xFFC62828));
-    final bg = passed
-        ? (dark ? const Color(0xFF1E3A24) : const Color(0xFFE8F5E9))
-        : (dark ? const Color(0xFF3A2020) : const Color(0xFFFFEBEE));
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: fg.withValues(alpha: 0.25)),
-      ),
-      child: Text(
-        passed ? 'Passed' : 'Failed',
-        maxLines: 1,
-        softWrap: false,
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: fg),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final isExamView = widget.view == _RspMonitorView.examResults;
+    final isApplicationsView = !isExamView;
+    final pageTitle = isExamView ? 'Exam Results' : 'Applications';
+    final pageSubtitle = isExamView
+        ? 'Section scores and pass/fail below. Use Mark passed in the Result column for admin bypass (100% on all 4 exams). Use Grade BEI to score real BEI responses.'
+        : 'Monitor applicant submissions, attachments, and document review status.';
+    final pageIcon = isExamView
+        ? Icons.fact_check_outlined
+        : Icons.assignment_outlined;
     final hairline = AppTheme.dashHairlineOf(context);
     final panel = AppTheme.dashPanelOf(context);
     final muted = AppTheme.dashMutedSurfaceOf(context);
@@ -10125,25 +9130,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     );
     final filteredApplications = _filteredApplications;
 
-    final viewScoreBtn = Tooltip(
-      message:
-          'Open the score table to grade BEI, see section scores, and pass/fail.',
-      child: FilledButton.icon(
-        onPressed: _loading ? null : _showApplicantScoreBreakdownDialog,
-        icon: const Icon(Icons.assessment_outlined, size: 18),
-        label: const Text('View score'),
-        style: FilledButton.styleFrom(
-          backgroundColor: AppTheme.primaryNavy,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-    );
-
     final generateReportBtn = Tooltip(
       message:
           'Export the filtered applicant list and exam scores (CSV or PDF).',
@@ -10158,7 +9144,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.summarize_outlined, size: 18),
-        label: Text(_exportingReport ? 'Generating…' : 'Generate report'),
+        label: Text(_exportingReport ? 'Generatingâ€¦' : 'Generate report'),
         style: OutlinedButton.styleFrom(
           foregroundColor: AppTheme.dashIsDark(context)
               ? AppTheme.primaryNavyLight
@@ -10251,7 +9237,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 ),
               ),
               child: Icon(
-                Icons.assignment_outlined,
+                pageIcon,
                 size: 26,
                 color: AppTheme.dashIsDark(context)
                     ? AppTheme.primaryNavyLight
@@ -10267,7 +9253,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     children: [
                       Expanded(
                         child: Text(
-                          'Applications & Exam Results',
+                          pageTitle,
                           style: TextStyle(
                             color: AppTheme.dashTextPrimaryOf(context),
                             fontSize: 26,
@@ -10298,8 +9284,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Monitor all documents (basic info) and screening exam results from applicants. '
-                    'Use View score to open the score table — grade BEI and review section results there.',
+                    pageSubtitle,
                     style: TextStyle(
                       color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 14,
@@ -10327,11 +9312,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    viewScoreBtn,
-                    const SizedBox(height: 10),
                     generateReportBtn,
-                    const SizedBox(height: 10),
-                    syncBtn,
+                    if (isApplicationsView) const SizedBox(height: 10),
+                    if (isApplicationsView) syncBtn,
                     const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
                       initialValue: _selectedPositionFilter,
@@ -10408,7 +9391,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 spacing: 10,
                 runSpacing: 10,
                 crossAxisAlignment: WrapCrossAlignment.center,
-                children: [viewScoreBtn, generateReportBtn, syncBtn],
+                children: [
+                  generateReportBtn,
+                  if (isApplicationsView) syncBtn,
+                ],
               );
             },
           ),
@@ -10553,13 +9539,18 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     ),
                   ),
                 )
+              else if (isExamView)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: _buildScoreBreakdownDataTable(context),
+                )
               else
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final scrollWidth = constraints.maxWidth.isFinite
                         ? constraints.maxWidth
                         : MediaQuery.sizeOf(context).width;
-                    const fixedTableWidth = 2698.0;
+                    const fixedTableWidth = 3350.0;
                     final tableWidth = scrollWidth > fixedTableWidth
                         ? scrollWidth
                         : fixedTableWidth;
@@ -10585,26 +9576,32 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                   2: const FixedColumnWidth(140), // Last
                                   3: const FixedColumnWidth(90), // Suffix
                                   4: const FixedColumnWidth(90), // Gender
-                                  5: const FixedColumnWidth(260), // Email
-                                  6: const FixedColumnWidth(140), // Phone
-                                  7: const FixedColumnWidth(
+                                  5: const FixedColumnWidth(150), // Course
+                                  6: const FixedColumnWidth(70), // Age
+                                  7: const FixedColumnWidth(140), // Civil status
+                                  8: const FixedColumnWidth(
+                                    170,
+                                  ), // City / Municipality
+                                  9: const FixedColumnWidth(150), // Barangay
+                                  10: const FixedColumnWidth(180), // Street
+                                  11: const FixedColumnWidth(260), // Email
+                                  12: const FixedColumnWidth(140), // Phone
+                                  13: const FixedColumnWidth(
                                     200,
                                   ), // Position applied
-                                  8: const FixedColumnWidth(170), // Status
-                                  9: const FixedColumnWidth(100), // Exam
-                                  10: const FixedColumnWidth(108), // Exam score
-                                  11: const FixedColumnWidth(
+                                  14: const FixedColumnWidth(170), // Status
+                                  15: const FixedColumnWidth(
                                     188,
                                   ), // Application letter
-                                  12: const FixedColumnWidth(188), // Resume
-                                  13: const FixedColumnWidth(188), // TOR
-                                  14: const FixedColumnWidth(
+                                  16: const FixedColumnWidth(188), // Resume
+                                  17: const FixedColumnWidth(188), // TOR
+                                  18: const FixedColumnWidth(
                                     200,
                                   ), // Eligibility/trainings
-                                  15: const FixedColumnWidth(
+                                  19: const FixedColumnWidth(
                                     248,
                                   ), // Document review
-                                  16: const FixedColumnWidth(108), // Actions
+                                  20: const FixedColumnWidth(108), // Actions
                                 },
                                 defaultVerticalAlignment:
                                     TableCellVerticalAlignment.middle,
@@ -10655,6 +9652,36 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         Text('Gender', style: tableHeaderStyle),
                                       ),
                                       _tableCell(
+                                        150,
+                                        Text('Course', style: tableHeaderStyle),
+                                      ),
+                                      _tableCell(
+                                        70,
+                                        Text('Age', style: tableHeaderStyle),
+                                      ),
+                                      _tableCell(
+                                        140,
+                                        Text(
+                                          'Civil status',
+                                          style: tableHeaderStyle,
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        170,
+                                        Text(
+                                          'City / Municipality',
+                                          style: tableHeaderStyle,
+                                        ),
+                                      ),
+                                      _tableCell(
+                                        150,
+                                        Text('Barangay', style: tableHeaderStyle),
+                                      ),
+                                      _tableCell(
+                                        180,
+                                        Text('Street', style: tableHeaderStyle),
+                                      ),
+                                      _tableCell(
                                         260,
                                         Text('Email', style: tableHeaderStyle),
                                       ),
@@ -10672,17 +9699,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                       _tableCell(
                                         170,
                                         Text('Status', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        100,
-                                        Text('Exam', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        108,
-                                        Text(
-                                          'Exam score',
-                                          style: tableHeaderStyle,
-                                        ),
                                       ),
                                       _tableCell(
                                         188,
@@ -10726,46 +9742,52 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                     ri,
                                   ) {
                                     final app = filteredApplications[ri];
-                                    final exam =
-                                        _examResults[app.id.toLowerCase()];
                                     final textStyle = TextStyle(
                                       fontSize: 13,
                                       color: primary,
                                       fontWeight: FontWeight.w500,
                                     );
-                                    String? beiSummaryLine;
-                                    if (exam != null && _hasBeiAnswers(exam)) {
-                                      final beiPct = _beiSectionScorePercent(
-                                        exam.answersJson,
-                                      );
-                                      beiSummaryLine = beiPct == null
-                                          ? 'BEI: pending'
-                                          : 'BEI: ${beiPct.toStringAsFixed(0)}%';
-                                    }
 
                                     final full = app.fullName.trim();
                                     final parts = full
                                         .split(RegExp(r'\s+'))
                                         .where((p) => p.trim().isNotEmpty)
                                         .toList();
-                                    final fallbackFirst = parts.isNotEmpty
-                                        ? parts.first
-                                        : '—';
-                                    final fallbackLast = parts.length >= 2
-                                        ? parts.last
-                                        : '—';
-                                    final firstName =
-                                        (app.firstName ?? '').trim().isNotEmpty
-                                        ? app.firstName!.trim()
-                                        : fallbackFirst;
-                                    final middleName = (app.middleName ?? '')
-                                        .trim();
-                                    final lastName =
-                                        (app.lastName ?? '').trim().isNotEmpty
-                                        ? app.lastName!.trim()
-                                        : fallbackLast;
-                                    final suffix = (app.suffix ?? '').trim();
-                                    final gender = (app.sex ?? '').trim();
+                                    final firstName = _displayOrNa(
+                                      (app.firstName ?? '').trim().isNotEmpty
+                                          ? app.firstName
+                                          : (parts.isNotEmpty
+                                                ? parts.first
+                                                : null),
+                                    );
+                                    final middleName = _displayOrNa(
+                                      app.middleName,
+                                    );
+                                    final lastName = _displayOrNa(
+                                      (app.lastName ?? '').trim().isNotEmpty
+                                          ? app.lastName
+                                          : (parts.length >= 2
+                                                ? parts.last
+                                                : null),
+                                    );
+                                    final suffix = _displayOrNa(app.suffix);
+                                    final gender = _displayOrNa(app.sex);
+                                    final course = _displayOrNa(app.course);
+                                    final age = _displayOrNa(app.age);
+                                    final civilStatus =
+                                        _displayOrNa(app.civilStatus);
+                                    final addr = _appAddressParts(app);
+                                    final city = _displayOrNa(
+                                      addr.city.isEmpty ? null : addr.city,
+                                    );
+                                    final barangay = _displayOrNa(
+                                      addr.barangay.isEmpty
+                                          ? null
+                                          : addr.barangay,
+                                    );
+                                    final street = _displayOrNa(
+                                      addr.street.isEmpty ? null : addr.street,
+                                    );
 
                                     return TableRow(
                                       decoration: ri.isOdd
@@ -10792,9 +9814,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         _tableCell(
                                           140,
                                           Text(
-                                            middleName.isEmpty
-                                                ? '—'
-                                                : middleName,
+                                            middleName,
                                             style: textStyle,
                                             overflow: TextOverflow.ellipsis,
                                             maxLines: 2,
@@ -10814,7 +9834,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         _tableCell(
                                           90,
                                           Text(
-                                            suffix.isEmpty ? '—' : suffix,
+                                            suffix,
                                             style: textStyle,
                                             overflow: TextOverflow.ellipsis,
                                             maxLines: 1,
@@ -10824,11 +9844,82 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         _tableCell(
                                           90,
                                           Text(
-                                            gender.isEmpty ? '—' : gender,
+                                            gender,
                                             style: textStyle,
                                             overflow: TextOverflow.ellipsis,
                                             maxLines: 1,
                                             softWrap: false,
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          150,
+                                          Tooltip(
+                                            message: course,
+                                            child: Text(
+                                              course,
+                                              style: textStyle,
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 2,
+                                              softWrap: true,
+                                            ),
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          70,
+                                          Text(
+                                            age,
+                                            style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          140,
+                                          Text(
+                                            civilStatus,
+                                            style: textStyle,
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 2,
+                                            softWrap: true,
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          170,
+                                          Tooltip(
+                                            message: city,
+                                            child: Text(
+                                              city,
+                                              style: textStyle,
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 2,
+                                              softWrap: true,
+                                            ),
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          150,
+                                          Tooltip(
+                                            message: barangay,
+                                            child: Text(
+                                              barangay,
+                                              style: textStyle,
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 2,
+                                              softWrap: true,
+                                            ),
+                                          ),
+                                        ),
+                                        _tableCell(
+                                          180,
+                                          Tooltip(
+                                            message: street,
+                                            child: Text(
+                                              street,
+                                              style: textStyle,
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 2,
+                                              softWrap: true,
+                                            ),
                                           ),
                                         ),
                                         _tableCell(
@@ -10847,7 +9938,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         _tableCell(
                                           140,
                                           Text(
-                                            app.phone ?? _kNa,
+                                            _displayOrNa(app.phone),
                                             style: textStyle,
                                             overflow: TextOverflow.ellipsis,
                                             maxLines: 1,
@@ -10856,16 +9947,13 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                         _tableCell(
                                           200,
                                           Tooltip(
-                                            message:
-                                                app.positionAppliedFor ?? _kNa,
+                                            message: _displayOrNa(
+                                              app.positionAppliedFor,
+                                            ),
                                             child: Text(
-                                              (app.positionAppliedFor != null &&
-                                                      app.positionAppliedFor!
-                                                          .trim()
-                                                          .isNotEmpty)
-                                                  ? app.positionAppliedFor!
-                                                        .trim()
-                                                  : _kNa,
+                                              _displayOrNa(
+                                                app.positionAppliedFor,
+                                              ),
                                               style: textStyle,
                                               overflow: TextOverflow.ellipsis,
                                               maxLines: 2,
@@ -10879,65 +9967,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                             context,
                                             app.status,
                                           ),
-                                        ),
-                                        _tableCell(
-                                          100,
-                                          exam == null
-                                              ? Text(
-                                                  _kNa,
-                                                  style: textStyle.copyWith(
-                                                    color: secondary,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                )
-                                              : Align(
-                                                  alignment:
-                                                      Alignment.centerLeft,
-                                                  child: _examOutcomeChip(
-                                                    context,
-                                                    exam.passed,
-                                                  ),
-                                                ),
-                                        ),
-                                        _tableCell(
-                                          108,
-                                          exam == null
-                                              ? Text(_kNa, style: textStyle)
-                                              : Tooltip(
-                                                  message:
-                                                      'Open View score to grade BEI and see all sections.',
-                                                  child: Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: [
-                                                      Text(
-                                                        '${exam.scorePercent.toStringAsFixed(0)}%',
-                                                        style: textStyle,
-                                                      ),
-                                                      if (beiSummaryLine !=
-                                                          null) ...[
-                                                        const SizedBox(
-                                                          height: 2,
-                                                        ),
-                                                        Text(
-                                                          beiSummaryLine,
-                                                          style: TextStyle(
-                                                            fontSize: 11,
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                            color: secondary
-                                                                .withValues(
-                                                                  alpha: 0.9,
-                                                                ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ],
-                                                  ),
-                                                ),
                                         ),
                                         TableCell(
                                           verticalAlignment:
@@ -11097,6 +10126,433 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _AdminExamBypassDialog extends StatelessWidget {
+  const _AdminExamBypassDialog({
+    required this.app,
+    required this.existing,
+  });
+
+  final RecruitmentApplication app;
+  final RecruitmentExamResult? existing;
+
+  static Future<bool?> show(
+    BuildContext context, {
+    required RecruitmentApplication app,
+    required RecruitmentExamResult? existing,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.48),
+      builder: (ctx) => _AdminExamBypassDialog(app: app, existing: existing),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final dark = AppTheme.dashIsDark(context);
+    final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
+    final alreadyPassed = existing?.passed == true;
+    final hasExam = existing != null;
+    final name = app.fullName.trim().isEmpty ? 'Unnamed applicant' : app.fullName.trim();
+    final position = (app.positionAppliedFor ?? '').trim();
+    final email = app.email.trim();
+
+    String statusLabel;
+    Color statusBg;
+    Color statusFg;
+    IconData statusIcon;
+    if (alreadyPassed) {
+      statusLabel = 'Currently passed';
+      statusBg = dark ? const Color(0xFF1E3A24) : const Color(0xFFE8F5E9);
+      statusFg = dark ? const Color(0xFF81C784) : const Color(0xFF2E7D32);
+      statusIcon = Icons.check_circle_outline_rounded;
+    } else if (hasExam) {
+      statusLabel = 'Failed exam';
+      statusBg = dark ? const Color(0xFF3A2020) : const Color(0xFFFFEBEE);
+      statusFg = dark ? const Color(0xFFEF9A9A) : const Color(0xFFC62828);
+      statusIcon = Icons.cancel_outlined;
+    } else {
+      statusLabel = 'No exam yet';
+      statusBg = muted;
+      statusFg = secondary;
+      statusIcon = Icons.hourglass_empty_rounded;
+    }
+
+    final parts = name.split(RegExp(r'\s+'));
+    var initials = '';
+    if (parts.isNotEmpty && parts.first.isNotEmpty) {
+      initials += parts.first[0].toUpperCase();
+    }
+    if (parts.length > 1 && parts.last.isNotEmpty) {
+      initials += parts.last[0].toUpperCase();
+    }
+    if (initials.isEmpty) initials = '?';
+
+    return Dialog(
+      backgroundColor: panel,
+      surfaceTintColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: hairline),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+              child: Container(
+                height: 4,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 20, 14, 0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          accent.withValues(alpha: 0.18),
+                          accent.withValues(alpha: 0.08),
+                        ],
+                      ),
+                      border: Border.all(color: accent.withValues(alpha: 0.22)),
+                    ),
+                    child: Icon(
+                      Icons.verified_user_rounded,
+                      color: accent,
+                      size: 26,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          alreadyPassed
+                              ? 'Replace exam result?'
+                              : 'Admin exam bypass',
+                          style: TextStyle(
+                            color: primary,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.35,
+                            height: 1.15,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          alreadyPassed
+                              ? 'Overwrite the current passing record with perfect scores on all four screening sections.'
+                              : 'Record this applicant as passed with 100% on every exam section — even without taking the screening exam.',
+                          style: TextStyle(
+                            color: secondary,
+                            fontSize: 13.5,
+                            height: 1.45,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(false),
+                    icon: Icon(Icons.close_rounded, color: secondary),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 18, 22, 0),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: muted,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: hairline),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: accent.withValues(alpha: 0.14),
+                      child: Text(
+                        initials,
+                        style: TextStyle(
+                          color: accent,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: TextStyle(
+                              color: primary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (email.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              email,
+                              style: TextStyle(color: secondary, fontSize: 12.5),
+                            ),
+                          ],
+                          if (position.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              position,
+                              style: TextStyle(
+                                color: accent,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusBg,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: statusFg.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(statusIcon, size: 14, color: statusFg),
+                          const SizedBox(width: 5),
+                          Text(
+                            statusLabel,
+                            style: TextStyle(
+                              color: statusFg,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 16, 22, 0),
+              child: Text(
+                'WILL BE RECORDED AS',
+                style: TextStyle(
+                  color: secondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 10, 22, 0),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: const [
+                  _AdminBypassExamChip(label: 'General', score: '100%'),
+                  _AdminBypassExamChip(label: 'Math', score: '100%'),
+                  _AdminBypassExamChip(label: 'Gen. info', score: '100%'),
+                  _AdminBypassExamChip(label: 'BEI', score: '100%'),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8E1).withValues(
+                    alpha: dark ? 0.22 : 1,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFFFFB300).withValues(alpha: 0.45),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.info_outline_rounded,
+                      size: 18,
+                      color: dark
+                          ? const Color(0xFFFFD54F)
+                          : const Color(0xFFF57F17),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'This is an HR admin override. The applicant is marked passed without completing the online screening exam. Application status will update to passed.',
+                        style: TextStyle(
+                          color: dark
+                              ? const Color(0xFFFFE082)
+                              : const Color(0xFF6D4C41),
+                          fontSize: 12,
+                          height: 1.45,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 22, 22, 22),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: accent,
+                        side: BorderSide(color: hairline),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        gradient: const LinearGradient(
+                          colors: [
+                            AppTheme.primaryNavy,
+                            AppTheme.primaryNavyLight,
+                          ],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.28),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: FilledButton.icon(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        icon: const Icon(Icons.check_circle_rounded, size: 20),
+                        label: Text(
+                          alreadyPassed ? 'Replace with perfect' : 'Mark passed',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          foregroundColor: Colors.white,
+                          shadowColor: Colors.transparent,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminBypassExamChip extends StatelessWidget {
+  const _AdminBypassExamChip({required this.label, required this.score});
+
+  final String label;
+  final String score;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: accent.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            score,
+            style: TextStyle(
+              color: accent,
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -11622,7 +11078,7 @@ class _AttachmentActions extends StatelessWidget {
       children: [
         Expanded(
           child: Tooltip(
-            message: 'Preview — $fileName',
+            message: 'Preview â€” $fileName',
             child: TextButton.icon(
               onPressed: () => _preview(context),
               icon: const Icon(Icons.visibility_outlined, size: 18),

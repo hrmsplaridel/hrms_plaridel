@@ -666,15 +666,7 @@ class _ApplicantReportCard extends StatelessWidget {
   final RspApplicationsReportRow row;
   final bool showDocuments;
 
-  String get _fullName {
-    final parts = [
-      row.firstName,
-      if (row.middleName.isNotEmpty) row.middleName,
-      row.lastName,
-      if (row.suffix.isNotEmpty) row.suffix,
-    ];
-    return parts.join(' ').trim();
-  }
+  String get _fullName => row.displayFullName;
 
   @override
   Widget build(BuildContext context) {

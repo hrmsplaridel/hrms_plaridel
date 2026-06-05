@@ -10,6 +10,16 @@ import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.d
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 
+String _rspReportField(String? value) {
+  final v = (value ?? '').trim();
+  if (v.isEmpty) return '';
+  final lower = v.toLowerCase();
+  if (lower == 'none' || lower == 'null') return '';
+  if (v == '\u2014' || v == '\u2013' || v == '-') return '';
+  if (v.contains('\u00e2\u20ac')) return '';
+  return v;
+}
+
 /// One applicant row for CSV / PDF export (Applications & Exam Results).
 class RspApplicationsReportRow {
   const RspApplicationsReportRow({
@@ -56,6 +66,17 @@ class RspApplicationsReportRow {
   final String tor;
   final String eligibilityTrainings;
 
+  /// Full name for report preview/PDF — omits blank middle name and suffix.
+  String get displayFullName {
+    final parts = <String>[
+      firstName,
+      middleName,
+      lastName,
+      suffix,
+    ].where((p) => p.trim().isNotEmpty).toList();
+    return parts.join(' ').trim();
+  }
+
   static RspApplicationsReportRow fromApplication({
     required RecruitmentApplication app,
     RecruitmentExamResult? exam,
@@ -68,13 +89,17 @@ class RspApplicationsReportRow {
     final fallbackFirst = parts.isNotEmpty ? parts.first : '';
     final fallbackLast = parts.length >= 2 ? parts.last : '';
 
-    final first = (app.firstName ?? '').trim().isNotEmpty
-        ? app.firstName!.trim()
-        : fallbackFirst;
-    final middle = (app.middleName ?? '').trim();
-    final last = (app.lastName ?? '').trim().isNotEmpty
-        ? app.lastName!.trim()
-        : fallbackLast;
+    final first = _rspReportField(
+      (app.firstName ?? '').trim().isNotEmpty
+          ? app.firstName
+          : (fallbackFirst.isNotEmpty ? fallbackFirst : null),
+    );
+    final middle = _rspReportField(app.middleName);
+    final last = _rspReportField(
+      (app.lastName ?? '').trim().isNotEmpty
+          ? app.lastName
+          : (fallbackLast.isNotEmpty ? fallbackLast : null),
+    );
 
     Map<String, dynamic>? answers;
     if (exam?.answersJson != null) {
@@ -106,11 +131,11 @@ class RspApplicationsReportRow {
       firstName: first,
       middleName: middle,
       lastName: last,
-      suffix: (app.suffix ?? '').trim(),
-      gender: (app.sex ?? '').trim(),
+      suffix: _rspReportField(app.suffix),
+      gender: _rspReportField(app.sex),
       email: app.email.trim(),
-      phone: (app.phone ?? '').trim(),
-      positionApplied: (app.positionAppliedFor ?? '').trim(),
+      phone: _rspReportField(app.phone),
+      positionApplied: _rspReportField(app.positionAppliedFor),
       status: RspApplicationsReportExport.statusDisplayLabel(app.status),
       examOutcome: exam == null
           ? 'No exam'

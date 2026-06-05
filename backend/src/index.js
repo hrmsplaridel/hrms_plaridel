@@ -1,4 +1,8 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({
+  path: path.resolve(__dirname, '../.env'),
+  override: true,
+});
 const express = require('express');
 const cors = require('cors');
 const { pool } = require('./config/db');
@@ -30,6 +34,7 @@ const calendarRoutes = require('./routes/calendar');
 const dtrDailySummaryRoutes = require('./routes/dtrDailySummary');
 const docutrackerRoutes = require('./routes/docutracker');
 const trainingDailyReportsRoutes = require('./routes/trainingDailyReports');
+const ldTrainingRequirementsRoutes = require('./routes/ldTrainingRequirements');
 const rspJobVacanciesRoutes = require('./routes/rspJobVacancies');
 const rspExamQuestionsRoutes = require('./routes/rspExamQuestions');
 const rspExamTimeLimitsRoutes = require('./routes/rspExamTimeLimits');
@@ -132,6 +137,7 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
 app.use('/api/docutracker', docutrackerRoutes);
 app.use('/api/training-daily-reports', trainingDailyReportsRoutes);
+app.use('/api/ld/training-requirements', ldTrainingRequirementsRoutes);
 app.use('/api/rsp/job-vacancies', rspJobVacanciesRoutes);
 app.use('/api/rsp/exam-questions', rspExamQuestionsRoutes);
 app.use('/api/rsp/exam-time-limits', rspExamTimeLimitsRoutes);
@@ -162,6 +168,9 @@ const server = app.listen(PORT, HOST, () => {
   if (rspEmailVerificationPublicRoutes.rspEmailOtpEnrollmentActive?.()) {
     console.log(
       '  RSP email OTP          - enabled (GET/POST /api/rsp/email-verification/*)',
+    );
+    console.log(
+      '  EmailJS OTP mail       - requires non-browser API + Private Key in EmailJS Security',
     );
   }
   if (isEmailJsConfiguredForHireEmail() || isEmailJsContactConfigured()) {

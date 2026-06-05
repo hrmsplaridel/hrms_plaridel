@@ -56,6 +56,18 @@ const RSP_DOC_KIND_COLUMNS = {
     pathCol: 'doc_eligibility_trainings_path',
     nameCol: 'doc_eligibility_trainings_name',
   },
+  medical_certificate: {
+    pathCol: 'doc_medical_certificate_path',
+    nameCol: 'doc_medical_certificate_name',
+  },
+  drug_test_result: {
+    pathCol: 'doc_drug_test_path',
+    nameCol: 'doc_drug_test_name',
+  },
+  nbi_clearance: {
+    pathCol: 'doc_nbi_clearance_path',
+    nameCol: 'doc_nbi_clearance_name',
+  },
 };
 
 function parseRspDocKind(value) {
@@ -68,12 +80,19 @@ function parseRspDocKind(value) {
 
 const RSP_APPLICATION_ROW_SELECT = `
   id, full_name, first_name, middle_name, last_name, suffix, sex,
+  course, address, age, civil_status,
   email, phone, resume_notes, position_applied_for,
   attachment_path, attachment_name,
   doc_application_letter_path, doc_application_letter_name,
   doc_resume_path, doc_resume_name,
   doc_tor_path, doc_tor_name,
   doc_eligibility_trainings_path, doc_eligibility_trainings_name,
+  doc_medical_certificate_path, doc_medical_certificate_name,
+  doc_drug_test_path, doc_drug_test_name,
+  doc_nbi_clearance_path, doc_nbi_clearance_name,
+  final_requirements_approved,
+  orientation_at,
+  orientation_attended,
   status, final_interview_at, final_interview_passed, hired_user_id,
   hr_account_setup_done, hire_credentials_email_sent_at,
   created_at, updated_at
@@ -184,6 +203,15 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS doc_tor_name TEXT,
       ADD COLUMN IF NOT EXISTS doc_eligibility_trainings_path TEXT,
       ADD COLUMN IF NOT EXISTS doc_eligibility_trainings_name TEXT,
+      ADD COLUMN IF NOT EXISTS doc_medical_certificate_path TEXT,
+      ADD COLUMN IF NOT EXISTS doc_medical_certificate_name TEXT,
+      ADD COLUMN IF NOT EXISTS doc_drug_test_path TEXT,
+      ADD COLUMN IF NOT EXISTS doc_drug_test_name TEXT,
+      ADD COLUMN IF NOT EXISTS doc_nbi_clearance_path TEXT,
+      ADD COLUMN IF NOT EXISTS doc_nbi_clearance_name TEXT,
+      ADD COLUMN IF NOT EXISTS final_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS orientation_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS orientation_attended BOOLEAN,
       ADD COLUMN IF NOT EXISTS final_interview_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS final_interview_passed BOOLEAN,
       ADD COLUMN IF NOT EXISTS hired_user_id UUID,
@@ -194,7 +222,11 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS middle_name TEXT,
       ADD COLUMN IF NOT EXISTS last_name TEXT,
       ADD COLUMN IF NOT EXISTS suffix TEXT,
-      ADD COLUMN IF NOT EXISTS sex TEXT;
+      ADD COLUMN IF NOT EXISTS sex TEXT,
+      ADD COLUMN IF NOT EXISTS course TEXT,
+      ADD COLUMN IF NOT EXISTS address TEXT,
+      ADD COLUMN IF NOT EXISTS age TEXT,
+      ADD COLUMN IF NOT EXISTS civil_status TEXT;
   `);
 
   await pool.query(`
@@ -224,6 +256,10 @@ router.post('/', async (req, res) => {
       lastName,
       suffix,
       sex,
+      course,
+      address,
+      age,
+      civilStatus,
       fullName, // legacy
       email,
       phone,
@@ -296,10 +332,12 @@ router.post('/', async (req, res) => {
       `
       INSERT INTO public.recruitment_applications
         (full_name, first_name, middle_name, last_name, suffix, sex,
+         course, address, age, civil_status,
          email, phone, resume_notes, position_applied_for, status, created_at, updated_at)
       VALUES
         ($1, $2, $3, $4, $5, $6,
-         $7, $8, $9, $10, $11, now(), now())
+         $7, $8, $9, $10,
+         $11, $12, $13, $14, $15, now(), now())
       RETURNING ${RSP_APPLICATION_ROW_SELECT}
       `,
       [
@@ -309,6 +347,10 @@ router.post('/', async (req, res) => {
         ln,
         suf,
         sx,
+        optStr(course),
+        optStr(address),
+        optStr(age),
+        optStr(civilStatus),
         normalizedEmail,
         phone ?? null,
         resumeNotes ?? null,
@@ -538,6 +580,131 @@ router.put('/:applicationId/final-interview', protect, async (req, res) => {
   }
 });
 
+// PUT /api/rsp/applications/:applicationId/orientation
+// Admin: schedule or clear orientation datetime (after final requirements are approved).
+router.put('/:applicationId/orientation', protect, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const { applicationId } = req.params;
+    const { orientationAt } = req.body || {};
+
+    const check = await pool.query(
+      `
+      SELECT final_requirements_approved
+      FROM public.recruitment_applications
+      WHERE id = $1
+      `,
+      [applicationId],
+    );
+    if (!check.rows[0]) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    if (check.rows[0].final_requirements_approved !== true) {
+      return res.status(400).json({
+        error: 'Final requirements must be approved before scheduling orientation',
+      });
+    }
+
+    let param = null;
+    if (orientationAt === null || orientationAt === undefined || orientationAt === '') {
+      param = null;
+    } else if (typeof orientationAt === 'string') {
+      const d = new Date(orientationAt);
+      if (Number.isNaN(d.getTime())) {
+        return res.status(400).json({
+          error: 'orientationAt must be a valid ISO 8601 datetime or null',
+        });
+      }
+      param = d.toISOString();
+    } else {
+      return res.status(400).json({ error: 'orientationAt must be an ISO string or null' });
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE public.recruitment_applications
+      SET orientation_at = $1::timestamptz, updated_at = now()
+      WHERE id = $2
+      RETURNING ${RSP_APPLICATION_ROW_SELECT}
+      `,
+      [param, applicationId],
+    );
+    if ((result.rowCount ?? 0) === 0) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    return res.json({ ok: true, application: result.rows[0] });
+  } catch (err) {
+    console.error('[rspApplications PUT orientation]', err);
+    return res.status(500).json({
+      error: 'Failed to update orientation schedule',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
+// PUT /api/rsp/applications/:applicationId/orientation-attendance
+// Admin: record orientation attendance (null = pending, true = attended, false = no-show).
+router.put('/:applicationId/orientation-attendance', protect, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const { applicationId } = req.params;
+    const body = req.body || {};
+    if (!Object.prototype.hasOwnProperty.call(body, 'attended')) {
+      return res.status(400).json({
+        error: 'attended is required (true, false, or null)',
+      });
+    }
+    const { attended } = body;
+    let value = null;
+    if (attended === null) {
+      value = null;
+    } else if (typeof attended === 'boolean') {
+      value = attended;
+    } else {
+      return res.status(400).json({
+        error: 'attended must be true, false, or null',
+      });
+    }
+
+    const check = await pool.query(
+      `
+      SELECT final_requirements_approved
+      FROM public.recruitment_applications
+      WHERE id = $1
+      `,
+      [applicationId],
+    );
+    if (!check.rows[0]) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    if (check.rows[0].final_requirements_approved !== true) {
+      return res.status(400).json({
+        error: 'Final requirements must be approved before recording orientation attendance',
+      });
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE public.recruitment_applications
+      SET orientation_attended = $1, updated_at = now()
+      WHERE id = $2
+      RETURNING ${RSP_APPLICATION_ROW_SELECT}
+      `,
+      [value, applicationId],
+    );
+    if ((result.rowCount ?? 0) === 0) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    return res.json({ ok: true, application: result.rows[0] });
+  } catch (err) {
+    console.error('[rspApplications PUT orientation-attendance]', err);
+    return res.status(500).json({
+      error: 'Failed to update orientation attendance',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
 // PUT /api/rsp/applications/:applicationId/final-interview-outcome
 // Admin: record whether the applicant passed the in-person final interview (null = not recorded yet).
 router.put('/:applicationId/final-interview-outcome', protect, async (req, res) => {
@@ -575,6 +742,69 @@ router.put('/:applicationId/final-interview-outcome', protect, async (req, res) 
     console.error('[rspApplications PUT final-interview-outcome]', err);
     return res.status(500).json({
       error: 'Failed to update final interview outcome',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
+// PUT /api/rsp/applications/:applicationId/final-requirements-approval
+// Admin: mark all final requirements (medical, drug test, NBI) as approved.
+router.put('/:applicationId/final-requirements-approval', protect, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const { applicationId } = req.params;
+    const { approved } = req.body || {};
+    if (typeof approved !== 'boolean') {
+      return res.status(400).json({ error: 'approved is required (true or false)' });
+    }
+
+    const check = await pool.query(
+      `
+      SELECT
+        doc_medical_certificate_path,
+        doc_drug_test_path,
+        doc_nbi_clearance_path,
+        final_interview_passed
+      FROM public.recruitment_applications
+      WHERE id = $1
+      `,
+      [applicationId],
+    );
+    if (!check.rows[0]) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    const row = check.rows[0];
+    if (row.final_interview_passed !== true) {
+      return res.status(400).json({
+        error: 'Applicant must pass deliberation before final requirements can be approved.',
+      });
+    }
+    if (approved) {
+      const missing = [];
+      if (!row.doc_medical_certificate_path) missing.push('medical certificate');
+      if (!row.doc_drug_test_path) missing.push('drug test result');
+      if (!row.doc_nbi_clearance_path) missing.push('NBI clearance');
+      if (missing.length > 0) {
+        return res.status(400).json({
+          error: `Missing required documents: ${missing.join(', ')}.`,
+        });
+      }
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE public.recruitment_applications
+      SET final_requirements_approved = $1, updated_at = now()
+      WHERE id = $2
+      RETURNING ${RSP_APPLICATION_ROW_SELECT}
+      `,
+      [approved, applicationId],
+    );
+    return res.json({ ok: true, application: result.rows[0] });
+  } catch (err) {
+    console.error('[rspApplications PUT final-requirements-approval]', err);
+    return res.status(500).json({
+      error: 'Failed to update final requirements approval',
       details: err?.message ? String(err.message) : String(err),
     });
   }
@@ -625,11 +855,20 @@ router.put('/:applicationId/hired-link', protect, async (req, res) => {
     }
 
     const appQ = await pool.query(
-      `SELECT id, email FROM public.recruitment_applications WHERE id = $1`,
+      `
+      SELECT id, email, final_requirements_approved
+      FROM public.recruitment_applications
+      WHERE id = $1
+      `,
       [applicationId],
     );
     const appRow = appQ.rows[0];
     if (!appRow) return res.status(404).json({ error: 'Application not found' });
+    if (appRow.final_requirements_approved !== true) {
+      return res.status(400).json({
+        error: 'Applicant final requirements must be approved before linking an employee account',
+      });
+    }
 
     const userQ = await pool.query(
       `SELECT id, email FROM public.users WHERE id = $1`,
@@ -693,7 +932,7 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
 
     const appQ = await pool.query(
       `
-      SELECT full_name, email, final_interview_passed, hr_account_setup_done
+      SELECT full_name, email, final_interview_passed, final_requirements_approved, hr_account_setup_done
       FROM public.recruitment_applications
       WHERE id = $1
       `,
@@ -706,6 +945,11 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
     if (row.final_interview_passed !== true) {
       return res.status(400).json({
         error: 'Applicant must be marked as passed the final interview before sending this email',
+      });
+    }
+    if (row.final_requirements_approved !== true) {
+      return res.status(400).json({
+        error: 'Applicant final requirements must be approved before sending hire credentials',
       });
     }
 
@@ -889,12 +1133,28 @@ router.delete('/attachment-file', ...protect, async (req, res) => {
         doc_tor_name = CASE WHEN btrim(COALESCE(doc_tor_path, '')) = btrim($1::text) THEN NULL ELSE doc_tor_name END,
         doc_eligibility_trainings_path = CASE WHEN btrim(COALESCE(doc_eligibility_trainings_path, '')) = btrim($1::text) THEN NULL ELSE doc_eligibility_trainings_path END,
         doc_eligibility_trainings_name = CASE WHEN btrim(COALESCE(doc_eligibility_trainings_path, '')) = btrim($1::text) THEN NULL ELSE doc_eligibility_trainings_name END,
+        doc_medical_certificate_path = CASE WHEN btrim(COALESCE(doc_medical_certificate_path, '')) = btrim($1::text) THEN NULL ELSE doc_medical_certificate_path END,
+        doc_medical_certificate_name = CASE WHEN btrim(COALESCE(doc_medical_certificate_path, '')) = btrim($1::text) THEN NULL ELSE doc_medical_certificate_name END,
+        doc_drug_test_path = CASE WHEN btrim(COALESCE(doc_drug_test_path, '')) = btrim($1::text) THEN NULL ELSE doc_drug_test_path END,
+        doc_drug_test_name = CASE WHEN btrim(COALESCE(doc_drug_test_path, '')) = btrim($1::text) THEN NULL ELSE doc_drug_test_name END,
+        doc_nbi_clearance_path = CASE WHEN btrim(COALESCE(doc_nbi_clearance_path, '')) = btrim($1::text) THEN NULL ELSE doc_nbi_clearance_path END,
+        doc_nbi_clearance_name = CASE WHEN btrim(COALESCE(doc_nbi_clearance_path, '')) = btrim($1::text) THEN NULL ELSE doc_nbi_clearance_name END,
+        final_requirements_approved = CASE
+          WHEN btrim(COALESCE(doc_medical_certificate_path, '')) = btrim($1::text)
+            OR btrim(COALESCE(doc_drug_test_path, '')) = btrim($1::text)
+            OR btrim(COALESCE(doc_nbi_clearance_path, '')) = btrim($1::text)
+          THEN FALSE
+          ELSE final_requirements_approved
+        END,
         updated_at = now()
       WHERE btrim(COALESCE(attachment_path, '')) = btrim($1::text)
          OR btrim(COALESCE(doc_application_letter_path, '')) = btrim($1::text)
          OR btrim(COALESCE(doc_resume_path, '')) = btrim($1::text)
          OR btrim(COALESCE(doc_tor_path, '')) = btrim($1::text)
          OR btrim(COALESCE(doc_eligibility_trainings_path, '')) = btrim($1::text)
+         OR btrim(COALESCE(doc_medical_certificate_path, '')) = btrim($1::text)
+         OR btrim(COALESCE(doc_drug_test_path, '')) = btrim($1::text)
+         OR btrim(COALESCE(doc_nbi_clearance_path, '')) = btrim($1::text)
       `,
       [t],
     );

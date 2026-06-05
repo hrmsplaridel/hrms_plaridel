@@ -24,6 +24,11 @@ const employeeDashboardMobileNavItems = [
     shortLabel: 'Training',
   ),
   DashboardMobileNavItem(
+    icon: Icons.fact_check_outlined,
+    label: 'Training Requirements',
+    shortLabel: 'Requirements',
+  ),
+  DashboardMobileNavItem(
     icon: Icons.description_outlined,
     label: 'DocuTracker',
   ),
