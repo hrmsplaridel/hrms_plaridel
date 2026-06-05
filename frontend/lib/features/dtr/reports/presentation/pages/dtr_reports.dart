@@ -43,6 +43,12 @@ class _DtrReportsState extends State<DtrReports> {
   final _searchController = TextEditingController();
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
+  int _rangeStartDay = 1;
+  int _rangeEndDay = DateTime(
+    DateTime.now().year,
+    DateTime.now().month + 1,
+    0,
+  ).day;
   String? _selectedEmployeeId;
   String? _selectedDepartmentId;
   List<TimeRecord> _employeeRecords = [];
@@ -93,6 +99,7 @@ class _DtrReportsState extends State<DtrReports> {
 
   Future<void> _loadEmployeeRecords() async {
     if (_selectedEmployeeId == null) return;
+    _clampRangeToSelectedMonth();
     final start = DateTime(_selectedYear, _selectedMonth, 1);
     final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
     final dtr = context.read<DtrProvider>();
@@ -107,6 +114,47 @@ class _DtrReportsState extends State<DtrReports> {
     ]);
     if (!mounted) return;
     setState(() => _employeeRecords = List.from(dtr.timeRecords));
+  }
+
+  int _daysInSelectedMonth() {
+    return DateTime(_selectedYear, _selectedMonth + 1, 0).day;
+  }
+
+  DateTime _rangeStartDate() {
+    _clampRangeToSelectedMonth();
+    return DateTime(_selectedYear, _selectedMonth, _rangeStartDay);
+  }
+
+  DateTime _rangeEndDate() {
+    _clampRangeToSelectedMonth();
+    return DateTime(_selectedYear, _selectedMonth, _rangeEndDay);
+  }
+
+  void _clampRangeToSelectedMonth() {
+    final lastDay = _daysInSelectedMonth();
+    _rangeStartDay = _rangeStartDay.clamp(1, lastDay).toInt();
+    _rangeEndDay = _rangeEndDay.clamp(1, lastDay).toInt();
+    if (_rangeStartDay > _rangeEndDay) {
+      _rangeEndDay = _rangeStartDay;
+    }
+  }
+
+  void _setSelectedMonth(int month) {
+    setState(() {
+      _selectedMonth = month;
+      _rangeStartDay = 1;
+      _rangeEndDay = _daysInSelectedMonth();
+    });
+    _loadEmployeeRecords();
+  }
+
+  void _setSelectedYear(int year) {
+    setState(() {
+      _selectedYear = year;
+      _rangeStartDay = 1;
+      _rangeEndDay = _daysInSelectedMonth();
+    });
+    _loadEmployeeRecords();
   }
 
   static String _formatOfficialHours(String start, String end) {
@@ -243,6 +291,7 @@ class _DtrReportsState extends State<DtrReports> {
   DateTime _tardinessStatsInclusiveEnd() {
     final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
     final lastDay = DateTime(_selectedYear, _selectedMonth + 1, 0).day;
+    final reportEnd = _rangeEndDate();
     final monthEnd = DateTime(_selectedYear, _selectedMonth, lastDay);
     final now = DateTime.now();
     // Use yesterday: today's shift may still be in progress.
@@ -252,19 +301,20 @@ class _DtrReportsState extends State<DtrReports> {
       now.day,
     ).subtract(const Duration(days: 1));
     if (monthEnd.isBefore(yesterday)) {
-      return monthEnd;
+      return reportEnd.isBefore(monthEnd) ? reportEnd : monthEnd;
     }
     if (yesterday.isBefore(monthStart)) {
       return monthStart.subtract(const Duration(days: 1));
     }
-    return yesterday.isAfter(monthEnd) ? monthEnd : yesterday;
+    final capped = yesterday.isAfter(monthEnd) ? monthEnd : yesterday;
+    return capped.isAfter(reportEnd) ? reportEnd : capped;
   }
 
   /// Scheduled work days in the month on or before [inclusiveEnd].
   int _countScheduledWorkDaysThrough(DateTime inclusiveEnd) {
     final lastDay = DateTime(_selectedYear, _selectedMonth + 1, 0).day;
     var n = 0;
-    for (var d = 1; d <= lastDay; d++) {
+    for (var d = _rangeStartDay; d <= lastDay; d++) {
       final dt = DateTime(_selectedYear, _selectedMonth, d);
       if (dt.isAfter(inclusiveEnd)) continue;
       if (_isScheduledWorkDay(dt)) n++;
@@ -272,10 +322,12 @@ class _DtrReportsState extends State<DtrReports> {
     return n;
   }
 
-  List<DateTime> _calendarDatesInSelectedMonth(DateTime end) {
+  List<DateTime> _calendarDatesInSelectedRange(DateTime end) {
+    final startDay = _rangeStartDay.clamp(1, end.day).toInt();
+    final endDay = _rangeEndDay.clamp(startDay, end.day).toInt();
     return List<DateTime>.generate(
-      end.day,
-      (i) => DateTime(_selectedYear, _selectedMonth, i + 1),
+      endDay - startDay + 1,
+      (i) => DateTime(_selectedYear, _selectedMonth, startDay + i),
     );
   }
 
@@ -284,6 +336,8 @@ class _DtrReportsState extends State<DtrReports> {
       _searchController.clear();
       _selectedMonth = DateTime.now().month;
       _selectedYear = DateTime.now().year;
+      _rangeStartDay = 1;
+      _rangeEndDay = _daysInSelectedMonth();
       _selectedDepartmentId = null;
     });
     _load();
@@ -388,6 +442,7 @@ class _DtrReportsState extends State<DtrReports> {
     BuildContext context,
     _DtrExportFormat format, {
     required String selectedName,
+    required DateTime start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
   }) async {
@@ -404,6 +459,7 @@ class _DtrReportsState extends State<DtrReports> {
             employeeName: selectedName,
             year: _selectedYear,
             month: _selectedMonth,
+            start: start,
             end: end,
             recordsByDate: recordsByDate,
             officialHours: _shiftOfficialHours,
@@ -419,6 +475,7 @@ class _DtrReportsState extends State<DtrReports> {
             employeeName: selectedName,
             year: _selectedYear,
             month: _selectedMonth,
+            start: start,
             end: end,
             recordsByDate: recordsByDate,
             officialHours: _shiftOfficialHours,
@@ -438,6 +495,7 @@ class _DtrReportsState extends State<DtrReports> {
             employeeName: selectedName,
             year: _selectedYear,
             month: _selectedMonth,
+            start: start,
             end: end,
             recordsByDate: recordsByDate,
             officialHours: _shiftOfficialHours,
@@ -474,6 +532,7 @@ class _DtrReportsState extends State<DtrReports> {
   Future<void> _printDtrReport(
     BuildContext context, {
     required String selectedName,
+    required DateTime start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     String? department,
@@ -490,6 +549,7 @@ class _DtrReportsState extends State<DtrReports> {
         employeeName: selectedName,
         year: _selectedYear,
         month: _selectedMonth,
+        start: start,
         end: end,
         recordsByDate: recordsByDate,
         department: department,
@@ -515,6 +575,7 @@ class _DtrReportsState extends State<DtrReports> {
           employeeName: selectedName,
           year: _selectedYear,
           month: _selectedMonth,
+          start: start,
           end: end,
           recordsByDate: recordsByDate,
           reportTitle: 'Daily Time Record Report',
@@ -567,7 +628,9 @@ class _DtrReportsState extends State<DtrReports> {
       if (byId.isNotEmpty) selectedName = byId.first.fullName;
     }
 
-    final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
+    _clampRangeToSelectedMonth();
+    final start = _rangeStartDate();
+    final end = _rangeEndDate();
     final recordsByDate = <DateTime, TimeRecord>{};
     for (final r in _employeeRecords) {
       final key = DateTime(
@@ -578,14 +641,19 @@ class _DtrReportsState extends State<DtrReports> {
       recordsByDate[key] = r;
     }
     final reportRecordsByDate = _filterRecordsForTardinessReport(recordsByDate);
-    // Display the full calendar month in the report. Non-working days without
+    final rangedRecordsByDate = Map<DateTime, TimeRecord>.fromEntries(
+      reportRecordsByDate.entries.where(
+        (e) => !e.key.isBefore(start) && !e.key.isAfter(end),
+      ),
+    );
+    // Display the selected calendar range in the report. Non-working days without
     // records are quiet placeholders only; they are not saved or counted.
     final hasAssignment = _assignmentEffectiveFrom != null;
     final shouldShowCalendarRows =
         _selectedEmployeeId != null &&
-        (hasAssignment || reportRecordsByDate.isNotEmpty);
+        (hasAssignment || rangedRecordsByDate.isNotEmpty);
     final sortedDates = shouldShowCalendarRows
-        ? _calendarDatesInSelectedMonth(end)
+        ? _calendarDatesInSelectedRange(end)
         : <DateTime>[];
 
     // Compute summary from real API records, using shift + assignment window when available.
@@ -595,11 +663,11 @@ class _DtrReportsState extends State<DtrReports> {
     var lateCount = 0;
     var absentCount = 0;
     var holidaysCount = 0;
-    for (var d = 1; d <= end.day; d++) {
+    for (var d = _rangeStartDay; d <= end.day; d++) {
       final dt = DateTime(_selectedYear, _selectedMonth, d);
       if (!_isScheduledWorkDay(dt)) continue;
       if (dt.isAfter(statsEnd)) continue;
-      final rec = reportRecordsByDate[dt];
+      final rec = rangedRecordsByDate[dt];
       if (rec?.status == 'holiday' || (rec?.holidayId != null)) {
         holidaysCount++;
       } else if (rec?.status == 'on_leave') {
@@ -614,7 +682,7 @@ class _DtrReportsState extends State<DtrReports> {
     }
     // Show summary whenever this month has any report rows — not only days with punches.
     // (Absent / undertime-only days have no timeIn/breakIn but must still roll up to totals.)
-    final hasRecords = reportRecordsByDate.isNotEmpty || hasAssignment;
+    final hasRecords = rangedRecordsByDate.isNotEmpty || hasAssignment;
     final workingDays = hasRecords ? totalWeekdays - holidaysCount : 0;
     final displayLateCount = hasRecords ? lateCount : 0;
     final displayAbsentCount = hasRecords ? absentCount : 0;
@@ -626,7 +694,7 @@ class _DtrReportsState extends State<DtrReports> {
     // Total late and undertime minutes (elapsed days only, same window as counts)
     var totalLateMinutes = 0;
     var totalUndertimeMinutes = 0;
-    for (final e in reportRecordsByDate.entries) {
+    for (final e in rangedRecordsByDate.entries) {
       if (e.key.isAfter(statsEnd)) continue;
       final rec = e.value;
       totalLateMinutes += rec.lateMinutes ?? 0;
@@ -669,8 +737,9 @@ class _DtrReportsState extends State<DtrReports> {
                     ? _buildMobileLayout(
                         context: context,
                         employees: employees,
+                        start: start,
                         end: end,
-                        recordsByDate: reportRecordsByDate,
+                        recordsByDate: rangedRecordsByDate,
                         sortedDates: sortedDates,
                         selectedName: selectedName,
                         workingDays: workingDays,
@@ -686,8 +755,9 @@ class _DtrReportsState extends State<DtrReports> {
                     : isCompact
                     ? _buildCompactLayout(
                         employees: employees,
+                        start: start,
                         end: end,
-                        recordsByDate: reportRecordsByDate,
+                        recordsByDate: rangedRecordsByDate,
                         sortedDates: sortedDates,
                         selectedName: selectedName,
                         workingDays: workingDays,
@@ -720,7 +790,7 @@ class _DtrReportsState extends State<DtrReports> {
                                         child: _buildDtrTable(
                                           context,
                                           end: end,
-                                          recordsByDate: reportRecordsByDate,
+                                          recordsByDate: rangedRecordsByDate,
                                           sortedDates: sortedDates,
                                           dtr: dtr,
                                           availableWidth: tableAvailableWidth,
@@ -739,7 +809,8 @@ class _DtrReportsState extends State<DtrReports> {
                                         totalUndertimeMinutes:
                                             displayTotalUndertimeMinutes,
                                         hasRecords: hasRecords,
-                                        recordsByDate: reportRecordsByDate,
+                                        recordsByDate: rangedRecordsByDate,
+                                        start: start,
                                         end: end,
                                       ),
                                     ],
@@ -760,6 +831,7 @@ class _DtrReportsState extends State<DtrReports> {
 
   Widget _buildFilters(BuildContext context, bool isMobile) {
     final dark = AppTheme.dashIsDark(context);
+    final dayItems = List.generate(_daysInSelectedMonth(), (i) => i + 1);
     return Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -831,8 +903,7 @@ class _DtrReportsState extends State<DtrReports> {
                 )
                 .toList(),
             onChanged: (v) {
-              if (v != null) setState(() => _selectedMonth = v);
-              _loadEmployeeRecords();
+              if (v != null) _setSelectedMonth(v);
             },
           ),
           DropdownButton<int>(
@@ -851,8 +922,50 @@ class _DtrReportsState extends State<DtrReports> {
                 )
                 .toList(),
             onChanged: (v) {
-              if (v != null) setState(() => _selectedYear = v);
-              _loadEmployeeRecords();
+              if (v != null) _setSelectedYear(v);
+            },
+          ),
+          DropdownButton<int>(
+            value: _rangeStartDay,
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
+            items: dayItems
+                .map(
+                  (d) => DropdownMenuItem(
+                    value: d,
+                    child: Text(
+                      'From day $d',
+                      style: AppTheme.dashFieldTextStyle(context),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) {
+              if (v == null) return;
+              setState(() {
+                _rangeStartDay = v;
+                if (_rangeEndDay < v) _rangeEndDay = v;
+              });
+            },
+          ),
+          DropdownButton<int>(
+            value: _rangeEndDay,
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
+            items: dayItems
+                .where((d) => d >= _rangeStartDay)
+                .map(
+                  (d) => DropdownMenuItem(
+                    value: d,
+                    child: Text(
+                      'To day $d',
+                      style: AppTheme.dashFieldTextStyle(context),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) {
+              if (v != null) setState(() => _rangeEndDay = v);
             },
           ),
         ] else ...[
@@ -930,8 +1043,7 @@ class _DtrReportsState extends State<DtrReports> {
                       )
                       .toList(),
                   onChanged: (v) {
-                    if (v != null) setState(() => _selectedMonth = v);
-                    _loadEmployeeRecords();
+                    if (v != null) _setSelectedMonth(v);
                   },
                 ),
               ),
@@ -962,8 +1074,78 @@ class _DtrReportsState extends State<DtrReports> {
                       )
                       .toList(),
                   onChanged: (v) {
-                    if (v != null) setState(() => _selectedYear = v);
-                    _loadEmployeeRecords();
+                    if (v != null) _setSelectedYear(v);
+                  },
+                ),
+              ),
+            ],
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 112,
+                child: DropdownButtonFormField<int>(
+                  initialValue: _rangeStartDay,
+                  dropdownColor: AppTheme.dashPanelOf(context),
+                  style: AppTheme.dashFieldTextStyle(context),
+                  decoration: AppTheme.dashInputDecoration(
+                    context,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    radius: 8,
+                  ),
+                  items: dayItems
+                      .map(
+                        (d) => DropdownMenuItem(
+                          value: d,
+                          child: Text(
+                            'From $d',
+                            style: AppTheme.dashFieldTextStyle(context),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() {
+                      _rangeStartDay = v;
+                      if (_rangeEndDay < v) _rangeEndDay = v;
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 100,
+                child: DropdownButtonFormField<int>(
+                  initialValue: _rangeEndDay,
+                  dropdownColor: AppTheme.dashPanelOf(context),
+                  style: AppTheme.dashFieldTextStyle(context),
+                  decoration: AppTheme.dashInputDecoration(
+                    context,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    radius: 8,
+                  ),
+                  items: dayItems
+                      .where((d) => d >= _rangeStartDay)
+                      .map(
+                        (d) => DropdownMenuItem(
+                          value: d,
+                          child: Text(
+                            'To $d',
+                            style: AppTheme.dashFieldTextStyle(context),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _rangeEndDay = v);
                   },
                 ),
               ),
@@ -992,6 +1174,7 @@ class _DtrReportsState extends State<DtrReports> {
   Widget _buildMobileLayout({
     required BuildContext context,
     required List<dynamic> employees,
+    required DateTime start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     required List<DateTime> sortedDates,
@@ -1073,6 +1256,7 @@ class _DtrReportsState extends State<DtrReports> {
           fullWidth: true,
           isResponsive: true,
           recordsByDate: recordsByDate,
+          start: start,
           end: end,
         ),
       ],
@@ -1474,6 +1658,7 @@ class _DtrReportsState extends State<DtrReports> {
     bool fullWidth = false,
     bool isResponsive = false,
     required Map<DateTime, TimeRecord> recordsByDate,
+    required DateTime start,
     required DateTime end,
   }) {
     final dark = AppTheme.dashIsDark(context);
@@ -1677,6 +1862,7 @@ class _DtrReportsState extends State<DtrReports> {
                 onPressed: () => _printDtrReport(
                   context,
                   selectedName: selectedName,
+                  start: start,
                   end: end,
                   recordsByDate: recordsByDate,
                 ),
@@ -1738,6 +1924,7 @@ class _DtrReportsState extends State<DtrReports> {
                                   context,
                                   _DtrExportFormat.pdf,
                                   selectedName: selectedName,
+                                  start: start,
                                   end: end,
                                   recordsByDate: recordsByDate,
                                 );
@@ -1760,6 +1947,7 @@ class _DtrReportsState extends State<DtrReports> {
                                   context,
                                   _DtrExportFormat.word,
                                   selectedName: selectedName,
+                                  start: start,
                                   end: end,
                                   recordsByDate: recordsByDate,
                                 );
@@ -1782,6 +1970,7 @@ class _DtrReportsState extends State<DtrReports> {
                                   context,
                                   _DtrExportFormat.excel,
                                   selectedName: selectedName,
+                                  start: start,
                                   end: end,
                                   recordsByDate: recordsByDate,
                                 );
@@ -1817,6 +2006,7 @@ class _DtrReportsState extends State<DtrReports> {
 
   Widget _buildCompactLayout({
     required List<EmployeeOption> employees,
+    required DateTime start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     required List<DateTime> sortedDates,
@@ -1869,6 +2059,7 @@ class _DtrReportsState extends State<DtrReports> {
               fullWidth: true,
               isResponsive: true,
               recordsByDate: recordsByDate,
+              start: start,
               end: end,
             ),
           ],

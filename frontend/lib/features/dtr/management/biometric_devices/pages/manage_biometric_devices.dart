@@ -151,6 +151,8 @@ class ManageBiometricDevices extends StatefulWidget {
 }
 
 class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
+  static const int _rowsPerPage = 10;
+
   final _searchController = TextEditingController();
   final _nameController = TextEditingController();
   final _deviceIdController = TextEditingController();
@@ -158,6 +160,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   final _ipAddressController = TextEditingController();
 
   String _statusFilter = 'Active';
+  int _page = 0;
   List<_DeviceRecord> _devices = [];
   bool _loading = false;
   _DeviceRecord? _selectedDevice;
@@ -218,7 +221,10 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   }
 
   Future<void> _loadDevices() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _page = 0;
+    });
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/biometric-devices',
@@ -636,6 +642,18 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
 
   Widget _buildListPanel(List<_DeviceRecord> filtered) {
     final dark = _isDark(context);
+    final total = filtered.length;
+    final pageCount = total == 0
+        ? 1
+        : ((total + _rowsPerPage - 1) ~/ _rowsPerPage);
+    final page = _page >= pageCount ? pageCount - 1 : _page;
+    final pageStart = page * _rowsPerPage;
+    final pageEnd = pageStart + _rowsPerPage > total
+        ? total
+        : pageStart + _rowsPerPage;
+    final paged = total == 0
+        ? <_DeviceRecord>[]
+        : filtered.sublist(pageStart, pageEnd);
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: AppTheme.dashSurfaceCard(context, radius: 12),
@@ -650,7 +668,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                 width: 200,
                 child: TextField(
                   controller: _searchController,
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (_) => setState(() => _page = 0),
                   style: AppTheme.dashFieldTextStyle(context),
                   decoration: AppTheme.dashInputDecoration(
                     context,
@@ -687,7 +705,10 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                       )
                       .toList(),
                   onChanged: (v) {
-                    setState(() => _statusFilter = v ?? 'Active');
+                    setState(() {
+                      _statusFilter = v ?? 'Active';
+                      _page = 0;
+                    });
                     _loadDevices();
                   },
                 ),
@@ -713,70 +734,124 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
               ),
             )
           else
-            ListView.separated(
-              shrinkWrap: true,
-              itemCount: filtered.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (_, i) {
-                final d = filtered[i];
-                final isSelected = _selectedDevice?.id == d.id;
-                final now = DateTime.now();
-                final health = _biometricSyncHealth(d.lastSyncAt, now);
-                return ListTile(
-                  selected: isSelected,
-                  selectedTileColor: dark
-                      ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                      : AppTheme.primaryNavy.withValues(alpha: 0.08),
-                  leading: Icon(
-                    Icons.fingerprint_rounded,
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.8),
-                  ),
-                  title: Text(
-                    d.name,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: _headingColor(context),
-                    ),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${d.deviceId ?? '—'} · ${d.location ?? '—'}${d.ipAddress != null && d.ipAddress!.isNotEmpty ? ' · ${d.ipAddress}' : ''}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _mutedColor(context),
-                        ),
+            Column(
+              children: [
+                ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: paged.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final d = paged[i];
+                    final isSelected = _selectedDevice?.id == d.id;
+                    final now = DateTime.now();
+                    final health = _biometricSyncHealth(d.lastSyncAt, now);
+                    return ListTile(
+                      selected: isSelected,
+                      selectedTileColor: dark
+                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                          : AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      leading: Icon(
+                        Icons.fingerprint_rounded,
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.8),
                       ),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+                      title: Text(
+                        d.name,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: _headingColor(context),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          _buildRegistrationBadge(d.isActive),
-                          _buildOnlineBadge(d.online, d.ipAddress),
-                          _buildSyncBadge(health),
+                          Text(
+                            '${d.deviceId ?? '—'} · ${d.location ?? '—'}${d.ipAddress != null && d.ipAddress!.isNotEmpty ? ' · ${d.ipAddress}' : ''}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _mutedColor(context),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              _buildRegistrationBadge(d.isActive),
+                              _buildOnlineBadge(d.online, d.ipAddress),
+                              _buildSyncBadge(health),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            d.lastSyncAt != null
+                                ? 'Last sync · ${_formatRelativeSync(d.lastSyncAt!, now)}'
+                                : 'No sync recorded yet',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: _mutedColor(context),
+                            ),
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        d.lastSyncAt != null
-                            ? 'Last sync · ${_formatRelativeSync(d.lastSyncAt!, now)}'
-                            : 'No sync recorded yet',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: _mutedColor(context),
-                        ),
-                      ),
-                    ],
-                  ),
-                  isThreeLine: true,
-                  onTap: () => _openDeviceDrawer(device: d),
-                );
-              },
+                      isThreeLine: true,
+                      onTap: () => _openDeviceDrawer(device: d),
+                    );
+                  },
+                ),
+                _buildPaginationFooter(
+                  total: total,
+                  page: page,
+                  pageCount: pageCount,
+                  pageStart: pageStart,
+                  pageEnd: pageEnd,
+                ),
+              ],
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationFooter({
+    required int total,
+    required int page,
+    required int pageCount,
+    required int pageStart,
+    required int pageEnd,
+  }) {
+    final summary = total == 0
+        ? 'No results'
+        : 'Showing ${pageStart + 1}-$pageEnd of $total';
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              summary,
+              style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+            ),
+          ),
+          Text(
+            'Page ${page + 1} of $pageCount',
+            style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+          ),
+          const SizedBox(width: 12),
+          OutlinedButton(
+            onPressed: page > 0 ? () => setState(() => _page = page - 1) : null,
+            child: const Text('Previous'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: page < pageCount - 1
+                ? () => setState(() => _page = page + 1)
+                : null,
+            child: const Text('Next'),
+          ),
         ],
       ),
     );

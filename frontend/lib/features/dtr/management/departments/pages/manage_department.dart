@@ -32,11 +32,14 @@ class ManageDepartment extends StatefulWidget {
 }
 
 class _ManageDepartmentState extends State<ManageDepartment> {
+  static const int _rowsPerPage = 10;
+
   final _searchController = TextEditingController();
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
 
   String _statusFilter = 'Active';
+  int _page = 0;
   List<_DepartmentRecord> _departments = [];
   bool _loading = false;
   _DepartmentRecord? _selectedDepartment;
@@ -88,7 +91,10 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   }
 
   Future<void> _loadDepartments() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _page = 0;
+    });
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/departments',
@@ -506,6 +512,18 @@ class _ManageDepartmentState extends State<ManageDepartment> {
             final desc = (d.description ?? '').toLowerCase();
             return n.contains(search) || desc.contains(search);
           }).toList();
+    final total = filtered.length;
+    final pageCount = total == 0
+        ? 1
+        : ((total + _rowsPerPage - 1) ~/ _rowsPerPage);
+    final page = _page >= pageCount ? pageCount - 1 : _page;
+    final pageStart = page * _rowsPerPage;
+    final pageEnd = pageStart + _rowsPerPage > total
+        ? total
+        : pageStart + _rowsPerPage;
+    final paged = total == 0
+        ? <_DepartmentRecord>[]
+        : filtered.sublist(pageStart, pageEnd);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -562,40 +580,94 @@ class _ManageDepartmentState extends State<ManageDepartment> {
               ),
             )
           else
-            Table(
-              columnWidths: const {
-                0: FixedColumnWidth(88),
-                1: FlexColumnWidth(),
-                2: FlexColumnWidth(2),
-              },
-              children: filtered.map((d) {
-                final isSelected = _selectedDepartment?.id == d.id;
-                return TableRow(
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? (dark
-                              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                              : AppTheme.primaryNavy.withValues(alpha: 0.08))
-                        : null,
-                  ),
-                  children: [
-                    _tableCell(
-                      d.displayDepartmentNo,
-                      onTap: () => _openDepartmentDrawer(department: d),
-                    ),
-                    _tableCell(
-                      d.name,
-                      onTap: () => _openDepartmentDrawer(department: d),
-                    ),
-                    _tableCell(
-                      d.description ?? '—',
-                      onTap: () => _openDepartmentDrawer(department: d),
-                      secondary: true,
-                    ),
-                  ],
-                );
-              }).toList(),
+            Column(
+              children: [
+                Table(
+                  columnWidths: const {
+                    0: FixedColumnWidth(88),
+                    1: FlexColumnWidth(),
+                    2: FlexColumnWidth(2),
+                  },
+                  children: paged.map((d) {
+                    final isSelected = _selectedDepartment?.id == d.id;
+                    return TableRow(
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? (dark
+                                  ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                                  : AppTheme.primaryNavy.withValues(
+                                      alpha: 0.08,
+                                    ))
+                            : null,
+                      ),
+                      children: [
+                        _tableCell(
+                          d.displayDepartmentNo,
+                          onTap: () => _openDepartmentDrawer(department: d),
+                        ),
+                        _tableCell(
+                          d.name,
+                          onTap: () => _openDepartmentDrawer(department: d),
+                        ),
+                        _tableCell(
+                          d.description ?? '—',
+                          onTap: () => _openDepartmentDrawer(department: d),
+                          secondary: true,
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+                _buildPaginationFooter(
+                  total: total,
+                  page: page,
+                  pageCount: pageCount,
+                  pageStart: pageStart,
+                  pageEnd: pageEnd,
+                ),
+              ],
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationFooter({
+    required int total,
+    required int page,
+    required int pageCount,
+    required int pageStart,
+    required int pageEnd,
+  }) {
+    final summary = total == 0
+        ? 'No results'
+        : 'Showing ${pageStart + 1}-$pageEnd of $total';
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              summary,
+              style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+            ),
+          ),
+          Text(
+            'Page ${page + 1} of $pageCount',
+            style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+          ),
+          const SizedBox(width: 12),
+          OutlinedButton(
+            onPressed: page > 0 ? () => setState(() => _page = page - 1) : null,
+            child: const Text('Previous'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: page < pageCount - 1
+                ? () => setState(() => _page = page + 1)
+                : null,
+            child: const Text('Next'),
+          ),
         ],
       ),
     );
@@ -642,7 +714,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   Widget _buildSearchField() {
     return TextField(
       controller: _searchController,
-      onChanged: (_) => setState(() {}),
+      onChanged: (_) => setState(() => _page = 0),
       style: AppTheme.dashFieldTextStyle(context),
       decoration: AppTheme.dashInputDecoration(
         context,
@@ -680,7 +752,10 @@ class _ManageDepartmentState extends State<ManageDepartment> {
             )
             .toList(),
         onChanged: (v) {
-          setState(() => _statusFilter = v ?? 'Active');
+          setState(() {
+            _statusFilter = v ?? 'Active';
+            _page = 0;
+          });
           _loadDepartments();
         },
       ),

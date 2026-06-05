@@ -76,11 +76,14 @@ class ManageShift extends StatefulWidget {
 }
 
 class _ManageShiftState extends State<ManageShift> {
+  static const int _rowsPerPage = 10;
+
   final _searchController = TextEditingController();
   final _nameController = TextEditingController();
   final _graceController = TextEditingController();
 
   String _statusFilter = 'Active';
+  int _page = 0;
   List<_ShiftRecord> _shifts = [];
   bool _loading = false;
   _ShiftRecord? _selectedShift;
@@ -164,7 +167,10 @@ class _ManageShiftState extends State<ManageShift> {
   }
 
   Future<void> _loadShifts() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _page = 0;
+    });
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/shifts',
@@ -626,6 +632,18 @@ class _ManageShiftState extends State<ManageShift> {
     final filtered = search.isEmpty
         ? _shifts
         : _shifts.where((s) => s.name.toLowerCase().contains(search)).toList();
+    final total = filtered.length;
+    final pageCount = total == 0
+        ? 1
+        : ((total + _rowsPerPage - 1) ~/ _rowsPerPage);
+    final page = _page >= pageCount ? pageCount - 1 : _page;
+    final pageStart = page * _rowsPerPage;
+    final pageEnd = pageStart + _rowsPerPage > total
+        ? total
+        : pageStart + _rowsPerPage;
+    final paged = total == 0
+        ? <_ShiftRecord>[]
+        : filtered.sublist(pageStart, pageEnd);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -730,97 +748,149 @@ class _ManageShiftState extends State<ManageShift> {
               ),
             )
           else
-            ...filtered.map((s) {
-              final isSelected = _selectedShift?.id == s.id;
-              return Material(
-                color: isSelected
-                    ? (dark
-                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                          : AppTheme.primaryNavy.withValues(alpha: 0.08))
-                    : Colors.transparent,
-                child: InkWell(
-                  onTap: () => _openShiftDrawer(shift: s),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: shiftNoColumnWidth,
-                          child: Text(
-                            s.displayShiftNo,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: _mutedColor(context),
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
+            Column(
+              children: [
+                ...paged.map((s) {
+                  final isSelected = _selectedShift?.id == s.id;
+                  return Material(
+                    color: isSelected
+                        ? (dark
+                              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                              : AppTheme.primaryNavy.withValues(alpha: 0.08))
+                        : Colors.transparent,
+                    child: InkWell(
+                      onTap: () => _openShiftDrawer(shift: s),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
                         ),
-                        Expanded(
-                          flex: 1,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                s.name,
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: shiftNoColumnWidth,
+                              child: Text(
+                                s.displayShiftNo,
                                 style: TextStyle(
-                                  fontSize: 13,
-                                  color: _headingColor(context),
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                s.punchModeDisplay,
-                                style: TextStyle(
-                                  fontSize: 10,
+                                  fontSize: 12,
                                   color: _mutedColor(context),
                                 ),
                                 overflow: TextOverflow.ellipsis,
                                 maxLines: 1,
                               ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          flex: 1,
-                          child: Text(
-                            s.startTime.format(context),
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: _headingColor(context),
                             ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 1,
-                          child: Text(
-                            s.endTime.format(context),
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: _headingColor(context),
+                            Expanded(
+                              flex: 1,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    s.name,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: _headingColor(context),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    s.punchModeDisplay,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: _mutedColor(context),
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 1,
-                          child: Text(
-                            s.workingDaysDisplay,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: _headingColor(context),
+                            Expanded(
+                              flex: 1,
+                              child: Text(
+                                s.startTime.format(context),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: _headingColor(context),
+                                ),
+                              ),
                             ),
-                          ),
+                            Expanded(
+                              flex: 1,
+                              child: Text(
+                                s.endTime.format(context),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: _headingColor(context),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 1,
+                              child: Text(
+                                s.workingDaysDisplay,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: _headingColor(context),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
+                  );
+                }),
+                _buildPaginationFooter(
+                  total: total,
+                  page: page,
+                  pageCount: pageCount,
+                  pageStart: pageStart,
+                  pageEnd: pageEnd,
                 ),
-              );
-            }),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationFooter({
+    required int total,
+    required int page,
+    required int pageCount,
+    required int pageStart,
+    required int pageEnd,
+  }) {
+    final summary = total == 0
+        ? 'No results'
+        : 'Showing ${pageStart + 1}-$pageEnd of $total';
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              summary,
+              style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+            ),
+          ),
+          Text(
+            'Page ${page + 1} of $pageCount',
+            style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+          ),
+          const SizedBox(width: 12),
+          OutlinedButton(
+            onPressed: page > 0 ? () => setState(() => _page = page - 1) : null,
+            child: const Text('Previous'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: page < pageCount - 1
+                ? () => setState(() => _page = page + 1)
+                : null,
+            child: const Text('Next'),
+          ),
         ],
       ),
     );
@@ -829,7 +899,7 @@ class _ManageShiftState extends State<ManageShift> {
   Widget _buildSearchField() {
     return TextField(
       controller: _searchController,
-      onChanged: (_) => setState(() {}),
+      onChanged: (_) => setState(() => _page = 0),
       style: AppTheme.dashFieldTextStyle(context),
       decoration: AppTheme.dashInputDecoration(
         context,
@@ -867,7 +937,10 @@ class _ManageShiftState extends State<ManageShift> {
             )
             .toList(),
         onChanged: (v) {
-          setState(() => _statusFilter = v ?? 'Active');
+          setState(() {
+            _statusFilter = v ?? 'Active';
+            _page = 0;
+          });
           _loadShifts();
         },
       ),

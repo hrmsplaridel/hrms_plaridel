@@ -37,12 +37,15 @@ class ManagePosition extends StatefulWidget {
 }
 
 class _ManagePositionState extends State<ManagePosition> {
+  static const int _rowsPerPage = 10;
+
   final _searchController = TextEditingController();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
 
   String? _departmentFilterId;
   String _statusFilter = 'Active';
+  int _page = 0;
   List<_PositionRecord> _positions = [];
   List<Map<String, dynamic>> _departments = [];
   bool _loading = false;
@@ -120,7 +123,10 @@ class _ManagePositionState extends State<ManagePosition> {
   }
 
   Future<void> _loadPositions() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _page = 0;
+    });
     try {
       final params = <String, String>{'status': _statusFilter};
       if (_departmentFilterId != null) {
@@ -527,6 +533,18 @@ class _ManagePositionState extends State<ManagePosition> {
                 desc.contains(search) ||
                 dept.contains(search);
           }).toList();
+    final total = filtered.length;
+    final pageCount = total == 0
+        ? 1
+        : ((total + _rowsPerPage - 1) ~/ _rowsPerPage);
+    final page = _page >= pageCount ? pageCount - 1 : _page;
+    final pageStart = page * _rowsPerPage;
+    final pageEnd = pageStart + _rowsPerPage > total
+        ? total
+        : pageStart + _rowsPerPage;
+    final paged = total == 0
+        ? <_PositionRecord>[]
+        : filtered.sublist(pageStart, pageEnd);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -599,18 +617,6 @@ class _ManagePositionState extends State<ManagePosition> {
                     ),
                   ),
                 ),
-                SizedBox(
-                  width: 96,
-                  child: Text(
-                    'Action',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: _headingColor(context),
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -633,49 +639,101 @@ class _ManagePositionState extends State<ManagePosition> {
               ),
             )
           else
-            Table(
-              columnWidths: const {
-                0: FixedColumnWidth(88),
-                1: FlexColumnWidth(),
-                2: FlexColumnWidth(),
-                3: FlexColumnWidth(2),
-                4: FixedColumnWidth(96),
-              },
-              children: filtered.map((p) {
-                final isSelected = _selectedPosition?.id == p.id;
-                return TableRow(
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? (dark
-                              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                              : AppTheme.primaryNavy.withValues(alpha: 0.08))
-                        : null,
-                  ),
-                  children: [
-                    _tableCell(
-                      p.displayPositionNo,
-                      onTap: () => _openPositionDrawer(position: p),
-                      secondary: true,
-                    ),
-                    _tableCell(
-                      p.name,
-                      onTap: () => _openPositionDrawer(position: p),
-                    ),
-                    _tableCell(
-                      p.departmentName ?? '—',
-                      onTap: () => _openPositionDrawer(position: p),
-                      secondary: true,
-                    ),
-                    _tableCell(
-                      p.description ?? '—',
-                      onTap: () => _openPositionDrawer(position: p),
-                      secondary: true,
-                    ),
-                    _actionCell(p),
-                  ],
-                );
-              }).toList(),
+            Column(
+              children: [
+                Table(
+                  columnWidths: const {
+                    0: FixedColumnWidth(88),
+                    1: FlexColumnWidth(),
+                    2: FlexColumnWidth(),
+                    3: FlexColumnWidth(2),
+                  },
+                  children: paged.map((p) {
+                    final isSelected = _selectedPosition?.id == p.id;
+                    return TableRow(
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? (dark
+                                  ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                                  : AppTheme.primaryNavy.withValues(
+                                      alpha: 0.08,
+                                    ))
+                            : null,
+                      ),
+                      children: [
+                        _tableCell(
+                          p.displayPositionNo,
+                          onTap: () => _openPositionDrawer(position: p),
+                          secondary: true,
+                        ),
+                        _tableCell(
+                          p.name,
+                          onTap: () => _openPositionDrawer(position: p),
+                        ),
+                        _tableCell(
+                          p.departmentName ?? '—',
+                          onTap: () => _openPositionDrawer(position: p),
+                          secondary: true,
+                        ),
+                        _tableCell(
+                          p.description ?? '—',
+                          onTap: () => _openPositionDrawer(position: p),
+                          secondary: true,
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+                _buildPaginationFooter(
+                  total: total,
+                  page: page,
+                  pageCount: pageCount,
+                  pageStart: pageStart,
+                  pageEnd: pageEnd,
+                ),
+              ],
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationFooter({
+    required int total,
+    required int page,
+    required int pageCount,
+    required int pageStart,
+    required int pageEnd,
+  }) {
+    final summary = total == 0
+        ? 'No results'
+        : 'Showing ${pageStart + 1}-$pageEnd of $total';
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              summary,
+              style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+            ),
+          ),
+          Text(
+            'Page ${page + 1} of $pageCount',
+            style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+          ),
+          const SizedBox(width: 12),
+          OutlinedButton(
+            onPressed: page > 0 ? () => setState(() => _page = page - 1) : null,
+            child: const Text('Previous'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: page < pageCount - 1
+                ? () => setState(() => _page = page + 1)
+                : null,
+            child: const Text('Next'),
+          ),
         ],
       ),
     );
@@ -706,25 +764,10 @@ class _ManagePositionState extends State<ManagePosition> {
     );
   }
 
-  Widget _actionCell(_PositionRecord position) {
-    return TableCell(
-      verticalAlignment: TableCellVerticalAlignment.middle,
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: IconButton(
-          onPressed: () => _openPositionDrawer(position: position),
-          icon: const Icon(Icons.open_in_new_rounded, size: 18),
-          tooltip: 'Open position',
-          color: const Color(0xFFE85D04),
-        ),
-      ),
-    );
-  }
-
   Widget _buildSearchField() {
     return TextField(
       controller: _searchController,
-      onChanged: (_) => setState(() {}),
+      onChanged: (_) => setState(() => _page = 0),
       style: AppTheme.dashFieldTextStyle(context),
       decoration: AppTheme.dashInputDecoration(
         context,
@@ -769,7 +812,10 @@ class _ManagePositionState extends State<ManagePosition> {
           ),
         ],
         onChanged: (v) {
-          setState(() => _departmentFilterId = v);
+          setState(() {
+            _departmentFilterId = v;
+            _page = 0;
+          });
           _loadPositions();
         },
       ),
@@ -795,7 +841,10 @@ class _ManagePositionState extends State<ManagePosition> {
             )
             .toList(),
         onChanged: (v) {
-          setState(() => _statusFilter = v ?? 'Active');
+          setState(() {
+            _statusFilter = v ?? 'Active';
+            _page = 0;
+          });
           _loadPositions();
         },
       ),

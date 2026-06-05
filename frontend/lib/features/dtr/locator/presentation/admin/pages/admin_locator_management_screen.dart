@@ -39,13 +39,15 @@ class AdminLocatorManagementScreen extends StatefulWidget {
 
 class _AdminLocatorManagementScreenState
     extends State<AdminLocatorManagementScreen> {
+  static const int _rowsPerPage = 10;
+
   _LocatorAdminQueue _queue = _LocatorAdminQueue.all;
   LocatorRequestType? _requestTypeFilter;
   bool _loading = false;
-  bool _acting = false;
   String? _error;
   List<_LocatorAdminRecord> _items = [];
   String? _selectedItemId;
+  int _page = 0;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
@@ -81,6 +83,7 @@ class _AdminLocatorManagementScreenState
 
   @override
   Widget build(BuildContext context) {
+    _clampPage();
     final screenHeight = MediaQuery.sizeOf(context).height;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final maxListHeight = screenWidth < 600
@@ -88,7 +91,10 @@ class _AdminLocatorManagementScreenState
         : screenWidth < 1024
         ? (screenHeight * 0.5).clamp(320.0, 560.0)
         : (screenHeight * 0.58).clamp(380.0, 700.0);
-    final useScrollableList = _items.length > 3;
+    final pageStart = _page * _rowsPerPage;
+    final pageEnd = (pageStart + _rowsPerPage).clamp(0, _items.length);
+    final pageItems = _items.sublist(pageStart, pageEnd);
+    final useScrollableList = pageItems.length > 3;
     _LocatorAdminRecord? selectedItem;
     for (final item in _items) {
       if (item.id == _selectedItemId) {
@@ -96,8 +102,6 @@ class _AdminLocatorManagementScreenState
         break;
       }
     }
-    final canReviewSelected = selectedItem?.canHrReview == true;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -128,6 +132,7 @@ class _AdminLocatorManagementScreenState
                     setState(() {
                       _queue = queue;
                       _selectedItemId = null;
+                      _page = 0;
                     });
                     _load();
                   },
@@ -178,6 +183,7 @@ class _AdminLocatorManagementScreenState
                   setState(() {
                     _requestTypeFilter = type;
                     _selectedItemId = null;
+                    _page = 0;
                   });
                   _load();
                 },
@@ -212,33 +218,9 @@ class _AdminLocatorManagementScreenState
                   OutlinedButton.icon(
                     onPressed: selectedItem == null
                         ? null
-                        : () => _showDetailsDialog(selectedItem!),
-                    icon: const Icon(Icons.visibility_rounded, size: 18),
-                    label: const Text('View'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: selectedItem == null
-                        ? null
                         : () => _showHistoryDialog(selectedItem!),
                     icon: const Icon(Icons.history_rounded, size: 18),
                     label: const Text('History'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: _acting || !canReviewSelected
-                        ? null
-                        : () => _reject(selectedItem!),
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                    label: const Text('Reject'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: _acting || !canReviewSelected
-                        ? null
-                        : () => _approve(selectedItem!),
-                    icon: const Icon(Icons.check_rounded, size: 18),
-                    label: const Text('Approve'),
                   ),
                   const SizedBox(width: 12),
                   if (_loading)
@@ -276,9 +258,29 @@ class _AdminLocatorManagementScreenState
               else
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
-                  child: _adminItemsTable(
-                    maxHeight: maxListHeight,
-                    useScrollableList: useScrollableList,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _adminItemsTable(
+                        items: pageItems,
+                        maxHeight: maxListHeight,
+                        useScrollableList: useScrollableList,
+                      ),
+                      const SizedBox(height: 12),
+                      _LocatorPaginationBar(
+                        page: _page,
+                        pageCount: _pageCount,
+                        pageStart: pageStart,
+                        pageEnd: pageEnd,
+                        total: _items.length,
+                        onPrevious: _page > 0
+                            ? () => _goToPage(_page - 1)
+                            : null,
+                        onNext: _page < _pageCount - 1
+                            ? () => _goToPage(_page + 1)
+                            : null,
+                      ),
+                    ],
                   ),
                 ),
             ],
@@ -289,6 +291,7 @@ class _AdminLocatorManagementScreenState
   }
 
   Widget _adminItemsTable({
+    required List<_LocatorAdminRecord> items,
     required double maxHeight,
     required bool useScrollableList,
   }) {
@@ -303,14 +306,14 @@ class _AdminLocatorManagementScreenState
           child: Column(
             children: [
               _adminTableHeader(context, purposeWidth),
-              for (var index = 0; index < _items.length; index++)
+              for (var index = 0; index < items.length; index++)
                 _adminTableRow(
                   context,
-                  _items[index],
+                  items[index],
                   purposeWidth: purposeWidth,
-                  isLast: index == _items.length - 1,
-                  isSelected: _items[index].id == _selectedItemId,
-                  onTap: () => _toggleItemSelection(_items[index].id),
+                  isLast: index == items.length - 1,
+                  isSelected: items[index].id == _selectedItemId,
+                  onTap: () => _openItemDetailsFromRow(items[index]),
                 ),
             ],
           ),
@@ -347,6 +350,22 @@ class _AdminLocatorManagementScreenState
         );
       },
     );
+  }
+
+  int get _pageCount {
+    if (_items.isEmpty) return 1;
+    return (_items.length / _rowsPerPage).ceil();
+  }
+
+  void _clampPage() {
+    final maxPage = _pageCount - 1;
+    if (_page > maxPage) _page = maxPage;
+    if (_page < 0) _page = 0;
+  }
+
+  void _goToPage(int page) {
+    final maxPage = _pageCount - 1;
+    setState(() => _page = page.clamp(0, maxPage).toInt());
   }
 
   Widget _adminTableHeader(BuildContext context, double purposeWidth) {
@@ -507,13 +526,13 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  void _toggleItemSelection(String id) {
-    setState(() {
-      _selectedItemId = _selectedItemId == id ? null : id;
-    });
+  void _openItemDetailsFromRow(_LocatorAdminRecord item) {
+    setState(() => _selectedItemId = item.id);
+    _showDetailsDialog(item);
   }
 
   void _showDetailsDialog(_LocatorAdminRecord item) {
+    final canReview = item.canHrReview;
     showDialog<void>(
       context: context,
       builder: (dialogContext) => Dialog(
@@ -594,6 +613,26 @@ class _AdminLocatorManagementScreenState
                       child: const Text('Close'),
                     ),
                     const SizedBox(width: 12),
+                    if (canReview) ...[
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(dialogContext).pop();
+                          _reject(item);
+                        },
+                        icon: const Icon(Icons.close_rounded),
+                        label: const Text('Reject'),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton.icon(
+                        onPressed: () {
+                          Navigator.of(dialogContext).pop();
+                          _approve(item);
+                        },
+                        icon: const Icon(Icons.check_rounded),
+                        label: const Text('Approve'),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
                     FilledButton.icon(
                       onPressed: () => LocatorSlipPrint.printForm(
                         context: dialogContext,
@@ -985,7 +1024,6 @@ class _AdminLocatorManagementScreenState
   }
 
   Future<void> _approve(_LocatorAdminRecord item) async {
-    setState(() => _acting = true);
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/approve',
@@ -997,13 +1035,10 @@ class _AdminLocatorManagementScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Approve failed: $e');
-    } finally {
-      if (mounted) setState(() => _acting = false);
     }
   }
 
   Future<void> _reject(_LocatorAdminRecord item) async {
-    setState(() => _acting = true);
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/reject',
@@ -1015,8 +1050,6 @@ class _AdminLocatorManagementScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Reject failed: $e');
-    } finally {
-      if (mounted) setState(() => _acting = false);
     }
   }
 }
@@ -1128,6 +1161,85 @@ class _LocatorAdminRecord {
       amOut: json['am_out'] == true,
       pmIn: json['pm_in'] == true,
       pmOut: json['pm_out'] == true,
+    );
+  }
+}
+
+class _LocatorPaginationBar extends StatelessWidget {
+  const _LocatorPaginationBar({
+    required this.page,
+    required this.pageCount,
+    required this.pageStart,
+    required this.pageEnd,
+    required this.total,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final int page;
+  final int pageCount;
+  final int pageStart;
+  final int pageEnd;
+  final int total;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final showingText = total == 0
+        ? 'Showing 0 requests'
+        : 'Showing ${pageStart + 1}-$pageEnd of $total requests';
+    final pageText = 'Page ${page + 1} of $pageCount';
+    final textStyle = TextStyle(
+      color: AppTheme.dashTextSecondaryOf(context),
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 520;
+        final info = Column(
+          crossAxisAlignment: isNarrow
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
+          children: [
+            Text(showingText, style: textStyle),
+            const SizedBox(height: 2),
+            Text(pageText, style: textStyle),
+          ],
+        );
+        final controls = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            OutlinedButton.icon(
+              onPressed: onPrevious,
+              icon: const Icon(Icons.chevron_left_rounded, size: 18),
+              label: const Text('Previous'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: onNext,
+              icon: const Icon(Icons.chevron_right_rounded, size: 18),
+              label: const Text('Next'),
+            ),
+          ],
+        );
+
+        if (isNarrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [info, const SizedBox(height: 10), controls],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: info),
+            controls,
+          ],
+        );
+      },
     );
   }
 }

@@ -39,6 +39,8 @@ class ManageHoliday extends StatefulWidget {
 }
 
 class _ManageHolidayState extends State<ManageHoliday> {
+  static const int _rowsPerPage = 10;
+
   final _searchController = TextEditingController();
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
@@ -48,6 +50,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
   String _coverage = 'whole_day';
   bool _isActive = true;
   bool _isRecurring = false;
+  int _page = 0;
 
   List<_HolidayRecord> _holidays = [];
   bool _loading = false;
@@ -95,7 +98,10 @@ class _ManageHolidayState extends State<ManageHoliday> {
   }
 
   Future<void> _loadHolidays() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _page = 0;
+    });
     try {
       final res = await ApiClient.instance.get<List<dynamic>>('/api/holidays');
       final data = res.data ?? [];
@@ -569,6 +575,18 @@ class _ManageHolidayState extends State<ManageHoliday> {
 
   Widget _buildListPanel(List<_HolidayRecord> filtered) {
     final dark = _isDark(context);
+    final total = filtered.length;
+    final pageCount = total == 0
+        ? 1
+        : ((total + _rowsPerPage - 1) ~/ _rowsPerPage);
+    final page = _page >= pageCount ? pageCount - 1 : _page;
+    final pageStart = page * _rowsPerPage;
+    final pageEnd = pageStart + _rowsPerPage > total
+        ? total
+        : pageStart + _rowsPerPage;
+    final paged = total == 0
+        ? <_HolidayRecord>[]
+        : filtered.sublist(pageStart, pageEnd);
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: AppTheme.dashSurfaceCard(context, radius: 12),
@@ -577,7 +595,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
         children: [
           TextField(
             controller: _searchController,
-            onChanged: (_) => setState(() {}),
+            onChanged: (_) => setState(() => _page = 0),
             style: AppTheme.dashFieldTextStyle(context),
             decoration: AppTheme.dashInputDecoration(
               context,
@@ -613,33 +631,88 @@ class _ManageHolidayState extends State<ManageHoliday> {
               ),
             )
           else
-            ListView.separated(
-              shrinkWrap: true,
-              itemCount: filtered.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (_, i) {
-                final h = filtered[i];
-                final isSelected = _selectedHoliday?.id == h.id;
-                return ListTile(
-                  selected: isSelected,
-                  selectedTileColor: dark
-                      ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                      : AppTheme.primaryNavy.withValues(alpha: 0.08),
-                  title: Text(
-                    h.name,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: _headingColor(context),
-                    ),
-                  ),
-                  subtitle: Text(
-                    _holidayListSubtitle(h),
-                    style: TextStyle(fontSize: 12, color: _mutedColor(context)),
-                  ),
-                  onTap: () => _openHolidayDrawer(holiday: h),
-                );
-              },
+            Column(
+              children: [
+                ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: paged.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final h = paged[i];
+                    final isSelected = _selectedHoliday?.id == h.id;
+                    return ListTile(
+                      selected: isSelected,
+                      selectedTileColor: dark
+                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                          : AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      title: Text(
+                        h.name,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: _headingColor(context),
+                        ),
+                      ),
+                      subtitle: Text(
+                        _holidayListSubtitle(h),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _mutedColor(context),
+                        ),
+                      ),
+                      onTap: () => _openHolidayDrawer(holiday: h),
+                    );
+                  },
+                ),
+                _buildPaginationFooter(
+                  total: total,
+                  page: page,
+                  pageCount: pageCount,
+                  pageStart: pageStart,
+                  pageEnd: pageEnd,
+                ),
+              ],
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationFooter({
+    required int total,
+    required int page,
+    required int pageCount,
+    required int pageStart,
+    required int pageEnd,
+  }) {
+    final summary = total == 0
+        ? 'No results'
+        : 'Showing ${pageStart + 1}-$pageEnd of $total';
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              summary,
+              style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+            ),
+          ),
+          Text(
+            'Page ${page + 1} of $pageCount',
+            style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+          ),
+          const SizedBox(width: 12),
+          OutlinedButton(
+            onPressed: page > 0 ? () => setState(() => _page = page - 1) : null,
+            child: const Text('Previous'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: page < pageCount - 1
+                ? () => setState(() => _page = page + 1)
+                : null,
+            child: const Text('Next'),
+          ),
         ],
       ),
     );

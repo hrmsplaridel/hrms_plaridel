@@ -330,12 +330,11 @@ class LeaveRequestPdf {
     final endStr = request.endDate != null
         ? _formatDate(request.endDate!)
         : '—';
-    final disapprovalDueToText =
-        request.disapprovalReason?.trim().isNotEmpty == true
-        ? request.disapprovalReason!.trim()
-        : (request.hrRemarks?.trim().isNotEmpty == true
-              ? request.hrRemarks!.trim()
-              : '____________________________________________________________');
+    final disapprovalDueToText = request.status.isRejected
+        ? (request.disapprovalReason?.trim().isNotEmpty == true
+              ? request.disapprovalReason!.trim()
+              : '____________________________________________________________')
+        : '____________________________________________________________';
 
     final leaveTypeText = request.leaveTypeLabel;
 
@@ -1606,6 +1605,9 @@ class _LeaveRequestPdfFixedEngine {
     final hasDepartmentHeadDisapproval =
         request.departmentHeadAction == 'department_head_rejected' ||
         request.status == LeaveRequestStatus.rejectedByDepartmentHead;
+    final disapprovalReason = request.status.isRejected
+        ? _s(request.disapprovalReason)
+        : '';
 
     final vlDed =
         (request.leaveType == LeaveType.vacationLeave ||
@@ -2671,7 +2673,7 @@ class _LeaveRequestPdfFixedEngine {
                                             ),
                                             alignment: pw.Alignment.bottomLeft,
                                             child: pw.Text(
-                                              _s(request.disapprovalReason),
+                                              disapprovalReason,
                                               style: const pw.TextStyle(
                                                 fontSize: _small,
                                               ),

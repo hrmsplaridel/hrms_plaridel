@@ -466,12 +466,41 @@ class AdminLeaveRequestQueuePanel extends StatefulWidget {
 
 class _AdminLeaveRequestQueuePanelState
     extends State<AdminLeaveRequestQueuePanel> {
+  static const int _rowsPerPage = 10;
+
   final ScrollController _queueScrollController = ScrollController();
+  int _page = 0;
+
+  @override
+  void didUpdateWidget(covariant AdminLeaveRequestQueuePanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.requests != widget.requests) {
+      _page = 0;
+    } else {
+      _clampPage();
+    }
+  }
 
   @override
   void dispose() {
     _queueScrollController.dispose();
     super.dispose();
+  }
+
+  int get _pageCount {
+    if (widget.requests.isEmpty) return 1;
+    return (widget.requests.length / _rowsPerPage).ceil();
+  }
+
+  void _clampPage() {
+    final maxPage = _pageCount - 1;
+    if (_page > maxPage) _page = maxPage;
+    if (_page < 0) _page = 0;
+  }
+
+  void _goToPage(int page) {
+    final maxPage = _pageCount - 1;
+    setState(() => _page = page.clamp(0, maxPage).toInt());
   }
 
   @override
@@ -483,6 +512,11 @@ class _AdminLeaveRequestQueuePanelState
         : screenWidth < 1024
         ? (screenHeight * 0.52).clamp(320.0, 580.0)
         : (screenHeight * 0.6).clamp(380.0, 760.0);
+
+    _clampPage();
+    final pageStart = _page * _rowsPerPage;
+    final pageEnd = (pageStart + _rowsPerPage).clamp(0, widget.requests.length);
+    final pageRequests = widget.requests.sublist(pageStart, pageEnd);
 
     return AdminLeaveSectionCard(
       title: widget.isDepartmentHead ? 'Requests & History' : 'Request Queue',
@@ -500,7 +534,7 @@ class _AdminLeaveRequestQueuePanelState
             const AdminLeaveCenteredState(
               message: 'No leave requests matched the filters.',
             )
-          else
+          else ...[
             Container(
               width: double.infinity,
               constraints: BoxConstraints(maxHeight: maxQueueHeight),
@@ -531,7 +565,7 @@ class _AdminLeaveRequestQueuePanelState
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               const AdminTableHeader(),
-                              ...widget.requests.map(
+                              ...pageRequests.map(
                                 (request) => AdminRow(
                                   request: request,
                                   statusLabel: adminLeaveStatusLabel(
@@ -552,8 +586,100 @@ class _AdminLeaveRequestQueuePanelState
                 },
               ),
             ),
+            const SizedBox(height: 12),
+            _AdminLeavePaginationBar(
+              page: _page,
+              pageCount: _pageCount,
+              pageStart: pageStart,
+              pageEnd: pageEnd,
+              total: widget.requests.length,
+              onPrevious: _page > 0 ? () => _goToPage(_page - 1) : null,
+              onNext: _page < _pageCount - 1
+                  ? () => _goToPage(_page + 1)
+                  : null,
+            ),
+          ],
         ],
       ),
+    );
+  }
+}
+
+class _AdminLeavePaginationBar extends StatelessWidget {
+  const _AdminLeavePaginationBar({
+    required this.page,
+    required this.pageCount,
+    required this.pageStart,
+    required this.pageEnd,
+    required this.total,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final int page;
+  final int pageCount;
+  final int pageStart;
+  final int pageEnd;
+  final int total;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final showingText = total == 0
+        ? 'Showing 0 requests'
+        : 'Showing ${pageStart + 1}-$pageEnd of $total requests';
+    final pageText = 'Page ${page + 1} of $pageCount';
+    final textStyle = TextStyle(
+      color: AppTheme.dashTextSecondaryOf(context),
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 520;
+        final info = Column(
+          crossAxisAlignment: isNarrow
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
+          children: [
+            Text(showingText, style: textStyle),
+            const SizedBox(height: 2),
+            Text(pageText, style: textStyle),
+          ],
+        );
+        final controls = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            OutlinedButton.icon(
+              onPressed: onPrevious,
+              icon: const Icon(Icons.chevron_left_rounded, size: 18),
+              label: const Text('Previous'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: onNext,
+              icon: const Icon(Icons.chevron_right_rounded, size: 18),
+              label: const Text('Next'),
+            ),
+          ],
+        );
+
+        if (isNarrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [info, const SizedBox(height: 10), controls],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: info),
+            controls,
+          ],
+        );
+      },
     );
   }
 }
