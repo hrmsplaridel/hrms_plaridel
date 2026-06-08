@@ -6,17 +6,24 @@ class EmployeeLocatorMobileRequestList extends StatelessWidget {
     required this.children,
     required this.maxHeight,
     required this.useScrollableList,
+    this.gap = 12,
   });
 
   final List<Widget> children;
   final double maxHeight;
   final bool useScrollableList;
+  final double gap;
 
   @override
   Widget build(BuildContext context) {
     final list = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: children,
+      children: [
+        for (var i = 0; i < children.length; i++) ...[
+          if (i > 0) SizedBox(height: gap),
+          children[i],
+        ],
+      ],
     );
 
     if (!useScrollableList) return list;

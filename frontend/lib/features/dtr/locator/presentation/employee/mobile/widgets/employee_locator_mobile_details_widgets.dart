@@ -505,14 +505,22 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
     required this.onHistory,
     required this.onCancel,
     required this.onPrint,
+    this.canReject = false,
+    this.canApprove = false,
+    this.onReject,
+    this.onApprove,
   });
 
   final bool canCancel;
   final bool canPrint;
+  final bool canReject;
+  final bool canApprove;
   final VoidCallback onClose;
   final VoidCallback onHistory;
   final VoidCallback onCancel;
   final VoidCallback onPrint;
+  final VoidCallback? onReject;
+  final VoidCallback? onApprove;
 
   @override
   Widget build(BuildContext context) {
@@ -564,6 +572,28 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (canReject || canApprove) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: canReject ? onReject : null,
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          label: const Text('Reject'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: canApprove ? onApprove : null,
+                          icon: const Icon(Icons.check_rounded, size: 18),
+                          label: const Text('Approve'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           );
@@ -593,6 +623,18 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                   onPressed: onPrint,
                   icon: const Icon(Icons.print_rounded, size: 18),
                   label: const Text('Print'),
+                ),
+              if (canReject)
+                OutlinedButton.icon(
+                  onPressed: onReject,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  label: const Text('Reject'),
+                ),
+              if (canApprove)
+                FilledButton.icon(
+                  onPressed: onApprove,
+                  icon: const Icon(Icons.check_rounded, size: 18),
+                  label: const Text('Approve'),
                 ),
             ],
           ),

@@ -7,6 +7,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 
 typedef _LocatorHistoryStep = ({
@@ -45,6 +46,7 @@ class _AdminLocatorManagementScreenState
   LocatorRequestType? _requestTypeFilter;
   bool _loading = false;
   String? _error;
+  List<LocatorRequestType> _locatorTypes = LocatorRequestType.values;
   List<_LocatorAdminRecord> _items = [];
   String? _selectedItemId;
   int _page = 0;
@@ -61,6 +63,7 @@ class _AdminLocatorManagementScreenState
   @override
   void initState() {
     super.initState();
+    _loadLocatorTypes();
     _load();
   }
 
@@ -119,6 +122,15 @@ class _AdminLocatorManagementScreenState
           style: TextStyle(color: _mutedColor(context), fontSize: 14),
         ),
         const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.icon(
+            onPressed: _openTypeManagement,
+            icon: const Icon(Icons.tune_rounded, size: 18),
+            label: const Text('Manage Types'),
+          ),
+        ),
+        const SizedBox(height: 12),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -171,7 +183,7 @@ class _AdminLocatorManagementScreenState
                     value: null,
                     child: Text('All types'),
                   ),
-                  ...LocatorRequestType.values.map(
+                  ..._locatorTypes.map(
                     (type) => DropdownMenuItem<LocatorRequestType?>(
                       value: type,
                       child: Text(type.shortLabel),
@@ -589,6 +601,7 @@ class _AdminLocatorManagementScreenState
                         item.deptHeadReviewerName ?? '—',
                       ),
                       _detailTile('HR Reviewer', item.hrReviewerName ?? '—'),
+                      _detailTile('Attachment', item.attachmentName ?? '—'),
                       _detailTile('Reason/Purpose', item.reason, wide: true),
                       if ((item.deptHeadRemarks ?? '').trim().isNotEmpty)
                         _detailTile(
@@ -968,6 +981,39 @@ class _AdminLocatorManagementScreenState
     );
   }
 
+  Future<void> _loadLocatorTypes() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/locator-slips/types?include_inactive=true',
+      );
+      final items = (res.data ?? const [])
+          .whereType<Map>()
+          .map((e) => LocatorRequestType.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      if (!mounted || items.isEmpty) return;
+      setState(() => _locatorTypes = items);
+    } catch (_) {
+      // Keep built-in fallback types when configuration cannot be loaded.
+    }
+  }
+
+  Future<void> _openTypeManagement() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: const SizedBox(
+          width: 1120,
+          height: 720,
+          child: LocatorTypeManagementScreen(),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    await _loadLocatorTypes();
+    await _load();
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -1063,6 +1109,7 @@ class _LocatorAdminRecord {
     this.requestType = LocatorRequestType.locator,
     required this.office,
     required this.reason,
+    this.attachmentName,
     required this.status,
     this.deptHeadReviewerName,
     this.deptHeadReviewedAt,
@@ -1085,6 +1132,7 @@ class _LocatorAdminRecord {
   final LocatorRequestType requestType;
   final String office;
   final String reason;
+  final String? attachmentName;
   final String status;
   final String? deptHeadReviewerName;
   final DateTime? deptHeadReviewedAt;
@@ -1145,9 +1193,20 @@ class _LocatorAdminRecord {
       employeeName: (json['employee_name'] ?? 'Employee').toString(),
       departmentName: (json['department_name'] ?? '').toString(),
       slipDate: (json['slip_date'] ?? '').toString(),
-      requestType: LocatorRequestType.fromCode(json['request_type']),
+      requestType: LocatorRequestType.fromJson({
+        'code': json['request_type'],
+        'label': json['request_type_label'],
+        'short_label': json['request_type_short_label'],
+        'location_label': json['request_type_location_label'],
+        'location_hint': json['request_type_location_hint'],
+        'dtr_slot_label': json['request_type_dtr_slot_label'],
+        'dtr_print_label': json['request_type_dtr_print_label'],
+        'requires_attachment': json['request_type_requires_attachment'],
+        'coverage_mode': json['request_type_coverage_mode'],
+      }),
       office: (json['office'] ?? '').toString(),
       reason: (json['reason'] ?? '').toString(),
+      attachmentName: _trimOrNull(json['attachment_name']),
       status: (json['status'] ?? '').toString(),
       deptHeadReviewerName: _trimOrNull(json['dept_head_reviewer_name']),
       deptHeadReviewedAt: _parseDateTime(json['dept_head_reviewed_at']),

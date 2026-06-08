@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
+import 'package:hrms_plaridel/shared/widgets/hrms_date_picker.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/admin_row.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_status_chip.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_screen_utils.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_shared_widgets.dart';
 
@@ -344,7 +346,7 @@ class AdminLeaveFilterBar extends StatelessWidget {
 
   Future<void> _pickDate(BuildContext context, {required bool isFrom}) async {
     final current = isFrom ? startDateFrom : startDateTo;
-    final picked = await showDatePicker(
+    final picked = await showHrmsDatePicker(
       context: context,
       initialDate: current ?? DateTime.now(),
       firstDate: DateTime(2020),
@@ -428,7 +430,7 @@ class _AdminLeaveDateFilterChip extends StatelessWidget {
       deleteIcon: hasDate ? const Icon(Icons.close_rounded, size: 14) : null,
       onDeleted: hasDate ? () => onChanged?.call(null) : null,
       onPressed: () async {
-        final picked = await showDatePicker(
+        final picked = await showHrmsDatePicker(
           context: context,
           initialDate: date ?? DateTime.now(),
           firstDate: DateTime(2020),
@@ -507,6 +509,7 @@ class _AdminLeaveRequestQueuePanelState
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.sizeOf(context).height;
     final screenWidth = MediaQuery.sizeOf(context).width;
+    final isMobile = screenWidth < 600;
     final maxQueueHeight = screenWidth < 600
         ? (screenHeight * 0.42).clamp(260.0, 420.0)
         : screenWidth < 1024
@@ -545,6 +548,28 @@ class _AdminLeaveRequestQueuePanelState
               clipBehavior: Clip.antiAlias,
               child: LayoutBuilder(
                 builder: (context, constraints) {
+                  if (isMobile) {
+                    return ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.all(10),
+                      physics: const BouncingScrollPhysics(),
+                      itemCount: pageRequests.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final request = pageRequests[index];
+                        return _AdminLeaveMobileRequestCard(
+                          request: request,
+                          highlighted: request.id == widget.selectedRequest?.id,
+                          statusLabel: adminLeaveStatusLabel(
+                            request.status,
+                            isDepartmentHead: widget.isDepartmentHead,
+                          ),
+                          onTap: () => widget.onSelect(request),
+                        );
+                      },
+                    );
+                  }
+
                   final maxW = constraints.maxWidth;
                   final tableWidth = !maxW.isFinite || maxW <= 0
                       ? kAdminTableMinWidth
@@ -605,6 +630,167 @@ class _AdminLeaveRequestQueuePanelState
   }
 }
 
+class _AdminLeaveMobileRequestCard extends StatelessWidget {
+  const _AdminLeaveMobileRequestCard({
+    required this.request,
+    required this.highlighted,
+    required this.statusLabel,
+    required this.onTap,
+  });
+
+  final LeaveRequest request;
+  final bool highlighted;
+  final String statusLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
+    final borderColor = highlighted
+        ? accent.withValues(alpha: 0.55)
+        : AppTheme.dashHairlineOf(context);
+
+    return Material(
+      color: highlighted
+          ? accent.withValues(alpha: dark ? 0.18 : 0.06)
+          : AppTheme.dashPanelOf(context),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      request.employeeName?.trim().isNotEmpty == true
+                          ? request.employeeName!.trim()
+                          : 'Unknown employee',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  LeaveStatusChip(status: request.status, label: statusLabel),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                request.officeDepartment?.trim().isNotEmpty == true
+                    ? request.officeDepartment!.trim()
+                    : 'No department',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _AdminLeaveMobileInfoChip(
+                    icon: Icons.event_note_rounded,
+                    label: request.leaveTypeLabel,
+                  ),
+                  _AdminLeaveMobileInfoChip(
+                    icon: Icons.date_range_rounded,
+                    label: _rangeText(request),
+                  ),
+                  _AdminLeaveMobileInfoChip(
+                    icon: Icons.timelapse_rounded,
+                    label: _daysText(request),
+                  ),
+                  _AdminLeaveMobileInfoChip(
+                    icon: Icons.upload_file_rounded,
+                    label: request.dateFiled == null
+                        ? 'No filed date'
+                        : 'Filed ${formatAdminLeaveDate(request.dateFiled!)}',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _rangeText(LeaveRequest request) {
+    if (request.startDate == null || request.endDate == null) {
+      return 'No date range';
+    }
+    return '${formatAdminLeaveDate(request.startDate!)} - ${formatAdminLeaveDate(request.endDate!)}';
+  }
+
+  static String _daysText(LeaveRequest request) {
+    final days = request.workingDaysApplied;
+    if (days == null) return 'No day count';
+    final whole = days.roundToDouble();
+    final text = (days - whole).abs() < 0.01
+        ? whole.toStringAsFixed(0)
+        : days.toStringAsFixed(1);
+    return '$text ${days == 1 ? 'day' : 'days'}';
+  }
+}
+
+class _AdminLeaveMobileInfoChip extends StatelessWidget {
+  const _AdminLeaveMobileInfoChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 32),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: AppTheme.dashTextSecondaryOf(context)),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AdminLeavePaginationBar extends StatelessWidget {
   const _AdminLeavePaginationBar({
     required this.page,
@@ -630,6 +816,7 @@ class _AdminLeavePaginationBar extends StatelessWidget {
         ? 'Showing 0 requests'
         : 'Showing ${pageStart + 1}-$pageEnd of $total requests';
     final pageText = 'Page ${page + 1} of $pageCount';
+    final hasMultiplePages = pageCount > 1;
     final textStyle = TextStyle(
       color: AppTheme.dashTextSecondaryOf(context),
       fontSize: 12,
@@ -645,38 +832,45 @@ class _AdminLeavePaginationBar extends StatelessWidget {
               : CrossAxisAlignment.start,
           children: [
             Text(showingText, style: textStyle),
-            const SizedBox(height: 2),
-            Text(pageText, style: textStyle),
+            if (hasMultiplePages) ...[
+              const SizedBox(height: 2),
+              Text(pageText, style: textStyle),
+            ],
           ],
         );
-        final controls = Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            OutlinedButton.icon(
-              onPressed: onPrevious,
-              icon: const Icon(Icons.chevron_left_rounded, size: 18),
-              label: const Text('Previous'),
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: onNext,
-              icon: const Icon(Icons.chevron_right_rounded, size: 18),
-              label: const Text('Next'),
-            ),
-          ],
-        );
+        final controls = hasMultiplePages
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: onPrevious,
+                    icon: const Icon(Icons.chevron_left_rounded, size: 18),
+                    label: const Text('Previous'),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: onNext,
+                    icon: const Icon(Icons.chevron_right_rounded, size: 18),
+                    label: const Text('Next'),
+                  ),
+                ],
+              )
+            : null;
 
         if (isNarrow) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.center,
-            children: [info, const SizedBox(height: 10), controls],
+            children: [
+              info,
+              if (controls != null) ...[const SizedBox(height: 10), controls],
+            ],
           );
         }
 
         return Row(
           children: [
             Expanded(child: info),
-            controls,
+            if (controls != null) controls,
           ],
         );
       },
