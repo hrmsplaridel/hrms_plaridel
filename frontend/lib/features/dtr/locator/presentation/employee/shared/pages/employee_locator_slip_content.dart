@@ -1817,6 +1817,10 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       }
 
       _requestType = type;
+      if (!type.requiresAttachment) {
+        _pendingAttachmentBytes = null;
+        _pendingAttachmentName = null;
+      }
     });
   }
 
@@ -1928,8 +1932,10 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
                         : null,
                   ),
                 ),
-                const SizedBox(height: 14),
-                _attachmentPicker(),
+                if (_requiresAttachment) ...[
+                  const SizedBox(height: 14),
+                  _attachmentPicker(),
+                ],
               ],
             ),
           ),
@@ -2029,7 +2035,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         EmployeeLocatorMobileFieldLabel(
-          text: _requiresAttachment ? 'Attachment *' : 'Attachment',
+          text: 'Attachment *',
           color: AppTheme.dashTextSecondaryOf(context),
         ),
         const SizedBox(height: 8),
@@ -2053,9 +2059,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
                 child: Text(
                   hasAttachment
                       ? _pendingAttachmentName!
-                      : (_requiresAttachment
-                            ? 'PDF, JPG, or PNG required'
-                            : 'PDF, JPG, or PNG optional'),
+                      : 'PDF, JPG, or PNG required',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(

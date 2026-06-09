@@ -90,18 +90,8 @@ class EmployeeLeaveMobileRequestsContent extends StatelessWidget {
       );
     });
 
-    if (!useScrollableList) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: children,
-      );
-    }
-
-    return ListView(
-      controller: scrollController,
-      primary: false,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: children,
     );
   }
