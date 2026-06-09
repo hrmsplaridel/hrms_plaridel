@@ -700,6 +700,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                             color: AppTheme.dashCanvasOf(context),
                             child: DashboardContentNavigator(
                               navigatorKey: _contentNavKey,
+                              homeCacheKey: _selectedMenu,
                               homeRefreshKey: Object.hash(
                                 _selectedMenu,
                                 displayName,
@@ -745,6 +746,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                       color: AppTheme.dashCanvasOf(context),
                       child: DashboardContentNavigator(
                         navigatorKey: _contentNavKey,
+                        homeCacheKey: _selectedMenu,
                         homeRefreshKey: Object.hash(
                           _selectedMenu,
                           displayName,

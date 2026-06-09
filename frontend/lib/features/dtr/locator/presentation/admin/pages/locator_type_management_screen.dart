@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 
 class LocatorTypeManagementScreen extends StatefulWidget {
@@ -55,16 +56,13 @@ class _LocatorTypeManagementScreenState
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool forceRefresh = false}) async {
     setState(() => _loading = true);
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/locator-slips/types?include_inactive=true',
+      final items = await LocatorSlipDataCache.instance.listTypes(
+        includeInactive: true,
+        forceRefresh: forceRefresh,
       );
-      final items = (res.data ?? const [])
-          .whereType<Map>()
-          .map((e) => LocatorRequestType.fromJson(Map<String, dynamic>.from(e)))
-          .toList();
       if (!mounted) return;
       setState(() {
         _items = items.isEmpty ? LocatorRequestType.values : items;
@@ -146,7 +144,9 @@ class _LocatorTypeManagementScreenState
         );
         _showMessage('Locator type updated.');
       }
-      await _load();
+      LocatorSlipDataCache.instance.invalidateTypes();
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
     } on DioException catch (e) {
       _showMessage(
         e.response?.data is Map
@@ -188,7 +188,9 @@ class _LocatorTypeManagementScreenState
         '/api/locator-slips/types/${selected.id}',
       );
       _selected = null;
-      await _load();
+      LocatorSlipDataCache.instance.invalidateTypes();
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
       _showMessage('Locator type removed.');
     } catch (e) {
       _showMessage('Remove failed: $e');

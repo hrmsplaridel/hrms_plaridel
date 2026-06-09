@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_details_widgets.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_form_widgets.dart';
@@ -95,10 +96,10 @@ class EmployeeLocatorSlipContentState
       if (event.name != 'locator_updated') return;
       final userId = authProvider.user?.id;
       if (event.affectsUser(userId)) {
-        unawaited(_loadMyRequests());
+        unawaited(_loadMyRequests(forceRefresh: true));
       }
       if (_currentSection == _LocatorSection.approvals) {
-        unawaited(_loadDepartmentHeadRequests());
+        unawaited(_loadDepartmentHeadRequests(forceRefresh: true));
       }
     });
   }
@@ -1306,6 +1307,7 @@ class EmployeeLocatorSlipContentState
         return;
       }
       final data = res.data;
+      LocatorSlipDataCache.instance.invalidateRequests();
       _LocatorSlipDraft? inserted;
       if (data != null) {
         inserted = _LocatorSlipDraft.fromApi(data);
@@ -1364,6 +1366,7 @@ class EmployeeLocatorSlipContentState
         '/api/locator-slips/$id/cancel',
         data: const {},
       );
+      LocatorSlipDataCache.instance.invalidateRequests();
       final data = res.data;
       if (!mounted) return;
       setState(() {
@@ -1376,7 +1379,7 @@ class EmployeeLocatorSlipContentState
           }
         }
       });
-      await _loadMyRequests();
+      await _loadMyRequests(forceRefresh: true);
       if (!mounted) return;
       _showLocatorSnack('Request cancelled.');
     } catch (e) {
@@ -1392,10 +1395,8 @@ class EmployeeLocatorSlipContentState
 
   Future<bool> _checkIsDepartmentHead() async {
     try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/locator-slips/department-head/check',
-      );
-      final isDeptHead = res.data?['isDeptHead'] == true;
+      final isDeptHead = await LocatorSlipDataCache.instance
+          .checkIsDepartmentHead();
       if (isDeptHead) {
         _loadDepartmentHeadRequests();
       }
@@ -1405,16 +1406,11 @@ class EmployeeLocatorSlipContentState
     }
   }
 
-  Future<void> _loadLocatorTypes() async {
+  Future<void> _loadLocatorTypes({bool forceRefresh = false}) async {
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/locator-slips/types',
-      );
-      final items = (res.data ?? const [])
-          .whereType<Map>()
-          .map((e) => LocatorRequestType.fromJson(Map<String, dynamic>.from(e)))
-          .where((type) => type.isActive)
-          .toList();
+      final items = (await LocatorSlipDataCache.instance.listTypes(
+        forceRefresh: forceRefresh,
+      )).where((type) => type.isActive).toList();
       if (!mounted || items.isEmpty) return;
       setState(() => _locatorTypes = items);
     } catch (_) {
@@ -1422,19 +1418,15 @@ class EmployeeLocatorSlipContentState
     }
   }
 
-  Future<void> _loadMyRequests() async {
+  Future<void> _loadMyRequests({bool forceRefresh = false}) async {
     setState(() {
       _loadingMy = true;
       _error = null;
     });
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/locator-slips/my',
-      );
-      final items = (res.data ?? const [])
-          .whereType<Map>()
-          .map((e) => _LocatorSlipDraft.fromApi(Map<String, dynamic>.from(e)))
-          .toList();
+      final items = (await LocatorSlipDataCache.instance.listMyRequests(
+        forceRefresh: forceRefresh,
+      )).map((e) => _LocatorSlipDraft.fromApi(e)).toList();
       if (!mounted) return;
       setState(() {
         _slips
@@ -1454,16 +1446,13 @@ class EmployeeLocatorSlipContentState
     }
   }
 
-  Future<void> _loadDepartmentHeadRequests() async {
+  Future<void> _loadDepartmentHeadRequests({bool forceRefresh = false}) async {
     setState(() => _loadingApprovals = true);
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/locator-slips/department-head',
-      );
-      final items = (res.data ?? const [])
-          .whereType<Map>()
-          .map((e) => _LocatorSlipDraft.fromApi(Map<String, dynamic>.from(e)))
-          .toList();
+      final items =
+          (await LocatorSlipDataCache.instance.listDepartmentHeadRequests(
+            forceRefresh: forceRefresh,
+          )).map((e) => _LocatorSlipDraft.fromApi(e)).toList();
       if (!mounted) return;
       setState(() {
         _deptHeadQueue
@@ -1487,8 +1476,9 @@ class EmployeeLocatorSlipContentState
         '/api/locator-slips/${item.id}/department-head-approve',
         data: const {},
       );
-      await _loadDepartmentHeadRequests();
-      await _loadMyRequests();
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _loadDepartmentHeadRequests(forceRefresh: true);
+      await _loadMyRequests(forceRefresh: true);
       if (!mounted) return;
       _showLocatorSnack('Approved and sent to HR for final approval.');
     } catch (e) {
@@ -1504,8 +1494,9 @@ class EmployeeLocatorSlipContentState
         '/api/locator-slips/${item.id}/department-head-reject',
         data: const {},
       );
-      await _loadDepartmentHeadRequests();
-      await _loadMyRequests();
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _loadDepartmentHeadRequests(forceRefresh: true);
+      await _loadMyRequests(forceRefresh: true);
       if (!mounted) return;
       _showLocatorSnack('Request rejected.');
     } catch (e) {

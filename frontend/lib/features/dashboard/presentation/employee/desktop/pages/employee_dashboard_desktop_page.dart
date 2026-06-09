@@ -396,6 +396,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
                       color: AppTheme.dashCanvasOf(context),
                       child: DashboardContentNavigator(
                         navigatorKey: _contentNavKey,
+                        homeCacheKey: _selectedNavIndex,
                         homeRefreshKey: Object.hash(
                           _selectedNavIndex,
                           _leaveNavKey,

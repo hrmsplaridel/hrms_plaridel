@@ -19,6 +19,7 @@ class DashboardContentNavigator extends StatefulWidget {
     required this.settingsPanel,
     required this.homeScrollPadding,
     required this.settingsScrollPadding,
+    this.homeCacheKey,
     this.homeRefreshKey,
   });
 
@@ -27,6 +28,7 @@ class DashboardContentNavigator extends StatefulWidget {
   final Widget settingsPanel;
   final EdgeInsets homeScrollPadding;
   final EdgeInsets settingsScrollPadding;
+  final Object? homeCacheKey;
   final Object? homeRefreshKey;
 
   static bool isSettingsOnTop(NavigatorState? nav) {
@@ -56,16 +58,22 @@ class DashboardContentNavigator extends StatefulWidget {
 }
 
 class _DashboardContentNavigatorState extends State<DashboardContentNavigator> {
+  static final Object _fallbackHomeCacheKey = Object();
+  static const int _maxHomeCacheEntries = 4;
+
   final ValueNotifier<int> _homeVersion = ValueNotifier<int>(0);
   final ValueNotifier<int> _settingsVersion = ValueNotifier<int>(0);
-  bool _homeRefreshScheduled = false;
+  final Map<Object, _DashboardHomeEntry> _homeCache =
+      <Object, _DashboardHomeEntry>{};
+  int _homeCacheClock = 0;
 
   @override
   void didUpdateWidget(covariant DashboardContentNavigator oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.homeRefreshKey != widget.homeRefreshKey ||
+    if (oldWidget.homeCacheKey != widget.homeCacheKey ||
+        oldWidget.homeRefreshKey != widget.homeRefreshKey ||
         oldWidget.homeScrollPadding != widget.homeScrollPadding) {
-      _scheduleHomeRefresh();
+      _homeVersion.value++;
     }
     if (oldWidget.settingsPanel != widget.settingsPanel ||
         oldWidget.settingsScrollPadding != widget.settingsScrollPadding) {
@@ -73,21 +81,56 @@ class _DashboardContentNavigatorState extends State<DashboardContentNavigator> {
     }
   }
 
-  void _scheduleHomeRefresh() {
-    if (_homeRefreshScheduled) return;
-    _homeRefreshScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _homeRefreshScheduled = false;
-      if (!mounted) return;
-      _homeVersion.value++;
-    });
-  }
-
   @override
   void dispose() {
     _homeVersion.dispose();
     _settingsVersion.dispose();
     super.dispose();
+  }
+
+  Object get _effectiveHomeCacheKey =>
+      widget.homeCacheKey ?? widget.homeRefreshKey ?? _fallbackHomeCacheKey;
+
+  Widget _buildHomeCacheStack(BuildContext context) {
+    final cacheKey = _effectiveHomeCacheKey;
+    final refreshKey = widget.homeRefreshKey ?? cacheKey;
+    final existing = _homeCache[cacheKey];
+
+    if (existing == null ||
+        existing.refreshKey != refreshKey ||
+        existing.padding != widget.homeScrollPadding) {
+      _homeCache[cacheKey] = _DashboardHomeEntry(
+        cacheKey: cacheKey,
+        refreshKey: refreshKey,
+        padding: widget.homeScrollPadding,
+        child: RepaintBoundary(
+          child: SingleChildScrollView(
+            key: PageStorageKey<Object>(cacheKey),
+            padding: widget.homeScrollPadding,
+            child: widget.homeBuilder(),
+          ),
+        ),
+        lastUsed: ++_homeCacheClock,
+      );
+    } else {
+      existing.lastUsed = ++_homeCacheClock;
+    }
+
+    _trimHomeCache(activeKey: cacheKey);
+    final entries = _homeCache.values.toList()
+      ..sort((a, b) => a.lastUsed.compareTo(b.lastUsed));
+    return _DashboardHomeCacheStack(entries: entries, activeKey: cacheKey);
+  }
+
+  void _trimHomeCache({required Object activeKey}) {
+    if (_homeCache.length <= _maxHomeCacheEntries) return;
+    final removable =
+        _homeCache.entries.where((entry) => entry.key != activeKey).toList()
+          ..sort((a, b) => a.value.lastUsed.compareTo(b.value.lastUsed));
+    for (final entry in removable) {
+      if (_homeCache.length <= _maxHomeCacheEntries) return;
+      _homeCache.remove(entry.key);
+    }
   }
 
   @override
@@ -99,14 +142,16 @@ class _DashboardContentNavigatorState extends State<DashboardContentNavigator> {
         final isSettings = settings.name == DashboardContentRoutes.settings;
         return PageRouteBuilder<void>(
           settings: settings,
-          pageBuilder: (_, __, ___) => _DashboardScrollPage(
-            listenable: isSettings ? _settingsVersion : _homeVersion,
-            paddingBuilder: () => isSettings
-                ? widget.settingsScrollPadding
-                : widget.homeScrollPadding,
-            childBuilder: () =>
-                isSettings ? widget.settingsPanel : widget.homeBuilder(),
-          ),
+          pageBuilder: (_, __, ___) => isSettings
+              ? _DashboardScrollPage(
+                  listenable: _settingsVersion,
+                  paddingBuilder: () => widget.settingsScrollPadding,
+                  childBuilder: () => widget.settingsPanel,
+                )
+              : _DashboardHomeCachePage(
+                  listenable: _homeVersion,
+                  stackBuilder: _buildHomeCacheStack,
+                ),
           transitionDuration: isSettings
               ? const Duration(milliseconds: 180)
               : Duration.zero,
@@ -125,6 +170,72 @@ class _DashboardContentNavigatorState extends State<DashboardContentNavigator> {
       },
     );
   }
+}
+
+class _DashboardHomeCachePage extends StatelessWidget {
+  const _DashboardHomeCachePage({
+    required this.listenable,
+    required this.stackBuilder,
+  });
+
+  final ValueListenable<int> listenable;
+  final WidgetBuilder stackBuilder;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: listenable,
+      builder: (context, _, __) => stackBuilder(context),
+    );
+  }
+}
+
+class _DashboardHomeCacheStack extends StatelessWidget {
+  const _DashboardHomeCacheStack({
+    required this.entries,
+    required this.activeKey,
+  });
+
+  final List<_DashboardHomeEntry> entries;
+  final Object activeKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: AppTheme.dashCanvasOf(context),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          for (final entry in entries)
+            Positioned.fill(
+              child: Offstage(
+                offstage: entry.cacheKey != activeKey,
+                child: TickerMode(
+                  enabled: entry.cacheKey == activeKey,
+                  child: entry.child,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashboardHomeEntry {
+  _DashboardHomeEntry({
+    required this.cacheKey,
+    required this.refreshKey,
+    required this.padding,
+    required this.child,
+    required this.lastUsed,
+  });
+
+  final Object cacheKey;
+  final Object refreshKey;
+  final EdgeInsets padding;
+  final Widget child;
+  int lastUsed;
 }
 
 class _DashboardScrollPage extends StatelessWidget {

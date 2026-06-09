@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
@@ -74,7 +75,7 @@ class _AdminLocatorManagementScreenState
       event,
     ) {
       if (event.name != 'locator_updated') return;
-      unawaited(_load());
+      unawaited(_load(forceRefresh: true));
     });
   }
 
@@ -1024,15 +1025,12 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  Future<void> _loadLocatorTypes() async {
+  Future<void> _loadLocatorTypes({bool forceRefresh = false}) async {
     try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/locator-slips/types?include_inactive=true',
+      final items = await LocatorSlipDataCache.instance.listTypes(
+        includeInactive: true,
+        forceRefresh: forceRefresh,
       );
-      final items = (res.data ?? const [])
-          .whereType<Map>()
-          .map((e) => LocatorRequestType.fromJson(Map<String, dynamic>.from(e)))
-          .toList();
       if (!mounted || items.isEmpty) return;
       setState(() => _locatorTypes = items);
     } catch (_) {
@@ -1053,11 +1051,12 @@ class _AdminLocatorManagementScreenState
       ),
     );
     if (!mounted) return;
-    await _loadLocatorTypes();
-    await _load();
+    LocatorSlipDataCache.instance.invalidateAll();
+    await _loadLocatorTypes(forceRefresh: true);
+    await _load(forceRefresh: true);
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool forceRefresh = false}) async {
     setState(() {
       _loading = true;
       _error = null;
@@ -1076,17 +1075,10 @@ class _AdminLocatorManagementScreenState
       if (_requestTypeFilter != null) {
         query['request_type'] = _requestTypeFilter!.code;
       }
-      final path = Uri(
-        path: '/api/locator-slips/admin',
-        queryParameters: query.isEmpty ? null : query,
-      ).toString();
-      final res = await ApiClient.instance.get<List<dynamic>>(path);
-      final all = (res.data ?? const [])
-          .whereType<Map>()
-          .map(
-            (e) => _LocatorAdminRecord.fromJson(Map<String, dynamic>.from(e)),
-          )
-          .toList();
+      final all = (await LocatorSlipDataCache.instance.listAdminRequests(
+        query: query,
+        forceRefresh: forceRefresh,
+      )).map((e) => _LocatorAdminRecord.fromJson(e)).toList();
       final filtered = switch (_queue) {
         _LocatorAdminQueue.pendingHrAdmin =>
           all.where((e) => e.canHrReview).toList(),
@@ -1118,7 +1110,8 @@ class _AdminLocatorManagementScreenState
         '/api/locator-slips/${item.id}/approve',
         data: const {},
       );
-      await _load();
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
       if (!mounted) return;
       _showLocatorSnack('Request approved.');
     } catch (e) {
@@ -1133,7 +1126,8 @@ class _AdminLocatorManagementScreenState
         '/api/locator-slips/${item.id}/reject',
         data: const {},
       );
-      await _load();
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
       if (!mounted) return;
       _showLocatorSnack('Request rejected.');
     } catch (e) {
