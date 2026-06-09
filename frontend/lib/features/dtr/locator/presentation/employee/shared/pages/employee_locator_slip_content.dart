@@ -17,7 +17,6 @@ import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 import 'package:hrms_plaridel/shared/widgets/hrms_date_picker.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
-import 'package:hrms_plaridel/shared/widgets/section_header_actions.dart';
 
 const _locatorSlipFilterOptions = <RequestFilterOption<String>>[
   RequestFilterOption(label: 'All'),
@@ -218,21 +217,12 @@ class EmployeeLocatorSlipContentState
 
   Widget _buildMyRequests({required double width, required bool compact}) {
     final screenHeight = MediaQuery.sizeOf(context).height;
-    final isMobile = width < 600;
     final maxListHeight = width < 600
         ? (screenHeight * 0.38).clamp(260.0, 420.0)
         : width < 1024
         ? (screenHeight * 0.5).clamp(320.0, 560.0)
         : (screenHeight * 0.58).clamp(380.0, 700.0);
     final visibleSlips = _filteredSlips;
-    _LocatorSlipDraft? selectedSlip;
-    for (final item in visibleSlips) {
-      if (_slipSelectionKey(item) == _selectedSlipId) {
-        selectedSlip = item;
-        break;
-      }
-    }
-    final canCancelSelected = _canCancelSlip(selectedSlip);
     final useScrollableList = visibleSlips.length > 3;
 
     return _SectionCard(
@@ -240,34 +230,6 @@ class EmployeeLocatorSlipContentState
       subtitle:
           'Use filters to quickly find requests by status, date, type, office, or reason.',
       icon: Icons.receipt_long_rounded,
-      headerTrailing: isMobile
-          ? null
-          : SectionHeaderActions(
-              children: [
-                SectionHeaderActionButton.outlined(
-                  context: context,
-                  onPressed: selectedSlip == null
-                      ? null
-                      : () => _showSlipDetails(context, selectedSlip!),
-                  label: 'View Details',
-                ),
-                SectionHeaderActionButton.outlined(
-                  context: context,
-                  onPressed: selectedSlip == null
-                      ? null
-                      : () => _showSlipHistory(context, selectedSlip!),
-                  label: 'View History',
-                ),
-                SectionHeaderActionButton.outlined(
-                  context: context,
-                  onPressed: !canCancelSelected
-                      ? null
-                      : () => _cancelSlip(selectedSlip!),
-                  icon: Icons.close_rounded,
-                  label: 'Cancel',
-                ),
-              ],
-            ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -314,11 +276,14 @@ class EmployeeLocatorSlipContentState
     );
   }
 
-  void _toggleSlipSelection(_LocatorSlipDraft item) {
-    final id = _slipSelectionKey(item);
-    setState(() {
-      _selectedSlipId = _selectedSlipId == id ? null : id;
-    });
+  void _openSlipDetails(_LocatorSlipDraft item) {
+    setState(() => _selectedSlipId = _slipSelectionKey(item));
+    _showSlipDetails(context, item);
+  }
+
+  void _openApprovalDetails(_LocatorSlipDraft item) {
+    setState(() => _selectedApprovalSlipId = _slipSelectionKey(item));
+    _showSlipDetails(context, item, reviewMode: true);
   }
 
   String _slipSelectionKey(_LocatorSlipDraft item) {
@@ -436,7 +401,6 @@ class EmployeeLocatorSlipContentState
           canPrint: item.status == _LocatorSlipStatus.approved,
           canReject: canReview,
           canApprove: canReview,
-          onClose: () => Navigator.of(dialogContext).pop(),
           onHistory: () {
             Navigator.of(dialogContext).pop();
             _showSlipHistory(context, item);
@@ -711,59 +675,12 @@ class EmployeeLocatorSlipContentState
         ? (screenHeight * 0.5).clamp(320.0, 560.0)
         : (screenHeight * 0.58).clamp(380.0, 700.0);
     final useScrollableList = visibleItems.length > 3;
-    _LocatorSlipDraft? selectedApproval;
-    for (final item in visibleItems) {
-      if (_slipSelectionKey(item) == _selectedApprovalSlipId) {
-        selectedApproval = item;
-        break;
-      }
-    }
-    final canReviewSelected =
-        selectedApproval?.status == _LocatorSlipStatus.pendingDepartmentHead;
 
     return _SectionCard(
       title: 'Locator Requests & History',
       subtitle:
           'Review pending locator, pass slip, and work-from-home requests.',
       icon: Icons.fact_check_rounded,
-      headerTrailing: screenWidth < 600
-          ? null
-          : SectionHeaderActions(
-              children: [
-                SectionHeaderActionButton.outlined(
-                  context: context,
-                  onPressed: selectedApproval == null
-                      ? null
-                      : () => _showSlipDetails(context, selectedApproval!),
-                  icon: Icons.visibility_rounded,
-                  label: 'View',
-                ),
-                SectionHeaderActionButton.outlined(
-                  context: context,
-                  onPressed: selectedApproval == null
-                      ? null
-                      : () => _showSlipHistory(context, selectedApproval!),
-                  icon: Icons.history_rounded,
-                  label: 'History',
-                ),
-                SectionHeaderActionButton.outlined(
-                  context: context,
-                  onPressed: !canReviewSelected
-                      ? null
-                      : () => _departmentHeadReject(selectedApproval!),
-                  icon: Icons.close_rounded,
-                  label: 'Reject',
-                ),
-                SectionHeaderActionButton.filled(
-                  context: context,
-                  onPressed: !canReviewSelected
-                      ? null
-                      : () => _departmentHeadApprove(selectedApproval!),
-                  icon: Icons.check_rounded,
-                  label: 'Approve',
-                ),
-              ],
-            ),
       child: _loadingApprovals
           ? const _CenteredLoading(message: 'Loading approval queue...')
           : Column(
@@ -840,7 +757,7 @@ class EmployeeLocatorSlipContentState
                   isLast: index == items.length - 1,
                   isSelected:
                       _slipSelectionKey(items[index]) == _selectedSlipId,
-                  onTap: () => _toggleSlipSelection(items[index]),
+                  onTap: () => _openSlipDetails(items[index]),
                 ),
             ],
           ),
@@ -900,7 +817,7 @@ class EmployeeLocatorSlipContentState
             segmentsText: _approvalSegmentsText(item),
             typeLabel: item.requestType.shortLabel,
             statusPill: _myRequestStatusPill(item),
-            onTap: () => _showSlipDetails(context, item),
+            onTap: () => _openSlipDetails(item),
           ),
         );
       }),
@@ -1041,7 +958,7 @@ class EmployeeLocatorSlipContentState
                   isSelected:
                       _slipSelectionKey(items[index]) ==
                       _selectedApprovalSlipId,
-                  onTap: () => _toggleApprovalSelection(items[index]),
+                  onTap: () => _openApprovalDetails(items[index]),
                 ),
             ],
           ),
@@ -1099,10 +1016,7 @@ class EmployeeLocatorSlipContentState
             typeLabel: item.requestType.shortLabel,
             statusPill: _approvalStatusPill(item),
             isSelected: _slipSelectionKey(item) == _selectedApprovalSlipId,
-            onTap: () {
-              setState(() => _selectedApprovalSlipId = _slipSelectionKey(item));
-              _showSlipDetails(context, item, reviewMode: true);
-            },
+            onTap: () => _openApprovalDetails(item),
           ),
       ],
     );
@@ -1322,13 +1236,6 @@ class EmployeeLocatorSlipContentState
     if (item.pmIn) segments.add('PM IN');
     if (item.pmOut) segments.add('PM OUT');
     return segments.isEmpty ? '-' : segments.join(', ');
-  }
-
-  void _toggleApprovalSelection(_LocatorSlipDraft item) {
-    final id = _slipSelectionKey(item);
-    setState(() {
-      _selectedApprovalSlipId = _selectedApprovalSlipId == id ? null : id;
-    });
   }
 
   Future<void> _openCreateForm(
@@ -2515,21 +2422,15 @@ class _SectionCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.child,
-    this.headerTrailing,
   });
 
   final String title;
   final String subtitle;
   final IconData icon;
   final Widget child;
-  final Widget? headerTrailing;
-
-  static const double _mobileBreakpoint = 600;
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.sizeOf(context).width < _mobileBreakpoint;
-
     return _InfoCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2562,21 +2463,8 @@ class _SectionCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (!isMobile && headerTrailing != null) ...[
-                const SizedBox(width: 12),
-                Flexible(
-                  child: Align(
-                    alignment: Alignment.topRight,
-                    child: headerTrailing!,
-                  ),
-                ),
-              ],
             ],
           ),
-          if (isMobile && headerTrailing != null) ...[
-            const SizedBox(height: 12),
-            SizedBox(width: double.infinity, child: headerTrailing!),
-          ],
           const SizedBox(height: 18),
           child,
         ],

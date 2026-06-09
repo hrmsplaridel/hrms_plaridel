@@ -98,13 +98,6 @@ class _AdminLocatorManagementScreenState
     final pageEnd = (pageStart + _rowsPerPage).clamp(0, _items.length);
     final pageItems = _items.sublist(pageStart, pageEnd);
     final useScrollableList = pageItems.length > 3;
-    _LocatorAdminRecord? selectedItem;
-    for (final item in _items) {
-      if (item.id == _selectedItemId) {
-        selectedItem = item;
-        break;
-      }
-    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -227,14 +220,6 @@ class _AdminLocatorManagementScreenState
                       ),
                     ),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: selectedItem == null
-                        ? null
-                        : () => _showHistoryDialog(selectedItem!),
-                    icon: const Icon(Icons.history_rounded, size: 18),
-                    label: const Text('History'),
-                  ),
-                  const SizedBox(width: 12),
                   if (_loading)
                     const SizedBox(
                       width: 20,
@@ -617,54 +602,84 @@ class _AdminLocatorManagementScreenState
               ),
               Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 20, 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(),
-                      child: const Text('Close'),
-                    ),
-                    const SizedBox(width: 12),
-                    if (canReview) ...[
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
                       OutlinedButton.icon(
                         onPressed: () {
                           Navigator.of(dialogContext).pop();
-                          _reject(item);
+                          _showHistoryDialog(item);
                         },
-                        icon: const Icon(Icons.close_rounded),
-                        label: const Text('Reject'),
+                        style: _dialogSecondaryButtonStyle(dialogContext),
+                        icon: const Icon(Icons.history_rounded, size: 18),
+                        label: const Text('History'),
                       ),
-                      const SizedBox(width: 12),
-                      FilledButton.icon(
-                        onPressed: () {
-                          Navigator.of(dialogContext).pop();
-                          _approve(item);
-                        },
-                        icon: const Icon(Icons.check_rounded),
-                        label: const Text('Approve'),
-                      ),
-                      const SizedBox(width: 12),
+                      if (canReview)
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(dialogContext).pop();
+                            _reject(item);
+                          },
+                          style: _dialogDangerButtonStyle(dialogContext),
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          label: const Text('Reject'),
+                        ),
+                      if (canReview)
+                        FilledButton.icon(
+                          onPressed: () {
+                            Navigator.of(dialogContext).pop();
+                            _approve(item);
+                          },
+                          style: _dialogPrimaryButtonStyle(),
+                          icon: const Icon(Icons.check_rounded, size: 18),
+                          label: const Text('Approve'),
+                        ),
+                      canReview
+                          ? OutlinedButton.icon(
+                              onPressed: () => LocatorSlipPrint.printForm(
+                                context: dialogContext,
+                                id: item.id,
+                                employeeName: item.employeeName,
+                                dateText: item.slipDateLabel,
+                                requestTypeLabel: item.requestType.label,
+                                locationLabel: item.requestType.locationLabel,
+                                office: item.office,
+                                remarks: item.reason,
+                                amIn: item.amIn,
+                                amOut: item.amOut,
+                                pmIn: item.pmIn,
+                                pmOut: item.pmOut,
+                              ),
+                              style: _dialogSecondaryButtonStyle(dialogContext),
+                              icon: const Icon(Icons.print_rounded, size: 18),
+                              label: const Text('Print Form'),
+                            )
+                          : FilledButton.icon(
+                              onPressed: () => LocatorSlipPrint.printForm(
+                                context: dialogContext,
+                                id: item.id,
+                                employeeName: item.employeeName,
+                                dateText: item.slipDateLabel,
+                                requestTypeLabel: item.requestType.label,
+                                locationLabel: item.requestType.locationLabel,
+                                office: item.office,
+                                remarks: item.reason,
+                                amIn: item.amIn,
+                                amOut: item.amOut,
+                                pmIn: item.pmIn,
+                                pmOut: item.pmOut,
+                              ),
+                              style: _dialogPrimaryButtonStyle(),
+                              icon: const Icon(Icons.print_rounded, size: 18),
+                              label: const Text('Print Form'),
+                            ),
                     ],
-                    FilledButton.icon(
-                      onPressed: () => LocatorSlipPrint.printForm(
-                        context: dialogContext,
-                        id: item.id,
-                        employeeName: item.employeeName,
-                        dateText: item.slipDateLabel,
-                        requestTypeLabel: item.requestType.label,
-                        locationLabel: item.requestType.locationLabel,
-                        office: item.office,
-                        remarks: item.reason,
-                        amIn: item.amIn,
-                        amOut: item.amOut,
-                        pmIn: item.pmIn,
-                        pmOut: item.pmOut,
-                      ),
-                      icon: const Icon(Icons.print_rounded),
-                      label: const Text('Print Form'),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ],
@@ -827,6 +842,34 @@ class _AdminLocatorManagementScreenState
           ),
         ),
       ),
+    );
+  }
+
+  ButtonStyle _dialogSecondaryButtonStyle(BuildContext context) {
+    return OutlinedButton.styleFrom(
+      minimumSize: const Size(116, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      foregroundColor: AppTheme.dashTextPrimaryOf(context),
+      side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  ButtonStyle _dialogDangerButtonStyle(BuildContext context) {
+    return OutlinedButton.styleFrom(
+      minimumSize: const Size(116, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      foregroundColor: Colors.red.shade700,
+      side: BorderSide(color: Colors.red.shade300),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  ButtonStyle _dialogPrimaryButtonStyle() {
+    return FilledButton.styleFrom(
+      minimumSize: const Size(116, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     );
   }
 
