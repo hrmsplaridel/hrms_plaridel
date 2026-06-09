@@ -16,7 +16,7 @@ const double kDashboardSidebarExpandedWidth = kDashboardSidebarWidth;
 /// Collapsed nav touch target (circular orb inside).
 const double kDashboardSidebarCollapsedOrbSize = 40;
 
-const Duration kDashboardSidebarAnimationDuration = Duration(milliseconds: 280);
+const Duration kDashboardSidebarAnimationDuration = Duration(milliseconds: 220);
 
 /// 0 = fully expanded, 1 = fully collapsed.
 class SidebarCollapseScope extends InheritedWidget {
@@ -75,7 +75,8 @@ class _AnimatedSidebarWidthState extends State<AnimatedSidebarWidth>
     );
     _collapseT = CurvedAnimation(
       parent: _controller,
-      curve: Curves.easeInOutCubic,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
     );
     if (widget.collapsed) {
       _controller.value = 1;

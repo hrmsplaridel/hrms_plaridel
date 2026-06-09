@@ -185,7 +185,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       _openMyProfile();
       return;
     }
-    setState(() => _selectedNavIndex = index);
+    final settingsOnTop = DashboardContentNavigator.isSettingsOnTop(
+      _contentNavKey.currentState,
+    );
+    if (_selectedNavIndex == index && !settingsOnTop) return;
+    if (_selectedNavIndex != index) {
+      setState(() => _selectedNavIndex = index);
+    }
     DashboardContentNavigator.showHome(_contentNavKey);
   }
 

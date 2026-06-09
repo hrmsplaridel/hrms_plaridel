@@ -58,18 +58,29 @@ class DashboardContentNavigator extends StatefulWidget {
 class _DashboardContentNavigatorState extends State<DashboardContentNavigator> {
   final ValueNotifier<int> _homeVersion = ValueNotifier<int>(0);
   final ValueNotifier<int> _settingsVersion = ValueNotifier<int>(0);
+  bool _homeRefreshScheduled = false;
 
   @override
   void didUpdateWidget(covariant DashboardContentNavigator oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.homeRefreshKey != widget.homeRefreshKey ||
         oldWidget.homeScrollPadding != widget.homeScrollPadding) {
-      _homeVersion.value++;
+      _scheduleHomeRefresh();
     }
     if (oldWidget.settingsPanel != widget.settingsPanel ||
         oldWidget.settingsScrollPadding != widget.settingsScrollPadding) {
       _settingsVersion.value++;
     }
+  }
+
+  void _scheduleHomeRefresh() {
+    if (_homeRefreshScheduled) return;
+    _homeRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _homeRefreshScheduled = false;
+      if (!mounted) return;
+      _homeVersion.value++;
+    });
   }
 
   @override
@@ -131,12 +142,42 @@ class _DashboardScrollPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<int>(
       valueListenable: listenable,
-      builder: (context, _, __) {
+      builder: (context, version, __) {
         return ColoredBox(
           color: AppTheme.dashCanvasOf(context),
-          child: SingleChildScrollView(
-            padding: paddingBuilder(),
-            child: childBuilder(),
+          child: RepaintBoundary(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 140),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              layoutBuilder: (currentChild, previousChildren) {
+                return Stack(
+                  fit: StackFit.expand,
+                  alignment: Alignment.topLeft,
+                  children: [
+                    for (final child in previousChildren)
+                      Positioned.fill(child: child),
+                    if (currentChild != null)
+                      Positioned.fill(child: currentChild),
+                  ],
+                );
+              },
+              transitionBuilder: (child, animation) {
+                final offset = Tween<Offset>(
+                  begin: const Offset(0, 0.012),
+                  end: Offset.zero,
+                ).animate(animation);
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(position: offset, child: child),
+                );
+              },
+              child: SingleChildScrollView(
+                key: ValueKey<int>(version),
+                padding: paddingBuilder(),
+                child: childBuilder(),
+              ),
+            ),
           ),
         );
       },

@@ -495,7 +495,13 @@ class _AdminDashboardState extends State<AdminDashboard>
       _openMyProfile();
       return;
     }
-    setState(() => _selectedMenu = menu);
+    final settingsOnTop = DashboardContentNavigator.isSettingsOnTop(
+      _contentNavKey.currentState,
+    );
+    if (_selectedMenu == menu && !settingsOnTop) return;
+    if (_selectedMenu != menu) {
+      setState(() => _selectedMenu = menu);
+    }
     DashboardContentNavigator.showHome(_contentNavKey);
     if (menu == AdminMenu.docutracker) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
