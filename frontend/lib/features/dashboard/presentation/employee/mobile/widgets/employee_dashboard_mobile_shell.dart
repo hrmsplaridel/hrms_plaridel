@@ -79,6 +79,13 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
                 color: AppTheme.dashCanvasOf(context),
                 child: DashboardContentNavigator(
                   navigatorKey: navigatorKey,
+                  homeRefreshKey: Object.hash(
+                    selectedIndex,
+                    displayName,
+                    width,
+                    _useMobileLeaveFab,
+                    _useMobileLocatorFab,
+                  ),
                   homeBuilder: () => homeBuilder(
                     useMobileLeaveFab: _useMobileLeaveFab,
                     useMobileLocatorFab: _useMobileLocatorFab,

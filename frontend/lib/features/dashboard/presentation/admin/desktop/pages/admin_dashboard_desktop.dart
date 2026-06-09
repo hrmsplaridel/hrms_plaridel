@@ -515,10 +515,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       return;
     }
     setState(() => _selectedMenu = AdminMenu.myProfile);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      DashboardContentNavigator.openSettings(_contentNavKey);
-    });
+    DashboardContentNavigator.openSettings(_contentNavKey);
   }
 
   void _closeMyProfile() {
@@ -697,6 +694,11 @@ class _AdminDashboardState extends State<AdminDashboard>
                             color: AppTheme.dashCanvasOf(context),
                             child: DashboardContentNavigator(
                               navigatorKey: _contentNavKey,
+                              homeRefreshKey: Object.hash(
+                                _selectedMenu,
+                                displayName,
+                                contentPadding,
+                              ),
                               homeBuilder: () => _buildContent(displayName),
                               settingsPanel: _settingsPanel(),
                               homeScrollPadding: EdgeInsets.all(contentPadding),
@@ -737,6 +739,11 @@ class _AdminDashboardState extends State<AdminDashboard>
                       color: AppTheme.dashCanvasOf(context),
                       child: DashboardContentNavigator(
                         navigatorKey: _contentNavKey,
+                        homeRefreshKey: Object.hash(
+                          _selectedMenu,
+                          displayName,
+                          contentPadding,
+                        ),
                         homeBuilder: () => _buildContent(displayName),
                         settingsPanel: _settingsPanel(),
                         homeScrollPadding: EdgeInsets.all(contentPadding),

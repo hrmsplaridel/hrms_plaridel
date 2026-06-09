@@ -165,10 +165,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       return;
     }
     setState(() => _selectedNavIndex = _profileNavIndex);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      DashboardContentNavigator.openSettings(_contentNavKey);
-    });
+    DashboardContentNavigator.openSettings(_contentNavKey);
   }
 
   void _closeMyProfile() {
@@ -393,6 +390,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
                       color: AppTheme.dashCanvasOf(context),
                       child: DashboardContentNavigator(
                         navigatorKey: _contentNavKey,
+                        homeRefreshKey: Object.hash(
+                          _selectedNavIndex,
+                          _leaveNavKey,
+                          displayName,
+                          useMobileLeaveFab,
+                          useMobileLocatorFab,
+                        ),
                         homeBuilder: () => _employeeMainChild(
                           displayName: displayName,
                           useMobileLeaveFab: useMobileLeaveFab,
