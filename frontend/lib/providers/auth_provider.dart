@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/config.dart';
 import 'package:hrms_plaridel/core/api/token_storage.dart';
+import 'package:hrms_plaridel/core/services/push_notification_service.dart';
 
 /// Central auth state. Uses API (JWT) instead of Supabase.
 /// Exposes current user, displayName, email, avatarPath. Call [refreshUser] after
@@ -78,6 +79,7 @@ class AuthProvider extends ChangeNotifier {
       final data = res.data;
       if (data != null) {
         _user = AppUser.fromJson(data);
+        await PushNotificationService.instance.syncTokenWithBackend();
         notifyListeners();
       }
     } on DioException catch (e) {
@@ -111,6 +113,7 @@ class AuthProvider extends ChangeNotifier {
         _user = AppUser.fromJson(userData);
       }
       await refreshUser();
+      await PushNotificationService.instance.syncTokenWithBackend();
       notifyListeners();
       return null;
     } on DioException catch (e) {
@@ -171,6 +174,7 @@ class AuthProvider extends ChangeNotifier {
     _isSigningOut = true;
     notifyListeners();
     try {
+      await PushNotificationService.instance.unregisterCurrentToken();
       final refresh = await TokenStorage.instance.getRefreshToken();
       if (refresh != null && refresh.isNotEmpty) {
         try {
