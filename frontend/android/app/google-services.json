@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "880844679741",
+    "project_id": "hrms-64fc6",
+    "storage_bucket": "hrms-64fc6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:880844679741:android:b94967b4dce014dcd69854",
+        "android_client_info": {
+          "package_name": "com.example.hrms_plaridel"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA9zXICy4aJrlgDujsR_R_2OFkdVZDeGxk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

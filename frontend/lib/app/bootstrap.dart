@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/services/push_notification_service.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/core/utils/webview_platform_init_stub.dart'
     if (dart.library.html) 'package:hrms_plaridel/core/utils/webview_platform_init_web.dart'
@@ -26,6 +27,7 @@ Future<AppBootstrap> bootstrapApp() async {
   }
 
   ApiClient.instance.init();
+  await PushNotificationService.instance.init();
 
   return AppBootstrap(
     auth: AuthProvider(),
