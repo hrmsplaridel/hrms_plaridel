@@ -1678,6 +1678,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   bool _savedPmInBeforeWfh = false;
   bool _savedPmOutBeforeWfh = false;
   bool _hasSavedSegmentsBeforeWfh = false;
+  bool _showAttachmentError = false;
 
   bool get _isWfhRequest => _requestType.usesWfhCoverage;
   bool get _requiresAttachment => _requestType.requiresAttachment;
@@ -1715,6 +1716,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       }
 
       _requestType = type;
+      _showAttachmentError = false;
       if (!type.requiresAttachment) {
         _pendingAttachmentBytes = null;
         _pendingAttachmentName = null;
@@ -1843,7 +1845,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         EmployeeLocatorMobileFormActions(
           accent: accent,
           onCancel: () => Navigator.of(context).pop(),
-          onSave: _save,
+          onSubmit: _save,
         ),
       ],
     );
@@ -1929,6 +1931,10 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
 
   Widget _attachmentPicker() {
     final hasAttachment = (_pendingAttachmentName ?? '').trim().isNotEmpty;
+    final showError = _showAttachmentError && !hasAttachment;
+    final borderColor = showError
+        ? Colors.redAccent
+        : AppTheme.dashHairlineOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1943,7 +1949,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
           decoration: BoxDecoration(
             color: AppTheme.dashPanelOf(context),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+            border: Border.all(color: borderColor, width: showError ? 1.4 : 1),
           ),
           child: Row(
             children: [
@@ -1990,6 +1996,17 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
             ],
           ),
         ),
+        if (showError) ...[
+          const SizedBox(height: 6),
+          const Text(
+            'Upload an attachment to submit this request.',
+            style: TextStyle(
+              color: Colors.redAccent,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -2007,6 +2024,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     setState(() {
       _pendingAttachmentBytes = bytes;
       _pendingAttachmentName = file.name;
+      _showAttachmentError = false;
     });
   }
 
@@ -2076,9 +2094,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     }
     if (!_formKey.currentState!.validate()) return;
     if (_requiresAttachment && _pendingAttachmentBytes == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Attachment is required for this type.')),
-      );
+      setState(() => _showAttachmentError = true);
       return;
     }
 

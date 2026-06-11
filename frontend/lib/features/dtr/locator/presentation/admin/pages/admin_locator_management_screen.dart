@@ -531,6 +531,13 @@ class _AdminLocatorManagementScreenState
 
   void _showDetailsDialog(_LocatorAdminRecord item) {
     final canReview = item.canHrReview;
+    final normalizedStatus = item.status.toLowerCase();
+    final isPending =
+        normalizedStatus == 'pending' ||
+        normalizedStatus.startsWith('pending_');
+    final canShowHistory = !isPending;
+    final canPrint = normalizedStatus == 'approved';
+    final showFooter = canShowHistory || canReview || canPrint;
     showDialog<void>(
       context: context,
       builder: (dialogContext) => Dialog(
@@ -601,88 +608,75 @@ class _AdminLocatorManagementScreenState
                   ),
                 ),
               ),
-              Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.of(dialogContext).pop();
-                          _showHistoryDialog(item);
-                        },
-                        style: _dialogSecondaryButtonStyle(dialogContext),
-                        icon: const Icon(Icons.history_rounded, size: 18),
-                        label: const Text('History'),
-                      ),
-                      if (canReview)
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.of(dialogContext).pop();
-                            _reject(item);
-                          },
-                          style: _dialogDangerButtonStyle(dialogContext),
-                          icon: const Icon(Icons.close_rounded, size: 18),
-                          label: const Text('Reject'),
-                        ),
-                      if (canReview)
-                        FilledButton.icon(
-                          onPressed: () {
-                            Navigator.of(dialogContext).pop();
-                            _approve(item);
-                          },
-                          style: _dialogPrimaryButtonStyle(),
-                          icon: const Icon(Icons.check_rounded, size: 18),
-                          label: const Text('Approve'),
-                        ),
-                      canReview
-                          ? OutlinedButton.icon(
-                              onPressed: () => LocatorSlipPrint.printForm(
-                                context: dialogContext,
-                                id: item.id,
-                                employeeName: item.employeeName,
-                                dateText: item.slipDateLabel,
-                                requestTypeLabel: item.requestType.label,
-                                locationLabel: item.requestType.locationLabel,
-                                office: item.office,
-                                remarks: item.reason,
-                                amIn: item.amIn,
-                                amOut: item.amOut,
-                                pmIn: item.pmIn,
-                                pmOut: item.pmOut,
-                              ),
-                              style: _dialogSecondaryButtonStyle(dialogContext),
-                              icon: const Icon(Icons.print_rounded, size: 18),
-                              label: const Text('Print Form'),
-                            )
-                          : FilledButton.icon(
-                              onPressed: () => LocatorSlipPrint.printForm(
-                                context: dialogContext,
-                                id: item.id,
-                                employeeName: item.employeeName,
-                                dateText: item.slipDateLabel,
-                                requestTypeLabel: item.requestType.label,
-                                locationLabel: item.requestType.locationLabel,
-                                office: item.office,
-                                remarks: item.reason,
-                                amIn: item.amIn,
-                                amOut: item.amOut,
-                                pmIn: item.pmIn,
-                                pmOut: item.pmOut,
-                              ),
-                              style: _dialogPrimaryButtonStyle(),
-                              icon: const Icon(Icons.print_rounded, size: 18),
-                              label: const Text('Print Form'),
+              if (showFooter) ...[
+                Divider(
+                  height: 1,
+                  color: AppTheme.dashHairlineOf(dialogContext),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        if (canShowHistory)
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(dialogContext).pop();
+                              _showHistoryDialog(item);
+                            },
+                            style: _dialogSecondaryButtonStyle(dialogContext),
+                            icon: const Icon(Icons.history_rounded, size: 18),
+                            label: const Text('History'),
+                          ),
+                        if (canReview)
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(dialogContext).pop();
+                              _reject(item);
+                            },
+                            style: _dialogDangerButtonStyle(dialogContext),
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            label: const Text('Reject'),
+                          ),
+                        if (canReview)
+                          FilledButton.icon(
+                            onPressed: () {
+                              Navigator.of(dialogContext).pop();
+                              _approve(item);
+                            },
+                            style: _dialogPrimaryButtonStyle(),
+                            icon: const Icon(Icons.check_rounded, size: 18),
+                            label: const Text('Approve'),
+                          ),
+                        if (canPrint)
+                          FilledButton.icon(
+                            onPressed: () => LocatorSlipPrint.printForm(
+                              context: dialogContext,
+                              id: item.id,
+                              employeeName: item.employeeName,
+                              dateText: item.slipDateLabel,
+                              requestTypeLabel: item.requestType.label,
+                              locationLabel: item.requestType.locationLabel,
+                              office: item.office,
+                              remarks: item.reason,
+                              amIn: item.amIn,
+                              amOut: item.amOut,
+                              pmIn: item.pmIn,
+                              pmOut: item.pmOut,
                             ),
-                    ],
+                            style: _dialogPrimaryButtonStyle(),
+                            icon: const Icon(Icons.print_rounded, size: 18),
+                            label: const Text('Print Form'),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         ),
