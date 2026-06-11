@@ -257,37 +257,10 @@ class _DashboardScrollPage extends StatelessWidget {
         return ColoredBox(
           color: AppTheme.dashCanvasOf(context),
           child: RepaintBoundary(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 140),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              layoutBuilder: (currentChild, previousChildren) {
-                return Stack(
-                  fit: StackFit.expand,
-                  alignment: Alignment.topLeft,
-                  children: [
-                    for (final child in previousChildren)
-                      Positioned.fill(child: child),
-                    if (currentChild != null)
-                      Positioned.fill(child: currentChild),
-                  ],
-                );
-              },
-              transitionBuilder: (child, animation) {
-                final offset = Tween<Offset>(
-                  begin: const Offset(0, 0.012),
-                  end: Offset.zero,
-                ).animate(animation);
-                return FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(position: offset, child: child),
-                );
-              },
-              child: SingleChildScrollView(
-                key: ValueKey<int>(version),
-                padding: paddingBuilder(),
-                child: childBuilder(),
-              ),
+            child: SingleChildScrollView(
+              key: ValueKey<int>(version),
+              padding: paddingBuilder(),
+              child: childBuilder(),
             ),
           ),
         );
