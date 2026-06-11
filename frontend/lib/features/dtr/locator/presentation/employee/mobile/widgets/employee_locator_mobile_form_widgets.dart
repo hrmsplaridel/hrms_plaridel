@@ -90,12 +90,12 @@ class EmployeeLocatorMobileFormActions extends StatelessWidget {
   const EmployeeLocatorMobileFormActions({
     super.key,
     required this.onCancel,
-    required this.onSave,
+    required this.onSubmit,
     this.accent = const Color(0xFFF57C00),
   });
 
   final VoidCallback onCancel;
-  final VoidCallback onSave;
+  final VoidCallback onSubmit;
   final Color accent;
 
   @override
@@ -114,7 +114,7 @@ class EmployeeLocatorMobileFormActions extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         FilledButton(
-          onPressed: onSave,
+          onPressed: onSubmit,
           style: FilledButton.styleFrom(
             backgroundColor: accent,
             foregroundColor: Colors.white,
@@ -123,7 +123,7 @@ class EmployeeLocatorMobileFormActions extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
             ),
           ),
-          child: const Text('Save'),
+          child: const Text('Submit'),
         ),
       ],
     );

@@ -287,6 +287,41 @@ CREATE TABLE IF NOT EXISTS holidays (
   CONSTRAINT uq_holidays_name_range UNIQUE (name, date_from, date_to)
 );
 
+CREATE TABLE IF NOT EXISTS holiday_default_templates (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  country_code TEXT NOT NULL DEFAULT 'PH',
+  year INTEGER NOT NULL,
+  label TEXT NOT NULL,
+  source TEXT,
+  note TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT uq_holiday_default_templates_country_year UNIQUE (country_code, year)
+);
+
+CREATE TABLE IF NOT EXISTS holiday_default_template_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  template_id UUID NOT NULL REFERENCES holiday_default_templates(id) ON DELETE CASCADE,
+  date_from DATE NOT NULL,
+  date_to DATE NOT NULL,
+  name TEXT NOT NULL,
+  holiday_type TEXT NOT NULL DEFAULT 'regular'
+    CHECK (holiday_type IN ('regular', 'special', 'local', 'work_suspension')),
+  description TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  recurring BOOLEAN NOT NULL DEFAULT false,
+  coverage TEXT NOT NULL DEFAULT 'whole_day'
+    CHECK (coverage IN ('whole_day', 'am_only', 'pm_only')),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_holiday_default_template_items_date_range CHECK (date_to >= date_from),
+  CONSTRAINT uq_holiday_default_template_items_row UNIQUE (template_id, name, date_from, date_to)
+);
+
 -- =========================================
 -- LEAVE TYPES
 -- =========================================
@@ -1757,6 +1792,8 @@ CREATE INDEX IF NOT EXISTS idx_policy_assignments_policy_id ON policy_assignment
 
 CREATE INDEX IF NOT EXISTS idx_holidays_date_range ON holidays(date_from, date_to);
 CREATE INDEX IF NOT EXISTS idx_holidays_type ON holidays(holiday_type);
+CREATE INDEX IF NOT EXISTS idx_holiday_default_template_items_template
+ON holiday_default_template_items(template_id, sort_order, date_from);
 
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(employee_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_user_id ON leave_requests(user_id);

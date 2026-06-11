@@ -55,6 +55,7 @@ dependencies:
   package_info_plus: ^9.0.1
 
   web: any
+  flutter_local_notifications: ^22.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
