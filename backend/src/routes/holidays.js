@@ -2,6 +2,13 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  deleteHolidayDefaultTemplate,
+  getHolidayDefaultTemplate,
+  getHolidayDefaultTemplateYears,
+  listHolidayDefaultTemplates,
+  upsertHolidayDefaultTemplate,
+} = require('../services/holidayDefaultTemplates');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -53,6 +60,51 @@ function rowToJson(r) {
   };
 }
 
+function holidayDefaultKey(item) {
+  return [
+    String(item.name || '').trim().toLowerCase(),
+    toDateString(item.date_from),
+    toDateString(item.date_to),
+  ].join('|');
+}
+
+async function existingHolidayKeyMap(holidays, client = pool) {
+  if (!holidays.length) return new Map();
+  const minDate = holidays.reduce(
+    (min, item) => (item.date_from < min ? item.date_from : min),
+    holidays[0].date_from
+  );
+  const maxDate = holidays.reduce(
+    (max, item) => (item.date_to > max ? item.date_to : max),
+    holidays[0].date_to
+  );
+  const result = await client.query(
+    `SELECT id, name, date_from, date_to
+       FROM holidays
+      WHERE date_from <= $1::date
+        AND date_to >= $2::date`,
+    [maxDate, minDate]
+  );
+  const map = new Map();
+  for (const row of result.rows) {
+    map.set(holidayDefaultKey(row), row.id);
+  }
+  return map;
+}
+
+async function templateOr404(req, res) {
+  const year = Number(req.query.year ?? req.body?.year);
+  const template = await getHolidayDefaultTemplate(year);
+  if (!template) {
+    res.status(404).json({
+      error: 'No Philippine holiday template is available for that year.',
+      supported_years: await getHolidayDefaultTemplateYears(),
+    });
+    return null;
+  }
+  return template;
+}
+
 // GET /api/holidays - list (?year=YYYY optional, ?is_active=true). Tolerates missing coverage column (pre-migration).
 router.get('/', protect, async (req, res) => {
   try {
@@ -90,6 +142,139 @@ router.get('/', protect, async (req, res) => {
   } catch (err) {
     console.error('[holidays GET]', err);
     res.status(500).json({ error: 'Failed to fetch holidays' });
+  }
+});
+
+// GET /api/holidays/ph-defaults/templates - list available PH default templates.
+router.get('/ph-defaults/templates', protect, requireAdmin, async (_req, res) => {
+  try {
+    const templates = await listHolidayDefaultTemplates();
+    res.json({
+      supported_years: templates
+        .filter((template) => template.is_active !== false)
+        .map((template) => template.year),
+      templates,
+    });
+  } catch (err) {
+    console.error('[holiday default templates GET]', err);
+    res.status(500).json({ error: 'Failed to list holiday templates' });
+  }
+});
+
+// POST /api/holidays/ph-defaults/templates - add or replace a PH default template.
+router.post('/ph-defaults/templates', protect, requireAdmin, async (req, res) => {
+  try {
+    const template = await upsertHolidayDefaultTemplate(req.body || {});
+    res.status(201).json(template);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) console.error('[holiday default templates POST]', err);
+    res.status(status).json({
+      error: err.message || 'Failed to save holiday template',
+    });
+  }
+});
+
+// DELETE /api/holidays/ph-defaults/templates/:year - remove an admin-maintained PH template.
+router.delete('/ph-defaults/templates/:year', protect, requireAdmin, async (req, res) => {
+  try {
+    const deleted = await deleteHolidayDefaultTemplate(req.params.year);
+    if (!deleted) return res.status(404).json({ error: 'Template not found' });
+    res.status(204).send();
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) console.error('[holiday default templates DELETE]', err);
+    res.status(status).json({
+      error: err.message || 'Failed to delete holiday template',
+    });
+  }
+});
+
+// GET /api/holidays/ph-defaults?year=YYYY - preview maintained Philippine national holiday defaults.
+router.get('/ph-defaults', protect, requireAdmin, async (req, res) => {
+  try {
+    const template = await templateOr404(req, res);
+    if (!template) return;
+    const existing = await existingHolidayKeyMap(template.holidays);
+    res.json({
+      year: template.year,
+      country: template.country,
+      label: template.label,
+      source: template.source,
+      note: template.note,
+      source_mode: template.source_mode,
+      supported_years: template.supported_years,
+      holidays: template.holidays.map((item) => {
+        const existingId = existing.get(holidayDefaultKey(item)) || null;
+        return {
+          ...item,
+          exists: existingId != null,
+          existing_id: existingId,
+        };
+      }),
+    });
+  } catch (err) {
+    console.error('[holidays PH defaults GET]', err);
+    res.status(500).json({ error: 'Failed to load Philippine holiday defaults' });
+  }
+});
+
+// POST /api/holidays/ph-defaults/import - insert missing Philippine defaults for a supported year.
+router.post('/ph-defaults/import', protect, requireAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const template = await templateOr404(req, res);
+    if (!template) return;
+    await client.query('BEGIN');
+    const existing = await existingHolidayKeyMap(template.holidays, client);
+    const created = [];
+    const skipped = [];
+
+    for (const item of template.holidays) {
+      const key = holidayDefaultKey(item);
+      if (existing.has(key)) {
+        skipped.push({ ...item, exists: true, existing_id: existing.get(key) });
+        continue;
+      }
+      const result = await client.query(
+        `INSERT INTO holidays
+          (date_from, date_to, name, holiday_type, description, is_active, recurring, coverage)
+         VALUES ($1::date, $2::date, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (name, date_from, date_to) DO NOTHING
+         RETURNING id, date_from, date_to, name, holiday_type, description, is_active, recurring, coverage, created_at`,
+        [
+          item.date_from,
+          item.date_to,
+          item.name,
+          item.holiday_type,
+          item.description,
+          item.is_active,
+          item.recurring,
+          item.coverage,
+        ]
+      );
+      if (result.rowCount === 0) {
+        skipped.push({ ...item, exists: true, existing_id: null });
+      } else {
+        created.push(rowToJson(result.rows[0]));
+      }
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({
+      year: template.year,
+      source: template.source,
+      created_count: created.length,
+      skipped_count: skipped.length,
+      created,
+      skipped,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[holidays PH defaults import POST]', err);
+    res.status(500).json({ error: 'Failed to import Philippine holiday defaults' });
+  } finally {
+    client.release();
   }
 });
 
