@@ -1,7 +1,7 @@
 -- Migration: Two-stage leave approval workflow
 -- Employee → Department Head → HR/Admin
 --
--- Run: psql -d hrms_plaridel -f scripts/migrate-leave-approval-workflow.sql
+-- Run: psql -d hrms_plaridel -f backend/scripts/migrations/dtr/migrate-leave-approval-workflow.sql
 --
 -- Safe to re-run (idempotent via IF EXISTS guards).
 

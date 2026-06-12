@@ -1,6 +1,6 @@
 -- Idempotent: leave_balance_ledger (append-only balance audit).
 -- Also created at runtime by backend/src/services/leaveBalanceLedger.js (initLeaveBalanceLedger).
--- Run manually if needed: psql $DATABASE_URL -f backend/scripts/migrate-leave-balance-ledger.sql
+-- Run manually if needed: psql $DATABASE_URL -f backend/scripts/migrations/dtr/migrate-leave-balance-ledger.sql
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
