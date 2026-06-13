@@ -28,6 +28,7 @@ const biometricAttendanceLogsRoutes = require('./routes/biometricAttendanceLogs'
 const overtimeRoutes = require('./routes/overtime');
 const calendarRoutes = require('./routes/calendar');
 const dtrDailySummaryRoutes = require('./routes/dtrDailySummary');
+const dtrAssistantRoutes = require('./routes/dtrAssistant');
 const docutrackerRoutes = require('./routes/docutracker');
 const trainingDailyReportsRoutes = require('./routes/trainingDailyReports');
 const rspJobVacanciesRoutes = require('./routes/rspJobVacancies');
@@ -130,6 +131,7 @@ app.use('/api/biometric-attendance-logs', biometricAttendanceLogsRoutes);
 app.use('/api/overtime', overtimeRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
+app.use('/api/dtr-assistant', dtrAssistantRoutes);
 app.use('/api/docutracker', docutrackerRoutes);
 app.use('/api/training-daily-reports', trainingDailyReportsRoutes);
 app.use('/api/rsp/job-vacancies', rspJobVacanciesRoutes);
