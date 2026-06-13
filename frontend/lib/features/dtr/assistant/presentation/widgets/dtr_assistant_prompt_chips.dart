@@ -25,8 +25,16 @@ class DtrAssistantPromptChips extends StatelessWidget {
       intent: 'leave_balance',
     ),
     DtrAssistantPrompt(
+      text: 'Can I file 1 day vacation leave tomorrow?',
+      intent: 'leave_availability_check',
+    ),
+    DtrAssistantPrompt(
       text: 'Ano status ng latest leave request ko?',
       intent: 'latest_leave_request',
+    ),
+    DtrAssistantPrompt(
+      text: 'Who is holding my leave request?',
+      intent: 'leave_approval_tracker',
     ),
     DtrAssistantPrompt(
       text: 'Na-approve na ba akong locator slip?',

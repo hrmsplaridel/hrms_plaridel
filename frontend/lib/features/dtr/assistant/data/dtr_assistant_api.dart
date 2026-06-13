@@ -10,10 +10,15 @@ class DtrAssistantApi {
   Future<DtrAssistantMessage> sendMessage(
     String message, {
     String? intent,
+    String? modelProfile,
   }) async {
     final res = await _client.post<Map<String, dynamic>>(
       '/api/dtr-assistant/chat',
-      data: {'message': message, if (intent != null) 'intent': intent},
+      data: {
+        'message': message,
+        if (intent != null) 'intent': intent,
+        if (modelProfile != null) 'modelProfile': modelProfile,
+      },
       // Ollama can take up to 90s to generate a free-form answer locally.
       options: Options(receiveTimeout: const Duration(seconds: 120)),
     );
@@ -28,5 +33,30 @@ class DtrAssistantApi {
       );
     }
     throw Exception('Assistant returned an invalid response.');
+  }
+
+  Future<({String defaultModelProfile, List<DtrAssistantModelProfile> models})>
+  fetchModels() async {
+    final res = await _client.get<Map<String, dynamic>>(
+      '/api/dtr-assistant/models',
+    );
+    final data = res.data ?? <String, dynamic>{};
+    final rawModels = data['models'];
+    final models = rawModels is List
+        ? rawModels
+              .whereType<Map>()
+              .map(
+                (item) => DtrAssistantModelProfile.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .where((item) => item.id.isNotEmpty && item.label.isNotEmpty)
+              .toList(growable: false)
+        : const <DtrAssistantModelProfile>[];
+    return (
+      defaultModelProfile:
+          data['defaultModelProfile']?.toString() ?? 'tools_ollama',
+      models: models,
+    );
   }
 }

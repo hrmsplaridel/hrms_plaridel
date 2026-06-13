@@ -30,12 +30,54 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       createdAt: DateTime.now(),
     ),
   ];
+  List<DtrAssistantModelProfile> _modelProfiles = const [
+    DtrAssistantModelProfile(
+      id: 'tools_ollama',
+      label: 'Qwen + HRMS tools',
+      engine: 'tools',
+      provider: 'ollama',
+      model: 'qwen3:4b',
+      available: true,
+      recommended: true,
+    ),
+  ];
+  String _selectedModelProfile = 'tools_ollama';
   bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadModelProfiles();
+  }
 
   @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadModelProfiles() async {
+    try {
+      final result = await _api.fetchModels();
+      if (!mounted || result.models.isEmpty) return;
+      final selected =
+          result.models.any(
+            (item) => item.id == result.defaultModelProfile && item.available,
+          )
+          ? result.defaultModelProfile
+          : result.models
+                .firstWhere(
+                  (item) => item.available,
+                  orElse: () => result.models.first,
+                )
+                .id;
+      setState(() {
+        _modelProfiles = result.models;
+        _selectedModelProfile = selected;
+      });
+    } catch (_) {
+      // Keep the local default profile if the model list endpoint is unavailable.
+    }
   }
 
   Future<void> _send(String text, {String? intent}) async {
@@ -47,7 +89,11 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     _scrollToBottom();
 
     try {
-      final reply = await _api.sendMessage(text, intent: intent);
+      final reply = await _api.sendMessage(
+        text,
+        intent: intent,
+        modelProfile: _selectedModelProfile,
+      );
       if (!mounted) return;
       setState(() => _messages.add(reply));
     } catch (e) {
@@ -109,14 +155,80 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
                   ),
                   const SizedBox(height: 16),
                   ..._messages.map(
-                    (message) => DtrAssistantMessageBubble(message: message),
+                    (message) => Column(
+                      crossAxisAlignment: message.isUser
+                          ? CrossAxisAlignment.end
+                          : CrossAxisAlignment.start,
+                      children: [
+                        DtrAssistantMessageBubble(message: message),
+                        if (!message.isUser && message.suggestions.isNotEmpty)
+                          _AssistantSuggestionChips(
+                            enabled: !_sending,
+                            suggestions: message.suggestions,
+                            onSelected: (suggestion) => _send(
+                              suggestion.text,
+                              intent: suggestion.intent,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                   if (_sending) const _TypingIndicator(),
                 ],
               ),
             ),
-            DtrAssistantInputBar(enabled: !_sending, onSend: _send),
+            DtrAssistantInputBar(
+              enabled: !_sending,
+              modelProfiles: _modelProfiles,
+              selectedModelProfile: _selectedModelProfile,
+              onModelChanged: (id) =>
+                  setState(() => _selectedModelProfile = id),
+              onSend: _send,
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AssistantSuggestionChips extends StatelessWidget {
+  const _AssistantSuggestionChips({
+    required this.enabled,
+    required this.suggestions,
+    required this.onSelected,
+  });
+
+  final bool enabled;
+  final List<DtrAssistantSuggestion> suggestions;
+  final ValueChanged<DtrAssistantSuggestion> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, bottom: 8),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: suggestions.take(3).map((suggestion) {
+            return ActionChip(
+              label: Text(suggestion.text),
+              avatar: const Icon(Icons.auto_awesome_rounded, size: 15),
+              onPressed: enabled ? () => onSelected(suggestion) : null,
+              backgroundColor: AppTheme.dashMutedSurfaceOf(context),
+              side: BorderSide(
+                color: AppTheme.dashHairlineOf(context).withValues(alpha: 0.75),
+              ),
+              labelStyle: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 12,
+              ),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+            );
+          }).toList(),
         ),
       ),
     );
