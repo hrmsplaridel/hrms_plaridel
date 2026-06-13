@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/pages/employee_dtr_assistant_page.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
@@ -238,6 +240,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     showLeaveFormSuccessSnackBar(context, result);
   }
 
+  void _openDtrAssistant() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const EmployeeDtrAssistantPage()),
+    );
+  }
+
+  bool get _showDtrAssistantFab =>
+      _selectedNavIndex == 1 ||
+      _selectedNavIndex == 2 ||
+      _selectedNavIndex == 3;
+
   Widget _buildEmployeeLeaveRequestForm() {
     return LeaveRequestFormScreen(
       onSaveDraft: (LeaveRequest request) async {
@@ -351,80 +364,94 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         onNotificationTap: _applyNotificationTapResult,
         onFileLeave: _openEmployeeLeaveRequestForm,
         onFileLocator: _openEmployeeLocatorRequestForm,
+        onDtrAssistant: _openDtrAssistant,
       );
     }
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
-      body: SafeArea(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _EmployeeSidebar(
-              railMode: true,
-              collapsed: _sidebarCollapsed,
-              showBrand: false,
-              displayName: displayName,
-              avatarPath: avatarPath,
-              selectedIndex: _selectedNavIndex,
-              onTap: (i) {
-                _onNavSelected(i);
-                _prefetchDocuTrackerNotificationsIfNeeded(i);
-              },
-            ),
-            Expanded(
-              child: Column(
-                children: [
-                  DashboardAppHeaderBar(
-                    showBrand: false,
-                    showSidebarToggle: true,
-                    sidebarCollapsed: _sidebarCollapsed,
-                    onSidebarToggle: () =>
-                        setState(() => _sidebarCollapsed = !_sidebarCollapsed),
-                    compactActions: width < 600,
-                    onViewAllNotifications: _handleOpenNotifications,
-                    onNotificationTap: _applyNotificationTapResult,
-                    trailing: DashboardAccountMenuButton(
-                      avatarPath: avatarPath,
-                      compact: width < 600,
-                      tooltip: displayName,
-                      onProfile: () => _openMyProfile(),
-                    ),
-                  ),
-                  Expanded(
-                    child: ColoredBox(
-                      color: AppTheme.dashCanvasOf(context),
-                      child: DashboardContentNavigator(
-                        navigatorKey: _contentNavKey,
-                        homeCacheKey: _selectedNavIndex,
-                        homeRefreshKey: Object.hash(
-                          _selectedNavIndex,
-                          _leaveNavKey,
-                          displayName,
-                          useMobileLeaveFab,
-                          useMobileLocatorFab,
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _EmployeeSidebar(
+                  railMode: true,
+                  collapsed: _sidebarCollapsed,
+                  showBrand: false,
+                  displayName: displayName,
+                  avatarPath: avatarPath,
+                  selectedIndex: _selectedNavIndex,
+                  onTap: (i) {
+                    _onNavSelected(i);
+                    _prefetchDocuTrackerNotificationsIfNeeded(i);
+                  },
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      DashboardAppHeaderBar(
+                        showBrand: false,
+                        showSidebarToggle: true,
+                        sidebarCollapsed: _sidebarCollapsed,
+                        onSidebarToggle: () => setState(
+                          () => _sidebarCollapsed = !_sidebarCollapsed,
                         ),
-                        homeBuilder: () => _employeeMainChild(
-                          displayName: displayName,
-                          useMobileLeaveFab: useMobileLeaveFab,
-                          useMobileLocatorFab: useMobileLocatorFab,
-                        ),
-                        settingsPanel: _settingsPanel(),
-                        homeScrollPadding: employeeMainScrollPadding(context),
-                        settingsScrollPadding: const EdgeInsets.fromLTRB(
-                          12,
-                          8,
-                          12,
-                          28,
+                        compactActions: width < 600,
+                        onViewAllNotifications: _handleOpenNotifications,
+                        onNotificationTap: _applyNotificationTapResult,
+                        trailing: DashboardAccountMenuButton(
+                          avatarPath: avatarPath,
+                          compact: width < 600,
+                          tooltip: displayName,
+                          onProfile: () => _openMyProfile(),
                         ),
                       ),
-                    ),
+                      Expanded(
+                        child: ColoredBox(
+                          color: AppTheme.dashCanvasOf(context),
+                          child: DashboardContentNavigator(
+                            navigatorKey: _contentNavKey,
+                            homeCacheKey: _selectedNavIndex,
+                            homeRefreshKey: Object.hash(
+                              _selectedNavIndex,
+                              _leaveNavKey,
+                              displayName,
+                              useMobileLeaveFab,
+                              useMobileLocatorFab,
+                            ),
+                            homeBuilder: () => _employeeMainChild(
+                              displayName: displayName,
+                              useMobileLeaveFab: useMobileLeaveFab,
+                              useMobileLocatorFab: useMobileLocatorFab,
+                            ),
+                            settingsPanel: _settingsPanel(),
+                            homeScrollPadding: employeeMainScrollPadding(
+                              context,
+                            ),
+                            settingsScrollPadding: const EdgeInsets.fromLTRB(
+                              12,
+                              8,
+                              12,
+                              28,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          if (_showDtrAssistantFab)
+            DraggableDtrAssistantLauncher(
+              onPressed: _openDtrAssistant,
+              initialRight: 24,
+              initialBottom: 24,
+            ),
+        ],
       ),
     );
   }

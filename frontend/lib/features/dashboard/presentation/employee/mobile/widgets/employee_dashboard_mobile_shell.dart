@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_nav_items.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dashboard_layout_metrics.dart';
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
@@ -24,6 +25,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
     required this.onNotificationTap,
     required this.onFileLeave,
     required this.onFileLocator,
+    required this.onDtrAssistant,
   });
 
   final double width;
@@ -43,9 +45,12 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
   final void Function(NotificationTapResult? result) onNotificationTap;
   final VoidCallback onFileLeave;
   final VoidCallback onFileLocator;
+  final VoidCallback onDtrAssistant;
 
   bool get _useMobileLeaveFab => width < 600 && selectedIndex == 2;
   bool get _useMobileLocatorFab => selectedIndex == 3;
+  bool get _showAssistantFab =>
+      selectedIndex == 1 || selectedIndex == 2 || selectedIndex == 3;
 
   @override
   Widget build(BuildContext context) {
@@ -60,58 +65,76 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
             : -1,
         onSelected: onNavSelected,
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            DashboardAppHeaderBar(
-              compactActions: width < 600,
-              onViewAllNotifications: onViewAllNotifications,
-              onNotificationTap: onNotificationTap,
-              trailing: DashboardAccountMenuButton(
-                avatarPath: avatarPath,
-                compact: width < 600,
-                tooltip: displayName,
-                onProfile: onProfile,
-              ),
-            ),
-            Expanded(
-              child: ColoredBox(
-                color: AppTheme.dashCanvasOf(context),
-                child: DashboardContentNavigator(
-                  navigatorKey: navigatorKey,
-                  homeCacheKey: selectedIndex,
-                  homeRefreshKey: Object.hash(
-                    selectedIndex,
-                    displayName,
-                    width,
-                    _useMobileLeaveFab,
-                    _useMobileLocatorFab,
-                  ),
-                  homeBuilder: () => homeBuilder(
-                    useMobileLeaveFab: _useMobileLeaveFab,
-                    useMobileLocatorFab: _useMobileLocatorFab,
-                  ),
-                  settingsPanel: settingsPanel,
-                  homeScrollPadding: employeeMainScrollPadding(
-                    context,
-                    mobileNav: true,
-                  ),
-                  settingsScrollPadding: EdgeInsets.fromLTRB(
-                    12,
-                    8,
-                    12,
-                    28 + DashboardMobileBottomNav.scrollPaddingExtra(context),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Column(
+              children: [
+                DashboardAppHeaderBar(
+                  compactActions: width < 600,
+                  onViewAllNotifications: onViewAllNotifications,
+                  onNotificationTap: onNotificationTap,
+                  trailing: DashboardAccountMenuButton(
+                    avatarPath: avatarPath,
+                    compact: width < 600,
+                    tooltip: displayName,
+                    onProfile: onProfile,
                   ),
                 ),
-              ),
+                Expanded(
+                  child: ColoredBox(
+                    color: AppTheme.dashCanvasOf(context),
+                    child: DashboardContentNavigator(
+                      navigatorKey: navigatorKey,
+                      homeCacheKey: selectedIndex,
+                      homeRefreshKey: Object.hash(
+                        selectedIndex,
+                        displayName,
+                        width,
+                        _useMobileLeaveFab,
+                        _useMobileLocatorFab,
+                      ),
+                      homeBuilder: () => homeBuilder(
+                        useMobileLeaveFab: _useMobileLeaveFab,
+                        useMobileLocatorFab: _useMobileLocatorFab,
+                      ),
+                      settingsPanel: settingsPanel,
+                      homeScrollPadding: employeeMainScrollPadding(
+                        context,
+                        mobileNav: true,
+                      ),
+                      settingsScrollPadding: EdgeInsets.fromLTRB(
+                        12,
+                        8,
+                        12,
+                        28 +
+                            DashboardMobileBottomNav.scrollPaddingExtra(
+                              context,
+                            ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          if (_showAssistantFab)
+            DraggableDtrAssistantLauncher(
+              onPressed: onDtrAssistant,
+              initialBottom: _useMobileLeaveFab || _useMobileLocatorFab
+                  ? 96
+                  : 16,
+            ),
+        ],
       ),
     );
   }
 
   Widget? _buildActionButton() {
+    return _buildFileActionButton();
+  }
+
+  Widget? _buildFileActionButton() {
     if (!_useMobileLeaveFab && !_useMobileLocatorFab) return null;
     return FloatingActionButton.extended(
       heroTag: _useMobileLeaveFab
