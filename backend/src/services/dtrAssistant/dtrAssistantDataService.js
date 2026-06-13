@@ -121,7 +121,7 @@ async function loadLeaveBalances(pool, userId) {
   });
 }
 
-async function loadRecentLeaveRequests(pool, userId) {
+async function loadRecentLeaveRequests(pool, userId, dateRange) {
   const result = await pool.query(
     `SELECT lr.id,
             lr.start_date::text AS start_date,
@@ -129,33 +129,122 @@ async function loadRecentLeaveRequests(pool, userId) {
             COALESCE(lr.number_of_days, lr.total_days) AS days,
             lr.status,
             lr.reason,
+            lr.attachment_name,
+            lr.attachment_path,
+            lr.details,
             lr.reviewer_remarks,
             lr.reviewed_at,
             lr.approved_at,
+            reviewer.full_name AS reviewer_name,
+            approver.full_name AS approver_name,
             lr.created_at,
             lr.updated_at,
-            lt.name AS leave_type
+            lt.name AS leave_type_key,
+            COALESCE(NULLIF(lt.display_name, ''), NULLIF(lt.description, ''), lt.name) AS leave_type,
+            latest_history.action AS latest_history_action,
+            latest_history.from_status AS latest_history_from_status,
+            latest_history.to_status AS latest_history_to_status,
+            latest_history.remarks AS latest_history_remarks,
+            latest_history.acted_at AS latest_history_acted_at,
+            latest_history.actor_name AS latest_history_actor_name
      FROM leave_requests lr
      LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+     LEFT JOIN users reviewer ON reviewer.id = lr.reviewer_id
+     LEFT JOIN users approver ON approver.id = lr.approved_by
+     LEFT JOIN LATERAL (
+       SELECT h.action,
+              h.from_status,
+              h.to_status,
+              h.remarks,
+              h.acted_at,
+              actor.full_name AS actor_name
+       FROM leave_request_history h
+       LEFT JOIN users actor ON actor.id = h.acted_by
+       WHERE h.leave_request_id = lr.id
+       ORDER BY h.acted_at DESC
+       LIMIT 1
+     ) latest_history ON true
      WHERE lr.user_id = $1::uuid OR lr.employee_id = $1::uuid
-     ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
-     LIMIT 8`,
-    [userId]
+     ORDER BY
+       CASE
+         WHEN lr.start_date <= $3::date AND lr.end_date >= $2::date THEN 0
+         ELSE 1
+       END,
+       lr.updated_at DESC NULLS LAST,
+       lr.created_at DESC
+     LIMIT 30`,
+    [userId, dateRange.startDate, dateRange.endDate]
   );
 
   return result.rows.map((row) => ({
     id: row.id,
     leave_type: row.leave_type,
+    leave_type_key: row.leave_type_key,
     start_date: row.start_date,
     end_date: row.end_date,
     days: toNumber(row.days),
     status: row.status,
     reason: compactText(row.reason),
+    has_attachment: !!row.attachment_path,
+    attachment_name: compactText(row.attachment_name, 120),
+    details: row.details && typeof row.details === 'object' ? row.details : {},
     reviewer_remarks: compactText(row.reviewer_remarks),
+    reviewer_name: row.reviewer_name,
+    approver_name: row.approver_name,
     reviewed_at: toIso(row.reviewed_at),
     approved_at: toIso(row.approved_at),
     created_at: toIso(row.created_at),
     updated_at: toIso(row.updated_at),
+    latest_history: row.latest_history_action
+      ? {
+          action: row.latest_history_action,
+          from_status: row.latest_history_from_status,
+          to_status: row.latest_history_to_status,
+          remarks: compactText(row.latest_history_remarks),
+          acted_at: toIso(row.latest_history_acted_at),
+          actor_name: row.latest_history_actor_name,
+        }
+      : null,
+  }));
+}
+
+async function loadLeaveTypes(pool) {
+  const result = await pool.query(
+    `SELECT id,
+            name,
+            display_name,
+            description,
+            employee_can_file,
+            admin_only,
+            allows_past_dates,
+            requires_attachment,
+            requires_attachment_when_over_days,
+            max_days,
+            minimum_advance_days,
+            affects_dtr_normally,
+            balance_ledger_type,
+            is_active
+     FROM leave_types
+     WHERE is_active IS NULL OR is_active = true
+     ORDER BY display_name NULLS LAST, name ASC
+     LIMIT 30`
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    display_name: row.display_name,
+    description: compactText(row.description),
+    employee_can_file: row.employee_can_file !== false,
+    admin_only: row.admin_only === true,
+    allows_past_dates: row.allows_past_dates !== false,
+    requires_attachment: row.requires_attachment === true,
+    requires_attachment_when_over_days: toNumber(row.requires_attachment_when_over_days),
+    max_days: toNumber(row.max_days),
+    minimum_advance_days: row.minimum_advance_days ?? null,
+    affects_dtr_normally: row.affects_dtr_normally !== false,
+    balance_ledger_type: row.balance_ledger_type,
+    is_active: row.is_active !== false,
   }));
 }
 
@@ -213,12 +302,13 @@ async function loadRecentLocatorSlips(pool, userId) {
 
 async function loadEmployeeAssistantContext(pool, { userId, message }) {
   const dateRange = parseAssistantDateRange(message);
-  const [employee, dtrRecords, leaveBalances, leaveRequests, locatorSlips] =
+  const [employee, dtrRecords, leaveBalances, leaveRequests, leaveTypes, locatorSlips] =
     await Promise.all([
       loadEmployeeProfile(pool, userId),
       loadDtrRecords(pool, userId, dateRange),
       loadLeaveBalances(pool, userId),
-      loadRecentLeaveRequests(pool, userId),
+      loadRecentLeaveRequests(pool, userId, dateRange),
+      loadLeaveTypes(pool),
       loadRecentLocatorSlips(pool, userId),
     ]);
 
@@ -229,6 +319,7 @@ async function loadEmployeeAssistantContext(pool, { userId, message }) {
     dtr_records: dtrRecords,
     leave_balances: leaveBalances,
     recent_leave_requests: leaveRequests,
+    leave_types: leaveTypes,
     recent_locator_slips: locatorSlips,
   };
 }

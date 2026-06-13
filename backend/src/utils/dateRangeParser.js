@@ -33,9 +33,61 @@ function endOfMonth(isoDate) {
   return dt.toISOString().slice(0, 10);
 }
 
+function addMonths(isoDate, months) {
+  const [year, month] = String(isoDate).split('-').map(Number);
+  const dt = new Date(Date.UTC(year, month - 1 + months, 1));
+  return dt.toISOString().slice(0, 10);
+}
+
+const MONTHS = {
+  january: 1,
+  jan: 1,
+  february: 2,
+  feb: 2,
+  march: 3,
+  mar: 3,
+  april: 4,
+  apr: 4,
+  may: 5,
+  june: 6,
+  jun: 6,
+  july: 7,
+  jul: 7,
+  august: 8,
+  aug: 8,
+  september: 9,
+  sep: 9,
+  sept: 9,
+  october: 10,
+  oct: 10,
+  november: 11,
+  nov: 11,
+  december: 12,
+  dec: 12,
+};
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function dateFromParts(year, month, day) {
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
 function parseAssistantDateRange(message, options = {}) {
   const text = String(message || '').toLowerCase();
   const today = options.today || todayInHrmsTimezone(options.now);
+  const explicitRange = text.match(
+    /\b(\d{4}-\d{2}-\d{2})\s*(?:to|until|through|-|–)\s*(\d{4}-\d{2}-\d{2})\b/
+  );
+  if (explicitRange) {
+    return {
+      label: `${explicitRange[1]} to ${explicitRange[2]}`,
+      startDate: explicitRange[1],
+      endDate: explicitRange[2],
+    };
+  }
+
   const explicit = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
 
   if (explicit) {
@@ -43,6 +95,28 @@ function parseAssistantDateRange(message, options = {}) {
       label: explicit[1],
       startDate: explicit[1],
       endDate: explicit[1],
+    };
+  }
+
+  const monthNames = Object.keys(MONTHS).join('|');
+  const monthRange = text.match(
+    new RegExp(
+      `\\b(${monthNames})\\s+(\\d{1,2})(?:\\s*(?:to|until|through|-|–)\\s*(?:(${monthNames})\\s+)?(\\d{1,2}))?(?:,?\\s*(20\\d{2}))?\\b`
+    )
+  );
+  if (monthRange) {
+    const currentYear = Number(today.slice(0, 4));
+    const year = Number(monthRange[5] || currentYear);
+    const startMonth = MONTHS[monthRange[1]];
+    const startDay = Number(monthRange[2]);
+    const endMonth = monthRange[3] ? MONTHS[monthRange[3]] : startMonth;
+    const endDay = monthRange[4] ? Number(monthRange[4]) : startDay;
+    const startDate = dateFromParts(year, startMonth, startDay);
+    const endDate = dateFromParts(year, endMonth, endDay);
+    return {
+      label: startDate === endDate ? startDate : `${startDate} to ${endDate}`,
+      startDate,
+      endDate,
     };
   }
 
@@ -56,6 +130,12 @@ function parseAssistantDateRange(message, options = {}) {
     const startDate = addDays(thisWeekStart, -7);
     const endDate = addDays(startDate, 6);
     return { label: 'last week', startDate, endDate };
+  }
+
+  if (/\blast month\b/.test(text)) {
+    const lastMonth = addMonths(today, -1);
+    const startDate = `${lastMonth.slice(0, 7)}-01`;
+    return { label: 'last month', startDate, endDate: endOfMonth(lastMonth) };
   }
 
   if (/\bthis week\b|\bweek\b/.test(text)) {
@@ -77,6 +157,7 @@ function parseAssistantDateRange(message, options = {}) {
 
 module.exports = {
   addDays,
+  addMonths,
   parseAssistantDateRange,
   todayInHrmsTimezone,
 };

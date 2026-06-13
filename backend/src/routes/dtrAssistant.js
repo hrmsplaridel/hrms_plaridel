@@ -1,10 +1,17 @@
 const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
-const { chatWithDtrAssistant } = require('../services/dtrAssistant/dtrAssistantService');
+const {
+  chatWithDtrAssistant,
+  getDtrAssistantModelProfiles,
+} = require('../services/dtrAssistant/dtrAssistantService');
 
 const router = express.Router();
 const protect = [authMiddleware];
+
+router.get('/models', protect, async (_req, res) => {
+  res.json(getDtrAssistantModelProfiles());
+});
 
 router.post('/chat', protect, async (req, res) => {
   try {
@@ -12,6 +19,7 @@ router.post('/chat', protect, async (req, res) => {
       user: req.user,
       message: req.body?.message,
       intent: req.body?.intent,
+      modelProfile: req.body?.modelProfile,
     });
     res.json(result);
   } catch (err) {
