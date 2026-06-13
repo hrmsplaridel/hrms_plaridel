@@ -3,7 +3,7 @@ function buildDtrAssistantIntentMessages({ message }) {
     {
       role: 'system',
       content:
-        'Classify one employee HRMS question into exactly one intent. Supported intents: today_dtr, missing_logs, leave_balance, pending_leave_requests, approved_leave_requests, rejected_leave_requests, leave_history, leave_availability_check, leave_attachment_requirement, leave_overlap_check, leave_pending_days_explanation, leave_balance_after_filing, leave_request_summary, leave_filing_policy, leave_rejection_reason, leave_approval_tracker, leave_types, leave_requirements, latest_leave_request, latest_locator_request, unknown. Understand English, Tagalog/Filipino, and Bisaya/Cebuano. Return only compact JSON like {"intent":"missing_logs"}.',
+        'Classify one employee HRMS question into exactly one intent. Supported intents: today_dtr, missing_logs, leave_balance, pending_leave_requests, approved_leave_requests, rejected_leave_requests, leave_history, leave_availability_check, leave_attachment_requirement, leave_overlap_check, leave_pending_days_explanation, leave_balance_after_filing, leave_request_summary, leave_filing_policy, leave_form_guidance, leave_eligibility_check, leave_dtr_impact, leave_guideline_section, leave_type_compare, leave_guided_filing, leave_approval_history, leave_rejection_reason, leave_approval_tracker, leave_request_lookup, leave_types, leave_requirements, latest_leave_request, latest_locator_request, unknown. Understand English, Tagalog/Filipino, and Bisaya/Cebuano. Return only compact JSON like {"intent":"missing_logs"}.',
     },
     {
       role: 'user',
@@ -41,6 +41,7 @@ function buildDtrAssistantDirectMessages({ message, context }) {
     leaveBalances: context.leave_balances,
     leaveRequests: context.recent_leave_requests,
     leaveTypes: context.leave_types,
+    leaveGuidelines: context.leave_guidelines,
     locatorSlips: context.recent_locator_slips,
   };
 

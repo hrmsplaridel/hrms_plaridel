@@ -14,6 +14,7 @@ const {
   normalizeIntent,
 } = require('./dtrAssistantIntentService');
 const { getEmployeeSelfScope } = require('./dtrAssistantPermissionService');
+const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
 const {
   buildDtrAssistantDirectMessages,
   buildDtrAssistantIntentMessages,
@@ -186,11 +187,25 @@ function buildSuggestions(intent) {
       { text: 'Show available leave types', intent: 'leave_types' },
     ];
   }
+  if (
+    intent === 'leave_form_guidance' ||
+    intent === 'leave_eligibility_check' ||
+    intent === 'leave_dtr_impact' ||
+    intent === 'leave_guided_filing' ||
+    intent === 'leave_type_compare' ||
+    intent === 'leave_guideline_section'
+  ) {
+    return [
+      { text: 'Can I file 1 day vacation leave tomorrow?', intent: 'leave_availability_check' },
+      { text: 'What attachment do I need?', intent: 'leave_attachment_requirement' },
+      { text: 'Does this affect my DTR?', intent: 'leave_dtr_impact' },
+    ];
+  }
   if (intent === 'latest_leave_request' || intent === 'leave_approval_tracker') {
     return [
       { text: 'Who is holding my leave request?', intent: 'leave_approval_tracker' },
+      { text: 'Show approval timeline', intent: 'leave_approval_history' },
       { text: 'Why was my leave returned or rejected?', intent: 'leave_rejection_reason' },
-      { text: 'Show my leave history this month', intent: 'leave_history' },
     ];
   }
   if (intent === 'leave_history' || intent === 'leave_request_summary') {
@@ -198,6 +213,13 @@ function buildSuggestions(intent) {
       { text: 'Summarize my leave this month', intent: 'leave_request_summary' },
       { text: 'Show approved leave this month', intent: 'approved_leave_requests' },
       { text: 'Show rejected leave requests', intent: 'rejected_leave_requests' },
+    ];
+  }
+  if (intent === 'leave_request_lookup') {
+    return [
+      { text: 'Show my leave history this month', intent: 'leave_history' },
+      { text: 'Check leave requirements', intent: 'leave_requirements' },
+      { text: 'Who is holding my leave request?', intent: 'leave_approval_tracker' },
     ];
   }
   return [
@@ -231,14 +253,14 @@ function parseIntentClassifierResponse(content) {
     return normalizeIntent(parsed.intent);
   } catch (_) {
     const match = text.match(
-      /\b(today_dtr|missing_logs|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_rejection_reason|leave_approval_tracker|leave_types|leave_requirements|latest_leave_request|latest_locator_request|unknown)\b/i
+      /\b(today_dtr|missing_logs|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|unknown)\b/i
     );
     return normalizeIntent(match?.[1]);
   }
 }
 
 function fallbackContent() {
-  return 'I can help only with your DTR, missing logs, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave approval tracking, leave summaries, leave types, and locator slip status. Try asking about your DTR today, missing logs this week, sick/vacation leave balance, pending leave requests, or locator status.';
+  return 'I can help only with your DTR, missing logs, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave eligibility, leave form guidance, leave DTR impact, approval tracking, leave summaries, leave types, and locator slip status. Try asking about your DTR today, missing logs this week, sick/vacation leave balance, pending leave requests, or locator status.';
 }
 
 function hasExplicitHrmsTopic(text) {
@@ -261,8 +283,35 @@ function resolveIntentFromMemory(text, memory) {
   if (/\b(policy|rule|rules|advance|before|deadline|max|maximum|limit|past date)\b/.test(lower(text))) {
     return 'leave_filing_policy';
   }
+  if (/\b(requirement|requirements|needed|need|kinahanglan|kailangan)\b/.test(lower(text))) {
+    return 'leave_requirements';
+  }
+  if (/\b(fill|field|fields|form|details|what to put|i-fill|input)\b/.test(lower(text))) {
+    return 'leave_form_guidance';
+  }
+  if (/\b(eligible|eligibility|qualified|avail|entitled|pwede|puwede)\b/.test(lower(text))) {
+    return 'leave_eligibility_check';
+  }
+  if (/\b(dtr|attendance|effect|impact|mark|on leave)\b/.test(lower(text))) {
+    return 'leave_dtr_impact';
+  }
+  if (/\b(compare|difference|versus| vs |kalahi|pagkaiba)\b/.test(` ${lower(text)} `)) {
+    return 'leave_type_compare';
+  }
+  if (/\b(guideline|guidelines|supporting documents|credits|commutation|monetization|terminal leave)\b/.test(lower(text))) {
+    return 'leave_guideline_section';
+  }
+  if (/\b(help|guide|assist|tabangi).*\b(file|filing)\b/.test(lower(text))) {
+    return 'leave_guided_filing';
+  }
+  if (/\b(timeline|approval history|review history|who approved|who reviewed)\b/.test(lower(text))) {
+    return 'leave_approval_history';
+  }
   if (/\b(who|kinsa|sino|where|asa|holding|waiting|awaiting|pending with)\b/.test(lower(text))) {
     return 'leave_approval_tracker';
+  }
+  if (/\b(what|which|unsa|unsay|ano|gi file|g-file|filed|leave type|that|to)\b/.test(lower(text))) {
+    return 'leave_request_lookup';
   }
   if (/\b(why|ngano|bakit|reason|remarks|returned|rejected|declined|denied)\b/.test(lower(text))) {
     return 'leave_rejection_reason';
@@ -294,8 +343,16 @@ function resolveIntentFromMemory(text, memory) {
       'leave_balance_after_filing',
       'leave_request_summary',
       'leave_filing_policy',
+      'leave_form_guidance',
+      'leave_eligibility_check',
+      'leave_dtr_impact',
+      'leave_guideline_section',
+      'leave_type_compare',
+      'leave_guided_filing',
+      'leave_approval_history',
       'leave_rejection_reason',
       'leave_approval_tracker',
+      'leave_request_lookup',
       'leave_requirements',
       'leave_types',
     ].includes(memory.intent)
@@ -306,9 +363,28 @@ function resolveIntentFromMemory(text, memory) {
 }
 
 function enrichMessageWithMemory(text, memory) {
-  const leaveType = requestedLeaveType(text) || memory?.leaveType;
-  if (!leaveType) return text;
-  if (requestedLeaveType(text)) return text;
+  let enriched = text;
+  const hasDateHint =
+    /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|week|semana|semanaha|month|bulan|buwan|sunod|miaging|niaging|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/i.test(
+      enriched
+    );
+  if (
+    !hasDateHint &&
+    memory?.dateRange?.startDate &&
+    /\b(what|which|unsa|unsay|ano|that|to|gi file|g-file|filed|leave type)\b/i.test(
+      enriched
+    )
+  ) {
+    enriched = `${enriched} (${memory.dateRange.startDate}${
+      memory.dateRange.endDate && memory.dateRange.endDate !== memory.dateRange.startDate
+        ? ` to ${memory.dateRange.endDate}`
+        : ''
+    })`;
+  }
+
+  const leaveType = requestedLeaveType(enriched) || memory?.leaveType;
+  if (!leaveType) return enriched;
+  if (requestedLeaveType(enriched)) return enriched;
   const leaveTypeLabel = /\bleave\b/i.test(leaveType)
     ? leaveType
     : `${leaveType} leave`;
@@ -316,12 +392,12 @@ function enrichMessageWithMemory(text, memory) {
     memory?.intent === 'leave_balance' &&
     /\b(why|ngano|bakit|gamay|low|small|nabilin|natira)\b/.test(lower(text))
   ) {
-    return `${text} (${leaveTypeLabel})`;
+    return `${enriched} (${leaveTypeLabel})`;
   }
-  if (/leave_|leave\b|requirements?|attachment|balance|pending|history|summary|overlap/i.test(memory?.intent || text)) {
-    return `${text} (${leaveTypeLabel})`;
+  if (/leave_|leave\b|requirements?|attachment|balance|pending|history|summary|overlap/i.test(memory?.intent || enriched)) {
+    return `${enriched} (${leaveTypeLabel})`;
   }
-  return text;
+  return enriched;
 }
 
 function buildToolData(intent, context) {
@@ -351,7 +427,9 @@ function buildToolData(intent, context) {
     intent === 'leave_pending_days_explanation' ||
     intent === 'leave_request_summary' ||
     intent === 'leave_rejection_reason' ||
-    intent === 'leave_approval_tracker'
+    intent === 'leave_approval_tracker' ||
+    intent === 'leave_approval_history' ||
+    intent === 'leave_request_lookup'
   ) {
     return {
       dateRange: context.date_range,
@@ -362,20 +440,32 @@ function buildToolData(intent, context) {
     return {
       balances: context.leave_balances || [],
       leaveTypes: context.leave_types || [],
+      leaveGuidelines: context.leave_guidelines || [],
     };
   }
   if (
     intent === 'leave_types' ||
     intent === 'leave_attachment_requirement' ||
-    intent === 'leave_filing_policy'
+    intent === 'leave_filing_policy' ||
+    intent === 'leave_form_guidance' ||
+    intent === 'leave_eligibility_check' ||
+    intent === 'leave_dtr_impact' ||
+    intent === 'leave_guideline_section' ||
+    intent === 'leave_type_compare' ||
+    intent === 'leave_guided_filing'
   ) {
     return {
+      employee: context.employee || null,
+      balances: context.leave_balances || [],
+      requests: context.recent_leave_requests || [],
       leaveTypes: context.leave_types || [],
+      leaveGuidelines: context.leave_guidelines || [],
     };
   }
   if (intent === 'leave_requirements') {
     return {
       leaveTypes: context.leave_types || [],
+      leaveGuidelines: context.leave_guidelines || [],
     };
   }
   if (intent === 'latest_leave_request') {
@@ -479,7 +569,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   const profile = resolveModelProfile(modelProfile);
   const scope = getEmployeeSelfScope(user);
   const memory = getAssistantMemory(scope.userId);
-  const effectiveText = enrichMessageWithMemory(text, memory);
+  const normalizedTextForRules = normalizeAssistantMessageForRules(text);
+  const effectiveText = enrichMessageWithMemory(normalizedTextForRules, memory);
   const context = await loadEmployeeAssistantContext(pool, {
     userId: scope.userId,
     message: effectiveText,
@@ -517,7 +608,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
 
   let resolvedIntent =
     detectEmployeeAssistantIntent(effectiveText, intent) ||
-    resolveIntentFromMemory(text, memory);
+    resolveIntentFromMemory(effectiveText, memory);
   let model = 'hrms-intent-rules';
   let provider = 'hrms';
 

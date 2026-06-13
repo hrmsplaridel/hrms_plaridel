@@ -1,4 +1,11 @@
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
+const {
+  GUIDELINE_SECTIONS,
+  getFormGuidanceForType,
+  getLeaveGuidanceForType,
+  getGuidelineSectionsForMessage,
+  summarizeLeaveGuidance,
+} = require('./leaveFilingGuidelines');
 
 function lower(value) {
   return String(value || '').toLowerCase();
@@ -34,6 +41,10 @@ function asNumber(value) {
 
 function statusLabel(value) {
   return String(value || 'unknown').replace(/_/g, ' ');
+}
+
+function trimTrailingSentencePunctuation(value) {
+  return String(value || '').replace(/[.\s]+$/g, '').trim();
 }
 
 function isTagalogOrBisaya(message) {
@@ -104,12 +115,39 @@ function inferLeaveTypeFromRecords(message, typeRecords = []) {
   return bestScore > 0 ? best : null;
 }
 
+function mentionedLeaveTypeRecords(context, message) {
+  const normalizedMessage = normalizedText(message);
+  const scored = (context.leave_types || [])
+    .map((type) => {
+      const label = leaveTypeSearchText(type);
+      const normalizedLabel = normalizedText(label);
+      const words = lower(label)
+        .split(/[^a-z0-9]+/)
+        .filter((word) => word.length >= 3 && word !== 'leave');
+      const uniqueWords = [...new Set(words)];
+      const score = uniqueWords.reduce((total, word) => {
+        return total + (normalizedMessage.includes(word) ? 1 : 0);
+      }, normalizedLabel && normalizedMessage.includes(normalizedLabel) ? 3 : 0);
+      return { type, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored.map((item) => item.type);
+}
+
 function requestedLeaveTypeRecord(message, context) {
   const type = requestedLeaveType(message);
   if (type) {
     return (context.leave_types || []).find((record) => leaveTypeRecordMatches(record, type)) || null;
   }
   return inferLeaveTypeFromRecords(message, context.leave_types || []);
+}
+
+function normalizeSex(value) {
+  const text = lower(value);
+  if (text === 'm' || text === 'male') return 'male';
+  if (text === 'f' || text === 'female') return 'female';
+  return text || null;
 }
 
 function isWhyBalanceQuestion(message) {
@@ -121,7 +159,7 @@ function isWhyBalanceQuestion(message) {
 
 function hasDateRangeHint(message) {
   const text = lower(message);
-  return /\b(today|yesterday|week|month|last month|this month|last week|this week|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b/.test(
+  return /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|karong adlawa|week|semana|semanaha|month|bulan|buwan|last month|this month|next month|last week|this week|next week|sunod|miaging|niaging|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b/.test(
     text
   );
 }
@@ -670,24 +708,32 @@ function leaveRequirementsReply(context, message) {
   }
 
   const lines = visibleTypes.slice(0, 4).map((type) => {
-    return `${labelLeaveType(type.display_name || type.name)}: ${leaveRequirementParts(type).join(
-      ', '
-    )}`;
+    const guidance = getLeaveGuidanceForType(type);
+    const guidelineText = guidance
+      ? ` Guideline: ${trimTrailingSentencePunctuation(
+          [guidance.requirements, guidance.limits, guidance.advanceFiling]
+            .filter(Boolean)
+            .join(' ')
+        )}.`
+      : '';
+    return `${labelLeaveType(type.display_name || type.name)}: DB rule - ${leaveRequirementParts(
+      type
+    ).join(', ')}.${guidelineText}`;
   });
 
   if (language === 'bisaya') {
-    return `Base sa leave type records, mao ni ang filing requirements: ${lines.join(
-      '; '
-    )}. Kung naa kay attachment or approval question, sundon gihapon ang actual HR review workflow.`;
+    return `Base sa leave type records, mao ni ang filing requirements: ${trimTrailingSentencePunctuation(
+      lines.join('; ')
+    )}. Ang guideline text kay CSC-based/HR-configured; approval moagi gihapon sa actual HR workflow.`;
   }
   if (language === 'tagalog') {
-    return `Base sa leave type records, ito ang filing requirements: ${lines.join(
-      '; '
-    )}. Susundin pa rin ang actual HR review workflow para sa approval.`;
+    return `Base sa leave type records, ito ang filing requirements: ${trimTrailingSentencePunctuation(
+      lines.join('; ')
+    )}. Ang guideline text ay CSC-based/HR-configured; susundin pa rin ang actual HR workflow para sa approval.`;
   }
-  return `Based on the leave type records, these are the filing requirements: ${lines.join(
-    '; '
-  )}. Approval still follows the actual HR review workflow.`;
+  return `Based on the leave type records, these are the filing requirements: ${trimTrailingSentencePunctuation(
+    lines.join('; ')
+  )}. Guideline text is CSC-based/HR-configured; approval still follows the actual HR review workflow.`;
 }
 
 function leaveRequirementParts(type) {
@@ -728,12 +774,23 @@ function leaveAttachmentRequirementReply(context, message) {
   }
 
   const lines = types.slice(0, 4).map((type) => {
-    return `${labelLeaveType(type.display_name || type.name)}: ${attachmentRuleText(type, days)}`;
+    const guidance = getLeaveGuidanceForType(type);
+    const guideline = guidance?.requirements
+      ? ` Guideline: ${trimTrailingSentencePunctuation(guidance.requirements)}.`
+      : '';
+    return `${labelLeaveType(type.display_name || type.name)}: DB rule - ${attachmentRuleText(
+      type,
+      days
+    )}.${guideline}`;
   });
 
-  if (language === 'bisaya') return `Base sa records: ${lines.join('; ')}.`;
-  if (language === 'tagalog') return `Base sa records: ${lines.join('; ')}.`;
-  return `Based on the records: ${lines.join('; ')}.`;
+  if (language === 'bisaya') {
+    return `Base sa records: ${trimTrailingSentencePunctuation(lines.join('; '))}.`;
+  }
+  if (language === 'tagalog') {
+    return `Base sa records: ${trimTrailingSentencePunctuation(lines.join('; '))}.`;
+  }
+  return `Based on the records: ${trimTrailingSentencePunctuation(lines.join('; '))}.`;
 }
 
 function leaveFilingPolicyReply(context, message) {
@@ -746,18 +803,205 @@ function leaveFilingPolicyReply(context, message) {
   }
 
   const lines = types.slice(0, 4).map((type) => {
-    return `${labelLeaveType(type.display_name || type.name)}: ${leaveRequirementParts(type).join(
-      ', '
-    )}`;
+    const guidance = getLeaveGuidanceForType(type);
+    const guidelineSummary = trimTrailingSentencePunctuation(
+      summarizeLeaveGuidance(guidance)
+    );
+    return `${labelLeaveType(type.display_name || type.name)}: DB rule - ${leaveRequirementParts(
+      type
+    ).join(', ')}.${guidelineSummary ? ` Guideline: ${guidelineSummary}` : ''}`;
   });
 
   if (language === 'bisaya') {
-    return `Mao ni ang leave filing policy base sa records: ${lines.join('; ')}. Ang approval moagi gihapon sa HR workflow.`;
+    return `Mao ni ang leave filing policy base sa records ug guidelines: ${trimTrailingSentencePunctuation(
+      lines.join('; ')
+    )}. Ang approval moagi gihapon sa HR workflow.`;
   }
   if (language === 'tagalog') {
-    return `Ito ang leave filing policy base sa records: ${lines.join('; ')}. Dadaan pa rin sa HR approval workflow.`;
+    return `Ito ang leave filing policy base sa records at guidelines: ${trimTrailingSentencePunctuation(
+      lines.join('; ')
+    )}. Dadaan pa rin sa HR approval workflow.`;
   }
-  return `Here is the leave filing policy from the records: ${lines.join('; ')}. Approval still follows the HR workflow.`;
+  return `Here is the leave filing policy from the records and guidelines: ${trimTrailingSentencePunctuation(
+    lines.join('; ')
+  )}. Approval still follows the HR workflow.`;
+}
+
+function leaveFormGuidanceReply(context, message) {
+  const language = languageOf(message);
+  const types = matchingLeaveTypes(context, message).slice(0, 3);
+  if (types.length === 0) {
+    if (language === 'bisaya') return 'Wala koy nakitang leave type para sa form guidance.';
+    if (language === 'tagalog') return 'Wala akong nakitang leave type para sa form guidance.';
+    return 'I found no leave type for form guidance.';
+  }
+
+  const lines = types.map((type) => {
+    const form = getFormGuidanceForType(type);
+    const requirement = attachmentRuleText(type, requestedDaysOrRangeDays(message, context));
+    return `${labelLeaveType(type.display_name || type.name)}: ${form.fields.join(' ')} DB rule: ${requirement}.`;
+  });
+
+  if (language === 'bisaya') {
+    return `Para sa leave form: ${trimTrailingSentencePunctuation(lines.join(' '))}.`;
+  }
+  if (language === 'tagalog') {
+    return `Para sa leave form: ${trimTrailingSentencePunctuation(lines.join(' '))}.`;
+  }
+  return `For the leave form: ${trimTrailingSentencePunctuation(lines.join(' '))}.`;
+}
+
+function leaveEligibilityReply(context, message) {
+  const language = languageOf(message);
+  const types = matchingLeaveTypes(context, message).slice(0, 3);
+  const employeeSex = normalizeSex(context.employee?.sex);
+  if (types.length === 0) {
+    if (language === 'bisaya') return 'Wala koy nakitang leave type para sa eligibility check.';
+    if (language === 'tagalog') return 'Wala akong nakitang leave type para sa eligibility check.';
+    return 'I found no leave type for an eligibility check.';
+  }
+
+  const lines = types.map((type) => {
+    const blockers = [];
+    const warnings = [];
+    const sexRule = lower(type.sex_eligibility || 'any') || 'any';
+    if (type.employee_can_file === false || type.admin_only) {
+      blockers.push('employee filing disabled/admin-only');
+    }
+    if (sexRule !== 'any') {
+      if (!employeeSex) {
+        warnings.push(`profile sex is missing, HR should confirm ${sexRule} eligibility`);
+      } else if (employeeSex !== sexRule) {
+        blockers.push(`configured for ${sexRule} employees only`);
+      }
+    }
+    const label = labelLeaveType(type.display_name || type.name);
+    if (blockers.length > 0) return `${label}: not eligible by current rule (${blockers.join(', ')})`;
+    if (warnings.length > 0) return `${label}: likely eligible, but ${warnings.join(', ')}`;
+    return `${label}: eligible by profile/rule check`;
+  });
+
+  const suffix = 'This is only a filing eligibility check; approval still follows HR workflow.';
+  if (language === 'bisaya') {
+    return `Eligibility check: ${lines.join('; ')}. Filing check ra ni; final approval moagi gihapon sa HR workflow.`;
+  }
+  if (language === 'tagalog') {
+    return `Eligibility check: ${lines.join('; ')}. Filing check lang ito; dadaan pa rin sa HR approval workflow.`;
+  }
+  return `Eligibility check: ${lines.join('; ')}. ${suffix}`;
+}
+
+function leaveDtrImpactReply(context, message) {
+  const language = languageOf(message);
+  const types = matchingLeaveTypes(context, message).slice(0, 3);
+  if (types.length === 0) {
+    if (language === 'bisaya') return 'Wala koy nakitang leave type para sa DTR impact.';
+    if (language === 'tagalog') return 'Wala akong nakitang leave type para sa DTR impact.';
+    return 'I found no leave type for DTR impact.';
+  }
+
+  const lines = types.map((type) => {
+    const label = labelLeaveType(type.display_name || type.name);
+    const balance = type.balance_ledger_type
+      ? `balance ledger: ${type.balance_ledger_type}`
+      : 'no specific balance ledger shown';
+    if (type.affects_dtr_normally === false) {
+      return `${label}: configured not to affect DTR normally; HR may handle attendance manually.`;
+    }
+    return `${label}: once approved/posting runs, covered dates can be marked on leave in DTR; ${balance}.`;
+  });
+
+  if (language === 'bisaya') {
+    return `DTR impact: ${lines.join(' ')} Final posting/approval gihapon ang basis.`;
+  }
+  if (language === 'tagalog') {
+    return `DTR impact: ${lines.join(' ')} Final posting/approval pa rin ang basis.`;
+  }
+  return `DTR impact: ${lines.join(' ')} Final posting/approval is still the basis.`;
+}
+
+function leaveGuidelineSectionReply(context, message) {
+  const language = languageOf(message);
+  const sections = getGuidelineSectionsForMessage(message);
+  const type = requestedLeaveTypeRecord(message, context);
+  const guidance = type ? getLeaveGuidanceForType(type) : null;
+
+  if (guidance && /\b(supporting|document|docs|attachment|requirements?)\b/i.test(message)) {
+    const line = `${labelLeaveType(type.display_name || type.name)}: ${trimTrailingSentencePunctuation(
+      [guidance.requirements, guidance.limits, guidance.advanceFiling, guidance.notes]
+        .filter(Boolean)
+        .join(' ')
+    )}. DB rule: ${attachmentRuleText(type, requestedDaysOrRangeDays(message, context))}.`;
+    if (language === 'bisaya') return `Guideline section answer: ${line}`;
+    if (language === 'tagalog') return `Guideline section answer: ${line}`;
+    return `Guideline section answer: ${line}`;
+  }
+
+  if (sections.length === 0) {
+    const titles = GUIDELINE_SECTIONS.map((section) => section.title).join(', ');
+    if (language === 'bisaya') return `Pwede nako i-explain ani nga guideline sections: ${titles}.`;
+    if (language === 'tagalog') return `Pwede kong i-explain itong guideline sections: ${titles}.`;
+    return `I can explain these guideline sections: ${titles}.`;
+  }
+
+  const lines = sections.map((section) => `${section.title}: ${section.points.join(' ')}`);
+  if (language === 'bisaya') return `Guidelines: ${lines.join(' ')}`;
+  if (language === 'tagalog') return `Guidelines: ${lines.join(' ')}`;
+  return `Guidelines: ${lines.join(' ')}`;
+}
+
+function leaveTypeCompareReply(context, message) {
+  const language = languageOf(message);
+  const types = mentionedLeaveTypeRecords(context, message).slice(0, 2);
+  if (types.length < 2) {
+    if (language === 'bisaya') return 'Unsang duha ka leave types ang imong gusto i-compare? Example: sick leave vs vacation leave.';
+    if (language === 'tagalog') return 'Aling dalawang leave types ang gusto mong i-compare? Example: sick leave vs vacation leave.';
+    return 'Which two leave types do you want to compare? Example: sick leave vs vacation leave.';
+  }
+
+  const lines = types.map((type) => {
+    const guidance = getLeaveGuidanceForType(type);
+    const pieces = [
+      leaveRequirementParts(type).join(', '),
+      guidance?.requirements ? `guideline requirements: ${guidance.requirements}` : null,
+      guidance?.limits ? `limit: ${guidance.limits}` : null,
+    ].filter(Boolean);
+    return `${labelLeaveType(type.display_name || type.name)}: ${pieces.join('; ')}`;
+  });
+
+  if (language === 'bisaya') return `Comparison: ${lines.join(' VS ')}.`;
+  if (language === 'tagalog') return `Comparison: ${lines.join(' VS ')}.`;
+  return `Comparison: ${lines.join(' VS ')}.`;
+}
+
+function leaveGuidedFilingReply(context, message) {
+  const language = languageOf(message);
+  const type = requestedLeaveTypeRecord(message, context);
+  const days = requestedDaysOrRangeDays(message, context);
+  const missing = [];
+  if (!type) missing.push('leave type');
+  if (!hasDateRangeHint(message)) missing.push('date or date range');
+  if (!days) missing.push('number of days');
+
+  if (missing.length > 0) {
+    if (language === 'bisaya') {
+      return `Tabangan tika sa leave filing. Kulang pa: ${missing.join(', ')}. Ihatag ang leave type, date range, number of days, ug reason/attachment kung required.`;
+    }
+    if (language === 'tagalog') {
+      return `Tutulungan kita sa leave filing. Kulang pa: ${missing.join(', ')}. Ibigay ang leave type, date range, number of days, at reason/attachment kung required.`;
+    }
+    return `I can guide the leave filing. Missing: ${missing.join(', ')}. Provide leave type, date range, number of days, and reason/attachment if required.`;
+  }
+
+  const check = leaveAvailabilityReply(context, message);
+  const form = getFormGuidanceForType(type);
+  if (language === 'bisaya') {
+    return `${check} Sunod: sa form, ${form.fields.join(' ')} I-submit ra sa leave module; dili pa ko mo-auto-submit.`;
+  }
+  if (language === 'tagalog') {
+    return `${check} Next: sa form, ${form.fields.join(' ')} I-submit sa leave module; hindi ako mag-auto-submit.`;
+  }
+  return `${check} Next in the form: ${form.fields.join(' ')} Submit it in the leave module; I will not auto-submit it.`;
 }
 
 function leaveOverlapCheckReply(context, message) {
@@ -906,6 +1150,40 @@ function leaveRequestSummaryReply(context, message) {
   return `Leave summary (${label}): total ${requests.length}, pending ${counts.pending}, approved ${counts.approved}, rejected ${counts.rejected}, other ${counts.other}, total days ${fmtDays(counts.days)}.`;
 }
 
+function leaveRequestLookupReply(context, message) {
+  const language = languageOf(message);
+  const useRange = hasDateRangeHint(message);
+  const requests = (context.recent_leave_requests || []).filter((request) => {
+    if (useRange && !requestOverlapsRange(request, context.date_range)) return false;
+    return requestMatchesMessageFilters(request, message, context);
+  });
+
+  if (requests.length === 0) {
+    const label = context.date_range?.label || 'that date';
+    if (language === 'bisaya') return `Wala koy nakitang leave request nga gi-file para sa ${label}.`;
+    if (language === 'tagalog') return `Wala akong nakitang leave request na na-file para sa ${label}.`;
+    return `I found no leave request filed for ${label}.`;
+  }
+
+  const lines = limitedRequests(requests, 3).map((request) => {
+    return `${labelLeaveType(request.leave_type)} (${workflowStatusText(
+      request.status
+    )}, ${fmtDays(request.days)} day(s), ${fmtDate(request.start_date)} to ${fmtDate(
+      request.end_date
+    )})`;
+  });
+  const more = requests.length > 3 ? ` plus ${requests.length - 3} more` : '';
+  const label = context.date_range?.label || 'that date';
+
+  if (language === 'bisaya') {
+    return `Ang leave request nga nakita nako para sa ${label}: ${lines.join('; ')}${more}.`;
+  }
+  if (language === 'tagalog') {
+    return `Ito ang leave request na nakita ko para sa ${label}: ${lines.join('; ')}${more}.`;
+  }
+  return `The leave request I found for ${label}: ${lines.join('; ')}${more}.`;
+}
+
 function leaveRejectionReasonReply(context, message) {
   const language = languageOf(message);
   const requests = (context.recent_leave_requests || []).filter((request) => {
@@ -966,6 +1244,43 @@ function leaveApprovalTrackerReply(context, message) {
   if (language === 'bisaya') return content;
   if (language === 'tagalog') return content;
   return content;
+}
+
+function leaveApprovalHistoryReply(context, message) {
+  const language = languageOf(message);
+  const requests = (context.recent_leave_requests || []).filter((request) => {
+    return requestMatchesMessageFilters(request, message, context);
+  });
+  const request = requests[0] || context.recent_leave_requests?.[0];
+
+  if (!request) {
+    if (language === 'bisaya') return 'Wala koy nakitang leave request para sa approval timeline.';
+    if (language === 'tagalog') return 'Wala akong nakitang leave request para sa approval timeline.';
+    return 'I found no leave request for an approval timeline.';
+  }
+
+  const history = Array.isArray(request.history) ? request.history : [];
+  if (history.length === 0 && !request.latest_history) {
+    const base = fmtLeaveRequest(request);
+    if (language === 'bisaya') return `${base}. Wala koy detailed approval history sa record.`;
+    if (language === 'tagalog') return `${base}. Wala akong detailed approval history sa record.`;
+    return `${base}. I found no detailed approval history in the record.`;
+  }
+
+  const events = history.length > 0 ? history : [request.latest_history];
+  const lines = limitedRequests(events, 6).map((event) => {
+    const action = statusLabel(event.action || event.to_status || 'action');
+    const actor = event.actor_name ? ` by ${event.actor_name}` : '';
+    const when = event.acted_at ? ` on ${fmtDate(event.acted_at)}` : '';
+    const remarks = event.remarks ? ` (${event.remarks})` : '';
+    return `${action}${actor}${when}${remarks}`;
+  });
+  const more = events.length > 6 ? ` plus ${events.length - 6} more` : '';
+  const base = fmtLeaveRequest(request);
+
+  if (language === 'bisaya') return `${base}. Approval timeline: ${lines.join('; ')}${more}.`;
+  if (language === 'tagalog') return `${base}. Approval timeline: ${lines.join('; ')}${more}.`;
+  return `${base}. Approval timeline: ${lines.join('; ')}${more}.`;
 }
 
 function locatorReply(context, localized) {
@@ -1044,14 +1359,38 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
   if (intent === 'leave_request_summary') {
     return leaveRequestSummaryReply(context, message);
   }
+  if (intent === 'leave_request_lookup') {
+    return leaveRequestLookupReply(context, message);
+  }
   if (intent === 'leave_filing_policy') {
     return leaveFilingPolicyReply(context, message);
+  }
+  if (intent === 'leave_form_guidance') {
+    return leaveFormGuidanceReply(context, message);
+  }
+  if (intent === 'leave_eligibility_check') {
+    return leaveEligibilityReply(context, message);
+  }
+  if (intent === 'leave_dtr_impact') {
+    return leaveDtrImpactReply(context, message);
+  }
+  if (intent === 'leave_guideline_section') {
+    return leaveGuidelineSectionReply(context, message);
+  }
+  if (intent === 'leave_type_compare') {
+    return leaveTypeCompareReply(context, message);
+  }
+  if (intent === 'leave_guided_filing') {
+    return leaveGuidedFilingReply(context, message);
   }
   if (intent === 'leave_rejection_reason') {
     return leaveRejectionReasonReply(context, message);
   }
   if (intent === 'leave_approval_tracker') {
     return leaveApprovalTrackerReply(context, message);
+  }
+  if (intent === 'leave_approval_history') {
+    return leaveApprovalHistoryReply(context, message);
   }
   if (intent === 'leave_types') {
     return leaveTypesReply(context, message);

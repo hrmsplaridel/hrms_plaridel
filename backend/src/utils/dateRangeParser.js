@@ -27,6 +27,13 @@ function startOfWeekMonday(isoDate) {
   return addDays(isoDate, offset);
 }
 
+function dayOfWeekMondayIndex(isoDate) {
+  const [year, month, day] = String(isoDate).split('-').map(Number);
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  const utcDay = dt.getUTCDay();
+  return utcDay === 0 ? 6 : utcDay - 1;
+}
+
 function endOfMonth(isoDate) {
   const [year, month] = String(isoDate).split('-').map(Number);
   const dt = new Date(Date.UTC(year, month, 0));
@@ -66,12 +73,52 @@ const MONTHS = {
   dec: 12,
 };
 
+const WEEKDAYS = {
+  monday: 0,
+  mon: 0,
+  lunes: 0,
+  tuesday: 1,
+  tue: 1,
+  tues: 1,
+  martes: 1,
+  wednesday: 2,
+  wed: 2,
+  miyerkules: 2,
+  mierkules: 2,
+  merkules: 2,
+  thursday: 3,
+  thu: 3,
+  thurs: 3,
+  huwebes: 3,
+  jueves: 3,
+  webes: 3,
+  friday: 4,
+  fri: 4,
+  biyernes: 4,
+  byernes: 4,
+  bernes: 4,
+  saturday: 5,
+  sat: 5,
+  sabado: 5,
+  sunday: 6,
+  sun: 6,
+  domingo: 6,
+};
+
 function pad2(value) {
   return String(value).padStart(2, '0');
 }
 
 function dateFromParts(year, month, day) {
   return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+function weekdayDate(today, targetWeekday, mode = 'next') {
+  const current = dayOfWeekMondayIndex(today);
+  let offset = targetWeekday - current;
+  if (mode === 'next' && offset <= 0) offset += 7;
+  if (mode === 'previous' && offset >= 0) offset -= 7;
+  return addDays(today, offset);
 }
 
 function parseAssistantDateRange(message, options = {}) {
@@ -120,32 +167,70 @@ function parseAssistantDateRange(message, options = {}) {
     };
   }
 
-  if (/\byesterday\b/.test(text)) {
+  if (/\b(tomorrow|ugma|bukas)\b/.test(text)) {
+    const date = addDays(today, 1);
+    return { label: 'tomorrow', startDate: date, endDate: date };
+  }
+
+  if (/\b(yesterday|kagahapon|gahapon|kahapon)\b/.test(text)) {
     const date = addDays(today, -1);
     return { label: 'yesterday', startDate: date, endDate: date };
   }
 
-  if (/\blast week\b/.test(text)) {
+  const weekdayNames = Object.keys(WEEKDAYS).join('|');
+  const nextWeekday = text.match(
+    new RegExp(`\\b(?:next|sunod|sunod nga|sunod na)\\s+(${weekdayNames})\\b`)
+  );
+  if (nextWeekday) {
+    const date = weekdayDate(today, WEEKDAYS[nextWeekday[1]], 'next');
+    return { label: `next ${nextWeekday[1]}`, startDate: date, endDate: date };
+  }
+
+  const previousWeekday = text.match(
+    new RegExp(`\\b(?:last|previous|niaging|miaging)\\s+(${weekdayNames})\\b`)
+  );
+  if (previousWeekday) {
+    const date = weekdayDate(today, WEEKDAYS[previousWeekday[1]], 'previous');
+    return { label: `previous ${previousWeekday[1]}`, startDate: date, endDate: date };
+  }
+
+  if (/\b(last week|previous week|niaging semana|miaging semana|niaging semanaha|miaging semanaha)\b/.test(text)) {
     const thisWeekStart = startOfWeekMonday(today);
     const startDate = addDays(thisWeekStart, -7);
     const endDate = addDays(startDate, 6);
     return { label: 'last week', startDate, endDate };
   }
 
-  if (/\blast month\b/.test(text)) {
+  if (/\b(next week|sunod semana|sunod nga semana|sunod semanaha|sunod nga semanaha)\b/.test(text)) {
+    const thisWeekStart = startOfWeekMonday(today);
+    const startDate = addDays(thisWeekStart, 7);
+    return { label: 'next week', startDate, endDate: addDays(startDate, 6) };
+  }
+
+  if (/\b(last month|previous month|niaging buwan|miaging buwan|niaging bulan|miaging bulan)\b/.test(text)) {
     const lastMonth = addMonths(today, -1);
     const startDate = `${lastMonth.slice(0, 7)}-01`;
     return { label: 'last month', startDate, endDate: endOfMonth(lastMonth) };
   }
 
-  if (/\bthis week\b|\bweek\b/.test(text)) {
+  if (/\b(next month|sunod buwan|sunod nga buwan|sunod bulan|sunod nga bulan)\b/.test(text)) {
+    const nextMonth = addMonths(today, 1);
+    const startDate = `${nextMonth.slice(0, 7)}-01`;
+    return { label: 'next month', startDate, endDate: endOfMonth(nextMonth) };
+  }
+
+  if (/\b(this week|current week|karong semanaha|karon nga semana|karong semana|this semana|week|semana|semanaha)\b/.test(text)) {
     const startDate = startOfWeekMonday(today);
     return { label: 'this week', startDate, endDate: addDays(startDate, 6) };
   }
 
-  if (/\bthis month\b|\bmonth\b/.test(text)) {
+  if (/\b(this month|current month|karong bulana|karon nga bulan|karong buwan|karon nga buwan|month|bulan|buwan)\b/.test(text)) {
     const startDate = `${today.slice(0, 7)}-01`;
     return { label: 'this month', startDate, endDate: endOfMonth(today) };
+  }
+
+  if (/\b(today|karong adlawa|karon nga adlaw|karon|ngayon)\b/.test(text)) {
+    return { label: 'today', startDate: today, endDate: today };
   }
 
   return {

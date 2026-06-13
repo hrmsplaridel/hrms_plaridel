@@ -1,4 +1,5 @@
 const { parseAssistantDateRange } = require('../../utils/dateRangeParser');
+const { buildGuidelinesForTypes } = require('./leaveFilingGuidelines');
 
 function toNumber(value) {
   if (value == null) return null;
@@ -18,9 +19,23 @@ function compactText(value, max = 360) {
   return `${text.slice(0, max - 1)}...`;
 }
 
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  }
+  return [];
+}
+
 async function loadEmployeeProfile(pool, userId) {
   const result = await pool.query(
-    `SELECT id, full_name, role
+    `SELECT id, full_name, role, sex, civil_status, date_of_birth::text AS date_of_birth
      FROM users
      WHERE id = $1::uuid
      LIMIT 1`,
@@ -32,6 +47,9 @@ async function loadEmployeeProfile(pool, userId) {
         id: row.id,
         full_name: row.full_name,
         role: row.role,
+        sex: row.sex,
+        civil_status: row.civil_status,
+        date_of_birth: row.date_of_birth,
       }
     : null;
 }
@@ -146,7 +164,8 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
             latest_history.to_status AS latest_history_to_status,
             latest_history.remarks AS latest_history_remarks,
             latest_history.acted_at AS latest_history_acted_at,
-            latest_history.actor_name AS latest_history_actor_name
+            latest_history.actor_name AS latest_history_actor_name,
+            history_summary.history AS history
      FROM leave_requests lr
      LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
      LEFT JOIN users reviewer ON reviewer.id = lr.reviewer_id
@@ -164,6 +183,22 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
        ORDER BY h.acted_at DESC
        LIMIT 1
      ) latest_history ON true
+     LEFT JOIN LATERAL (
+       SELECT json_agg(
+                json_build_object(
+                  'action', h.action,
+                  'from_status', h.from_status,
+                  'to_status', h.to_status,
+                  'remarks', h.remarks,
+                  'acted_at', h.acted_at,
+                  'actor_name', actor.full_name
+                )
+                ORDER BY h.acted_at DESC
+              ) AS history
+       FROM leave_request_history h
+       LEFT JOIN users actor ON actor.id = h.acted_by
+       WHERE h.leave_request_id = lr.id
+     ) history_summary ON true
      WHERE lr.user_id = $1::uuid OR lr.employee_id = $1::uuid
      ORDER BY
        CASE
@@ -205,6 +240,14 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
           actor_name: row.latest_history_actor_name,
         }
       : null,
+    history: parseJsonArray(row.history).map((item) => ({
+      action: item.action,
+      from_status: item.from_status,
+      to_status: item.to_status,
+      remarks: compactText(item.remarks),
+      acted_at: toIso(item.acted_at),
+      actor_name: item.actor_name,
+    })),
   }));
 }
 
@@ -221,6 +264,7 @@ async function loadLeaveTypes(pool) {
             requires_attachment_when_over_days,
             max_days,
             minimum_advance_days,
+            sex_eligibility,
             affects_dtr_normally,
             balance_ledger_type,
             is_active
@@ -242,6 +286,7 @@ async function loadLeaveTypes(pool) {
     requires_attachment_when_over_days: toNumber(row.requires_attachment_when_over_days),
     max_days: toNumber(row.max_days),
     minimum_advance_days: row.minimum_advance_days ?? null,
+    sex_eligibility: row.sex_eligibility,
     affects_dtr_normally: row.affects_dtr_normally !== false,
     balance_ledger_type: row.balance_ledger_type,
     is_active: row.is_active !== false,
@@ -320,6 +365,7 @@ async function loadEmployeeAssistantContext(pool, { userId, message }) {
     leave_balances: leaveBalances,
     recent_leave_requests: leaveRequests,
     leave_types: leaveTypes,
+    leave_guidelines: buildGuidelinesForTypes(leaveTypes),
     recent_locator_slips: locatorSlips,
   };
 }
