@@ -8,7 +8,8 @@
     "dev": "node --watch src/index.js",
     "db:init": "psql -d $npm_config_db -f scripts/init-schema.sql",
     "leave:accrual": "node scripts/run-leave-monthly-accrual.js",
-    "leave:accrual:dry": "node scripts/run-leave-monthly-accrual.js --dry-run"
+    "leave:accrual:dry": "node scripts/run-leave-monthly-accrual.js --dry-run",
+    "llm:smoke": "node scripts/test-llm.js"
   },
   "keywords": [],
   "author": "",
