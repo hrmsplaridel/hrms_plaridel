@@ -28,9 +28,9 @@ class EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (PlatformLayout.isMobile(context)) {
-      return EmployeeLocatorSlipMobilePage(key: _mobileKey);
-    }
-    return desktop.EmployeeLocatorSlipScreen(key: _desktopKey);
+    final child = PlatformLayout.isMobile(context)
+        ? EmployeeLocatorSlipMobilePage(key: _mobileKey)
+        : desktop.EmployeeLocatorSlipScreen(key: _desktopKey);
+    return child;
   }
 }
