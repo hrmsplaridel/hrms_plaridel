@@ -175,35 +175,60 @@ class RecruitmentHubAnalyticsPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            _InsightChip(
-              label: 'Hire rate',
-              value: '${_hireRate.toStringAsFixed(0)}%',
-              icon: Icons.trending_up_rounded,
-              color: _hiredColor,
-            ),
-            _InsightChip(
-              label: 'This month',
-              value: '$_thisMonthCount',
-              icon: Icons.calendar_month_rounded,
-              color: _pendingColor,
-            ),
-            _InsightChip(
-              label: 'In pipeline',
-              value: '${pending + inProgress}',
-              icon: Icons.sync_rounded,
-              color: _progressColor,
-            ),
-            _InsightChip(
-              label: 'Closed out',
-              value: '$closed',
-              icon: Icons.archive_outlined,
-              color: _closedColor,
-            ),
-          ],
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _InsightChip(
+                label: 'Pending Review',
+                value: '$pending',
+                icon: Icons.hourglass_top_rounded,
+                color: _pendingColor,
+              ),
+              const SizedBox(width: 10),
+              _InsightChip(
+                label: 'In Progress',
+                value: '$inProgress',
+                icon: Icons.timelapse_rounded,
+                color: _progressColor,
+              ),
+              const SizedBox(width: 10),
+              _InsightChip(
+                label: 'Total Applicants',
+                value: '$total',
+                icon: Icons.groups_rounded,
+                color: _closedColor,
+              ),
+              const SizedBox(width: 10),
+              _InsightChip(
+                label: 'Hire rate',
+                value: '${_hireRate.toStringAsFixed(0)}%',
+                icon: Icons.trending_up_rounded,
+                color: _hiredColor,
+              ),
+              const SizedBox(width: 10),
+              _InsightChip(
+                label: 'This month',
+                value: '$_thisMonthCount',
+                icon: Icons.calendar_month_rounded,
+                color: _pendingColor,
+              ),
+              const SizedBox(width: 10),
+              _InsightChip(
+                label: 'In pipeline',
+                value: '${pending + inProgress}',
+                icon: Icons.sync_rounded,
+                color: _progressColor,
+              ),
+              const SizedBox(width: 10),
+              _InsightChip(
+                label: 'Closed out',
+                value: '$closed',
+                icon: Icons.archive_outlined,
+                color: _closedColor,
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 16),
         charts,

@@ -672,7 +672,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         ),
         const SizedBox(height: 18),
         DropdownButtonFormField<String>(
-          value: _privilege,
+          initialValue: _privilege,
           isExpanded: true,
           decoration: _fieldDecoration('Role', hint: 'Select role first'),
           hint: Text(

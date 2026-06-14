@@ -29,9 +29,7 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
       final apps = await RecruitmentRepo.instance.listApplications();
       if (!mounted) return;
       setState(() {
-        _applications = apps
-            .where((a) => a.finalRequirementsApproved)
-            .toList()
+        _applications = apps.where((a) => a.finalRequirementsApproved).toList()
           ..sort(
             (a, b) =>
                 a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()),
@@ -128,9 +126,9 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
       await _load();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _savingIds.remove(applicationId));
@@ -230,8 +228,9 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
                     value: null,
                     child: Text('All positions'),
                   ),
-                  ...(_positionFilterOptions.toList()..sort())
-                      .map((p) => DropdownMenuItem(value: p, child: Text(p))),
+                  ...(_positionFilterOptions.toList()..sort()).map(
+                    (p) => DropdownMenuItem(value: p, child: Text(p)),
+                  ),
                 ],
                 onChanged: _loading
                     ? null
@@ -296,7 +295,8 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
               label: const Text('Today'),
             ),
             TextButton.icon(
-              onPressed: _loading ||
+              onPressed:
+                  _loading ||
                       (_selectedPositionFilter == null &&
                           _selectedAppliedDate == null &&
                           _scheduleFilter == null)
@@ -406,7 +406,7 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _formatSchedule(scheduled!, context),
+                        _formatSchedule(scheduled, context),
                         style: TextStyle(
                           fontSize: 13,
                           color: AppTheme.dashTextSecondaryOf(context),
@@ -490,7 +490,9 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  scheduled == null ? 'No date set' : _formatSchedule(scheduled, context),
+                  scheduled == null
+                      ? 'No date set'
+                      : _formatSchedule(scheduled, context),
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
@@ -515,7 +517,9 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
                       onPressed: busy ? null : () => _pickDateTime(app),
                       icon: const Icon(Icons.event_rounded, size: 20),
                       label: Text(
-                        scheduled == null ? 'Set date & time' : 'Change schedule',
+                        scheduled == null
+                            ? 'Set date & time'
+                            : 'Change schedule',
                       ),
                       style: FilledButton.styleFrom(
                         backgroundColor: accentNavy,

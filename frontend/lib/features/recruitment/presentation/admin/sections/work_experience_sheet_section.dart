@@ -149,13 +149,16 @@ class _RspWorkExperienceSheetSectionState
 
   @override
   Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Work Experience Sheet',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: primary,
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
@@ -163,7 +166,7 @@ class _RspWorkExperienceSheetSectionState
         const SizedBox(height: 8),
         Text(
           'HRMD work experience form: position applied for, department, four minimum standards, and job description of last work (with COE).',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(color: secondary, fontSize: 14),
         ),
         const SizedBox(height: 24),
         if (_editing != null) ...[
@@ -189,18 +192,14 @@ class _RspWorkExperienceSheetSectionState
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh_rounded, size: 20),
               label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
+              style: TextButton.styleFrom(foregroundColor: primary),
             ),
             const SizedBox(width: 4),
             TextButton.icon(
               onPressed: _loading ? null : _openSavedRecordsBrowser,
               icon: const Icon(Icons.folder_open_outlined, size: 20),
               label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
+              style: TextButton.styleFrom(foregroundColor: primary),
             ),
           ],
         ),
@@ -323,7 +322,8 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
           controller: controller,
           readOnly: widget.readOnly,
           maxLines: maxLines,
-          decoration: rspUnderlinedField(label),
+          style: AppTheme.dashFieldTextStyle(context),
+          decoration: rspUnderlinedFieldOf(context, label),
         ),
       ),
     );
@@ -333,14 +333,14 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
   Widget build(BuildContext context) {
     final ro = widget.readOnly;
     final entry = _buildEntry();
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final dark = AppTheme.dashIsDark(context);
+    final labelColor = dark ? primary : AppTheme.primaryNavy;
 
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -364,7 +364,7 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
                       Text(
                         '4 MINIMUM STANDARDS',
                         style: TextStyle(
-                          color: AppTheme.primaryNavy,
+                          color: labelColor,
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                         ),
@@ -386,7 +386,7 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
                       Text(
                         'Job Description of Last Work',
                         style: TextStyle(
-                          color: AppTheme.primaryNavy,
+                          color: labelColor,
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                         ),
@@ -394,8 +394,9 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
                       const SizedBox(height: 8),
                       Container(
                         decoration: BoxDecoration(
+                          color: AppTheme.dashInputFillOf(context),
                           border: Border.all(
-                            color: Colors.black.withValues(alpha: 0.2),
+                            color: AppTheme.dashInputBorderOf(context),
                           ),
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -404,10 +405,12 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
                           controller: _jobDescription,
                           readOnly: ro,
                           maxLines: 14,
-                          decoration: const InputDecoration(
+                          style: AppTheme.dashFieldTextStyle(context),
+                          decoration: InputDecoration(
                             border: InputBorder.none,
                             hintText:
                                 'Describe duties and responsibilities of last work…',
+                            hintStyle: AppTheme.dashFieldHintStyle(context),
                           ),
                         ),
                       ),
@@ -415,7 +418,7 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
                       Text(
                         'Note: With COE with detail position description details',
                         style: TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: secondary,
                           fontSize: 11,
                           fontStyle: FontStyle.italic,
                         ),
@@ -429,9 +432,13 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
             Center(
               child: Column(
                 children: [
-                  const Text(
+                  Text(
                     'Submitted by:',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: primary,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   SizedBox(
@@ -441,17 +448,15 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
                         controller: _applicantName,
                         readOnly: ro,
                         textAlign: TextAlign.center,
-                        decoration: rspUnderlinedField(''),
+                        style: AppTheme.dashFieldTextStyle(context),
+                        decoration: rspUnderlinedFieldOf(context, ''),
                       ),
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'Name of Applicant',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                    ),
+                    style: TextStyle(color: secondary, fontSize: 12),
                   ),
                 ],
               ),

@@ -1654,6 +1654,15 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
       );
 
   String _pipelineStatusLabel(RecruitmentApplication app) {
+    if (app.hiredUserId != null || app.status == 'registered') return 'Hired';
+    if (app.hrAccountSetupDone) return 'Account setup done';
+    if (app.orientationAttended == true) return 'Orientation attended';
+    if (app.orientationAttended == false) return 'Orientation missed';
+    if (app.orientationAt != null) return 'Orientation scheduled';
+    if (app.finalRequirementsApproved) return 'Final requirements approved';
+    if (app.finalInterviewPassed == true) return 'Final interview passed';
+    if (app.finalInterviewPassed == false) return 'Final interview failed';
+
     switch (app.status) {
       case 'submitted':
         return 'Pending review';
@@ -1730,7 +1739,6 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
     final stats = _RecruitmentPipelineStats.fromApps(_all);
     final pendingCount = stats.pending;
     final inProgressCount = stats.inProgress;
-    final allCount = stats.total;
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1797,31 +1805,7 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
             ),
           ],
           const SizedBox(height: 16),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _PendingKpiChip(
-                label: 'Pending Review',
-                value: '$pendingCount',
-                icon: Icons.hourglass_top_rounded,
-                color: AppTheme.primaryNavy,
-              ),
-              _PendingKpiChip(
-                label: 'In Progress',
-                value: '$inProgressCount',
-                icon: Icons.timelapse_rounded,
-                color: const Color(0xFF1565C0),
-              ),
-              _PendingKpiChip(
-                label: 'Total Applicants',
-                value: '$allCount',
-                icon: Icons.groups_rounded,
-                color: const Color(0xFF6A1B9A),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 8),
           if (_loading)
             const Center(
               child: Padding(
@@ -2138,56 +2122,6 @@ class _PendingCell extends StatelessWidget {
           fontSize: 13,
           color: AppTheme.dashTextSecondaryOf(context),
         ),
-      ),
-    );
-  }
-}
-
-class _PendingKpiChip extends StatelessWidget {
-  const _PendingKpiChip({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: color),
-          const SizedBox(width: 6),
-          Text(
-            value,
-            style: TextStyle(
-              color: color,
-              fontSize: 13.5,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
       ),
     );
   }

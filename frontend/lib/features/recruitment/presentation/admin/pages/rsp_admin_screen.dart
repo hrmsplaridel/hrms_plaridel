@@ -2565,6 +2565,206 @@ class _RspApplicantsProfileSectionState
     _load();
   }
 
+  static String _norm(String? s) => (s ?? '').trim().toLowerCase();
+
+  static bool _samePosition(String? a, String? b) {
+    final na = _norm(a);
+    final nb = _norm(b);
+    return na.isNotEmpty && na == nb;
+  }
+
+  static String _dateYmd(DateTime dt) {
+    final d = dt.toLocal();
+    final y = d.year.toString().padLeft(4, '0');
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '$y-$m-$day';
+  }
+
+  static String? _requirementsFromVacancy(JobVacancyItem? vacancy) {
+    if (vacancy == null) return null;
+    final lines = <String>[];
+    void addLine(String label, String? value) {
+      final v = value?.trim();
+      if (v != null && v.isNotEmpty) lines.add('$label: $v');
+    }
+
+    addLine('Education', vacancy.education);
+    addLine('Experience', vacancy.experience);
+    addLine('Training', vacancy.training);
+    if (lines.isNotEmpty) return lines.join('\n');
+    final body = vacancy.body?.trim();
+    return (body == null || body.isEmpty) ? null : body;
+  }
+
+  ApplicantsProfileEntry _buildAutoPrefilledProfile(
+    JobVacancyAnnouncement announcement,
+    List<RecruitmentApplication> applications,
+    {String? preferredPosition}
+  ) {
+    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
+    final preferred = preferredPosition?.trim();
+
+    JobVacancyItem? selectedVacancy;
+    if (preferred != null && preferred.isNotEmpty) {
+      for (final v in announcement.vacancies) {
+        final key = v.positionKey?.trim();
+        if (key != null && key.isNotEmpty && _samePosition(key, preferred)) {
+          selectedVacancy = v;
+          break;
+        }
+      }
+    }
+    selectedVacancy ??= () {
+      for (final v in announcement.vacancies) {
+        final key = v.positionKey?.trim();
+        if (key == null || key.isEmpty) continue;
+        final hasMatches = sourceApps.any(
+          (a) => _samePosition(a.positionAppliedFor, key),
+        );
+        if (hasMatches) return v;
+      }
+      return null;
+    }();
+    selectedVacancy ??=
+        announcement.vacancies.isNotEmpty ? announcement.vacancies.first : null;
+
+    String? selectedPosition = preferred;
+    if (selectedPosition == null || selectedPosition.isEmpty) {
+      selectedPosition = selectedVacancy?.positionKey?.trim();
+    }
+    if (selectedPosition == null || selectedPosition.isEmpty) {
+      for (final a in sourceApps) {
+        final p = a.positionAppliedFor?.trim();
+        if (p != null && p.isNotEmpty) {
+          selectedPosition = p;
+          break;
+        }
+      }
+    }
+
+    final matchedApps = selectedPosition == null || selectedPosition.isEmpty
+        ? sourceApps
+        : sourceApps
+              .where((a) => _samePosition(a.positionAppliedFor, selectedPosition))
+              .toList();
+    matchedApps.sort(
+      (a, b) => _norm(a.fullName).compareTo(_norm(b.fullName)),
+    );
+
+    DateTime? postingDate;
+    final withCreatedAt = matchedApps
+        .where((a) => a.createdAt != null)
+        .map((a) => a.createdAt!)
+        .toList()
+      ..sort((a, b) => a.compareTo(b));
+    if (withCreatedAt.isNotEmpty) {
+      postingDate = withCreatedAt.first;
+    } else {
+      postingDate = announcement.updatedAt;
+    }
+
+    return ApplicantsProfileEntry(
+      positionAppliedFor:
+          (selectedPosition == null || selectedPosition.isEmpty)
+          ? null
+          : selectedPosition,
+      minimumRequirements: _requirementsFromVacancy(selectedVacancy),
+      dateOfPosting: postingDate == null ? null : _dateYmd(postingDate),
+      closingDate: selectedVacancy?.closingDate == null
+          ? null
+          : _dateYmd(selectedVacancy!.closingDate!),
+      applicants: matchedApps
+          .map(
+            (a) => ApplicantsProfileApplicant(
+              name: a.fullName.trim().isEmpty ? null : a.fullName.trim(),
+              course: a.course?.trim().isEmpty == true ? null : a.course?.trim(),
+              address: a.address?.trim().isEmpty == true
+                  ? null
+                  : a.address?.trim(),
+              sex: a.sex?.trim().isEmpty == true ? null : a.sex?.trim(),
+              age: a.age?.trim().isEmpty == true ? null : a.age?.trim(),
+              civilStatus: a.civilStatus?.trim().isEmpty == true
+                  ? null
+                  : a.civilStatus?.trim(),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  List<String> _autofillPositions(
+    JobVacancyAnnouncement announcement,
+    List<RecruitmentApplication> applications,
+  ) {
+    final ordered = <String>[];
+    void addPosition(String? raw) {
+      final p = raw?.trim();
+      if (p == null || p.isEmpty) return;
+      if (!ordered.any((existing) => _samePosition(existing, p))) {
+        ordered.add(p);
+      }
+    }
+
+    for (final v in announcement.vacancies) {
+      addPosition(v.positionKey);
+    }
+
+    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
+    for (final app in sourceApps) {
+      addPosition(app.positionAppliedFor);
+    }
+
+    return ordered;
+  }
+
+  Future<String?> _pickAutofillPosition(
+    List<String> positions,
+    List<RecruitmentApplication> applications,
+  ) async {
+    if (positions.length <= 1) return positions.isEmpty ? null : positions.first;
+    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
+
+    int countFor(String position) => sourceApps
+        .where((a) => _samePosition(a.positionAppliedFor, position))
+        .length;
+
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Select position for autofill'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 430),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: positions
+                  .map(
+                    (position) => ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(position),
+                      subtitle: Text('${countFor(position)} applicant(s)'),
+                      onTap: () => Navigator.of(ctx).pop(position),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(positions.first),
+            child: const Text('Use default'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
@@ -2585,7 +2785,26 @@ class _RspApplicantsProfileSectionState
     }
   }
 
-  void _startNew() => setState(() => _editing = const ApplicantsProfileEntry());
+  Future<void> _startNew() async {
+    try {
+      final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
+      final applications = await RecruitmentRepo.instance.listApplications();
+      if (!mounted) return;
+      final positions = _autofillPositions(announcement, applications);
+      final selectedPosition = await _pickAutofillPosition(positions, applications);
+      if (!mounted) return;
+      setState(
+        () => _editing = _buildAutoPrefilledProfile(
+          announcement,
+          applications,
+          preferredPosition: selectedPosition,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _editing = const ApplicantsProfileEntry());
+    }
+  }
   void _edit(ApplicantsProfileEntry e) => setState(() => _editing = e);
   void _cancelEdit() => setState(() => _editing = null);
 
@@ -2974,6 +3193,8 @@ class _ApplicantsProfileFormEditorState
   @override
   Widget build(BuildContext context) {
     final ro = widget.readOnly;
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -3026,7 +3247,7 @@ class _ApplicantsProfileFormEditorState
                       Text(
                         'Applicants',
                         style: TextStyle(
-                          color: AppTheme.primaryNavy,
+                          color: primary,
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
                         ),
@@ -3035,7 +3256,7 @@ class _ApplicantsProfileFormEditorState
                       Text(
                         'Up to $_kApplicantsPerPage rows per form. Row 11+ opens the next form automatically.',
                         style: TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: secondary,
                           fontSize: 12,
                           height: 1.35,
                         ),
@@ -3107,15 +3328,31 @@ class _ApplicantsProfileFormEditorState
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
-                columns: const [
-                  DataColumn(label: Text('NAME')),
-                  DataColumn(label: Text('COURSE')),
-                  DataColumn(label: Text('ADDRESS')),
-                  DataColumn(label: Text('SEX')),
-                  DataColumn(label: Text('AGE')),
-                  DataColumn(label: Text('CIVIL STATUS')),
-                  DataColumn(label: Text('REMARK (DISABILITY)')),
-                  DataColumn(label: Text('')),
+                horizontalMargin: 10,
+                columnSpacing: 12,
+                dataRowMinHeight: 58,
+                dataRowMaxHeight: 58,
+                headingTextStyle: TextStyle(
+                  color: primary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+                columns: [
+                  DataColumn(label: Text('NAME', style: TextStyle(color: primary))),
+                  DataColumn(label: Text('COURSE', style: TextStyle(color: primary))),
+                  DataColumn(label: Text('ADDRESS', style: TextStyle(color: primary))),
+                  DataColumn(label: Text('SEX', style: TextStyle(color: primary))),
+                  DataColumn(label: Text('AGE', style: TextStyle(color: primary))),
+                  DataColumn(
+                    label: Text('CIVIL STATUS', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text(
+                      'REMARK (DISABILITY)',
+                      style: TextStyle(color: primary),
+                    ),
+                  ),
+                  DataColumn(label: Text('', style: TextStyle(color: primary))),
                 ],
                 rows: List.generate(_currentPageRows.length, (i) {
                   final r = _currentPageRows[i];
@@ -3123,70 +3360,77 @@ class _ApplicantsProfileFormEditorState
                     cells: [
                       DataCell(
                         SizedBox(
-                          width: 120,
+                          width: 190,
                           child: TextFormField(
                             controller: r['name'],
                             readOnly: ro,
+                            style: AppTheme.dashFieldTextStyle(context),
                             decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
                         SizedBox(
-                          width: 90,
+                          width: 145,
                           child: TextFormField(
                             controller: r['course'],
                             readOnly: ro,
+                            style: AppTheme.dashFieldTextStyle(context),
                             decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
                         SizedBox(
-                          width: 140,
+                          width: 240,
                           child: TextFormField(
                             controller: r['address'],
                             readOnly: ro,
+                            style: AppTheme.dashFieldTextStyle(context),
                             decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
                         SizedBox(
-                          width: 50,
+                          width: 70,
                           child: TextFormField(
                             controller: r['sex'],
                             readOnly: ro,
+                            style: AppTheme.dashFieldTextStyle(context),
                             decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
                         SizedBox(
-                          width: 45,
+                          width: 60,
                           child: TextFormField(
                             controller: r['age'],
                             readOnly: ro,
+                            style: AppTheme.dashFieldTextStyle(context),
                             decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
                         SizedBox(
-                          width: 90,
+                          width: 130,
                           child: TextFormField(
                             controller: r['civil_status'],
                             readOnly: ro,
+                            style: AppTheme.dashFieldTextStyle(context),
                             decoration: rspTableCellField(),
                           ),
                         ),
                       ),
                       DataCell(
                         SizedBox(
-                          width: 100,
+                          width: 170,
                           child: TextFormField(
                             controller: r['remark_disability'],
                             readOnly: ro,
+                            style: AppTheme.dashFieldTextStyle(context),
                             decoration: rspTableCellField(),
                           ),
                         ),
@@ -9024,6 +9268,34 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     );
   }
 
+  String _applicationDisplayStatus(RecruitmentApplication app) {
+    if (app.hiredUserId != null || app.status == 'registered') return 'Hired';
+    if (app.hrAccountSetupDone) return 'Account setup done';
+    if (app.orientationAttended == true) return 'Orientation attended';
+    if (app.orientationAttended == false) return 'Orientation missed';
+    if (app.orientationAt != null) return 'Orientation scheduled';
+    if (app.finalRequirementsApproved) return 'Final requirements approved';
+    if (app.finalInterviewPassed == true) return 'Final interview passed';
+    if (app.finalInterviewPassed == false) return 'Final interview failed';
+
+    switch (app.status) {
+      case 'submitted':
+        return 'Pending review';
+      case 'document_approved':
+        return 'Docs approved';
+      case 'document_declined':
+        return 'Docs declined';
+      case 'exam_taken':
+        return 'Exam taken';
+      case 'passed':
+        return 'Passed exam';
+      case 'failed':
+        return 'Failed exam';
+      default:
+        return app.status;
+    }
+  }
+
   /// Readable status pill with color by outcome (tooltip shows raw value).
   Widget _applicationStatusBadge(BuildContext context, String status) {
     final raw = status.trim();
@@ -9965,7 +10237,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                           170,
                                           _applicationStatusBadge(
                                             context,
-                                            app.status,
+                                            _applicationDisplayStatus(app),
                                           ),
                                         ),
                                         TableCell(

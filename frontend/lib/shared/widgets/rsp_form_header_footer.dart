@@ -14,6 +14,14 @@ class RspFormHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final primaryText = AppTheme.dashTextPrimaryOf(context);
+    final secondaryText = AppTheme.dashTextSecondaryOf(context);
+    final letterheadText = dark ? primaryText : _letterheadNavy;
+    final dividerColor =
+        dark ? AppTheme.dashHairlineOf(context) : Colors.black;
+    final logoBorder = dark ? AppTheme.dashHairlineOf(context) : _letterheadNavy;
+
     return Stack(
       clipBehavior: Clip.hardEdge,
       children: [
@@ -52,7 +60,7 @@ class RspFormHeader extends StatelessWidget {
                     height: 72,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: _letterheadNavy, width: 2),
+                      border: Border.all(color: logoBorder, width: 2),
                       color: Colors.white,
                     ),
                     clipBehavior: Clip.antiAlias,
@@ -61,7 +69,7 @@ class RspFormHeader extends StatelessWidget {
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Icon(
                         Icons.account_balance_rounded,
-                        color: _letterheadNavy,
+                        color: letterheadText,
                         size: 36,
                       ),
                     ),
@@ -72,12 +80,12 @@ class RspFormHeader extends StatelessWidget {
                     children: [
                       Text(
                         'Republic of the Philippines',
-                        style: TextStyle(color: _letterheadNavy, fontSize: 11),
+                        style: TextStyle(color: letterheadText, fontSize: 11),
                       ),
                       Text(
                         'PROVINCE OF MISAMIS OCCIDENTAL',
                         style: TextStyle(
-                          color: _letterheadNavy,
+                          color: letterheadText,
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                         ),
@@ -85,18 +93,20 @@ class RspFormHeader extends StatelessWidget {
                       Text(
                         'MUNICIPALITY OF PLARIDEL',
                         style: TextStyle(
-                          color: _letterheadNavy,
+                          color: letterheadText,
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Container(height: 3, width: 220, color: Colors.black),
+                      Container(height: 3, width: 220, color: dividerColor),
                       const SizedBox(height: 6),
                       Text(
                         'HUMAN RESOURCE MANAGEMENT AND DEVELOPMENT OFFICE',
                         style: TextStyle(
-                          color: AppTheme.letterheadOrange,
+                          color: dark
+                              ? primaryText
+                              : AppTheme.letterheadOrange,
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
                         ),
@@ -109,7 +119,7 @@ class RspFormHeader extends StatelessWidget {
               Text(
                 formTitle,
                 style: TextStyle(
-                  color: AppTheme.letterheadOrange,
+                  color: dark ? primaryText : AppTheme.letterheadOrange,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -118,7 +128,7 @@ class RspFormHeader extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   subtitle!,
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  style: TextStyle(color: secondaryText, fontSize: 12),
                 ),
               ],
               const SizedBox(height: 40),
@@ -378,6 +388,47 @@ InputDecoration rspUnderlinedField(String label) {
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(_rspFieldRadius),
       borderSide: BorderSide(color: Colors.grey.shade300),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(_rspFieldRadius),
+      borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 2),
+    ),
+    contentPadding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
+    isDense: false,
+  );
+}
+
+/// Theme-aware variant of [rspUnderlinedField] for dark-mode portals.
+InputDecoration rspUnderlinedFieldOf(BuildContext context, String label) {
+  final hasLabel = label.trim().isNotEmpty;
+  final borderColor = AppTheme.dashInputBorderOf(context);
+  return InputDecoration(
+    labelText: hasLabel ? label : null,
+    floatingLabelBehavior: hasLabel
+        ? FloatingLabelBehavior.always
+        : FloatingLabelBehavior.never,
+    alignLabelWithHint: false,
+    labelStyle: TextStyle(
+      color: AppTheme.dashTextSecondaryOf(context),
+      fontSize: 14,
+      fontWeight: FontWeight.w500,
+    ),
+    floatingLabelStyle: TextStyle(
+      color: AppTheme.dashTextPrimaryOf(context),
+      fontSize: 12.5,
+      fontWeight: FontWeight.w700,
+      height: 1.15,
+    ),
+    hintStyle: AppTheme.dashFieldHintStyle(context),
+    filled: true,
+    fillColor: AppTheme.dashInputFillOf(context),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(_rspFieldRadius),
+      borderSide: BorderSide(color: borderColor),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(_rspFieldRadius),
+      borderSide: BorderSide(color: borderColor),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(_rspFieldRadius),
