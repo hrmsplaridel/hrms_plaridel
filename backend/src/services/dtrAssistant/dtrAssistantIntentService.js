@@ -12,6 +12,22 @@ function normalizeIntent(value) {
   return [
     'today_dtr',
     'missing_logs',
+    'dtr_daily_record',
+    'dtr_range_summary',
+    'dtr_missing_logs',
+    'dtr_missing_log_reason',
+    'dtr_late_summary',
+    'dtr_late_reason',
+    'dtr_undertime_summary',
+    'dtr_overtime_summary',
+    'dtr_absent_summary',
+    'dtr_status_explanation',
+    'dtr_correction_guidance',
+    'dtr_leave_coverage_check',
+    'dtr_locator_coverage_check',
+    'dtr_holiday_check',
+    'dtr_schedule_context',
+    'dtr_export_guidance',
     'leave_balance',
     'pending_leave_requests',
     'approved_leave_requests',
@@ -48,6 +64,180 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
   if (forcedIntent) return forcedIntent;
 
   const text = lower(normalizeAssistantMessageForRules(message));
+  const hasDtrTopic =
+    /\b(dtr|attendance|daily time|log|logs|time[\s-]?in|time[\s-]?out|late|undertime|overtime|absent|absence|incomplete|present|duty|pasok|sched|schedule|shift|missing|kulang|kuwang)\b/.test(
+      text
+    );
+  const hasDateTopic =
+    /\b(date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|ngayon|karong adlawa|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|ana|ato|adto|same day|same date|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/.test(
+      text
+    );
+
+  if (
+    /\b(export|download|print|pdf|excel|csv|report)\b/.test(text) &&
+    /\b(dtr|attendance|daily time)\b/.test(text)
+  ) {
+    return 'dtr_export_guidance';
+  }
+
+  if (
+    /\b(schedule|shift|work schedule|duty schedule|office hours|sched|sked|duty|pasok|work day|working day|required[-\s]?log|naa.*duty|may.*pasok|naa.*trabaho|may.*trabaho)\b/.test(text) &&
+    (hasDtrTopic || hasDateTopic || /\b(naa|may|ba|ko|ako|akong|nako)\b/.test(text))
+  ) {
+    return 'dtr_schedule_context';
+  }
+
+  if (
+    /\b(why|ngano|bakit|what.*missing|unsa.*kulang|kulang|kuwang|incomplete|missing)\b/.test(text) &&
+    /\b(am in|am out|pm in|pm out|time[\s-]?in|time[\s-]?out|log|logs|dtr)\b/.test(text)
+  ) {
+    return 'dtr_missing_log_reason';
+  }
+
+  if (
+    /\b(why|ngano|bakit|unsa.*pasabot|ano.*ibig.*sabihin|explain|reason)\b/.test(text) &&
+    /\b(absent|absence|no record|walay record|wala.*record|wala.*dtr|missing|incomplete)\b/.test(text)
+  ) {
+    return 'dtr_status_explanation';
+  }
+
+  if (
+    /\b(complete|completed|kompleto|kumpleto|okay|ok|status)\b/.test(text) &&
+    /\b(dtr|attendance|log|logs|time[\s-]?in|time[\s-]?out)\b/.test(text)
+  ) {
+    return hasDateTopic ? 'dtr_status_explanation' : 'dtr_missing_logs';
+  }
+
+  if (
+    /\b(fix|correct|correction|adjust|manual|buhaton|unsa buhaton|ano gagawin|how to fix|resolve)\b/.test(
+      text
+    ) &&
+    /\b(dtr|attendance|log|logs|missing|incomplete|time[\s-]?in|time[\s-]?out|late|undertime)\b/.test(
+      text
+    )
+  ) {
+    return 'dtr_correction_guidance';
+  }
+
+  if (
+    /\b(covered|cover|covers|why|ngano|bakit|on leave)\b/.test(text) &&
+    /\b(leave|vl|sl)\b/.test(text) &&
+    /\b(dtr|attendance|absent|missing|incomplete|on leave|date)\b/.test(text)
+  ) {
+    return 'dtr_leave_coverage_check';
+  }
+
+  if (
+    /\b(covered|cover|covers|sakop|covered ba|na cover|na-cover|locator|pass slip|wfh|official business|ob)\b/.test(text) &&
+    /\b(locator|pass slip|wfh|official business|ob)\b/.test(text) &&
+    /\b(dtr|attendance|missing|incomplete|log|logs|date|am in|am out|pm in|pm out|time[\s-]?in|time[\s-]?out)\b/.test(text)
+  ) {
+    return 'dtr_locator_coverage_check';
+  }
+
+  if (
+    /\b(holiday|holidays|regular holiday|special holiday|walay work|no work|walay klase|nonworking|non-working)\b/.test(text) &&
+    (hasDtrTopic || hasDateTopic)
+  ) {
+    return 'dtr_holiday_check';
+  }
+
+  if (
+    /\b(why|ngano|bakit|reason|explain)\b/.test(text) &&
+    /\b(late)\b/.test(text)
+  ) {
+    return 'dtr_late_reason';
+  }
+
+  if (
+    /\b(late|lates|tardy|tardiness)\b/.test(text) &&
+    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|today|yesterday|kagahapon|gahapon|adtong|adtung|atong|niadtong|niadtung)\b/.test(text))
+  ) {
+    return 'dtr_late_summary';
+  }
+
+  if (
+    /\b(undertime|under time|early out|early-out|short hours|kulang.*oras)\b/.test(text) &&
+    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|adtong|adtung|atong|niadtong|niadtung)\b/.test(text))
+  ) {
+    return 'dtr_undertime_summary';
+  }
+
+  if (
+    /\b(overtime|over time|ot)\b/.test(text) &&
+    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|adtong|adtung|atong|niadtong|niadtung)\b/.test(text))
+  ) {
+    return 'dtr_overtime_summary';
+  }
+
+  if (
+    /\b(absent|absence|absences|pasabot|no record|walay record|wala.*record|wala.*dtr|pila.*absent|ilan.*absent|how many.*absent)\b/.test(text) &&
+    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|today|yesterday|kagahapon|gahapon|adtong|adtung|atong|niadtong|niadtung)\b/.test(text))
+  ) {
+    return 'dtr_absent_summary';
+  }
+
+  if (
+    /\b(why|ngano|bakit|what.*missing|unsa.*kulang|kulang|kuwang|incomplete|missing.*log|missing.*logs)\b/.test(
+      text
+    ) &&
+    /\b(dtr|attendance|log|logs|time[\s-]?in|time[\s-]?out|am in|am out|pm in|pm out|incomplete|missing)\b/.test(text)
+  ) {
+    return 'dtr_missing_log_reason';
+  }
+
+  if (
+    /\b(missing|incomplete|kulang|kuwang|wala|no log|nolog|logs?|entries|kompleto|kumpleto|complete)\b/.test(text) &&
+    /\b(logs?|dtr|attendance|time[\s-]?in|time[\s-]?out|am in|am out|pm in|pm out|this week|week|semanaha|semana|karon|ngayon)\b/.test(
+      text
+    )
+  ) {
+    return 'dtr_missing_logs';
+  }
+
+  if (
+    /\b(present|complete|kompleto|kumpleto|status)\b/.test(text) &&
+    /\b(summary|summarize|summarise|overview|recap|total|count|counts|pila|kabuok|how many|month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/.test(
+      text
+    ) &&
+    !LEAVE_TOPIC_PATTERN.test(text)
+  ) {
+    return 'dtr_range_summary';
+  }
+
+  if (
+    /\b(status|explain|why|ngano|bakit|unsa.*pasabot|ano.*ibig.*sabihin)\b/.test(text) &&
+    /\b(dtr|attendance|incomplete|absent|on leave|holiday|present|no record|missing)\b/.test(text)
+  ) {
+    return 'dtr_status_explanation';
+  }
+
+  if (
+    /\b(summary|summarize|summarise|overview|recap|total|count|counts|pila|kabuok|how many|hours|oras)\b/.test(
+      text
+    ) &&
+    /\b(dtr|attendance|daily time|late|undertime|overtime|absent|hours|oras)\b/.test(text)
+  ) {
+    return 'dtr_range_summary';
+  }
+
+  if (
+    hasDtrTopic &&
+    /\b(week|semana|semanaha|month|bulan|bulana|buwan|buwana|last week|this week|next week|last month|this month|next month|aning bulana|karong semana|karong semanaha|karong bulan|karong bulana)\b/.test(
+      text
+    )
+  ) {
+    return 'dtr_range_summary';
+  }
+
+  if (
+    /\b(dtr|attendance|daily time|time[\s-]?in|time[\s-]?out|am in|pm out)\b/.test(text) &&
+    /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|ngayon|karong adlawa|this day|status|time[\s-]?in|time[\s-]?out|adtong|adtung|atong|niadtong|niadtung|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2})\b/.test(
+      text
+    )
+  ) {
+    return 'dtr_daily_record';
+  }
 
   if (
     /\b(missing|incomplete|kulang|kuwang|wala|absent|no log|nolog|logs?|entries)\b/.test(
@@ -101,7 +291,7 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
     /\b(leave|type|filed|gi file|g-file|request|april|may|june|july|august|september|october|november|december|january|february|march|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec|\d{4}-\d{2}-\d{2})\b/.test(
       text
     ) &&
-    /\b(on|sa|adtung|niadtong|that|to|date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|sunod|miaging|niaging|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|april|may|june|july|august|september|october|november|december|january|february|march|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/.test(
+    /\b(on|sa|adtung|adtong|atong|niadtong|niadtung|that|to|date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|sunod|miaging|niaging|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|april|may|june|july|august|september|october|november|december|january|february|march|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/.test(
       text
     )
   ) {
@@ -185,7 +375,7 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
     /\b(overlap|conflict|already|existing|naa.*leave|may.*leave|on leave|leave.*date|same date|ana nga date)\b/.test(
       text
     ) &&
-    /\b(leave|date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|sunod|miaging|niaging|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/.test(
+    /\b(leave|date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/.test(
       text
     )
   ) {
