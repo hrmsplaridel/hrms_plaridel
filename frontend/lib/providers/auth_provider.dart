@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -98,6 +100,10 @@ class AuthProvider extends ChangeNotifier {
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
         '/auth/login',
         data: {'email': email.trim(), 'password': password},
+        options: Options(
+          sendTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 12),
+        ),
       );
       final data = res.data;
       if (data == null) return 'Invalid email or password';
@@ -113,7 +119,17 @@ class AuthProvider extends ChangeNotifier {
         _user = AppUser.fromJson(userData);
       }
       await refreshUser();
-      await PushNotificationService.instance.syncTokenWithBackend();
+      // Do NOT await — FCM getToken() can hang indefinitely when the phone
+      // has no internet or FCM is slow. Run in background with a timeout.
+      unawaited(
+        PushNotificationService.instance
+            .syncTokenWithBackend()
+            .timeout(
+              const Duration(seconds: 10),
+              onTimeout: () {},
+            )
+            .catchError((_) {}),
+      );
       notifyListeners();
       return null;
     } on DioException catch (e) {
@@ -131,6 +147,7 @@ class AuthProvider extends ChangeNotifier {
       }
       if (e.type == DioExceptionType.connectionError ||
           e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
           e.type == DioExceptionType.receiveTimeout) {
         return 'Cannot reach server at ${ApiConfig.baseUrl}. '
             'On PC: start backend (npm start in backend/). '

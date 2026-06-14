@@ -1,5 +1,5 @@
 -- Simplify shifts: add working_days, remove code, break, crosses_midnight
--- Run on existing DBs: psql -U postgres -d hrms_plaridel -f backend/scripts/migrate-shifts-working-days.sql
+-- Run on existing DBs: psql -U postgres -d hrms_plaridel -f backend/scripts/migrations/dtr/migrate-shifts-working-days.sql
 --
 -- working_days: INTEGER[] with ISO weekday 1=Monday..7=Sunday
 -- Default [1,2,3,4,5] = Mon-Fri

@@ -3,7 +3,7 @@
 --
 -- Safe to run multiple times (all ops are idempotent / IF NOT EXISTS / IF EXISTS).
 -- Run:
---   psql -U postgres -d hrms_plaridel -f backend/scripts/migrate-phase3-data-integrity.sql
+--   psql -U postgres -d hrms_plaridel -f backend/scripts/migrations/dtr/migrate-phase3-data-integrity.sql
 --
 -- Rollback strategy (if needed):
 --   DROP INDEX  IF EXISTS uq_leave_requests_no_overlap;

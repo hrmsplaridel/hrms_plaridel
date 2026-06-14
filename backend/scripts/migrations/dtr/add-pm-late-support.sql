@@ -1,5 +1,5 @@
 -- Add PM late detection support.
--- Run: psql -U postgres -d hrms_plaridel -f backend/scripts/add-pm-late-support.sql
+-- Run: psql -U postgres -d hrms_plaridel -f backend/scripts/migrations/dtr/add-pm-late-support.sql
 --
 -- break_end: when PM shift starts (e.g. 13:00 for 8-5 shift with 1hr lunch).
 -- pm_status: 'present' | 'late' | null (null = absent or no break_in).

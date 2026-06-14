@@ -135,7 +135,12 @@ class PushNotificationService {
 
       if (settings.authorizationStatus == AuthorizationStatus.denied) return;
 
-      final token = await FirebaseMessaging.instance.getToken();
+      final token = await FirebaseMessaging.instance
+          .getToken()
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => null,
+          );
       if (token == null || token.isEmpty) return;
       await _registerToken(token);
     } catch (e) {

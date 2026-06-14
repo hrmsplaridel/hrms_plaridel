@@ -1,0 +1,1049 @@
+const { chatCompletion } = require('../llm/llmClient');
+const { getLlmConfig } = require('../llm/llmConfig');
+const { loadEmployeeAssistantContext } = require('./dtrAssistantDataService');
+const {
+  buildFastEmployeeAssistantReply,
+  requestedLeaveType,
+} = require('./dtrAssistantFastReply');
+const {
+  getAssistantMemory,
+  setAssistantMemory,
+} = require('./dtrAssistantMemoryService');
+const {
+  detectEmployeeAssistantIntent,
+  normalizeIntent,
+} = require('./dtrAssistantIntentService');
+const { getEmployeeSelfScope } = require('./dtrAssistantPermissionService');
+const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
+const {
+  buildDtrAssistantDirectMessages,
+  buildDtrAssistantIntentMessages,
+  buildDtrAssistantToolPlanMessages,
+  buildDtrAssistantToolAnswerMessages,
+} = require('./dtrAssistantPrompt');
+const {
+  addDays,
+  parseAssistantDateRange,
+  todayInHrmsTimezone,
+} = require('../../utils/dateRangeParser');
+
+const MAX_ASSISTANT_REPLY_CHARS = 900;
+
+const DEFAULT_MODEL_PROFILE_ID = 'tools_ollama';
+
+function allowDirectLlm(env = process.env) {
+  return /^(1|true|yes)$/i.test(String(env.DTR_ASSISTANT_ALLOW_DIRECT_LLM || ''));
+}
+
+function buildModelProfiles(env = process.env) {
+  const config = getLlmConfig(env);
+  const groqConfigured = !!config.groq.apiKey;
+  const directEnabled = groqConfigured && allowDirectLlm(env);
+
+  return [
+    {
+      id: 'tools_ollama',
+      label: `Qwen + HRMS tools`,
+      description: 'Safest: DB tools get exact HRMS facts, Qwen only refines language.',
+      engine: 'tools',
+      provider: 'ollama',
+      model: config.ollama.model,
+      available: true,
+      recommended: true,
+    },
+    {
+      id: 'tools_groq',
+      label: 'Groq + HRMS tools',
+      description: 'Fast API refinement while DB tools still protect exact HRMS facts.',
+      engine: 'tools',
+      provider: 'groq',
+      model: config.groq.model,
+      available: groqConfigured,
+      recommended: false,
+      unavailableReason: groqConfigured ? null : 'Set GROQ_API_KEY in backend/.env.',
+    },
+    {
+      id: 'direct_groq',
+      label: 'Groq direct',
+      description: 'Experimental: Groq reasons over the HRMS context directly.',
+      engine: 'direct',
+      provider: 'groq',
+      model: config.groq.model,
+      available: directEnabled,
+      recommended: false,
+      unavailableReason: directEnabled
+        ? null
+        : groqConfigured
+          ? 'Set DTR_ASSISTANT_ALLOW_DIRECT_LLM=true to enable direct mode.'
+          : 'Set GROQ_API_KEY in backend/.env.',
+    },
+  ];
+}
+
+function getDtrAssistantModelProfiles(env = process.env) {
+  const models = buildModelProfiles(env);
+  return {
+    defaultModelProfile: DEFAULT_MODEL_PROFILE_ID,
+    models,
+  };
+}
+
+function resolveModelProfile(modelProfileId, env = process.env) {
+  const profiles = buildModelProfiles(env);
+  const requested = String(modelProfileId || DEFAULT_MODEL_PROFILE_ID).trim();
+  const profile =
+    profiles.find((item) => item.id === requested) ||
+    profiles.find((item) => item.id === DEFAULT_MODEL_PROFILE_ID);
+
+  if (!profile.available) {
+    const err = new Error(profile.unavailableReason || 'Selected assistant model is unavailable.');
+    err.statusCode = 400;
+    err.code = 'ASSISTANT_MODEL_UNAVAILABLE';
+    throw err;
+  }
+
+  return profile;
+}
+
+function lower(value) {
+  return String(value || '').toLowerCase();
+}
+
+function normalizeMessage(message) {
+  const text = String(message || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    const err = new Error('message is required');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (text.length > 2000) {
+    const err = new Error('message is too long');
+    err.statusCode = 400;
+    throw err;
+  }
+  return text;
+}
+
+function buildSources(context) {
+  return {
+    dateRange: context.date_range,
+    dtrSummaryIds: context.dtr_records.map((r) => r.id),
+    leaveRequestIds: context.recent_leave_requests.map((r) => r.id),
+    locatorSlipIds: context.recent_locator_slips.map((r) => r.id),
+  };
+}
+
+function compactAssistantContent(content) {
+  const text = String(content || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+  if (text.length <= MAX_ASSISTANT_REPLY_CHARS) return text;
+  return `${text.slice(0, MAX_ASSISTANT_REPLY_CHARS - 3).trim()}...`;
+}
+
+function isStructuredDtrIntent(intent) {
+  return (
+    intent === 'today_dtr' ||
+    intent === 'missing_logs' ||
+    /^dtr_/.test(String(intent || ''))
+  );
+}
+
+function isLeaveIntent(intent) {
+  const value = String(intent || '');
+  return (
+    value === 'leave_balance' ||
+    value === 'pending_leave_requests' ||
+    value === 'approved_leave_requests' ||
+    value === 'rejected_leave_requests' ||
+    value === 'latest_leave_request' ||
+    /^leave_/.test(value)
+  );
+}
+
+function memoryLeaveTypeForIntent(intent, effectiveText, context, memory) {
+  if (!isLeaveIntent(intent)) return null;
+  return (
+    requestedLeaveType(effectiveText) ||
+    inferLeaveTypeFromContext(effectiveText, context) ||
+    memory?.leaveType ||
+    null
+  );
+}
+
+function shouldSkipToolRefinement(intent) {
+  return isStructuredDtrIntent(intent) || isLeaveIntent(intent);
+}
+
+function normalizedText(value) {
+  return lower(value).replace(/[^a-z0-9]+/g, '');
+}
+
+function inferLeaveTypeFromContext(text, context) {
+  const normalizedMessage = normalizedText(text);
+  if (!normalizedMessage) return null;
+
+  let best = null;
+  let bestScore = 0;
+  for (const type of context.leave_types || []) {
+    const label = `${type.display_name || ''} ${type.name || ''} ${type.description || ''}`;
+    const normalizedLabel = normalizedText(label);
+    if (!normalizedLabel) continue;
+
+    const words = lower(label)
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length >= 3 && word !== 'leave');
+    const uniqueWords = [...new Set(words)];
+    const score = uniqueWords.reduce((total, word) => {
+      return total + (normalizedMessage.includes(word) ? 1 : 0);
+    }, normalizedMessage.includes(normalizedLabel) ? 3 : 0);
+
+    if (score > bestScore) {
+      best = type;
+      bestScore = score;
+    }
+  }
+
+  return bestScore > 0 ? best.display_name || best.name || null : null;
+}
+
+function buildSuggestions(intent) {
+  if (
+    intent === 'today_dtr' ||
+    intent === 'missing_logs' ||
+    intent === 'dtr_daily_record' ||
+    intent === 'dtr_status_explanation'
+  ) {
+    return [
+      { text: 'Show missing logs this week', intent: 'dtr_missing_logs' },
+      { text: 'Why is my DTR incomplete?', intent: 'dtr_missing_log_reason' },
+      { text: 'Check locator coverage', intent: 'dtr_locator_coverage_check' },
+    ];
+  }
+  if (
+    intent === 'dtr_missing_logs' ||
+    intent === 'dtr_missing_log_reason' ||
+    intent === 'dtr_absent_summary'
+  ) {
+    return [
+      { text: 'How do I fix missing logs?', intent: 'dtr_correction_guidance' },
+      { text: 'Check leave coverage', intent: 'dtr_leave_coverage_check' },
+      { text: 'Check locator coverage', intent: 'dtr_locator_coverage_check' },
+    ];
+  }
+  if (
+    intent === 'dtr_range_summary' ||
+    intent === 'dtr_late_summary' ||
+    intent === 'dtr_late_reason' ||
+    intent === 'dtr_undertime_summary' ||
+    intent === 'dtr_overtime_summary'
+  ) {
+    return [
+      { text: 'Show all late records this month', intent: 'dtr_late_summary' },
+      { text: 'Show undertime this month', intent: 'dtr_undertime_summary' },
+      { text: 'How do I fix DTR issues?', intent: 'dtr_correction_guidance' },
+    ];
+  }
+  if (intent === 'leave_availability_check') {
+    return [
+      { text: 'Check leave requirements', intent: 'leave_requirements' },
+      { text: 'Do I have overlapping leave?', intent: 'leave_overlap_check' },
+      { text: 'What attachment do I need?', intent: 'leave_attachment_requirement' },
+    ];
+  }
+  if (intent === 'leave_balance') {
+    return [
+      { text: 'Why is my leave balance low?', intent: 'leave_balance' },
+      { text: 'If I file 1 day vacation, how much remains?', intent: 'leave_balance_after_filing' },
+      { text: 'Show my leave history this month', intent: 'leave_history' },
+    ];
+  }
+  if (intent === 'leave_requirements' || intent === 'leave_filing_policy') {
+    return [
+      { text: 'What attachment is required?', intent: 'leave_attachment_requirement' },
+      { text: 'Can I file 1 day vacation leave tomorrow?', intent: 'leave_availability_check' },
+      { text: 'Show available leave types', intent: 'leave_types' },
+    ];
+  }
+  if (
+    intent === 'leave_form_guidance' ||
+    intent === 'leave_eligibility_check' ||
+    intent === 'leave_dtr_impact' ||
+    intent === 'leave_guided_filing' ||
+    intent === 'leave_type_compare' ||
+    intent === 'leave_guideline_section'
+  ) {
+    return [
+      { text: 'Can I file 1 day vacation leave tomorrow?', intent: 'leave_availability_check' },
+      { text: 'What attachment do I need?', intent: 'leave_attachment_requirement' },
+      { text: 'Does this affect my DTR?', intent: 'leave_dtr_impact' },
+    ];
+  }
+  if (intent === 'latest_leave_request' || intent === 'leave_approval_tracker') {
+    return [
+      { text: 'Who is holding my leave request?', intent: 'leave_approval_tracker' },
+      { text: 'Show approval timeline', intent: 'leave_approval_history' },
+      { text: 'Why was my leave returned or rejected?', intent: 'leave_rejection_reason' },
+    ];
+  }
+  if (intent === 'leave_history' || intent === 'leave_request_summary') {
+    return [
+      { text: 'Summarize my leave this month', intent: 'leave_request_summary' },
+      { text: 'Show approved leave this month', intent: 'approved_leave_requests' },
+      { text: 'Show rejected leave requests', intent: 'rejected_leave_requests' },
+    ];
+  }
+  if (intent === 'leave_request_lookup') {
+    return [
+      { text: 'Show my leave history this month', intent: 'leave_history' },
+      { text: 'Check leave requirements', intent: 'leave_requirements' },
+      { text: 'Who is holding my leave request?', intent: 'leave_approval_tracker' },
+    ];
+  }
+  return [
+    { text: 'What is my leave balance?', intent: 'leave_balance' },
+    { text: 'Show my pending leave requests', intent: 'pending_leave_requests' },
+  ];
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function buildDtrCsvAttachment(context) {
+  const recordsByDate = new Map(
+    (context.dtr_records || []).map((record) => [String(record.attendance_date).slice(0, 10), record])
+  );
+  const calendarDays = context.dtr_calendar_days || [];
+  const dates =
+    calendarDays.length > 0
+      ? calendarDays.map((day) => day.attendance_date)
+      : [...recordsByDate.keys()].sort();
+  const header = [
+    'Date',
+    'Shift',
+    'Schedule',
+    'Grace Minutes',
+    'Holiday',
+    'Status',
+    'AM In',
+    'AM Out',
+    'PM In',
+    'PM Out',
+    'Total Hours',
+    'Late Minutes',
+    'Undertime Minutes',
+    'Overtime Minutes',
+    'Leave Type',
+    'Source',
+    'Remarks',
+  ];
+  const calendarByDate = new Map(calendarDays.map((day) => [day.attendance_date, day]));
+  const rows = dates.map((date) => {
+    const record = recordsByDate.get(date) || {};
+    const day = calendarByDate.get(date) || {};
+    return [
+      date,
+      day.shift_name || '',
+      day.start_time || day.end_time ? `${day.start_time || ''}-${day.end_time || ''}` : '',
+      day.grace_period_minutes ?? '',
+      day.holiday_name ? `${day.holiday_name} (${day.holiday_coverage || 'whole_day'})` : record.holiday_name || '',
+      record.status || (day.shift_id ? 'no_record' : 'no_schedule'),
+      record.time_in || '',
+      record.break_out || '',
+      record.break_in || '',
+      record.time_out || '',
+      record.total_hours ?? '',
+      record.late_minutes ?? '',
+      record.undertime_minutes ?? '',
+      record.overtime_minutes ?? '',
+      record.leave_type || '',
+      record.source || '',
+      record.remarks || '',
+    ];
+  });
+  const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
+  const start = context.date_range?.startDate || 'dtr';
+  const end = context.date_range?.endDate || start;
+  return {
+    filename: `dtr_export_${start}_${end}.csv`,
+    mimeType: 'text/csv',
+    encoding: 'base64',
+    contentBase64: Buffer.from(csv, 'utf8').toString('base64'),
+  };
+}
+
+function buildAttachments(intent, context) {
+  if (intent === 'dtr_export_guidance') return [buildDtrCsvAttachment(context)];
+  return [];
+}
+
+function buildAssistantResult({ content, provider, model, mode, context, intent, attachments }) {
+  return {
+    message: {
+      role: 'assistant',
+      content: compactAssistantContent(content),
+      createdAt: new Date().toISOString(),
+      suggestions: buildSuggestions(intent),
+      attachments: attachments || [],
+    },
+    provider,
+    model,
+    mode,
+    intent: intent || null,
+    sources: buildSources(context),
+  };
+}
+
+function parseIntentClassifierResponse(content) {
+  const text = String(content || '').trim();
+  if (!text) return null;
+
+  try {
+    const parsed = JSON.parse(text);
+    return normalizeIntent(parsed.intent);
+  } catch (_) {
+    const match = text.match(
+      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|unknown)\b/i
+    );
+    return normalizeIntent(match?.[1]);
+  }
+}
+
+function extractJsonObject(content) {
+  const text = String(content || '').trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch (__) {
+      return null;
+    }
+  }
+}
+
+function isIsoDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+function normalizePlannedDateRange(dateRange) {
+  if (!dateRange || typeof dateRange !== 'object') return null;
+  const startDate = String(dateRange.startDate || '').slice(0, 10);
+  const endDate = String(dateRange.endDate || startDate).slice(0, 10);
+  if (!isIsoDate(startDate) || !isIsoDate(endDate)) return null;
+  if (startDate > endDate) return null;
+  return {
+    label: String(dateRange.label || (startDate === endDate ? startDate : `${startDate} to ${endDate}`)).trim(),
+    startDate,
+    endDate,
+  };
+}
+
+function parseToolPlanResponse(content) {
+  const parsed = extractJsonObject(content);
+  if (!parsed) return null;
+  return {
+    intent: normalizeIntent(parsed.intent),
+    dateRange: normalizePlannedDateRange(parsed.dateRange),
+    normalizedQuestion:
+      typeof parsed.normalizedQuestion === 'string'
+        ? parsed.normalizedQuestion.slice(0, 500).trim()
+        : '',
+  };
+}
+
+function dateRangeLooksDefaultToday(dateRange, text) {
+  if (!dateRange || dateRange.label !== 'today') return false;
+  return !/\b(today|karong adlawa|karon nga adlaw|ngayon)\b/i.test(String(text || ''));
+}
+
+function shouldAskAiForToolPlan({ resolvedIntent, dateRange, text, profile }) {
+  if (!profile || profile.engine === 'direct') return false;
+  if (!resolvedIntent) return true;
+  if (dateRangeLooksDefaultToday(dateRange, text)) return true;
+  return false;
+}
+
+function fallbackContent() {
+  return 'I can help only with your DTR, missing logs, late/undertime/overtime, absences, DTR correction guidance, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave eligibility, leave form guidance, leave DTR impact, approval tracking, leave summaries, leave types, and locator slip status.';
+}
+
+function hasExplicitHrmsTopic(text) {
+  return /\b(dtr|attendance|log|logs|leave|locator|pass slip|wfh|official business|sick|vacation|vl|sl)\b/.test(
+    lower(text)
+  );
+}
+
+function isFollowUpQuestion(text) {
+  return /\b(it|that|this|one|same|about|how about|what about|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?)\b/.test(
+    lower(text)
+  );
+}
+
+function memoryRelativeDate(text, memory) {
+  if (!memory?.dateRange?.startDate) return null;
+  const value = lower(text);
+  if (/\b(next day|following day|sunod adlaw|sunod nga adlaw|kinabukasan)\b/.test(value)) {
+    return addDays(memory.dateRange.startDate, 1);
+  }
+  if (/\b(previous day|day before|miaging adlaw|niaging adlaw|nakaraang araw)\b/.test(value)) {
+    return addDays(memory.dateRange.startDate, -1);
+  }
+  if (/\b(same day|same date|that day|that date|ana|ato|adto|niya)\b/.test(value)) {
+    return memory.dateRange.startDate;
+  }
+  return null;
+}
+
+function resolveIntentFromMemory(text, memory) {
+  if (!memory || hasExplicitHrmsTopic(text) || !isFollowUpQuestion(text)) return null;
+  if (/\b(fix|correct|correction|buhaton|gagawin|resolve)\b/.test(lower(text))) {
+    return 'dtr_correction_guidance';
+  }
+  if (/\b(locator|pass slip|wfh|official business|ob|covered)\b/.test(lower(text))) {
+    return 'dtr_locator_coverage_check';
+  }
+  if (/\b(leave|on leave|covered)\b/.test(lower(text))) {
+    return 'dtr_leave_coverage_check';
+  }
+  if (/\b(late|tardy)\b/.test(lower(text))) {
+    return 'dtr_late_summary';
+  }
+  if (/\b(undertime|under time)\b/.test(lower(text))) {
+    return 'dtr_undertime_summary';
+  }
+  if (/\b(overtime|over time|ot)\b/.test(lower(text))) {
+    return 'dtr_overtime_summary';
+  }
+  if (/\b(absent|absence|no record|walay record)\b/.test(lower(text))) {
+    return 'dtr_absent_summary';
+  }
+  if (/\b(missing|incomplete|kulang|kuwang|what.*missing|unsa.*kulang)\b/.test(lower(text))) {
+    return 'dtr_missing_log_reason';
+  }
+  if (/\b(attachment|attachments|document|documents|docs|proof|supporting|medical certificate|med cert)\b/.test(lower(text))) {
+    return 'leave_attachment_requirement';
+  }
+  if (/\b(policy|rule|rules|advance|before|deadline|max|maximum|limit|past date)\b/.test(lower(text))) {
+    return 'leave_filing_policy';
+  }
+  if (/\b(requirement|requirements|needed|need|kinahanglan|kailangan)\b/.test(lower(text))) {
+    return 'leave_requirements';
+  }
+  if (/\b(fill|field|fields|form|details|what to put|i-fill|input)\b/.test(lower(text))) {
+    return 'leave_form_guidance';
+  }
+  if (/\b(eligible|eligibility|qualified|avail|entitled|pwede|puwede)\b/.test(lower(text))) {
+    return 'leave_eligibility_check';
+  }
+  if (/\b(dtr|attendance|effect|impact|mark|on leave)\b/.test(lower(text))) {
+    return 'leave_dtr_impact';
+  }
+  if (/\b(compare|difference|versus| vs |kalahi|pagkaiba)\b/.test(` ${lower(text)} `)) {
+    return 'leave_type_compare';
+  }
+  if (/\b(guideline|guidelines|supporting documents|credits|commutation|monetization|terminal leave)\b/.test(lower(text))) {
+    return 'leave_guideline_section';
+  }
+  if (/\b(help|guide|assist|tabangi).*\b(file|filing)\b/.test(lower(text))) {
+    return 'leave_guided_filing';
+  }
+  if (/\b(timeline|approval history|review history|who approved|who reviewed)\b/.test(lower(text))) {
+    return 'leave_approval_history';
+  }
+  if (/\b(who|kinsa|sino|where|asa|holding|waiting|awaiting|pending with)\b/.test(lower(text))) {
+    return 'leave_approval_tracker';
+  }
+  if (/\b(what|which|unsa|unsay|ano|gi file|g-file|filed|leave type|that|to)\b/.test(lower(text))) {
+    return 'leave_request_lookup';
+  }
+  if (/\b(why|ngano|bakit|reason|remarks|returned|rejected|declined|denied)\b/.test(lower(text))) {
+    return 'leave_rejection_reason';
+  }
+  if (/\b(summary|summarize|summarise|overview|recap|total|count|counts)\b/.test(lower(text))) {
+    return 'leave_request_summary';
+  }
+  if (/\b(overlap|conflict|same date|already|existing|naa|may)\b/.test(lower(text))) {
+    return 'leave_overlap_check';
+  }
+  if (/\b(after filing|mabilin|matira|nabilin|natira|remaining after|balance after|pila.*mabilin|pila.*nabilin|how much.*remain|what.*remain)\b/.test(lower(text))) {
+    return 'leave_balance_after_filing';
+  }
+  if (memory.intent === 'leave_balance' && /\b(why|ngano|bakit|gamay|low|small|nabilin|natira)\b/.test(lower(text))) {
+    return 'leave_balance';
+  }
+  if (
+    [
+      'leave_balance',
+      'today_dtr',
+      'missing_logs',
+      'dtr_daily_record',
+      'dtr_range_summary',
+      'dtr_missing_logs',
+      'dtr_missing_log_reason',
+      'dtr_late_summary',
+      'dtr_late_reason',
+      'dtr_undertime_summary',
+      'dtr_overtime_summary',
+      'dtr_absent_summary',
+      'dtr_status_explanation',
+      'dtr_correction_guidance',
+      'dtr_leave_coverage_check',
+      'dtr_locator_coverage_check',
+      'dtr_holiday_check',
+      'dtr_schedule_context',
+      'dtr_export_guidance',
+      'leave_history',
+      'pending_leave_requests',
+      'approved_leave_requests',
+      'rejected_leave_requests',
+      'latest_leave_request',
+      'leave_availability_check',
+      'leave_attachment_requirement',
+      'leave_overlap_check',
+      'leave_pending_days_explanation',
+      'leave_balance_after_filing',
+      'leave_request_summary',
+      'leave_filing_policy',
+      'leave_form_guidance',
+      'leave_eligibility_check',
+      'leave_dtr_impact',
+      'leave_guideline_section',
+      'leave_type_compare',
+      'leave_guided_filing',
+      'leave_approval_history',
+      'leave_rejection_reason',
+      'leave_approval_tracker',
+      'leave_request_lookup',
+      'leave_requirements',
+      'leave_types',
+    ].includes(memory.intent)
+  ) {
+    return memory.intent;
+  }
+  return null;
+}
+
+function enrichMessageWithMemory(text, memory, memoryIntent = null) {
+  let enriched = text;
+  const activeIntent = memoryIntent || memory?.intent || null;
+  const relativeDate = memoryRelativeDate(enriched, memory);
+  if (relativeDate) {
+    enriched = `${enriched} (${relativeDate})`;
+  }
+  const hasDateHint =
+    /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|week|semana|semanaha|month|bulan|bulana|buwan|buwana|aning bulana|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|same day|same date|ana|ato|adto|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/i.test(
+      enriched
+    );
+  if (
+    !hasDateHint &&
+    memory?.dateRange?.startDate &&
+    isStructuredDtrIntent(activeIntent) &&
+    isFollowUpQuestion(enriched)
+  ) {
+    enriched = `${enriched} (${memory.dateRange.startDate}${
+      memory.dateRange.endDate && memory.dateRange.endDate !== memory.dateRange.startDate
+        ? ` to ${memory.dateRange.endDate}`
+        : ''
+    })`;
+  }
+  if (
+    !hasDateHint &&
+    memory?.dateRange?.startDate &&
+    isLeaveIntent(activeIntent) &&
+    /\b(what|which|unsa|unsay|ano|that|to|gi file|g-file|filed|leave type)\b/i.test(
+      enriched
+    )
+  ) {
+    enriched = `${enriched} (${memory.dateRange.startDate}${
+      memory.dateRange.endDate && memory.dateRange.endDate !== memory.dateRange.startDate
+        ? ` to ${memory.dateRange.endDate}`
+        : ''
+    })`;
+  }
+
+  if (!isLeaveIntent(activeIntent) && !/\b(leave|sick|vacation|vl|sl)\b/i.test(enriched)) {
+    return enriched;
+  }
+  const leaveType = requestedLeaveType(enriched) || memory?.leaveType;
+  if (!leaveType) return enriched;
+  if (requestedLeaveType(enriched)) return enriched;
+  const leaveTypeLabel = /\bleave\b/i.test(leaveType)
+    ? leaveType
+    : `${leaveType} leave`;
+  if (
+    memory?.intent === 'leave_balance' &&
+    /\b(why|ngano|bakit|gamay|low|small|nabilin|natira)\b/.test(lower(text))
+  ) {
+    return `${enriched} (${leaveTypeLabel})`;
+  }
+  if (/leave_|leave\b|requirements?|attachment|balance|pending|history|summary|overlap/i.test(memory?.intent || enriched)) {
+    return `${enriched} (${leaveTypeLabel})`;
+  }
+  return enriched;
+}
+
+function buildToolData(intent, context) {
+  if (intent === 'today_dtr') {
+    return {
+      dateRange: context.date_range,
+      record: context.dtr_records?.[0] || null,
+    };
+  }
+  if (
+    intent === 'missing_logs' ||
+    intent === 'dtr_daily_record' ||
+    intent === 'dtr_range_summary' ||
+    intent === 'dtr_missing_logs' ||
+    intent === 'dtr_missing_log_reason' ||
+    intent === 'dtr_late_summary' ||
+    intent === 'dtr_late_reason' ||
+    intent === 'dtr_undertime_summary' ||
+    intent === 'dtr_overtime_summary' ||
+    intent === 'dtr_absent_summary' ||
+    intent === 'dtr_status_explanation' ||
+    intent === 'dtr_correction_guidance' ||
+    intent === 'dtr_leave_coverage_check' ||
+    intent === 'dtr_locator_coverage_check' ||
+    intent === 'dtr_holiday_check' ||
+    intent === 'dtr_schedule_context' ||
+    intent === 'dtr_export_guidance'
+  ) {
+    return {
+      dateRange: context.date_range,
+      records: context.dtr_records || [],
+      calendarDays: context.dtr_calendar_days || [],
+      leaveRequests: context.recent_leave_requests || [],
+      locatorSlips: context.recent_locator_slips || [],
+    };
+  }
+  if (intent === 'leave_balance') {
+    return {
+      balances: context.leave_balances || [],
+    };
+  }
+  if (
+    intent === 'pending_leave_requests' ||
+    intent === 'approved_leave_requests' ||
+    intent === 'rejected_leave_requests' ||
+    intent === 'leave_history' ||
+    intent === 'leave_overlap_check' ||
+    intent === 'leave_pending_days_explanation' ||
+    intent === 'leave_request_summary' ||
+    intent === 'leave_rejection_reason' ||
+    intent === 'leave_approval_tracker' ||
+    intent === 'leave_approval_history' ||
+    intent === 'leave_request_lookup'
+  ) {
+    return {
+      dateRange: context.date_range,
+      requests: context.recent_leave_requests || [],
+    };
+  }
+  if (intent === 'leave_availability_check' || intent === 'leave_balance_after_filing') {
+    return {
+      balances: context.leave_balances || [],
+      leaveTypes: context.leave_types || [],
+      leaveGuidelines: context.leave_guidelines || [],
+    };
+  }
+  if (
+    intent === 'leave_types' ||
+    intent === 'leave_attachment_requirement' ||
+    intent === 'leave_filing_policy' ||
+    intent === 'leave_form_guidance' ||
+    intent === 'leave_eligibility_check' ||
+    intent === 'leave_dtr_impact' ||
+    intent === 'leave_guideline_section' ||
+    intent === 'leave_type_compare' ||
+    intent === 'leave_guided_filing'
+  ) {
+    return {
+      employee: context.employee || null,
+      balances: context.leave_balances || [],
+      requests: context.recent_leave_requests || [],
+      leaveTypes: context.leave_types || [],
+      leaveGuidelines: context.leave_guidelines || [],
+    };
+  }
+  if (intent === 'leave_requirements') {
+    return {
+      leaveTypes: context.leave_types || [],
+      leaveGuidelines: context.leave_guidelines || [],
+    };
+  }
+  if (intent === 'latest_leave_request') {
+    return {
+      request: context.recent_leave_requests?.[0] || null,
+    };
+  }
+  if (intent === 'latest_locator_request') {
+    return {
+      slip: context.recent_locator_slips?.[0] || null,
+    };
+  }
+  return {};
+}
+
+async function refineToolAnswerWithLocalAi({ text, intent, toolAnswer, toolData, profile }) {
+  try {
+    const result = await chatCompletion({
+      provider: profile?.provider,
+      model: profile?.model,
+      messages: buildDtrAssistantToolAnswerMessages({
+        message: text,
+        intent,
+        toolAnswer,
+        toolData,
+      }),
+      temperature: 0.2,
+      timeoutMs: 12000,
+      options: {
+        num_predict: 140,
+        num_ctx: 1024,
+      },
+    });
+    const content = compactAssistantContent(result.content);
+    if (!content) return null;
+    return {
+      content,
+      provider: result.provider,
+      model: result.model,
+    };
+  } catch (err) {
+    console.warn(
+      '[dtr-assistant] Tool-answer refinement failed:',
+      err.code || err.message
+    );
+    return null;
+  }
+}
+
+async function classifyIntentWithLocalAi(text, profile) {
+  try {
+    const result = await chatCompletion({
+      provider: profile?.provider,
+      model: profile?.model,
+      messages: buildDtrAssistantIntentMessages({ message: text }),
+      temperature: 0,
+      timeoutMs: 15000,
+      options: {
+        num_predict: 32,
+        num_ctx: 512,
+      },
+    });
+    return {
+      intent: parseIntentClassifierResponse(result.content),
+      provider: result.provider,
+      model: result.model,
+    };
+  } catch (err) {
+    return {
+      intent: null,
+      provider: err.provider || 'ollama',
+      model: 'intent-classifier-unavailable',
+      error: err.code || err.message,
+    };
+  }
+}
+
+async function planToolWithLocalAi(text, profile) {
+  try {
+    const result = await chatCompletion({
+      provider: profile?.provider,
+      model: profile?.model,
+      messages: buildDtrAssistantToolPlanMessages({
+        message: text,
+        today: todayInHrmsTimezone(),
+      }),
+      temperature: 0,
+      timeoutMs: 9000,
+      options: {
+        num_predict: 140,
+        num_ctx: 1024,
+      },
+      maxTokens: 140,
+    });
+    const plan = parseToolPlanResponse(result.content);
+    return {
+      intent: plan?.intent || null,
+      dateRange: plan?.dateRange || null,
+      normalizedQuestion: plan?.normalizedQuestion || '',
+      provider: result.provider,
+      model: result.model,
+    };
+  } catch (err) {
+    return {
+      intent: null,
+      dateRange: null,
+      normalizedQuestion: '',
+      provider: err.provider || profile?.provider || 'ollama',
+      model: 'tool-planner-unavailable',
+      error: err.code || err.message,
+    };
+  }
+}
+
+async function generateDirectAnswerWithAi({ text, context, profile }) {
+  const result = await chatCompletion({
+    provider: profile.provider,
+    model: profile.model,
+    messages: buildDtrAssistantDirectMessages({ message: text, context }),
+    temperature: 0.2,
+    timeoutMs: 20000,
+    options: {
+      num_predict: 240,
+      num_ctx: 2048,
+    },
+    maxTokens: 240,
+  });
+
+  return {
+    content: compactAssistantContent(result.content),
+    provider: result.provider,
+    model: result.model,
+  };
+}
+
+async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile }) {
+  const text = normalizeMessage(message);
+  const profile = resolveModelProfile(modelProfile);
+  const scope = getEmployeeSelfScope(user);
+  const memory = getAssistantMemory(scope.userId);
+  const normalizedTextForRules = normalizeAssistantMessageForRules(text);
+  const memoryIntent = resolveIntentFromMemory(normalizedTextForRules, memory);
+  const effectiveText = enrichMessageWithMemory(
+    normalizedTextForRules,
+    memory,
+    memoryIntent
+  );
+  let resolvedIntent =
+    detectEmployeeAssistantIntent(effectiveText, intent) ||
+    memoryIntent ||
+    resolveIntentFromMemory(effectiveText, memory);
+  let model = 'hrms-intent-rules';
+  let provider = 'hrms';
+  let plannedDateRange = parseAssistantDateRange(effectiveText);
+  let plannedText = effectiveText;
+
+  if (shouldAskAiForToolPlan({
+    resolvedIntent,
+    dateRange: plannedDateRange,
+    text: effectiveText,
+    profile,
+  })) {
+    const planned = await planToolWithLocalAi(effectiveText, profile);
+    if (planned.intent) {
+      resolvedIntent = resolvedIntent || planned.intent;
+      provider = planned.provider || provider;
+      model = planned.model || model;
+    }
+    if (planned.dateRange) {
+      plannedDateRange = planned.dateRange;
+      provider = planned.provider || provider;
+      model = planned.model || model;
+    }
+    if (planned.normalizedQuestion) {
+      plannedText = `${effectiveText} (${planned.normalizedQuestion})`;
+    }
+  }
+
+  const context = await loadEmployeeAssistantContext(pool, {
+    userId: scope.userId,
+    message: plannedText,
+    dateRange: plannedDateRange,
+  });
+
+  if (!resolvedIntent) {
+    const classified = await classifyIntentWithLocalAi(plannedText, profile);
+    resolvedIntent = classified.intent;
+    provider = classified.provider || provider;
+    model = classified.model || model;
+  }
+
+  if (profile.engine === 'direct' && !resolvedIntent) {
+    const direct = await generateDirectAnswerWithAi({
+      text: plannedText,
+      context,
+      profile,
+    });
+
+    setAssistantMemory(scope.userId, {
+      intent: 'direct_ai',
+      leaveType: memoryLeaveTypeForIntent('direct_ai', plannedText, context, memory),
+      dateRange: context.date_range,
+      toolData: {
+        modelProfile: profile.id,
+      },
+    });
+
+    return buildAssistantResult({
+      content: direct.content,
+      provider: direct.provider,
+      model: direct.model,
+      mode: scope.mode,
+      context,
+      intent: 'direct_ai',
+      attachments: [],
+    });
+  }
+
+  const fastReply = buildFastEmployeeAssistantReply(
+    plannedText,
+    context,
+    resolvedIntent
+  );
+  if (fastReply) {
+    const toolData = buildToolData(resolvedIntent, context);
+    const attachments = buildAttachments(resolvedIntent, context);
+    const refined = shouldSkipToolRefinement(resolvedIntent)
+      ? null
+      : await refineToolAnswerWithLocalAi({
+          text,
+          intent: resolvedIntent,
+          toolAnswer: fastReply,
+          toolData,
+          profile,
+        });
+
+    setAssistantMemory(scope.userId, {
+      intent: resolvedIntent,
+      leaveType: memoryLeaveTypeForIntent(resolvedIntent, plannedText, context, memory),
+      dateRange: context.date_range,
+      toolData,
+      modelProfile: profile.id,
+    });
+
+    return buildAssistantResult({
+      content: compactAssistantContent(refined?.content || fastReply),
+      provider: refined?.provider || 'hrms',
+      model: refined?.model || model,
+      mode: scope.mode,
+      context,
+      intent: resolvedIntent,
+      attachments,
+    });
+  }
+
+  return buildAssistantResult({
+    content: fallbackContent(),
+    provider,
+    model,
+    mode: scope.mode,
+    context,
+    intent: resolvedIntent,
+    attachments: buildAttachments(resolvedIntent, context),
+  });
+}
+
+module.exports = { chatWithDtrAssistant, getDtrAssistantModelProfiles };

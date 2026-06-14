@@ -1,5 +1,5 @@
 -- Add leave request history audit table
--- Run: psql -d hrms_plaridel -f backend/scripts/migrate-add-leave-request-history.sql
+-- Run: psql -d hrms_plaridel -f backend/scripts/migrations/dtr/migrate-add-leave-request-history.sql
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 

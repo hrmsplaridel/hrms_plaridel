@@ -1,6 +1,6 @@
 -- Leave Module Schema Alignment (Flutter LeaveRequest ↔ PostgreSQL)
 -- Run on existing DBs:
---   psql -U postgres -d hrms_plaridel -f backend/scripts/migrate-leave-schema-alignment.sql
+--   psql -U postgres -d hrms_plaridel -f backend/scripts/migrations/dtr/migrate-leave-schema-alignment.sql
 --
 -- Goals:
 -- - Expand leave_requests to support draft/returned workflow + reviewer fields + details payload.

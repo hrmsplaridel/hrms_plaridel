@@ -1,5 +1,5 @@
 -- Work Suspension support: extend holiday_type and add coverage (whole_day | am_only | pm_only).
--- Run on existing DBs: psql -U youruser -d hrms_plaridel -f scripts/add-work-suspension-support.sql
+-- Run on existing DBs: psql -U youruser -d hrms_plaridel -f backend/scripts/migrations/dtr/add-work-suspension-support.sql
 
 -- 1. Extend holiday_type to include 'work_suspension'
 ALTER TABLE holidays DROP CONSTRAINT IF EXISTS holidays_holiday_type_check;
