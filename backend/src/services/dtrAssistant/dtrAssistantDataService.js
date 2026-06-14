@@ -80,7 +80,7 @@ async function loadDtrRecords(pool, userId, dateRange) {
      WHERE d.employee_id = $1::uuid
        AND d.attendance_date BETWEEN $2::date AND $3::date
      ORDER BY d.attendance_date DESC
-     LIMIT 14`,
+     LIMIT 70`,
     [userId, dateRange.startDate, dateRange.endDate]
   );
 
@@ -102,6 +102,67 @@ async function loadDtrRecords(pool, userId, dateRange) {
     holiday_name: row.holiday_name,
     holiday_type: row.holiday_type,
     leave_type: row.leave_type,
+  }));
+}
+
+async function loadDtrCalendarDays(pool, userId, dateRange) {
+  const result = await pool.query(
+    `SELECT day.day::date::text AS attendance_date,
+            assignment.id AS assignment_id,
+            shift.id AS shift_id,
+            shift.name AS shift_name,
+            COALESCE(assignment.override_start_time, shift.start_time)::text AS start_time,
+            COALESCE(assignment.override_end_time, shift.end_time)::text AS end_time,
+            COALESCE(assignment.override_break_end, shift.break_end)::text AS break_end,
+            shift.punch_mode,
+            shift.grace_period_minutes,
+            shift.working_days,
+            holiday.id AS holiday_id,
+            holiday.name AS holiday_name,
+            holiday.holiday_type,
+            holiday.coverage AS holiday_coverage
+     FROM generate_series($2::date, $3::date, interval '1 day') AS day(day)
+     LEFT JOIN LATERAL (
+       SELECT a.*
+       FROM assignments a
+       WHERE a.employee_id = $1::uuid
+         AND (a.is_active IS NULL OR a.is_active = true)
+         AND a.effective_from <= day.day::date
+         AND (a.effective_to IS NULL OR a.effective_to >= day.day::date)
+       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+       LIMIT 1
+     ) assignment ON true
+     LEFT JOIN shifts shift ON shift.id = assignment.shift_id
+     LEFT JOIN LATERAL (
+       SELECT h.*
+       FROM holidays h
+       WHERE (h.is_active IS NULL OR h.is_active = true)
+         AND day.day::date BETWEEN h.date_from AND h.date_to
+       ORDER BY
+         CASE h.coverage WHEN 'whole_day' THEN 0 ELSE 1 END,
+         h.date_from DESC,
+         h.created_at DESC
+       LIMIT 1
+     ) holiday ON true
+     ORDER BY day.day ASC`,
+    [userId, dateRange.startDate, dateRange.endDate]
+  );
+
+  return result.rows.map((row) => ({
+    attendance_date: row.attendance_date,
+    assignment_id: row.assignment_id,
+    shift_id: row.shift_id,
+    shift_name: row.shift_name,
+    start_time: row.start_time,
+    end_time: row.end_time,
+    break_end: row.break_end,
+    punch_mode: row.punch_mode,
+    grace_period_minutes: row.grace_period_minutes ?? 0,
+    working_days: Array.isArray(row.working_days) ? row.working_days.map(Number) : [],
+    holiday_id: row.holiday_id,
+    holiday_name: row.holiday_name,
+    holiday_type: row.holiday_type,
+    holiday_coverage: row.holiday_coverage,
   }));
 }
 
@@ -293,7 +354,7 @@ async function loadLeaveTypes(pool) {
   }));
 }
 
-async function loadRecentLocatorSlips(pool, userId) {
+async function loadRecentLocatorSlips(pool, userId, dateRange) {
   const result = await pool.query(
     `SELECT ls.id,
             ls.slip_date::text AS slip_date,
@@ -316,9 +377,15 @@ async function loadRecentLocatorSlips(pool, userId) {
      FROM locator_slips ls
      LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
      WHERE ls.employee_id = $1::uuid
-     ORDER BY ls.updated_at DESC, ls.created_at DESC
-     LIMIT 8`,
-    [userId]
+     ORDER BY
+       CASE
+         WHEN ls.slip_date BETWEEN $2::date AND $3::date THEN 0
+         ELSE 1
+       END,
+       ls.updated_at DESC,
+       ls.created_at DESC
+     LIMIT 30`,
+    [userId, dateRange.startDate, dateRange.endDate]
   );
 
   return result.rows.map((row) => ({
@@ -345,16 +412,25 @@ async function loadRecentLocatorSlips(pool, userId) {
   }));
 }
 
-async function loadEmployeeAssistantContext(pool, { userId, message }) {
-  const dateRange = parseAssistantDateRange(message);
-  const [employee, dtrRecords, leaveBalances, leaveRequests, leaveTypes, locatorSlips] =
+async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: dateRangeOverride }) {
+  const dateRange = dateRangeOverride || parseAssistantDateRange(message);
+  const [
+    employee,
+    dtrRecords,
+    dtrCalendarDays,
+    leaveBalances,
+    leaveRequests,
+    leaveTypes,
+    locatorSlips,
+  ] =
     await Promise.all([
       loadEmployeeProfile(pool, userId),
       loadDtrRecords(pool, userId, dateRange),
+      loadDtrCalendarDays(pool, userId, dateRange),
       loadLeaveBalances(pool, userId),
       loadRecentLeaveRequests(pool, userId, dateRange),
       loadLeaveTypes(pool),
-      loadRecentLocatorSlips(pool, userId),
+      loadRecentLocatorSlips(pool, userId, dateRange),
     ]);
 
   return {
@@ -362,6 +438,7 @@ async function loadEmployeeAssistantContext(pool, { userId, message }) {
     date_range: dateRange,
     employee,
     dtr_records: dtrRecords,
+    dtr_calendar_days: dtrCalendarDays,
     leave_balances: leaveBalances,
     recent_leave_requests: leaveRequests,
     leave_types: leaveTypes,
