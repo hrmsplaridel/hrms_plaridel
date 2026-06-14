@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -436,9 +437,14 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       if (widget.onAccountCreated != null) {
         widget.onAccountCreated!();
       } else {
-        _showSnackBar(
-          'Account created as $privilege. They can sign in with their email and password.',
-        );
+        final emailConfigured = data['account_email_configured'] == true;
+        final emailSent = data['account_email_sent'] == true;
+        final emailStatus = emailSent
+            ? ' Credentials were emailed to the employee.'
+            : emailConfigured
+            ? ' Account email failed; please share the login details manually.'
+            : ' Email is not configured; please share the login details manually.';
+        _showSnackBar('Account created as $privilege.$emailStatus');
       }
     } on DioException catch (e) {
       if (!mounted) return;

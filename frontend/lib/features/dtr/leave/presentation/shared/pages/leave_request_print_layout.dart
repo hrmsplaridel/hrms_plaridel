@@ -1299,6 +1299,9 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
 
   Widget _buildApprovedDisapprovedSection({required bool compact}) {
     final req = widget.initialRequest;
+    final disapprovalReason = req?.status.isRejected == true
+        ? req?.disapprovalReason
+        : null;
     final withPay = req?.approvedDaysWithPay;
     final withoutPay = req?.approvedDaysWithoutPay;
     final others = req?.approvedOtherDetails;
@@ -1326,12 +1329,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     );
     final disapprovedContent = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _section7TextDisplay(
-          widget.initialRequest?.disapprovalReason,
-          minLines: 4,
-        ),
-      ],
+      children: [_section7TextDisplay(disapprovalReason, minLines: 4)],
     );
     final signatureBlock = Column(
       children: [

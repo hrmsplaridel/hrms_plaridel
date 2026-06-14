@@ -18,11 +18,9 @@ const {
 
 const router = express.Router();
 const protect = [authMiddleware];
-const LOCATOR_REQUEST_TYPES = new Set(['locator', 'pass_slip', 'work_from_home']);
-
 function normalizeLocatorRequestType(value) {
   const type = (value || 'locator').toString().trim().toLowerCase();
-  return LOCATOR_REQUEST_TYPES.has(type) ? type : 'locator';
+  return /^[a-z0-9_][a-z0-9_-]{1,63}$/.test(type) ? type : 'locator';
 }
 
 function isTruthyQueryFlag(value) {
@@ -35,8 +33,14 @@ function locatorRequestTypeLabel(value) {
       return 'Pass Slip';
     case 'work_from_home':
       return 'WFH';
-    default:
+    case 'locator':
       return 'Locator Slip';
+    default:
+      return normalizeLocatorRequestType(value)
+        .split(/[_-]+/)
+        .filter(Boolean)
+        .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+        .join(' ') || 'Locator Slip';
   }
 }
 

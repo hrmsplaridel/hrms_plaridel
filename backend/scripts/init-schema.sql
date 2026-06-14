@@ -287,6 +287,41 @@ CREATE TABLE IF NOT EXISTS holidays (
   CONSTRAINT uq_holidays_name_range UNIQUE (name, date_from, date_to)
 );
 
+CREATE TABLE IF NOT EXISTS holiday_default_templates (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  country_code TEXT NOT NULL DEFAULT 'PH',
+  year INTEGER NOT NULL,
+  label TEXT NOT NULL,
+  source TEXT,
+  note TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT uq_holiday_default_templates_country_year UNIQUE (country_code, year)
+);
+
+CREATE TABLE IF NOT EXISTS holiday_default_template_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  template_id UUID NOT NULL REFERENCES holiday_default_templates(id) ON DELETE CASCADE,
+  date_from DATE NOT NULL,
+  date_to DATE NOT NULL,
+  name TEXT NOT NULL,
+  holiday_type TEXT NOT NULL DEFAULT 'regular'
+    CHECK (holiday_type IN ('regular', 'special', 'local', 'work_suspension')),
+  description TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  recurring BOOLEAN NOT NULL DEFAULT false,
+  coverage TEXT NOT NULL DEFAULT 'whole_day'
+    CHECK (coverage IN ('whole_day', 'am_only', 'pm_only')),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_holiday_default_template_items_date_range CHECK (date_to >= date_from),
+  CONSTRAINT uq_holiday_default_template_items_row UNIQUE (template_id, name, date_from, date_to)
+);
+
 -- =========================================
 -- LEAVE TYPES
 -- =========================================
@@ -570,9 +605,66 @@ CREATE INDEX IF NOT EXISTS idx_user_notifications_user_id ON user_notifications(
 CREATE INDEX IF NOT EXISTS idx_user_notifications_read_at ON user_notifications(user_id, read_at);
 CREATE INDEX IF NOT EXISTS idx_user_notifications_created_at ON user_notifications(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS user_push_tokens (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL,
+  platform TEXT NOT NULL DEFAULT 'unknown',
+  device_id TEXT,
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_push_tokens_token_unique
+  ON user_push_tokens(token);
+
+CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_active
+  ON user_push_tokens(user_id)
+  WHERE revoked_at IS NULL;
+
 -- =========================================
 -- LOCATOR / PASS SLIP / WFH REQUESTS
 -- =========================================
+CREATE TABLE IF NOT EXISTS locator_request_types (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  code TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  short_label TEXT NOT NULL,
+  location_label TEXT NOT NULL DEFAULT 'Office / Destination',
+  location_hint TEXT NOT NULL DEFAULT 'Enter office or destination',
+  dtr_slot_label TEXT NOT NULL DEFAULT 'On Field',
+  dtr_print_label TEXT NOT NULL DEFAULT 'ON FIELD',
+  requires_attachment BOOLEAN NOT NULL DEFAULT false,
+  coverage_mode TEXT NOT NULL DEFAULT 'manual'
+    CONSTRAINT locator_request_types_coverage_mode_check
+    CHECK (coverage_mode IN ('manual', 'wfh')),
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  is_system BOOLEAN NOT NULL DEFAULT false,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO locator_request_types (
+  code, label, short_label, location_label, location_hint,
+  dtr_slot_label, dtr_print_label, requires_attachment,
+  coverage_mode, is_active, is_system, sort_order
+) VALUES
+  ('locator', 'Locator / Official Business', 'Locator',
+   'Office / Destination', 'Enter office or destination',
+   'On Field', 'ON FIELD', false, 'manual', true, true, 10),
+  ('pass_slip', 'Pass Slip', 'Pass Slip',
+   'Destination / Location', 'Enter destination or location',
+   'Pass Slip', 'PASS SLIP', false, 'manual', true, true, 20),
+  ('work_from_home', 'Work From Home', 'WFH',
+   'Work Location', 'Enter work location',
+   'WFH', 'WFH', false, 'wfh', true, true, 30)
+ON CONFLICT (code) DO UPDATE SET
+  is_system = true,
+  updated_at = now();
+
 CREATE TABLE IF NOT EXISTS locator_slips (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -582,11 +674,13 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   am_out BOOLEAN NOT NULL DEFAULT false,
   pm_in BOOLEAN NOT NULL DEFAULT false,
   pm_out BOOLEAN NOT NULL DEFAULT false,
-  request_type TEXT NOT NULL DEFAULT 'locator'
-    CONSTRAINT locator_slips_request_type_check
-    CHECK (request_type IN ('locator', 'pass_slip', 'work_from_home')),
+  request_type TEXT NOT NULL DEFAULT 'locator',
   office TEXT NOT NULL,
   reason TEXT NOT NULL,
+  attachment_name TEXT,
+  attachment_path TEXT,
+  attachment_mime_type TEXT,
+  attachment_uploaded_at TIMESTAMPTZ,
   status TEXT NOT NULL DEFAULT 'pending_department_head'
     CHECK (status IN (
       'pending',
@@ -617,6 +711,8 @@ CREATE INDEX IF NOT EXISTS idx_locator_slips_date
   ON locator_slips(slip_date DESC);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_request_type
   ON locator_slips(request_type);
+CREATE INDEX IF NOT EXISTS idx_locator_request_types_active
+  ON locator_request_types(is_active, sort_order, label);
 
 -- =========================================
 -- BIOMETRIC ATTENDANCE LOGS (raw import from .dat files)
@@ -1761,6 +1857,8 @@ CREATE INDEX IF NOT EXISTS idx_policy_assignments_policy_id ON policy_assignment
 
 CREATE INDEX IF NOT EXISTS idx_holidays_date_range ON holidays(date_from, date_to);
 CREATE INDEX IF NOT EXISTS idx_holidays_type ON holidays(holiday_type);
+CREATE INDEX IF NOT EXISTS idx_holiday_default_template_items_template
+ON holiday_default_template_items(template_id, sort_order, date_from);
 
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(employee_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_user_id ON leave_requests(user_id);
@@ -1863,6 +1961,12 @@ CREATE INDEX IF NOT EXISTS idx_promotion_certification_entries_created
 DROP TRIGGER IF EXISTS trg_users_updated_at ON users;
 CREATE TRIGGER trg_users_updated_at
 BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_user_push_tokens_updated_at ON user_push_tokens;
+CREATE TRIGGER trg_user_push_tokens_updated_at
+BEFORE UPDATE ON user_push_tokens
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();
 

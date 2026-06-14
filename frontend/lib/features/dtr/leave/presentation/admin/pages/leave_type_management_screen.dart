@@ -15,6 +15,8 @@ class LeaveTypeManagementScreen extends StatefulWidget {
 }
 
 class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
+  static const int _typesPerPage = 8;
+
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _displayNameController = TextEditingController();
@@ -26,6 +28,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
 
   List<LeaveTypeDefinition> _items = const [];
   LeaveTypeDefinition? _selected;
+  int _page = 0;
   bool _loading = true;
   bool _saving = false;
   bool _isActive = true;
@@ -64,7 +67,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   void initState() {
     super.initState();
     _displayNameController.addListener(_syncKeyFromDisplayName);
-    _searchController.addListener(() => setState(() {}));
+    _searchController.addListener(() => setState(() => _page = 0));
     _load();
   }
 
@@ -89,6 +92,12 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           item.name.toLowerCase().contains(query) ||
           (item.description ?? '').toLowerCase().contains(query);
     }).toList();
+  }
+
+  void _clampPage(int totalItems) {
+    final maxPage = totalItems == 0 ? 0 : (totalItems - 1) ~/ _typesPerPage;
+    if (_page > maxPage) _page = maxPage;
+    if (_page < 0) _page = 0;
   }
 
   Future<void> _load() async {
@@ -139,6 +148,23 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _sexEligibility = _sexEligibilityTypes.containsKey(item.sexEligibility)
         ? item.sexEligibility
         : 'any';
+  }
+
+  void _applySavedType(LeaveTypeDefinition item) {
+    final index = _items.indexWhere((existing) {
+      final id = existing.id;
+      return (id != null && id == item.id) || existing.name == item.name;
+    });
+    final next = List<LeaveTypeDefinition>.from(_items);
+    if (index >= 0) {
+      next[index] = item;
+    } else {
+      next.insert(0, item);
+    }
+    setState(() {
+      _items = next;
+      _select(item);
+    });
   }
 
   void _newCustom() {
@@ -206,9 +232,8 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         if (body != null) saved = LeaveTypeDefinition.fromJson(body);
         _showMessage('Leave type updated.');
       }
-      if (saved != null) _selected = saved;
       LeaveTypeDefinitionCache.instance.invalidate();
-      await _load();
+      if (saved != null) _applySavedType(saved);
     } on DioException catch (e) {
       _showMessage(_messageFromDio(e));
     } catch (e) {
@@ -260,12 +285,14 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         data: _payloadFromForm(isActiveOverride: nextActive),
       );
       final body = res.data;
-      if (body != null) _selected = LeaveTypeDefinition.fromJson(body);
+      final updated = body != null
+          ? LeaveTypeDefinition.fromJson(body)
+          : selected.copyWith(isActive: nextActive);
       LeaveTypeDefinitionCache.instance.invalidate();
+      _applySavedType(updated);
       _showMessage(
         nextActive ? 'Leave type reactivated.' : 'Leave type deactivated.',
       );
-      await _load();
     } on DioException catch (e) {
       if (mounted) setState(() => _isActive = selected.isActive);
       _showMessage(_messageFromDio(e));
@@ -324,7 +351,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Leave Type Rules',
+                      'Leave Type Settings',
                       style: TextStyle(
                         color: _headingColor(context),
                         fontSize: 22,
@@ -335,7 +362,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   TextButton.icon(
                     onPressed: _saving ? null : _newCustom,
                     icon: const Icon(Icons.add_rounded),
-                    label: const Text('New custom type'),
+                    label: const Text('New custom leave type'),
                   ),
                   const SizedBox(width: 8),
                   IconButton(
@@ -369,6 +396,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   Widget _buildList() {
     if (_loading) return const Center(child: CircularProgressIndicator());
     final items = _filteredItems;
+    _clampPage(items.length);
+    final pageStart = items.isEmpty ? 0 : _page * _typesPerPage;
+    final pageEnd = (pageStart + _typesPerPage).clamp(0, items.length);
+    final pageItems = items.sublist(pageStart, pageEnd);
     return Container(
       decoration: _panelDecoration(),
       clipBehavior: Clip.antiAlias,
@@ -431,11 +462,11 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     ),
                   )
                 : ListView.separated(
-                    itemCount: items.length,
+                    itemCount: pageItems.length,
                     separatorBuilder: (_, __) =>
                         Divider(height: 1, color: _hairline(context)),
                     itemBuilder: (context, index) {
-                      final item = items[index];
+                      final item = pageItems[index];
                       final selected = item.id == _selected?.id;
                       return _LeaveTypeListTile(
                         item: item,
@@ -444,6 +475,16 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       );
                     },
                   ),
+          ),
+          _TypeListPager(
+            page: _page,
+            pageSize: _typesPerPage,
+            total: items.length,
+            itemLabel: 'leave types',
+            onPrevious: _page <= 0 ? null : () => setState(() => _page--),
+            onNext: pageEnd >= items.length
+                ? null
+                : () => setState(() => _page++),
           ),
         ],
       ),
@@ -514,7 +555,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         const SizedBox(height: 6),
                         Text(
                           systemLocked
-                              ? 'Built-in CSC rule. Review only.'
+                              ? 'Built-in CSC leave type. View only.'
                               : 'Configure filing, balance, and DTR behavior.',
                           style: TextStyle(
                             color: _mutedColor(context),
@@ -536,14 +577,14 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     _InfoPanel(
                       icon: Icons.lock_outline_rounded,
                       text:
-                          'Built-in CSC leave types are protected. You can review their rules here; create a custom type when you need editable rules.',
+                          'Built-in CSC leave types are protected. Create a custom leave type when you need editable rules.',
                     ),
-                  _sectionTitle(Icons.badge_outlined, 'Basic Info'),
+                  _sectionTitle(Icons.badge_outlined, 'Basic Information'),
                   TextFormField(
                     controller: _displayNameController,
                     readOnly: _saving || systemLocked,
                     style: AppTheme.dashFieldTextStyle(context),
-                    decoration: _inputDecoration('Display name'),
+                    decoration: _inputDecoration('Leave type name'),
                     validator: (v) =>
                         v == null || v.trim().isEmpty ? 'Required' : null,
                   ),
@@ -553,7 +594,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     readOnly: _saving || systemLocked,
                     style: AppTheme.dashFieldTextStyle(context),
                     decoration: _inputDecoration(
-                      'System key',
+                      'System code',
                       helperText: 'Example: bereavementLeave',
                     ),
                     validator: (v) {
@@ -574,7 +615,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     maxLines: 2,
                   ),
                   const SizedBox(height: 24),
-                  _sectionTitle(Icons.rule_rounded, 'Filing Rules'),
+                  _sectionTitle(Icons.rule_rounded, 'Filing Requirements'),
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
@@ -586,25 +627,25 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         onChanged: (v) => setState(() => _isActive = v),
                       ),
                       _ruleChip(
-                        label: 'Employee can file',
+                        label: 'Employees can file',
                         value: _employeeCanFile,
                         editable: !systemLocked,
                         onChanged: (v) => setState(() => _employeeCanFile = v),
                       ),
                       _ruleChip(
-                        label: 'Admin only',
+                        label: 'HR/Admin only',
                         value: _adminOnly,
                         editable: !systemLocked,
                         onChanged: (v) => setState(() => _adminOnly = v),
                       ),
                       _ruleChip(
-                        label: 'Allows past dates',
+                        label: 'Allow past-date filing',
                         value: _allowsPastDates,
                         editable: !systemLocked,
                         onChanged: (v) => setState(() => _allowsPastDates = v),
                       ),
                       _ruleChip(
-                        label: 'Requires attachment',
+                        label: 'Require attachment',
                         value: _requiresAttachment,
                         editable: !systemLocked,
                         onChanged: _setRequiresAttachment,
@@ -690,16 +731,16 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       decimal: true,
                     ),
                     decoration: _inputDecoration(
-                      'Attachment required at days',
+                      'Require attachment over days',
                       helperText: _requiresAttachment
                           ? 'Optional threshold'
-                          : 'Enable Requires attachment first',
+                          : 'Turn on Require attachment first',
                     ),
                   ),
                   const SizedBox(height: 24),
-                  _sectionTitle(Icons.sync_alt_rounded, 'Balance And DTR'),
+                  _sectionTitle(Icons.sync_alt_rounded, 'Balance and DTR'),
                   _ruleChip(
-                    label: 'Affects DTR',
+                    label: 'Show on DTR',
                     value: _affectsDtrNormally,
                     editable: !systemLocked,
                     onChanged: (v) => setState(() => _affectsDtrNormally = v),
@@ -806,7 +847,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.save_rounded),
-            label: Text(_saving ? 'Saving...' : 'Save rules'),
+            label: Text(_saving ? 'Saving...' : 'Save Changes'),
           ),
         ],
       ),
@@ -1049,6 +1090,62 @@ class _LeaveTypeListTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _TypeListPager extends StatelessWidget {
+  const _TypeListPager({
+    required this.page,
+    required this.pageSize,
+    required this.total,
+    required this.itemLabel,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final int page;
+  final int pageSize;
+  final int total;
+  final String itemLabel;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final start = total == 0 ? 0 : page * pageSize + 1;
+    final end = total == 0 ? 0 : (page * pageSize + pageSize).clamp(0, total);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              total == 0 ? 'No $itemLabel' : 'Showing $start-$end of $total',
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Previous page',
+            onPressed: onPrevious,
+            icon: const Icon(Icons.chevron_left_rounded),
+          ),
+          IconButton(
+            tooltip: 'Next page',
+            onPressed: onNext,
+            icon: const Icon(Icons.chevron_right_rounded),
+          ),
+        ],
       ),
     );
   }

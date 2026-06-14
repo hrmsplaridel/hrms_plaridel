@@ -525,6 +525,7 @@ class DtrExport {
     required String employeeName,
     required int year,
     required int month,
+    required DateTime start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     String? reportTitle,
@@ -541,6 +542,7 @@ class DtrExport {
     final (formRows, totals) = _buildFormTableRows(
       year: year,
       month: month,
+      start: start,
       end: end,
       recordsByDate: recordsByDate,
       policy: policy,
@@ -550,7 +552,7 @@ class DtrExport {
     );
 
     final noteLines = <String>[];
-    for (var d = 1; d <= end.day; d++) {
+    for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
       final remark = rec?.remarks?.trim();
@@ -566,6 +568,7 @@ class DtrExport {
       employeeName: employeeName,
       year: year,
       month: month,
+      start: start,
       end: end,
       tableRows: formRows,
       totals: totals,
@@ -810,6 +813,7 @@ class DtrExport {
   static (List<pw.TableRow>, _ExportTotals) _buildFormTableRows({
     required int year,
     required int month,
+    required DateTime start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     required _ExportAttendancePolicy policy,
@@ -826,7 +830,7 @@ class DtrExport {
         : {1, 2, 3, 4, 5};
     final statsEnd = _exportStatsInclusiveEnd(year, month);
 
-    for (var d = 1; d <= end.day; d++) {
+    for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
       final isNonWorking = !shiftWd.contains(dt.weekday);
@@ -965,6 +969,7 @@ class DtrExport {
     required String employeeName,
     required int year,
     required int month,
+    required DateTime start,
     required DateTime end,
     required List<pw.TableRow> tableRows,
     required _ExportTotals totals,
@@ -1015,7 +1020,7 @@ class DtrExport {
               ],
               pw.SizedBox(height: 1),
               pw.Text(
-                'PERIOD : ${_months[month - 1]} 1-${end.day}, $year',
+                'PERIOD : ${_months[month - 1]} ${start.day}-${end.day}, $year',
                 style: const pw.TextStyle(fontSize: fsHeader),
               ),
               pw.SizedBox(height: 1),
@@ -1057,6 +1062,7 @@ class DtrExport {
     required String employeeName,
     required int year,
     required int month,
+    required DateTime start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     String? reportTitle,
@@ -1071,7 +1077,7 @@ class DtrExport {
     final policy = await _loadDefaultAttendancePolicy();
     final exportSignatories = signatories ?? await resolveSignatories();
     final noteLines = <String>[];
-    for (var d = 1; d <= end.day; d++) {
+    for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
       final remark = rec?.remarks?.trim();
@@ -1225,7 +1231,9 @@ class DtrExport {
     setCellBoth(
       0,
       row,
-      TextCellValue('PERIOD : ${_months[month - 1]} 1-${end.day}, $year'),
+      TextCellValue(
+        'PERIOD : ${_months[month - 1]} ${start.day}-${end.day}, $year',
+      ),
       CellStyle(fontSize: 9, horizontalAlign: HorizontalAlign.Center),
     );
     mergeBoth(0, row, 6, row);
@@ -1263,7 +1271,7 @@ class DtrExport {
     row++;
 
     final statsEndExcel = _exportStatsInclusiveEnd(year, month);
-    for (var d = 1; d <= end.day; d++) {
+    for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
       final isNonWorking = !shiftWd.contains(dt.weekday);
@@ -1513,6 +1521,7 @@ class DtrExport {
     required String employeeName,
     required int year,
     required int month,
+    required DateTime start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     String? reportTitle,
@@ -1527,7 +1536,7 @@ class DtrExport {
     final policy = await _loadDefaultAttendancePolicy();
     final exportSignatories = signatories ?? await resolveSignatories();
     final noteLines = <String>[];
-    for (var d = 1; d <= end.day; d++) {
+    for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
       final remark = rec?.remarks?.trim();
@@ -1559,7 +1568,7 @@ class DtrExport {
       );
     }
     oneCopy.writeln(
-      '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>PERIOD :</strong> ${_months[month - 1]} 1-${end.day}, $year</p>',
+      '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>PERIOD :</strong> ${_months[month - 1]} ${start.day}-${end.day}, $year</p>',
     );
     oneCopy.writeln(
       '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>Official Hours:</strong> ${officialHours ?? "8:00AM-12:00PM 01:00PM-5:00PM"}</p>',
@@ -1584,7 +1593,7 @@ class DtrExport {
         : '<td class="right">$t</td>';
 
     final statsEndWordExport = _exportStatsInclusiveEnd(year, month);
-    for (var d = 1; d <= end.day; d++) {
+    for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
       final isNonWorking = !shiftWd.contains(dt.weekday);
@@ -1742,6 +1751,7 @@ class DtrExport {
     required String employeeName,
     required int year,
     required int month,
+    DateTime? start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     String? reportTitle,
@@ -1754,8 +1764,9 @@ class DtrExport {
     DtrExportSignatories signatories = DtrExportSignatories.empty,
   }) {
     final policy = _ExportAttendancePolicy.defaults;
+    final effectiveStart = start ?? DateTime(year, month, 1);
     final noteLines = <String>[];
-    for (var d = 1; d <= end.day; d++) {
+    for (var d = effectiveStart.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
       final remark = rec?.remarks?.trim();
@@ -1787,7 +1798,7 @@ class DtrExport {
       );
     }
     oneCopy.writeln(
-      '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>PERIOD :</strong> ${_months[month - 1]} 1-${end.day}, $year</p>',
+      '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>PERIOD :</strong> ${_months[month - 1]} ${effectiveStart.day}-${end.day}, $year</p>',
     );
     oneCopy.writeln(
       '<p style="text-align:center;font-size:10pt;margin:4px 0;"><strong>Official Hours:</strong> ${officialHours ?? "8:00AM-12:00PM 01:00PM-5:00PM"}</p>',
@@ -1812,7 +1823,7 @@ class DtrExport {
         : '<td class="right">$t</td>';
 
     final statsEndWordExport = _exportStatsInclusiveEnd(year, month);
-    for (var d = 1; d <= end.day; d++) {
+    for (var d = effectiveStart.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
       final isNonWorking = !shiftWd.contains(dt.weekday);

@@ -8,6 +8,10 @@ const {
   markAllRead,
   mapRowToApi,
 } = require('../services/notificationService');
+const {
+  registerToken,
+  unregisterToken,
+} = require('../services/fcmPushService');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -45,6 +49,52 @@ router.get('/unread-count', protect, async (req, res) => {
   } catch (err) {
     console.error('[notifications GET unread-count]', err);
     res.status(500).json({ error: 'Failed to count notifications' });
+  }
+});
+
+// POST /api/notifications/push-token — register/update the current device FCM token
+router.post('/push-token', protect, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+  const { token, platform, device_id: deviceId } = req.body || {};
+  if (!token || String(token).trim().length < 20) {
+    return res.status(400).json({ error: 'Valid FCM token is required' });
+  }
+
+  try {
+    const row = await registerToken(pool, {
+      userId,
+      token,
+      platform,
+      deviceId,
+    });
+    res.json({ ok: true, id: row?.id });
+  } catch (err) {
+    console.error('[notifications POST push-token]', err);
+    const missingTable = err?.code === '42P01';
+    res.status(500).json({
+      error: missingTable
+        ? 'Push token table missing. Run backend/scripts/migrate-user-push-tokens.sql'
+        : 'Failed to register push token',
+    });
+  }
+});
+
+// DELETE /api/notifications/push-token — revoke the current device FCM token
+router.delete('/push-token', protect, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+  const { token } = req.body || {};
+  if (!token) return res.status(400).json({ error: 'FCM token is required' });
+
+  try {
+    await unregisterToken(pool, { userId, token });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[notifications DELETE push-token]', err);
+    res.status(500).json({ error: 'Failed to unregister push token' });
   }
 });
 

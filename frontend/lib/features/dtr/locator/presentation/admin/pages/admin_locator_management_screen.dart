@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 
 typedef _LocatorHistoryStep = ({
@@ -39,13 +41,16 @@ class AdminLocatorManagementScreen extends StatefulWidget {
 
 class _AdminLocatorManagementScreenState
     extends State<AdminLocatorManagementScreen> {
+  static const int _rowsPerPage = 10;
+
   _LocatorAdminQueue _queue = _LocatorAdminQueue.all;
   LocatorRequestType? _requestTypeFilter;
   bool _loading = false;
-  bool _acting = false;
   String? _error;
+  List<LocatorRequestType> _locatorTypes = LocatorRequestType.values;
   List<_LocatorAdminRecord> _items = [];
   String? _selectedItemId;
+  int _page = 0;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
@@ -59,6 +64,7 @@ class _AdminLocatorManagementScreenState
   @override
   void initState() {
     super.initState();
+    _loadLocatorTypes();
     _load();
   }
 
@@ -69,7 +75,7 @@ class _AdminLocatorManagementScreenState
       event,
     ) {
       if (event.name != 'locator_updated') return;
-      unawaited(_load());
+      unawaited(_load(forceRefresh: true));
     });
   }
 
@@ -81,6 +87,7 @@ class _AdminLocatorManagementScreenState
 
   @override
   Widget build(BuildContext context) {
+    _clampPage();
     final screenHeight = MediaQuery.sizeOf(context).height;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final maxListHeight = screenWidth < 600
@@ -88,16 +95,10 @@ class _AdminLocatorManagementScreenState
         : screenWidth < 1024
         ? (screenHeight * 0.5).clamp(320.0, 560.0)
         : (screenHeight * 0.58).clamp(380.0, 700.0);
-    final useScrollableList = _items.length > 3;
-    _LocatorAdminRecord? selectedItem;
-    for (final item in _items) {
-      if (item.id == _selectedItemId) {
-        selectedItem = item;
-        break;
-      }
-    }
-    final canReviewSelected = selectedItem?.canHrReview == true;
-
+    final pageStart = _page * _rowsPerPage;
+    final pageEnd = (pageStart + _rowsPerPage).clamp(0, _items.length);
+    final pageItems = _items.sublist(pageStart, pageEnd);
+    final useScrollableList = pageItems.length > 3;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -115,6 +116,15 @@ class _AdminLocatorManagementScreenState
           style: TextStyle(color: _mutedColor(context), fontSize: 14),
         ),
         const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.icon(
+            onPressed: _openTypeManagement,
+            icon: const Icon(Icons.tune_rounded, size: 18),
+            label: const Text('Manage Types'),
+          ),
+        ),
+        const SizedBox(height: 12),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -128,6 +138,7 @@ class _AdminLocatorManagementScreenState
                     setState(() {
                       _queue = queue;
                       _selectedItemId = null;
+                      _page = 0;
                     });
                     _load();
                   },
@@ -166,7 +177,7 @@ class _AdminLocatorManagementScreenState
                     value: null,
                     child: Text('All types'),
                   ),
-                  ...LocatorRequestType.values.map(
+                  ..._locatorTypes.map(
                     (type) => DropdownMenuItem<LocatorRequestType?>(
                       value: type,
                       child: Text(type.shortLabel),
@@ -178,6 +189,7 @@ class _AdminLocatorManagementScreenState
                   setState(() {
                     _requestTypeFilter = type;
                     _selectedItemId = null;
+                    _page = 0;
                   });
                   _load();
                 },
@@ -209,38 +221,6 @@ class _AdminLocatorManagementScreenState
                       ),
                     ),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: selectedItem == null
-                        ? null
-                        : () => _showDetailsDialog(selectedItem!),
-                    icon: const Icon(Icons.visibility_rounded, size: 18),
-                    label: const Text('View'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: selectedItem == null
-                        ? null
-                        : () => _showHistoryDialog(selectedItem!),
-                    icon: const Icon(Icons.history_rounded, size: 18),
-                    label: const Text('History'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: _acting || !canReviewSelected
-                        ? null
-                        : () => _reject(selectedItem!),
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                    label: const Text('Reject'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: _acting || !canReviewSelected
-                        ? null
-                        : () => _approve(selectedItem!),
-                    icon: const Icon(Icons.check_rounded, size: 18),
-                    label: const Text('Approve'),
-                  ),
-                  const SizedBox(width: 12),
                   if (_loading)
                     const SizedBox(
                       width: 20,
@@ -276,9 +256,29 @@ class _AdminLocatorManagementScreenState
               else
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
-                  child: _adminItemsTable(
-                    maxHeight: maxListHeight,
-                    useScrollableList: useScrollableList,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _adminItemsTable(
+                        items: pageItems,
+                        maxHeight: maxListHeight,
+                        useScrollableList: useScrollableList,
+                      ),
+                      const SizedBox(height: 12),
+                      _LocatorPaginationBar(
+                        page: _page,
+                        pageCount: _pageCount,
+                        pageStart: pageStart,
+                        pageEnd: pageEnd,
+                        total: _items.length,
+                        onPrevious: _page > 0
+                            ? () => _goToPage(_page - 1)
+                            : null,
+                        onNext: _page < _pageCount - 1
+                            ? () => _goToPage(_page + 1)
+                            : null,
+                      ),
+                    ],
                   ),
                 ),
             ],
@@ -289,6 +289,7 @@ class _AdminLocatorManagementScreenState
   }
 
   Widget _adminItemsTable({
+    required List<_LocatorAdminRecord> items,
     required double maxHeight,
     required bool useScrollableList,
   }) {
@@ -303,14 +304,14 @@ class _AdminLocatorManagementScreenState
           child: Column(
             children: [
               _adminTableHeader(context, purposeWidth),
-              for (var index = 0; index < _items.length; index++)
+              for (var index = 0; index < items.length; index++)
                 _adminTableRow(
                   context,
-                  _items[index],
+                  items[index],
                   purposeWidth: purposeWidth,
-                  isLast: index == _items.length - 1,
-                  isSelected: _items[index].id == _selectedItemId,
-                  onTap: () => _toggleItemSelection(_items[index].id),
+                  isLast: index == items.length - 1,
+                  isSelected: items[index].id == _selectedItemId,
+                  onTap: () => _openItemDetailsFromRow(items[index]),
                 ),
             ],
           ),
@@ -347,6 +348,22 @@ class _AdminLocatorManagementScreenState
         );
       },
     );
+  }
+
+  int get _pageCount {
+    if (_items.isEmpty) return 1;
+    return (_items.length / _rowsPerPage).ceil();
+  }
+
+  void _clampPage() {
+    final maxPage = _pageCount - 1;
+    if (_page > maxPage) _page = maxPage;
+    if (_page < 0) _page = 0;
+  }
+
+  void _goToPage(int page) {
+    final maxPage = _pageCount - 1;
+    setState(() => _page = page.clamp(0, maxPage).toInt());
   }
 
   Widget _adminTableHeader(BuildContext context, double purposeWidth) {
@@ -507,13 +524,20 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  void _toggleItemSelection(String id) {
-    setState(() {
-      _selectedItemId = _selectedItemId == id ? null : id;
-    });
+  void _openItemDetailsFromRow(_LocatorAdminRecord item) {
+    setState(() => _selectedItemId = item.id);
+    _showDetailsDialog(item);
   }
 
   void _showDetailsDialog(_LocatorAdminRecord item) {
+    final canReview = item.canHrReview;
+    final normalizedStatus = item.status.toLowerCase();
+    final isPending =
+        normalizedStatus == 'pending' ||
+        normalizedStatus.startsWith('pending_');
+    final canShowHistory = !isPending;
+    final canPrint = normalizedStatus == 'approved';
+    final showFooter = canShowHistory || canReview || canPrint;
     showDialog<void>(
       context: context,
       builder: (dialogContext) => Dialog(
@@ -570,6 +594,7 @@ class _AdminLocatorManagementScreenState
                         item.deptHeadReviewerName ?? '—',
                       ),
                       _detailTile('HR Reviewer', item.hrReviewerName ?? '—'),
+                      _detailTile('Attachment', item.attachmentName ?? '—'),
                       _detailTile('Reason/Purpose', item.reason, wide: true),
                       if ((item.deptHeadRemarks ?? '').trim().isNotEmpty)
                         _detailTile(
@@ -583,38 +608,75 @@ class _AdminLocatorManagementScreenState
                   ),
                 ),
               ),
-              Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 20, 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(),
-                      child: const Text('Close'),
-                    ),
-                    const SizedBox(width: 12),
-                    FilledButton.icon(
-                      onPressed: () => LocatorSlipPrint.printForm(
-                        context: dialogContext,
-                        id: item.id,
-                        employeeName: item.employeeName,
-                        dateText: item.slipDateLabel,
-                        requestTypeLabel: item.requestType.label,
-                        locationLabel: item.requestType.locationLabel,
-                        office: item.office,
-                        remarks: item.reason,
-                        amIn: item.amIn,
-                        amOut: item.amOut,
-                        pmIn: item.pmIn,
-                        pmOut: item.pmOut,
-                      ),
-                      icon: const Icon(Icons.print_rounded),
-                      label: const Text('Print Form'),
-                    ),
-                  ],
+              if (showFooter) ...[
+                Divider(
+                  height: 1,
+                  color: AppTheme.dashHairlineOf(dialogContext),
                 ),
-              ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        if (canShowHistory)
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(dialogContext).pop();
+                              _showHistoryDialog(item);
+                            },
+                            style: _dialogSecondaryButtonStyle(dialogContext),
+                            icon: const Icon(Icons.history_rounded, size: 18),
+                            label: const Text('History'),
+                          ),
+                        if (canReview)
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(dialogContext).pop();
+                              _reject(item);
+                            },
+                            style: _dialogDangerButtonStyle(dialogContext),
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            label: const Text('Reject'),
+                          ),
+                        if (canReview)
+                          FilledButton.icon(
+                            onPressed: () {
+                              Navigator.of(dialogContext).pop();
+                              _approve(item);
+                            },
+                            style: _dialogPrimaryButtonStyle(),
+                            icon: const Icon(Icons.check_rounded, size: 18),
+                            label: const Text('Approve'),
+                          ),
+                        if (canPrint)
+                          FilledButton.icon(
+                            onPressed: () => LocatorSlipPrint.printForm(
+                              context: dialogContext,
+                              id: item.id,
+                              employeeName: item.employeeName,
+                              dateText: item.slipDateLabel,
+                              requestTypeLabel: item.requestType.label,
+                              locationLabel: item.requestType.locationLabel,
+                              office: item.office,
+                              remarks: item.reason,
+                              amIn: item.amIn,
+                              amOut: item.amOut,
+                              pmIn: item.pmIn,
+                              pmOut: item.pmOut,
+                            ),
+                            style: _dialogPrimaryButtonStyle(),
+                            icon: const Icon(Icons.print_rounded, size: 18),
+                            label: const Text('Print Form'),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -778,6 +840,34 @@ class _AdminLocatorManagementScreenState
     );
   }
 
+  ButtonStyle _dialogSecondaryButtonStyle(BuildContext context) {
+    return OutlinedButton.styleFrom(
+      minimumSize: const Size(116, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      foregroundColor: AppTheme.dashTextPrimaryOf(context),
+      side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  ButtonStyle _dialogDangerButtonStyle(BuildContext context) {
+    return OutlinedButton.styleFrom(
+      minimumSize: const Size(116, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      foregroundColor: Colors.red.shade700,
+      side: BorderSide(color: Colors.red.shade300),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  ButtonStyle _dialogPrimaryButtonStyle() {
+    return FilledButton.styleFrom(
+      minimumSize: const Size(116, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
   Widget _detailTile(String label, String value, {bool wide = false}) {
     return SizedBox(
       width: wide ? 640 : 205,
@@ -929,7 +1019,38 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  Future<void> _load() async {
+  Future<void> _loadLocatorTypes({bool forceRefresh = false}) async {
+    try {
+      final items = await LocatorSlipDataCache.instance.listTypes(
+        includeInactive: true,
+        forceRefresh: forceRefresh,
+      );
+      if (!mounted || items.isEmpty) return;
+      setState(() => _locatorTypes = items);
+    } catch (_) {
+      // Keep built-in fallback types when configuration cannot be loaded.
+    }
+  }
+
+  Future<void> _openTypeManagement() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: const SizedBox(
+          width: 1120,
+          height: 720,
+          child: LocatorTypeManagementScreen(),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    LocatorSlipDataCache.instance.invalidateAll();
+    await _loadLocatorTypes(forceRefresh: true);
+    await _load(forceRefresh: true);
+  }
+
+  Future<void> _load({bool forceRefresh = false}) async {
     setState(() {
       _loading = true;
       _error = null;
@@ -948,17 +1069,10 @@ class _AdminLocatorManagementScreenState
       if (_requestTypeFilter != null) {
         query['request_type'] = _requestTypeFilter!.code;
       }
-      final path = Uri(
-        path: '/api/locator-slips/admin',
-        queryParameters: query.isEmpty ? null : query,
-      ).toString();
-      final res = await ApiClient.instance.get<List<dynamic>>(path);
-      final all = (res.data ?? const [])
-          .whereType<Map>()
-          .map(
-            (e) => _LocatorAdminRecord.fromJson(Map<String, dynamic>.from(e)),
-          )
-          .toList();
+      final all = (await LocatorSlipDataCache.instance.listAdminRequests(
+        query: query,
+        forceRefresh: forceRefresh,
+      )).map((e) => _LocatorAdminRecord.fromJson(e)).toList();
       final filtered = switch (_queue) {
         _LocatorAdminQueue.pendingHrAdmin =>
           all.where((e) => e.canHrReview).toList(),
@@ -985,38 +1099,34 @@ class _AdminLocatorManagementScreenState
   }
 
   Future<void> _approve(_LocatorAdminRecord item) async {
-    setState(() => _acting = true);
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/approve',
         data: const {},
       );
-      await _load();
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
       if (!mounted) return;
       _showLocatorSnack('Request approved.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Approve failed: $e');
-    } finally {
-      if (mounted) setState(() => _acting = false);
     }
   }
 
   Future<void> _reject(_LocatorAdminRecord item) async {
-    setState(() => _acting = true);
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/reject',
         data: const {},
       );
-      await _load();
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
       if (!mounted) return;
       _showLocatorSnack('Request rejected.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Reject failed: $e');
-    } finally {
-      if (mounted) setState(() => _acting = false);
     }
   }
 }
@@ -1030,6 +1140,7 @@ class _LocatorAdminRecord {
     this.requestType = LocatorRequestType.locator,
     required this.office,
     required this.reason,
+    this.attachmentName,
     required this.status,
     this.deptHeadReviewerName,
     this.deptHeadReviewedAt,
@@ -1052,6 +1163,7 @@ class _LocatorAdminRecord {
   final LocatorRequestType requestType;
   final String office;
   final String reason;
+  final String? attachmentName;
   final String status;
   final String? deptHeadReviewerName;
   final DateTime? deptHeadReviewedAt;
@@ -1112,9 +1224,20 @@ class _LocatorAdminRecord {
       employeeName: (json['employee_name'] ?? 'Employee').toString(),
       departmentName: (json['department_name'] ?? '').toString(),
       slipDate: (json['slip_date'] ?? '').toString(),
-      requestType: LocatorRequestType.fromCode(json['request_type']),
+      requestType: LocatorRequestType.fromJson({
+        'code': json['request_type'],
+        'label': json['request_type_label'],
+        'short_label': json['request_type_short_label'],
+        'location_label': json['request_type_location_label'],
+        'location_hint': json['request_type_location_hint'],
+        'dtr_slot_label': json['request_type_dtr_slot_label'],
+        'dtr_print_label': json['request_type_dtr_print_label'],
+        'requires_attachment': json['request_type_requires_attachment'],
+        'coverage_mode': json['request_type_coverage_mode'],
+      }),
       office: (json['office'] ?? '').toString(),
       reason: (json['reason'] ?? '').toString(),
+      attachmentName: _trimOrNull(json['attachment_name']),
       status: (json['status'] ?? '').toString(),
       deptHeadReviewerName: _trimOrNull(json['dept_head_reviewer_name']),
       deptHeadReviewedAt: _parseDateTime(json['dept_head_reviewed_at']),
@@ -1128,6 +1251,85 @@ class _LocatorAdminRecord {
       amOut: json['am_out'] == true,
       pmIn: json['pm_in'] == true,
       pmOut: json['pm_out'] == true,
+    );
+  }
+}
+
+class _LocatorPaginationBar extends StatelessWidget {
+  const _LocatorPaginationBar({
+    required this.page,
+    required this.pageCount,
+    required this.pageStart,
+    required this.pageEnd,
+    required this.total,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final int page;
+  final int pageCount;
+  final int pageStart;
+  final int pageEnd;
+  final int total;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final showingText = total == 0
+        ? 'Showing 0 requests'
+        : 'Showing ${pageStart + 1}-$pageEnd of $total requests';
+    final pageText = 'Page ${page + 1} of $pageCount';
+    final textStyle = TextStyle(
+      color: AppTheme.dashTextSecondaryOf(context),
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 520;
+        final info = Column(
+          crossAxisAlignment: isNarrow
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
+          children: [
+            Text(showingText, style: textStyle),
+            const SizedBox(height: 2),
+            Text(pageText, style: textStyle),
+          ],
+        );
+        final controls = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            OutlinedButton.icon(
+              onPressed: onPrevious,
+              icon: const Icon(Icons.chevron_left_rounded, size: 18),
+              label: const Text('Previous'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: onNext,
+              icon: const Icon(Icons.chevron_right_rounded, size: 18),
+              label: const Text('Next'),
+            ),
+          ],
+        );
+
+        if (isNarrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [info, const SizedBox(height: 10), controls],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: info),
+            controls,
+          ],
+        );
+      },
     );
   }
 }

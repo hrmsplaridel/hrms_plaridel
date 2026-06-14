@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -5,6 +7,7 @@ import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/config.dart';
 import 'package:hrms_plaridel/core/api/token_storage.dart';
+import 'package:hrms_plaridel/core/services/push_notification_service.dart';
 
 /// Central auth state. Uses API (JWT) instead of Supabase.
 /// Exposes current user, displayName, email, avatarPath. Call [refreshUser] after
@@ -78,6 +81,7 @@ class AuthProvider extends ChangeNotifier {
       final data = res.data;
       if (data != null) {
         _user = AppUser.fromJson(data);
+        await PushNotificationService.instance.syncTokenWithBackend();
         notifyListeners();
       }
     } on DioException catch (e) {
@@ -96,6 +100,10 @@ class AuthProvider extends ChangeNotifier {
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
         '/auth/login',
         data: {'email': email.trim(), 'password': password},
+        options: Options(
+          sendTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 12),
+        ),
       );
       final data = res.data;
       if (data == null) return 'Invalid email or password';
@@ -111,6 +119,17 @@ class AuthProvider extends ChangeNotifier {
         _user = AppUser.fromJson(userData);
       }
       await refreshUser();
+      // Do NOT await — FCM getToken() can hang indefinitely when the phone
+      // has no internet or FCM is slow. Run in background with a timeout.
+      unawaited(
+        PushNotificationService.instance
+            .syncTokenWithBackend()
+            .timeout(
+              const Duration(seconds: 10),
+              onTimeout: () {},
+            )
+            .catchError((_) {}),
+      );
       notifyListeners();
       return null;
     } on DioException catch (e) {
@@ -128,6 +147,7 @@ class AuthProvider extends ChangeNotifier {
       }
       if (e.type == DioExceptionType.connectionError ||
           e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
           e.type == DioExceptionType.receiveTimeout) {
         return 'Cannot reach server at ${ApiConfig.baseUrl}. '
             'On PC: start backend (npm start in backend/). '
@@ -171,6 +191,7 @@ class AuthProvider extends ChangeNotifier {
     _isSigningOut = true;
     notifyListeners();
     try {
+      await PushNotificationService.instance.unregisterCurrentToken();
       final refresh = await TokenStorage.instance.getRefreshToken();
       if (refresh != null && refresh.isNotEmpty) {
         try {

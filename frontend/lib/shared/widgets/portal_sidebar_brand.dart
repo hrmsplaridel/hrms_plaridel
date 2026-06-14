@@ -211,9 +211,13 @@ class DashboardAppHeaderBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hairline = AppTheme.dashHairlineOf(context);
+    final dark = AppTheme.dashIsDark(context);
     final isNarrow = MediaQuery.sizeOf(context).width < 600;
     final compact = compactActions || isNarrow;
     final barH = dashboardHeaderBarHeight(context);
+    final sidebarToggleIcon = sidebarCollapsed
+        ? Icons.keyboard_double_arrow_right_rounded
+        : Icons.keyboard_double_arrow_left_rounded;
 
     return Container(
       height: barH,
@@ -227,16 +231,35 @@ class DashboardAppHeaderBar extends StatelessWidget {
         children: [
           if (showSidebarToggle && onSidebarToggle != null) ...[
             IconButton(
-              icon: AnimatedRotation(
-                turns: sidebarCollapsed ? 0.5 : 0,
+              icon: AnimatedSwitcher(
                 duration: kDashboardSidebarAnimationDuration,
-                curve: Curves.easeInOutCubic,
-                child: const Icon(Icons.menu_rounded),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(scale: animation, child: child),
+                  );
+                },
+                child: Icon(
+                  sidebarToggleIcon,
+                  key: ValueKey<bool>(sidebarCollapsed),
+                  size: 22,
+                ),
               ),
               onPressed: onSidebarToggle,
               color: AppTheme.primaryNavy,
-              tooltip: 'Toggle sidebar',
+              tooltip: sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar',
               style: IconButton.styleFrom(
+                backgroundColor: AppTheme.primaryNavy.withValues(
+                  alpha: dark ? 0.16 : 0.08,
+                ),
+                hoverColor: AppTheme.primaryNavy.withValues(
+                  alpha: dark ? 0.24 : 0.13,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 visualDensity: VisualDensity.compact,
                 padding: const EdgeInsets.all(8),
               ),

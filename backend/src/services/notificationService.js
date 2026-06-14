@@ -1,4 +1,5 @@
 const { broadcastAppEvent } = require('../websockets/appEvents');
+const { sendPushForNotification } = require('./fcmPushService');
 
 /**
  * Global in-app notifications (header bell). DocuTracker uses docutracker_notifications
@@ -38,6 +39,9 @@ async function insertNotification(db, opts) {
     { notification: mapRowToApi(row) },
     { userIds: [row.user_id] }
   );
+  sendPushForNotification(db, row).catch((err) => {
+    console.error('[notificationService] sendPushForNotification', err);
+  });
   return row;
 }
 

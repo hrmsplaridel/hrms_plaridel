@@ -1175,30 +1175,103 @@ class _AdminHeaderCard extends StatelessWidget {
         ),
     ];
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 600;
+        final titleStyle = TextStyle(
+          color: AppTheme.dashTextPrimaryOf(context),
+          fontSize: isMobile ? 20 : 24,
+          fontWeight: FontWeight.w700,
+        );
+        final refreshButton = FilledButton.icon(
+          onPressed: reviewing ? null : onRefresh,
+          icon: const Icon(Icons.refresh_rounded),
+          label: Text(reviewing ? 'Reviewing...' : 'Refresh'),
+        );
+        final menuButton = menuActions.isEmpty
+            ? null
+            : PopupMenuButton<_HeaderMenuAction>(
+                tooltip: 'More actions',
+                enabled: !reviewing,
+                icon: const Icon(Icons.more_vert_rounded),
+                onSelected: (action) {
+                  action.onSelected();
+                },
+                itemBuilder: (context) {
+                  final entries = <PopupMenuEntry<_HeaderMenuAction>>[];
+                  for (final action in menuActions) {
+                    if (action.separatedBefore) {
+                      entries.add(const PopupMenuDivider());
+                    }
+                    entries.add(
+                      PopupMenuItem<_HeaderMenuAction>(
+                        value: action,
+                        child: Row(
+                          children: [
+                            Icon(action.icon, size: 18),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(action.label)),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+                  return entries;
+                },
+              );
+
+        if (isMobile) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: AppTheme.dashSurfaceCard(context, radius: 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ConstrainedBox(
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(child: Text('Leave Approvals', style: titleStyle)),
+                    const SizedBox(width: 10),
+                    refreshButton,
+                    if (menuButton != null) ...[
+                      const SizedBox(width: 4),
+                      menuButton,
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 6,
+                  children: [
+                    _CompactHeaderCount(value: totalRequests, label: 'loaded'),
+                    _CompactHeaderCount(
+                      value: pendingCount,
+                      label: 'pending',
+                      emphasize: true,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: AppTheme.dashSurfaceCard(context, radius: 16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 700),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Leave Approvals',
-                        style: TextStyle(
-                          color: AppTheme.dashTextPrimaryOf(context),
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      Text('Leave Approvals', style: titleStyle),
                       const SizedBox(height: 8),
                       Text(
                         'Review employee leave applications, inspect their form details, and record approval decisions.',
@@ -1227,54 +1300,47 @@ class _AdminHeaderCard extends StatelessWidget {
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              FilledButton.icon(
-                onPressed: reviewing ? null : onRefresh,
-                icon: const Icon(Icons.refresh_rounded),
-                label: Text(reviewing ? 'Reviewing...' : 'Refresh'),
               ),
-              if (menuActions.isNotEmpty) ...[
-                const SizedBox(width: 8),
-                PopupMenuButton<_HeaderMenuAction>(
-                  tooltip: 'More actions',
-                  enabled: !reviewing,
-                  icon: const Icon(Icons.more_vert_rounded),
-                  onSelected: (action) {
-                    action.onSelected();
-                  },
-                  itemBuilder: (context) {
-                    final entries = <PopupMenuEntry<_HeaderMenuAction>>[];
-                    for (final action in menuActions) {
-                      if (action.separatedBefore) {
-                        entries.add(const PopupMenuDivider());
-                      }
-                      entries.add(
-                        PopupMenuItem<_HeaderMenuAction>(
-                          value: action,
-                          child: Row(
-                            children: [
-                              Icon(action.icon, size: 18),
-                              const SizedBox(width: 10),
-                              Expanded(child: Text(action.label)),
-                            ],
-                          ),
-                        ),
-                      );
-                    }
-                    return entries;
-                  },
-                ),
-              ],
+              const SizedBox(width: 16),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  refreshButton,
+                  if (menuButton != null) ...[
+                    const SizedBox(width: 8),
+                    menuButton,
+                  ],
+                ],
+              ),
             ],
           ),
-        ],
-      ),
+        );
+      },
+    );
+  }
+}
+
+class _CompactHeaderCount extends StatelessWidget {
+  const _CompactHeaderCount({
+    required this.value,
+    required this.label,
+    this.emphasize = false,
+  });
+
+  final int value;
+  final String label;
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = emphasize
+        ? (AppTheme.dashIsDark(context)
+              ? AppTheme.primaryNavyLight
+              : AppTheme.primaryNavy)
+        : AppTheme.dashTextSecondaryOf(context);
+    return Text(
+      '$value $label',
+      style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w800),
     );
   }
 }

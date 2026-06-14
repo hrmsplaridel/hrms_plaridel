@@ -501,46 +501,47 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
     super.key,
     required this.canCancel,
     required this.canPrint,
-    required this.onClose,
     required this.onHistory,
     required this.onCancel,
     required this.onPrint,
+    this.canReject = false,
+    this.canApprove = false,
+    this.onReject,
+    this.onApprove,
   });
 
   final bool canCancel;
   final bool canPrint;
-  final VoidCallback onClose;
+  final bool canReject;
+  final bool canApprove;
   final VoidCallback onHistory;
   final VoidCallback onCancel;
   final VoidCallback onPrint;
+  final VoidCallback? onReject;
+  final VoidCallback? onApprove;
 
   @override
   Widget build(BuildContext context) {
+    final secondaryStyle = _secondaryButtonStyle(context);
+    final dangerStyle = _dangerButtonStyle(context);
+    final primaryStyle = _primaryButtonStyle();
+
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < 430) {
           return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextButton(
-                        onPressed: onClose,
-                        child: const Text('Close'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: onHistory,
-                        icon: const Icon(Icons.history_rounded, size: 18),
-                        label: const Text('History'),
-                      ),
-                    ),
-                  ],
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: onHistory,
+                    style: secondaryStyle,
+                    icon: const Icon(Icons.history_rounded, size: 18),
+                    label: const Text('History'),
+                  ),
                 ),
                 if (canCancel) ...[
                   const SizedBox(height: 8),
@@ -548,6 +549,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       onPressed: onCancel,
+                      style: dangerStyle,
                       icon: const Icon(Icons.close_rounded, size: 18),
                       label: const Text('Cancel Request'),
                     ),
@@ -559,9 +561,34 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     width: double.infinity,
                     child: FilledButton.icon(
                       onPressed: onPrint,
+                      style: primaryStyle,
                       icon: const Icon(Icons.print_rounded, size: 18),
                       label: const Text('Print'),
                     ),
+                  ),
+                ],
+                if (canReject || canApprove) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: canReject ? onReject : null,
+                          style: dangerStyle,
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          label: const Text('Reject'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: canApprove ? onApprove : null,
+                          style: primaryStyle,
+                          icon: const Icon(Icons.check_rounded, size: 18),
+                          label: const Text('Approve'),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ],
@@ -570,34 +597,81 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
         }
 
         return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              TextButton(onPressed: onClose, child: const Text('Close')),
-              OutlinedButton.icon(
-                onPressed: onHistory,
-                icon: const Icon(Icons.history_rounded, size: 18),
-                label: const Text('History'),
-              ),
-              if (canCancel)
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: SizedBox(
+            width: double.infinity,
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 10,
+              runSpacing: 10,
+              children: [
                 OutlinedButton.icon(
-                  onPressed: onCancel,
-                  icon: const Icon(Icons.close_rounded, size: 18),
-                  label: const Text('Cancel Request'),
+                  onPressed: onHistory,
+                  style: secondaryStyle,
+                  icon: const Icon(Icons.history_rounded, size: 18),
+                  label: const Text('History'),
                 ),
-              if (canPrint)
-                FilledButton.icon(
-                  onPressed: onPrint,
-                  icon: const Icon(Icons.print_rounded, size: 18),
-                  label: const Text('Print'),
-                ),
-            ],
+                if (canCancel)
+                  OutlinedButton.icon(
+                    onPressed: onCancel,
+                    style: dangerStyle,
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    label: const Text('Cancel Request'),
+                  ),
+                if (canReject)
+                  OutlinedButton.icon(
+                    onPressed: onReject,
+                    style: dangerStyle,
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    label: const Text('Reject'),
+                  ),
+                if (canApprove)
+                  FilledButton.icon(
+                    onPressed: onApprove,
+                    style: primaryStyle,
+                    icon: const Icon(Icons.check_rounded, size: 18),
+                    label: const Text('Approve'),
+                  ),
+                if (canPrint)
+                  FilledButton.icon(
+                    onPressed: onPrint,
+                    style: primaryStyle,
+                    icon: const Icon(Icons.print_rounded, size: 18),
+                    label: const Text('Print'),
+                  ),
+              ],
+            ),
           ),
         );
       },
+    );
+  }
+
+  ButtonStyle _secondaryButtonStyle(BuildContext context) {
+    return OutlinedButton.styleFrom(
+      minimumSize: const Size(116, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      foregroundColor: AppTheme.dashTextPrimaryOf(context),
+      side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  ButtonStyle _dangerButtonStyle(BuildContext context) {
+    return OutlinedButton.styleFrom(
+      minimumSize: const Size(116, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      foregroundColor: Colors.red.shade700,
+      side: BorderSide(color: Colors.red.shade300),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  ButtonStyle _primaryButtonStyle() {
+    return FilledButton.styleFrom(
+      minimumSize: const Size(116, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     );
   }
 }

@@ -549,7 +549,13 @@ class _AdminDashboardState extends State<AdminDashboard>
       _openMyProfile();
       return;
     }
-    setState(() => _selectedMenu = menu);
+    final settingsOnTop = DashboardContentNavigator.isSettingsOnTop(
+      _contentNavKey.currentState,
+    );
+    if (_selectedMenu == menu && !settingsOnTop) return;
+    if (_selectedMenu != menu) {
+      setState(() => _selectedMenu = menu);
+    }
     DashboardContentNavigator.showHome(_contentNavKey);
     if (menu == AdminMenu.docutracker) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -569,10 +575,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       return;
     }
     setState(() => _selectedMenu = AdminMenu.myProfile);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      DashboardContentNavigator.openSettings(_contentNavKey);
-    });
+    DashboardContentNavigator.openSettings(_contentNavKey);
   }
 
   void _closeMyProfile() {
@@ -753,6 +756,12 @@ class _AdminDashboardState extends State<AdminDashboard>
                             color: AppTheme.dashCanvasOf(context),
                             child: DashboardContentNavigator(
                               navigatorKey: _contentNavKey,
+                              homeCacheKey: _selectedMenu,
+                              homeRefreshKey: Object.hash(
+                                _selectedMenu,
+                                displayName,
+                                contentPadding,
+                              ),
                               homeBuilder: () => _buildContent(displayName),
                               settingsPanel: _settingsPanel(),
                               homeScrollPadding: EdgeInsets.all(contentPadding),
@@ -793,6 +802,12 @@ class _AdminDashboardState extends State<AdminDashboard>
                       color: AppTheme.dashCanvasOf(context),
                       child: DashboardContentNavigator(
                         navigatorKey: _contentNavKey,
+                        homeCacheKey: _selectedMenu,
+                        homeRefreshKey: Object.hash(
+                          _selectedMenu,
+                          displayName,
+                          contentPadding,
+                        ),
                         homeBuilder: () => _buildContent(displayName),
                         settingsPanel: _settingsPanel(),
                         homeScrollPadding: EdgeInsets.all(contentPadding),
@@ -2162,7 +2177,6 @@ class _DtrContentState extends State<_DtrContent> {
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
   /// 12 = Locator Slip Management
   int _dtrSectionIndex = 0;
-  int? _pendingDtrSectionIndex;
 
   /// When opening **Assignment** from Employees, pre-select this employee once.
   String? _prefillAssignmentEmployeeId;
@@ -2189,37 +2203,13 @@ class _DtrContentState extends State<_DtrContent> {
     if (!mounted) return;
     if (index == 0) {
       setState(() {
-        _pendingDtrSectionIndex = null;
         _dtrSectionIndex = 0;
       });
       return;
     }
-    if (_dtrSectionIndex == index && _pendingDtrSectionIndex == null) return;
-    setState(() => _pendingDtrSectionIndex = index);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _pendingDtrSectionIndex != index) return;
-      setState(() {
-        _dtrSectionIndex = index;
-        _pendingDtrSectionIndex = null;
-      });
-    });
+    if (_dtrSectionIndex == index) return;
+    setState(() => _dtrSectionIndex = index);
   }
-
-  String _dtrSectionTitle(int index) => switch (index) {
-    1 => 'Time Logs',
-    2 => 'Reports',
-    3 => 'Employees',
-    4 => 'Assignment',
-    5 => 'Department',
-    6 => 'Position',
-    7 => 'Shift',
-    8 => 'Leave Management',
-    9 => 'Holiday Management',
-    10 => 'Attendance Policy',
-    11 => 'Biometric Devices',
-    12 => 'Locator Slip Management',
-    _ => 'DTR',
-  };
 
   @override
   Widget build(BuildContext context) {
@@ -2231,7 +2221,7 @@ class _DtrContentState extends State<_DtrContent> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (_dtrSectionIndex != 0 || _pendingDtrSectionIndex != null) ...[
+              if (_dtrSectionIndex != 0) ...[
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
@@ -2245,11 +2235,7 @@ class _DtrContentState extends State<_DtrContent> {
                 ),
                 const SizedBox(height: 16),
               ],
-              if (_pendingDtrSectionIndex != null)
-                _DtrOpeningPanel(
-                  title: _dtrSectionTitle(_pendingDtrSectionIndex!),
-                )
-              else if (_dtrSectionIndex == 0) ...[
+              if (_dtrSectionIndex == 0) ...[
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2390,39 +2376,6 @@ class _DtrContentState extends State<_DtrContent> {
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-class _DtrOpeningPanel extends StatelessWidget {
-  const _DtrOpeningPanel({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minHeight: 260),
-      alignment: Alignment.center,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-            width: 32,
-            height: 32,
-            child: CircularProgressIndicator(strokeWidth: 3),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Opening $title...',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
       ),
     );
   }

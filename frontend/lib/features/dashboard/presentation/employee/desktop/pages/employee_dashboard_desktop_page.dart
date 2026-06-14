@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/pages/employee_dtr_assistant_page.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
@@ -167,10 +169,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       return;
     }
     setState(() => _selectedNavIndex = _profileNavIndex);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      DashboardContentNavigator.openSettings(_contentNavKey);
-    });
+    DashboardContentNavigator.openSettings(_contentNavKey);
   }
 
   void _closeMyProfile() {
@@ -190,7 +189,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       _openMyProfile();
       return;
     }
-    setState(() => _selectedNavIndex = index);
+    final settingsOnTop = DashboardContentNavigator.isSettingsOnTop(
+      _contentNavKey.currentState,
+    );
+    if (_selectedNavIndex == index && !settingsOnTop) return;
+    if (_selectedNavIndex != index) {
+      setState(() => _selectedNavIndex = index);
+    }
     DashboardContentNavigator.showHome(_contentNavKey);
   }
 
@@ -236,6 +241,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     if (!mounted) return;
     showLeaveFormSuccessSnackBar(context, result);
   }
+
+  void _openDtrAssistant() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const EmployeeDtrAssistantPage()),
+    );
+  }
+
+  bool get _showDtrAssistantFab =>
+      _selectedNavIndex == 1 ||
+      _selectedNavIndex == 2 ||
+      _selectedNavIndex == 3;
 
   Widget _buildEmployeeLeaveRequestForm() {
     return LeaveRequestFormScreen(
@@ -352,72 +368,94 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         onNotificationTap: _applyNotificationTapResult,
         onFileLeave: _openEmployeeLeaveRequestForm,
         onFileLocator: _openEmployeeLocatorRequestForm,
+        onDtrAssistant: _openDtrAssistant,
       );
     }
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
-      body: SafeArea(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _EmployeeSidebar(
-              railMode: true,
-              collapsed: _sidebarCollapsed,
-              showBrand: false,
-              displayName: displayName,
-              avatarPath: avatarPath,
-              selectedIndex: _selectedNavIndex,
-              onTap: (i) {
-                _onNavSelected(i);
-                _prefetchDocuTrackerNotificationsIfNeeded(i);
-              },
-            ),
-            Expanded(
-              child: Column(
-                children: [
-                  DashboardAppHeaderBar(
-                    showBrand: false,
-                    showSidebarToggle: true,
-                    sidebarCollapsed: _sidebarCollapsed,
-                    onSidebarToggle: () =>
-                        setState(() => _sidebarCollapsed = !_sidebarCollapsed),
-                    compactActions: width < 600,
-                    onViewAllNotifications: _handleOpenNotifications,
-                    onNotificationTap: _applyNotificationTapResult,
-                    trailing: DashboardAccountMenuButton(
-                      avatarPath: avatarPath,
-                      compact: width < 600,
-                      tooltip: displayName,
-                      onProfile: () => _openMyProfile(),
-                    ),
-                  ),
-                  Expanded(
-                    child: ColoredBox(
-                      color: AppTheme.dashCanvasOf(context),
-                      child: DashboardContentNavigator(
-                        navigatorKey: _contentNavKey,
-                        homeBuilder: () => _employeeMainChild(
-                          displayName: displayName,
-                          useMobileLeaveFab: useMobileLeaveFab,
-                          useMobileLocatorFab: useMobileLocatorFab,
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _EmployeeSidebar(
+                  railMode: true,
+                  collapsed: _sidebarCollapsed,
+                  showBrand: false,
+                  displayName: displayName,
+                  avatarPath: avatarPath,
+                  selectedIndex: _selectedNavIndex,
+                  onTap: (i) {
+                    _onNavSelected(i);
+                    _prefetchDocuTrackerNotificationsIfNeeded(i);
+                  },
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      DashboardAppHeaderBar(
+                        showBrand: false,
+                        showSidebarToggle: true,
+                        sidebarCollapsed: _sidebarCollapsed,
+                        onSidebarToggle: () => setState(
+                          () => _sidebarCollapsed = !_sidebarCollapsed,
                         ),
-                        settingsPanel: _settingsPanel(),
-                        homeScrollPadding: employeeMainScrollPadding(context),
-                        settingsScrollPadding: const EdgeInsets.fromLTRB(
-                          12,
-                          8,
-                          12,
-                          28,
+                        compactActions: width < 600,
+                        onViewAllNotifications: _handleOpenNotifications,
+                        onNotificationTap: _applyNotificationTapResult,
+                        trailing: DashboardAccountMenuButton(
+                          avatarPath: avatarPath,
+                          compact: width < 600,
+                          tooltip: displayName,
+                          onProfile: () => _openMyProfile(),
                         ),
                       ),
-                    ),
+                      Expanded(
+                        child: ColoredBox(
+                          color: AppTheme.dashCanvasOf(context),
+                          child: DashboardContentNavigator(
+                            navigatorKey: _contentNavKey,
+                            homeCacheKey: _selectedNavIndex,
+                            homeRefreshKey: Object.hash(
+                              _selectedNavIndex,
+                              _leaveNavKey,
+                              displayName,
+                              useMobileLeaveFab,
+                              useMobileLocatorFab,
+                            ),
+                            homeBuilder: () => _employeeMainChild(
+                              displayName: displayName,
+                              useMobileLeaveFab: useMobileLeaveFab,
+                              useMobileLocatorFab: useMobileLocatorFab,
+                            ),
+                            settingsPanel: _settingsPanel(),
+                            homeScrollPadding: employeeMainScrollPadding(
+                              context,
+                            ),
+                            settingsScrollPadding: const EdgeInsets.fromLTRB(
+                              12,
+                              8,
+                              12,
+                              28,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          if (_showDtrAssistantFab)
+            DraggableDtrAssistantLauncher(
+              onPressed: _openDtrAssistant,
+              initialRight: 24,
+              initialBottom: 24,
+            ),
+        ],
       ),
     );
   }
@@ -2162,6 +2200,8 @@ class _EmployeeAttendanceContentState
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
   int? _selectedDay;
+  bool _didApplyMobileDefault = false;
+  String _mobileAttendanceMode = 'today';
 
   int get _lastDayOfSelectedMonth {
     final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
@@ -2272,6 +2312,193 @@ class _EmployeeAttendanceContentState
     return '${d.day} $weekday';
   }
 
+  void _selectDay(int? day, {String mobileMode = 'day'}) {
+    setState(() {
+      _mobileAttendanceMode = day == null ? 'monthly' : mobileMode;
+      _selectedDay = day;
+    });
+    _load();
+  }
+
+  void _selectToday() {
+    final today = _todayDateOnly;
+    setState(() {
+      _mobileAttendanceMode = 'today';
+      _selectedMonth = today.month;
+      _selectedYear = today.year;
+      _selectedDay = today.day;
+    });
+    _load();
+  }
+
+  void _applyMobileDefaultIfNeeded() {
+    if (_didApplyMobileDefault || _selectedDay != null) return;
+    _didApplyMobileDefault = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _selectToday();
+    });
+  }
+
+  Widget _buildMobileModeSelector() {
+    final mode = _selectedDay == null ? 'monthly' : _mobileAttendanceMode;
+    return SegmentedButton<String>(
+      segments: const [
+        ButtonSegment(
+          value: 'today',
+          icon: Icon(Icons.today_rounded, size: 16),
+          label: Text('Today'),
+        ),
+        ButtonSegment(
+          value: 'day',
+          icon: Icon(Icons.calendar_view_day_rounded, size: 16),
+          label: Text('Day'),
+        ),
+        ButtonSegment(
+          value: 'monthly',
+          icon: Icon(Icons.calendar_month_rounded, size: 16),
+          label: Text('Monthly'),
+        ),
+      ],
+      selected: {mode},
+      showSelectedIcon: false,
+      style: ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        textStyle: WidgetStatePropertyAll(
+          AppTheme.dashFieldTextStyle(
+            context,
+          ).copyWith(fontSize: 12, fontWeight: FontWeight.w700),
+        ),
+      ),
+      onSelectionChanged: (values) {
+        final value = values.first;
+        if (value == 'today') {
+          _selectToday();
+        } else if (value == 'monthly') {
+          _selectDay(null);
+        } else if (value == 'day') {
+          final today = _todayDateOnly;
+          final day =
+              _selectedDay ??
+              (_selectedYear == today.year && _selectedMonth == today.month
+                  ? today.day
+                  : 1);
+          _selectDay(day, mobileMode: 'day');
+        }
+      },
+    );
+  }
+
+  Widget _buildMobileMonthCalendar() {
+    if (_selectedDay == null || _mobileAttendanceMode == 'monthly') {
+      return const SizedBox.shrink();
+    }
+    const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final firstDay = DateTime(_selectedYear, _selectedMonth, 1);
+    final leadingBlanks = firstDay.weekday - 1;
+    final maxSelectableDay = _maxSelectableCalendarDay;
+    final totalCells = ((leadingBlanks + _lastDayOfSelectedMonth + 6) ~/ 7) * 7;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              for (final label in weekdayLabels)
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: totalCells,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              mainAxisSpacing: 6,
+              crossAxisSpacing: 6,
+              childAspectRatio: 1.15,
+            ),
+            itemBuilder: (context, index) {
+              final day = index - leadingBlanks + 1;
+              if (day < 1 || day > _lastDayOfSelectedMonth) {
+                return const SizedBox.shrink();
+              }
+              final selected = _selectedDay == day;
+              final disabled = day > maxSelectableDay;
+              final isToday =
+                  _selectedYear == _todayDateOnly.year &&
+                  _selectedMonth == _todayDateOnly.month &&
+                  day == _todayDateOnly.day;
+              final bg = selected
+                  ? AppTheme.primaryNavy
+                  : isToday
+                  ? AppTheme.primaryNavy.withValues(alpha: 0.1)
+                  : AppTheme.dashMutedSurfaceOf(context);
+              final fg = selected
+                  ? Colors.white
+                  : disabled
+                  ? AppTheme.dashTextSecondaryOf(
+                      context,
+                    ).withValues(alpha: 0.45)
+                  : AppTheme.dashTextPrimaryOf(context);
+
+              return Material(
+                color: bg,
+                borderRadius: BorderRadius.circular(9),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(9),
+                  onTap: disabled
+                      ? null
+                      : () => _selectDay(day, mobileMode: 'day'),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(
+                        color: selected || isToday
+                            ? AppTheme.primaryNavy.withValues(alpha: 0.65)
+                            : AppTheme.dashHairlineOf(context),
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '$day',
+                        style: TextStyle(
+                          color: fg,
+                          fontSize: 13,
+                          fontWeight: selected || isToday
+                              ? FontWeight.w800
+                              : FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMobileAttendanceList(List<TimeRecord> records) {
     return EmployeeAttendanceMobileList(
       records: records,
@@ -2322,6 +2549,7 @@ class _EmployeeAttendanceContentState
         LayoutBuilder(
           builder: (context, constraints) {
             final isNarrow = constraints.maxWidth < 520;
+            if (isNarrow) _applyMobileDefaultIfNeeded();
             final monthWidth = isNarrow ? 150.0 : 172.0;
             final yearWidth = isNarrow ? 100.0 : 112.0;
             final dayWidth = isNarrow ? 115.0 : 144.0;
@@ -2375,6 +2603,9 @@ class _EmployeeAttendanceContentState
                   if (v != null) {
                     setState(() {
                       _selectedMonth = v;
+                      if (isNarrow && _mobileAttendanceMode == 'today') {
+                        _mobileAttendanceMode = 'day';
+                      }
                       if (_selectedDay != null &&
                           _selectedDay! > _lastDayOfSelectedMonth) {
                         _selectedDay = null;
@@ -2424,6 +2655,9 @@ class _EmployeeAttendanceContentState
                   if (v != null) {
                     setState(() {
                       _selectedYear = v;
+                      if (isNarrow && _mobileAttendanceMode == 'today') {
+                        _mobileAttendanceMode = 'day';
+                      }
                       if (_selectedDay != null &&
                           _selectedDay! > _lastDayOfSelectedMonth) {
                         _selectedDay = null;
@@ -2508,9 +2742,10 @@ class _EmployeeAttendanceContentState
               onPressed: () {
                 final now = DateTime.now();
                 setState(() {
+                  _mobileAttendanceMode = isNarrow ? 'today' : 'monthly';
                   _selectedMonth = now.month;
                   _selectedYear = now.year;
-                  _selectedDay = null;
+                  _selectedDay = isNarrow ? now.day : null;
                 });
                 _load();
               },
@@ -2530,16 +2765,20 @@ class _EmployeeAttendanceContentState
             );
 
             if (isNarrow) {
-              return Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                alignment: WrapAlignment.start,
-                crossAxisAlignment: WrapCrossAlignment.center,
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  monthField(),
-                  yearField(),
-                  dayField(),
-                  refreshButton,
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.start,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [monthField(), yearField(), refreshButton],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildMobileModeSelector(),
+                  const SizedBox(height: 12),
+                  _buildMobileMonthCalendar(),
                 ],
               );
             }
