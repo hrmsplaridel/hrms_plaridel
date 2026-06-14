@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -43,6 +44,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   ];
   String _selectedModelProfile = 'tools_ollama';
   bool _sending = false;
+  final _inputController = TextEditingController();
+  CancelToken? _cancelToken;
 
   @override
   void initState() {
@@ -53,6 +56,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _inputController.dispose();
+    _cancelToken?.cancel();
     super.dispose();
   }
 
@@ -80,6 +85,11 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     }
   }
 
+  void _stop() {
+    _cancelToken?.cancel('Cancelled by user');
+    setState(() => _sending = false);
+  }
+
   Future<void> _send(String text, {String? intent}) async {
     if (_sending) return;
     setState(() {
@@ -87,15 +97,29 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       _sending = true;
     });
     _scrollToBottom();
+    _cancelToken = CancelToken();
 
     try {
       final reply = await _api.sendMessage(
         text,
         intent: intent,
         modelProfile: _selectedModelProfile,
+        cancelToken: _cancelToken,
       );
       if (!mounted) return;
       setState(() => _messages.add(reply));
+    } on DioException catch (e) {
+      if (!mounted) return;
+      if (CancelToken.isCancel(e)) return;
+      setState(
+        () => _messages.add(
+          DtrAssistantMessage(
+            role: 'assistant',
+            content: userFacingApiError(e),
+            createdAt: DateTime.now(),
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(
@@ -160,7 +184,23 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
                           ? CrossAxisAlignment.end
                           : CrossAxisAlignment.start,
                       children: [
-                        DtrAssistantMessageBubble(message: message),
+                        DtrAssistantMessageBubble(
+                          message: message,
+                          onEdit: message.isUser
+                              ? () {
+                                  _inputController.text = message.content;
+                                  setState(() {
+                                    final index = _messages.indexOf(message);
+                                    if (index != -1) {
+                                      _messages.removeRange(
+                                        index,
+                                        _messages.length,
+                                      );
+                                    }
+                                  });
+                                }
+                              : null,
+                        ),
                         if (!message.isUser && message.suggestions.isNotEmpty)
                           _AssistantSuggestionChips(
                             enabled: !_sending,
@@ -179,11 +219,14 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
             ),
             DtrAssistantInputBar(
               enabled: !_sending,
+              sending: _sending,
               modelProfiles: _modelProfiles,
               selectedModelProfile: _selectedModelProfile,
               onModelChanged: (id) =>
                   setState(() => _selectedModelProfile = id),
               onSend: _send,
+              onStop: _stop,
+              controller: _inputController,
             ),
           ],
         ),

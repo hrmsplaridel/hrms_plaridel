@@ -146,6 +146,28 @@ function parseAssistantDateRange(message, options = {}) {
   }
 
   const monthNames = Object.keys(MONTHS).join('|');
+  const markedMonthDay = text.match(
+    new RegExp(
+      `\\b(?:on|sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\\s+(${monthNames})\\s+(\\d{1,2})(?:,?\\s*(20\\d{2}))?\\b`
+    )
+  );
+  if (markedMonthDay) {
+    const currentYear = Number(today.slice(0, 4));
+    const year = Number(markedMonthDay[3] || currentYear);
+    const date = dateFromParts(year, MONTHS[markedMonthDay[1]], Number(markedMonthDay[2]));
+    return { label: date, startDate: date, endDate: date };
+  }
+
+  const markedDayOnly = text.match(
+    /\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+(\d{1,2})(?:st|nd|rd|th)?\b(?!\s*(?:day|days|adlaw|ka adlaw))/i
+  );
+  if (markedDayOnly) {
+    const currentYear = Number(today.slice(0, 4));
+    const currentMonth = Number(today.slice(5, 7));
+    const date = dateFromParts(currentYear, currentMonth, Number(markedDayOnly[1]));
+    return { label: date, startDate: date, endDate: date };
+  }
+
   const monthRange = text.match(
     new RegExp(
       `\\b(${monthNames})\\s+(\\d{1,2})(?:\\s*(?:to|until|through|-|–)\\s*(?:(${monthNames})\\s+)?(\\d{1,2}))?(?:,?\\s*(20\\d{2}))?\\b`
@@ -167,12 +189,25 @@ function parseAssistantDateRange(message, options = {}) {
     };
   }
 
-  if (/\b(tomorrow|ugma|bukas)\b/.test(text)) {
+  const monthOnly = text.match(
+    new RegExp(
+      `\\b(?:in|sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung|last\\s+)?(${monthNames})(?:\\s+(?:nga\\s+)?(?:month|bulan|bulana|buwan|buwana))?(?:,?\\s*(20\\d{2}))?\\b`
+    )
+  );
+  if (monthOnly && !(monthOnly[1] === 'may' && /\bmay\s+(pasok|duty|trabaho|work)\b/.test(text))) {
+    const currentYear = Number(today.slice(0, 4));
+    const year = Number(monthOnly[2] || currentYear);
+    const month = MONTHS[monthOnly[1]];
+    const startDate = dateFromParts(year, month, 1);
+    return { label: `${monthOnly[1]} ${year}`, startDate, endDate: endOfMonth(startDate) };
+  }
+
+  if (/\b(tomorrow|ugma|bukas|next day|following day|sunod adlaw|sunod nga adlaw|kinabukasan)\b/.test(text)) {
     const date = addDays(today, 1);
     return { label: 'tomorrow', startDate: date, endDate: date };
   }
 
-  if (/\b(yesterday|kagahapon|gahapon|kahapon)\b/.test(text)) {
+  if (/\b(yesterday|kagahapon|gahapon|kahapon|previous day|day before|miaging adlaw|niaging adlaw|nakaraang araw)\b/.test(text)) {
     const date = addDays(today, -1);
     return { label: 'yesterday', startDate: date, endDate: date };
   }
@@ -187,7 +222,9 @@ function parseAssistantDateRange(message, options = {}) {
   }
 
   const previousWeekday = text.match(
-    new RegExp(`\\b(?:last|previous|niaging|miaging)\\s+(${weekdayNames})\\b`)
+    new RegExp(
+      `\\b(?:last|previous|niaging|miaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|nakaraang)\\s+(?:niaging\\s+|miaging\\s+)?(${weekdayNames})\\b`
+    )
   );
   if (previousWeekday) {
     const date = weekdayDate(today, WEEKDAYS[previousWeekday[1]], 'previous');
@@ -207,13 +244,13 @@ function parseAssistantDateRange(message, options = {}) {
     return { label: 'next week', startDate, endDate: addDays(startDate, 6) };
   }
 
-  if (/\b(last month|previous month|niaging buwan|miaging buwan|niaging bulan|miaging bulan)\b/.test(text)) {
+  if (/\b(last month|previous month|niaging buwan|miaging buwan|niaging bulan|miaging bulan|niaging bulana|miaging bulana)\b/.test(text)) {
     const lastMonth = addMonths(today, -1);
     const startDate = `${lastMonth.slice(0, 7)}-01`;
     return { label: 'last month', startDate, endDate: endOfMonth(lastMonth) };
   }
 
-  if (/\b(next month|sunod buwan|sunod nga buwan|sunod bulan|sunod nga bulan)\b/.test(text)) {
+  if (/\b(next month|sunod buwan|sunod nga buwan|sunod bulan|sunod nga bulan|sunod bulana|sunod nga bulana)\b/.test(text)) {
     const nextMonth = addMonths(today, 1);
     const startDate = `${nextMonth.slice(0, 7)}-01`;
     return { label: 'next month', startDate, endDate: endOfMonth(nextMonth) };
@@ -224,7 +261,7 @@ function parseAssistantDateRange(message, options = {}) {
     return { label: 'this week', startDate, endDate: addDays(startDate, 6) };
   }
 
-  if (/\b(this month|current month|karong bulana|karon nga bulan|karong buwan|karon nga buwan|month|bulan|buwan)\b/.test(text)) {
+  if (/\b(this month|current month|aning bulana|ani nga bulan|niining bulana|niini nga bulan|karong bulana|karon nga bulan|karong buwan|karon nga buwan|month|bulan|bulana|buwan|buwana)\b/.test(text)) {
     const startDate = `${today.slice(0, 7)}-01`;
     return { label: 'this month', startDate, endDate: endOfMonth(today) };
   }

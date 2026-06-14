@@ -4,12 +4,14 @@ class DtrAssistantMessage {
     required this.content,
     required this.createdAt,
     this.suggestions = const <DtrAssistantSuggestion>[],
+    this.attachments = const <DtrAssistantAttachment>[],
   });
 
   final String role;
   final String content;
   final DateTime createdAt;
   final List<DtrAssistantSuggestion> suggestions;
+  final List<DtrAssistantAttachment> attachments;
 
   bool get isUser => role == 'user';
 
@@ -19,11 +21,13 @@ class DtrAssistantMessage {
       content: content,
       createdAt: DateTime.now(),
       suggestions: const <DtrAssistantSuggestion>[],
+      attachments: const <DtrAssistantAttachment>[],
     );
   }
 
   factory DtrAssistantMessage.fromJson(Map<String, dynamic> json) {
     final rawSuggestions = json['suggestions'];
+    final rawAttachments = json['attachments'];
     return DtrAssistantMessage(
       role: json['role']?.toString() ?? 'assistant',
       content: json['content']?.toString() ?? '',
@@ -41,6 +45,43 @@ class DtrAssistantMessage {
                 .where((item) => item.text.isNotEmpty)
                 .toList(growable: false)
           : const <DtrAssistantSuggestion>[],
+      attachments: rawAttachments is List
+          ? rawAttachments
+                .whereType<Map>()
+                .map(
+                  (item) => DtrAssistantAttachment.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .where(
+                  (item) =>
+                      item.filename.isNotEmpty && item.contentBase64.isNotEmpty,
+                )
+                .toList(growable: false)
+          : const <DtrAssistantAttachment>[],
+    );
+  }
+}
+
+class DtrAssistantAttachment {
+  const DtrAssistantAttachment({
+    required this.filename,
+    required this.mimeType,
+    required this.contentBase64,
+    this.encoding = 'base64',
+  });
+
+  final String filename;
+  final String mimeType;
+  final String encoding;
+  final String contentBase64;
+
+  factory DtrAssistantAttachment.fromJson(Map<String, dynamic> json) {
+    return DtrAssistantAttachment(
+      filename: json['filename']?.toString() ?? '',
+      mimeType: json['mimeType']?.toString() ?? 'application/octet-stream',
+      encoding: json['encoding']?.toString() ?? 'base64',
+      contentBase64: json['contentBase64']?.toString() ?? '',
     );
   }
 }

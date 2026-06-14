@@ -2,40 +2,33 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
 
-class DtrAssistantInputBar extends StatefulWidget {
+class DtrAssistantInputBar extends StatelessWidget {
   const DtrAssistantInputBar({
     super.key,
     required this.enabled,
+    required this.sending,
     required this.modelProfiles,
     required this.selectedModelProfile,
     required this.onModelChanged,
     required this.onSend,
+    required this.onStop,
+    required this.controller,
   });
 
   final bool enabled;
+  final bool sending;
   final List<DtrAssistantModelProfile> modelProfiles;
   final String selectedModelProfile;
   final ValueChanged<String> onModelChanged;
   final ValueChanged<String> onSend;
-
-  @override
-  State<DtrAssistantInputBar> createState() => _DtrAssistantInputBarState();
-}
-
-class _DtrAssistantInputBarState extends State<DtrAssistantInputBar> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  final VoidCallback onStop;
+  final TextEditingController controller;
 
   void _send() {
-    final text = _controller.text.trim();
-    if (text.isEmpty || !widget.enabled) return;
-    _controller.clear();
-    widget.onSend(text);
+    final text = controller.text.trim();
+    if (text.isEmpty || !enabled) return;
+    controller.clear();
+    onSend(text);
   }
 
   @override
@@ -52,8 +45,8 @@ class _DtrAssistantInputBarState extends State<DtrAssistantInputBar> {
         children: [
           Expanded(
             child: TextField(
-              controller: _controller,
-              enabled: widget.enabled,
+              controller: controller,
+              enabled: enabled,
               minLines: 1,
               maxLines: 4,
               textInputAction: TextInputAction.send,
@@ -75,17 +68,24 @@ class _DtrAssistantInputBarState extends State<DtrAssistantInputBar> {
           ),
           const SizedBox(width: 8),
           _AssistantModelSelector(
-            enabled: widget.enabled,
-            profiles: widget.modelProfiles,
-            selectedId: widget.selectedModelProfile,
-            onChanged: widget.onModelChanged,
+            enabled: enabled,
+            profiles: modelProfiles,
+            selectedId: selectedModelProfile,
+            onChanged: onModelChanged,
           ),
           const SizedBox(width: 8),
-          IconButton.filled(
-            tooltip: 'Send',
-            onPressed: widget.enabled ? _send : null,
-            icon: const Icon(Icons.send_rounded),
-          ),
+          if (sending)
+            IconButton.filled(
+              tooltip: 'Stop generating',
+              onPressed: onStop,
+              icon: const Icon(Icons.stop_rounded),
+            )
+          else
+            IconButton.filled(
+              tooltip: 'Send',
+              onPressed: enabled ? _send : null,
+              icon: const Icon(Icons.send_rounded),
+            ),
         ],
       ),
     );

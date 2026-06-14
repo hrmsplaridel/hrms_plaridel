@@ -11,6 +11,7 @@ class DtrAssistantApi {
     String message, {
     String? intent,
     String? modelProfile,
+    CancelToken? cancelToken,
   }) async {
     final res = await _client.post<Map<String, dynamic>>(
       '/api/dtr-assistant/chat',
@@ -19,6 +20,7 @@ class DtrAssistantApi {
         if (intent != null) 'intent': intent,
         if (modelProfile != null) 'modelProfile': modelProfile,
       },
+      cancelToken: cancelToken,
       // Ollama can take up to 90s to generate a free-form answer locally.
       options: Options(receiveTimeout: const Duration(seconds: 120)),
     );
