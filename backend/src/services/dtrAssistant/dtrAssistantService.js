@@ -18,8 +18,14 @@ const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormali
 const {
   buildDtrAssistantDirectMessages,
   buildDtrAssistantIntentMessages,
+  buildDtrAssistantToolPlanMessages,
   buildDtrAssistantToolAnswerMessages,
 } = require('./dtrAssistantPrompt');
+const {
+  addDays,
+  parseAssistantDateRange,
+  todayInHrmsTimezone,
+} = require('../../utils/dateRangeParser');
 
 const MAX_ASSISTANT_REPLY_CHARS = 900;
 
@@ -128,9 +134,49 @@ function buildSources(context) {
 }
 
 function compactAssistantContent(content) {
-  const text = String(content || '').replace(/\s+/g, ' ').trim();
+  const text = String(content || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
   if (text.length <= MAX_ASSISTANT_REPLY_CHARS) return text;
   return `${text.slice(0, MAX_ASSISTANT_REPLY_CHARS - 3).trim()}...`;
+}
+
+function isStructuredDtrIntent(intent) {
+  return (
+    intent === 'today_dtr' ||
+    intent === 'missing_logs' ||
+    /^dtr_/.test(String(intent || ''))
+  );
+}
+
+function isLeaveIntent(intent) {
+  const value = String(intent || '');
+  return (
+    value === 'leave_balance' ||
+    value === 'pending_leave_requests' ||
+    value === 'approved_leave_requests' ||
+    value === 'rejected_leave_requests' ||
+    value === 'latest_leave_request' ||
+    /^leave_/.test(value)
+  );
+}
+
+function memoryLeaveTypeForIntent(intent, effectiveText, context, memory) {
+  if (!isLeaveIntent(intent)) return null;
+  return (
+    requestedLeaveType(effectiveText) ||
+    inferLeaveTypeFromContext(effectiveText, context) ||
+    memory?.leaveType ||
+    null
+  );
+}
+
+function shouldSkipToolRefinement(intent) {
+  return isStructuredDtrIntent(intent) || isLeaveIntent(intent);
 }
 
 function normalizedText(value) {
@@ -166,6 +212,42 @@ function inferLeaveTypeFromContext(text, context) {
 }
 
 function buildSuggestions(intent) {
+  if (
+    intent === 'today_dtr' ||
+    intent === 'missing_logs' ||
+    intent === 'dtr_daily_record' ||
+    intent === 'dtr_status_explanation'
+  ) {
+    return [
+      { text: 'Show missing logs this week', intent: 'dtr_missing_logs' },
+      { text: 'Why is my DTR incomplete?', intent: 'dtr_missing_log_reason' },
+      { text: 'Check locator coverage', intent: 'dtr_locator_coverage_check' },
+    ];
+  }
+  if (
+    intent === 'dtr_missing_logs' ||
+    intent === 'dtr_missing_log_reason' ||
+    intent === 'dtr_absent_summary'
+  ) {
+    return [
+      { text: 'How do I fix missing logs?', intent: 'dtr_correction_guidance' },
+      { text: 'Check leave coverage', intent: 'dtr_leave_coverage_check' },
+      { text: 'Check locator coverage', intent: 'dtr_locator_coverage_check' },
+    ];
+  }
+  if (
+    intent === 'dtr_range_summary' ||
+    intent === 'dtr_late_summary' ||
+    intent === 'dtr_late_reason' ||
+    intent === 'dtr_undertime_summary' ||
+    intent === 'dtr_overtime_summary'
+  ) {
+    return [
+      { text: 'Show all late records this month', intent: 'dtr_late_summary' },
+      { text: 'Show undertime this month', intent: 'dtr_undertime_summary' },
+      { text: 'How do I fix DTR issues?', intent: 'dtr_correction_guidance' },
+    ];
+  }
   if (intent === 'leave_availability_check') {
     return [
       { text: 'Check leave requirements', intent: 'leave_requirements' },
@@ -228,13 +310,88 @@ function buildSuggestions(intent) {
   ];
 }
 
-function buildAssistantResult({ content, provider, model, mode, context, intent }) {
+function csvCell(value) {
+  const text = String(value ?? '');
+  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function buildDtrCsvAttachment(context) {
+  const recordsByDate = new Map(
+    (context.dtr_records || []).map((record) => [String(record.attendance_date).slice(0, 10), record])
+  );
+  const calendarDays = context.dtr_calendar_days || [];
+  const dates =
+    calendarDays.length > 0
+      ? calendarDays.map((day) => day.attendance_date)
+      : [...recordsByDate.keys()].sort();
+  const header = [
+    'Date',
+    'Shift',
+    'Schedule',
+    'Grace Minutes',
+    'Holiday',
+    'Status',
+    'AM In',
+    'AM Out',
+    'PM In',
+    'PM Out',
+    'Total Hours',
+    'Late Minutes',
+    'Undertime Minutes',
+    'Overtime Minutes',
+    'Leave Type',
+    'Source',
+    'Remarks',
+  ];
+  const calendarByDate = new Map(calendarDays.map((day) => [day.attendance_date, day]));
+  const rows = dates.map((date) => {
+    const record = recordsByDate.get(date) || {};
+    const day = calendarByDate.get(date) || {};
+    return [
+      date,
+      day.shift_name || '',
+      day.start_time || day.end_time ? `${day.start_time || ''}-${day.end_time || ''}` : '',
+      day.grace_period_minutes ?? '',
+      day.holiday_name ? `${day.holiday_name} (${day.holiday_coverage || 'whole_day'})` : record.holiday_name || '',
+      record.status || (day.shift_id ? 'no_record' : 'no_schedule'),
+      record.time_in || '',
+      record.break_out || '',
+      record.break_in || '',
+      record.time_out || '',
+      record.total_hours ?? '',
+      record.late_minutes ?? '',
+      record.undertime_minutes ?? '',
+      record.overtime_minutes ?? '',
+      record.leave_type || '',
+      record.source || '',
+      record.remarks || '',
+    ];
+  });
+  const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
+  const start = context.date_range?.startDate || 'dtr';
+  const end = context.date_range?.endDate || start;
+  return {
+    filename: `dtr_export_${start}_${end}.csv`,
+    mimeType: 'text/csv',
+    encoding: 'base64',
+    contentBase64: Buffer.from(csv, 'utf8').toString('base64'),
+  };
+}
+
+function buildAttachments(intent, context) {
+  if (intent === 'dtr_export_guidance') return [buildDtrCsvAttachment(context)];
+  return [];
+}
+
+function buildAssistantResult({ content, provider, model, mode, context, intent, attachments }) {
   return {
     message: {
       role: 'assistant',
       content: compactAssistantContent(content),
       createdAt: new Date().toISOString(),
       suggestions: buildSuggestions(intent),
+      attachments: attachments || [],
     },
     provider,
     model,
@@ -253,14 +410,72 @@ function parseIntentClassifierResponse(content) {
     return normalizeIntent(parsed.intent);
   } catch (_) {
     const match = text.match(
-      /\b(today_dtr|missing_logs|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|unknown)\b/i
+      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|unknown)\b/i
     );
     return normalizeIntent(match?.[1]);
   }
 }
 
+function extractJsonObject(content) {
+  const text = String(content || '').trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch (__) {
+      return null;
+    }
+  }
+}
+
+function isIsoDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+function normalizePlannedDateRange(dateRange) {
+  if (!dateRange || typeof dateRange !== 'object') return null;
+  const startDate = String(dateRange.startDate || '').slice(0, 10);
+  const endDate = String(dateRange.endDate || startDate).slice(0, 10);
+  if (!isIsoDate(startDate) || !isIsoDate(endDate)) return null;
+  if (startDate > endDate) return null;
+  return {
+    label: String(dateRange.label || (startDate === endDate ? startDate : `${startDate} to ${endDate}`)).trim(),
+    startDate,
+    endDate,
+  };
+}
+
+function parseToolPlanResponse(content) {
+  const parsed = extractJsonObject(content);
+  if (!parsed) return null;
+  return {
+    intent: normalizeIntent(parsed.intent),
+    dateRange: normalizePlannedDateRange(parsed.dateRange),
+    normalizedQuestion:
+      typeof parsed.normalizedQuestion === 'string'
+        ? parsed.normalizedQuestion.slice(0, 500).trim()
+        : '',
+  };
+}
+
+function dateRangeLooksDefaultToday(dateRange, text) {
+  if (!dateRange || dateRange.label !== 'today') return false;
+  return !/\b(today|karong adlawa|karon nga adlaw|ngayon)\b/i.test(String(text || ''));
+}
+
+function shouldAskAiForToolPlan({ resolvedIntent, dateRange, text, profile }) {
+  if (!profile || profile.engine === 'direct') return false;
+  if (!resolvedIntent) return true;
+  if (dateRangeLooksDefaultToday(dateRange, text)) return true;
+  return false;
+}
+
 function fallbackContent() {
-  return 'I can help only with your DTR, missing logs, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave eligibility, leave form guidance, leave DTR impact, approval tracking, leave summaries, leave types, and locator slip status. Try asking about your DTR today, missing logs this week, sick/vacation leave balance, pending leave requests, or locator status.';
+  return 'I can help only with your DTR, missing logs, late/undertime/overtime, absences, DTR correction guidance, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave eligibility, leave form guidance, leave DTR impact, approval tracking, leave summaries, leave types, and locator slip status.';
 }
 
 function hasExplicitHrmsTopic(text) {
@@ -270,13 +485,52 @@ function hasExplicitHrmsTopic(text) {
 }
 
 function isFollowUpQuestion(text) {
-  return /\b(it|that|this|one|same|about|how about|what about|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?)\b/.test(
+  return /\b(it|that|this|one|same|about|how about|what about|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?)\b/.test(
     lower(text)
   );
 }
 
+function memoryRelativeDate(text, memory) {
+  if (!memory?.dateRange?.startDate) return null;
+  const value = lower(text);
+  if (/\b(next day|following day|sunod adlaw|sunod nga adlaw|kinabukasan)\b/.test(value)) {
+    return addDays(memory.dateRange.startDate, 1);
+  }
+  if (/\b(previous day|day before|miaging adlaw|niaging adlaw|nakaraang araw)\b/.test(value)) {
+    return addDays(memory.dateRange.startDate, -1);
+  }
+  if (/\b(same day|same date|that day|that date|ana|ato|adto|niya)\b/.test(value)) {
+    return memory.dateRange.startDate;
+  }
+  return null;
+}
+
 function resolveIntentFromMemory(text, memory) {
   if (!memory || hasExplicitHrmsTopic(text) || !isFollowUpQuestion(text)) return null;
+  if (/\b(fix|correct|correction|buhaton|gagawin|resolve)\b/.test(lower(text))) {
+    return 'dtr_correction_guidance';
+  }
+  if (/\b(locator|pass slip|wfh|official business|ob|covered)\b/.test(lower(text))) {
+    return 'dtr_locator_coverage_check';
+  }
+  if (/\b(leave|on leave|covered)\b/.test(lower(text))) {
+    return 'dtr_leave_coverage_check';
+  }
+  if (/\b(late|tardy)\b/.test(lower(text))) {
+    return 'dtr_late_summary';
+  }
+  if (/\b(undertime|under time)\b/.test(lower(text))) {
+    return 'dtr_undertime_summary';
+  }
+  if (/\b(overtime|over time|ot)\b/.test(lower(text))) {
+    return 'dtr_overtime_summary';
+  }
+  if (/\b(absent|absence|no record|walay record)\b/.test(lower(text))) {
+    return 'dtr_absent_summary';
+  }
+  if (/\b(missing|incomplete|kulang|kuwang|what.*missing|unsa.*kulang)\b/.test(lower(text))) {
+    return 'dtr_missing_log_reason';
+  }
   if (/\b(attachment|attachments|document|documents|docs|proof|supporting|medical certificate|med cert)\b/.test(lower(text))) {
     return 'leave_attachment_requirement';
   }
@@ -331,6 +585,24 @@ function resolveIntentFromMemory(text, memory) {
   if (
     [
       'leave_balance',
+      'today_dtr',
+      'missing_logs',
+      'dtr_daily_record',
+      'dtr_range_summary',
+      'dtr_missing_logs',
+      'dtr_missing_log_reason',
+      'dtr_late_summary',
+      'dtr_late_reason',
+      'dtr_undertime_summary',
+      'dtr_overtime_summary',
+      'dtr_absent_summary',
+      'dtr_status_explanation',
+      'dtr_correction_guidance',
+      'dtr_leave_coverage_check',
+      'dtr_locator_coverage_check',
+      'dtr_holiday_check',
+      'dtr_schedule_context',
+      'dtr_export_guidance',
       'leave_history',
       'pending_leave_requests',
       'approved_leave_requests',
@@ -362,15 +634,33 @@ function resolveIntentFromMemory(text, memory) {
   return null;
 }
 
-function enrichMessageWithMemory(text, memory) {
+function enrichMessageWithMemory(text, memory, memoryIntent = null) {
   let enriched = text;
+  const activeIntent = memoryIntent || memory?.intent || null;
+  const relativeDate = memoryRelativeDate(enriched, memory);
+  if (relativeDate) {
+    enriched = `${enriched} (${relativeDate})`;
+  }
   const hasDateHint =
-    /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|week|semana|semanaha|month|bulan|buwan|sunod|miaging|niaging|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/i.test(
+    /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|week|semana|semanaha|month|bulan|bulana|buwan|buwana|aning bulana|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|same day|same date|ana|ato|adto|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/i.test(
       enriched
     );
   if (
     !hasDateHint &&
     memory?.dateRange?.startDate &&
+    isStructuredDtrIntent(activeIntent) &&
+    isFollowUpQuestion(enriched)
+  ) {
+    enriched = `${enriched} (${memory.dateRange.startDate}${
+      memory.dateRange.endDate && memory.dateRange.endDate !== memory.dateRange.startDate
+        ? ` to ${memory.dateRange.endDate}`
+        : ''
+    })`;
+  }
+  if (
+    !hasDateHint &&
+    memory?.dateRange?.startDate &&
+    isLeaveIntent(activeIntent) &&
     /\b(what|which|unsa|unsay|ano|that|to|gi file|g-file|filed|leave type)\b/i.test(
       enriched
     )
@@ -382,6 +672,9 @@ function enrichMessageWithMemory(text, memory) {
     })`;
   }
 
+  if (!isLeaveIntent(activeIntent) && !/\b(leave|sick|vacation|vl|sl)\b/i.test(enriched)) {
+    return enriched;
+  }
   const leaveType = requestedLeaveType(enriched) || memory?.leaveType;
   if (!leaveType) return enriched;
   if (requestedLeaveType(enriched)) return enriched;
@@ -407,10 +700,31 @@ function buildToolData(intent, context) {
       record: context.dtr_records?.[0] || null,
     };
   }
-  if (intent === 'missing_logs') {
+  if (
+    intent === 'missing_logs' ||
+    intent === 'dtr_daily_record' ||
+    intent === 'dtr_range_summary' ||
+    intent === 'dtr_missing_logs' ||
+    intent === 'dtr_missing_log_reason' ||
+    intent === 'dtr_late_summary' ||
+    intent === 'dtr_late_reason' ||
+    intent === 'dtr_undertime_summary' ||
+    intent === 'dtr_overtime_summary' ||
+    intent === 'dtr_absent_summary' ||
+    intent === 'dtr_status_explanation' ||
+    intent === 'dtr_correction_guidance' ||
+    intent === 'dtr_leave_coverage_check' ||
+    intent === 'dtr_locator_coverage_check' ||
+    intent === 'dtr_holiday_check' ||
+    intent === 'dtr_schedule_context' ||
+    intent === 'dtr_export_guidance'
+  ) {
     return {
       dateRange: context.date_range,
       records: context.dtr_records || [],
+      calendarDays: context.dtr_calendar_days || [],
+      leaveRequests: context.recent_leave_requests || [],
+      locatorSlips: context.recent_locator_slips || [],
     };
   }
   if (intent === 'leave_balance') {
@@ -543,6 +857,43 @@ async function classifyIntentWithLocalAi(text, profile) {
   }
 }
 
+async function planToolWithLocalAi(text, profile) {
+  try {
+    const result = await chatCompletion({
+      provider: profile?.provider,
+      model: profile?.model,
+      messages: buildDtrAssistantToolPlanMessages({
+        message: text,
+        today: todayInHrmsTimezone(),
+      }),
+      temperature: 0,
+      timeoutMs: 9000,
+      options: {
+        num_predict: 140,
+        num_ctx: 1024,
+      },
+      maxTokens: 140,
+    });
+    const plan = parseToolPlanResponse(result.content);
+    return {
+      intent: plan?.intent || null,
+      dateRange: plan?.dateRange || null,
+      normalizedQuestion: plan?.normalizedQuestion || '',
+      provider: result.provider,
+      model: result.model,
+    };
+  } catch (err) {
+    return {
+      intent: null,
+      dateRange: null,
+      normalizedQuestion: '',
+      provider: err.provider || profile?.provider || 'ollama',
+      model: 'tool-planner-unavailable',
+      error: err.code || err.message,
+    };
+  }
+}
+
 async function generateDirectAnswerWithAi({ text, context, profile }) {
   const result = await chatCompletion({
     provider: profile.provider,
@@ -570,26 +921,66 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   const scope = getEmployeeSelfScope(user);
   const memory = getAssistantMemory(scope.userId);
   const normalizedTextForRules = normalizeAssistantMessageForRules(text);
-  const effectiveText = enrichMessageWithMemory(normalizedTextForRules, memory);
+  const memoryIntent = resolveIntentFromMemory(normalizedTextForRules, memory);
+  const effectiveText = enrichMessageWithMemory(
+    normalizedTextForRules,
+    memory,
+    memoryIntent
+  );
+  let resolvedIntent =
+    detectEmployeeAssistantIntent(effectiveText, intent) ||
+    memoryIntent ||
+    resolveIntentFromMemory(effectiveText, memory);
+  let model = 'hrms-intent-rules';
+  let provider = 'hrms';
+  let plannedDateRange = parseAssistantDateRange(effectiveText);
+  let plannedText = effectiveText;
+
+  if (shouldAskAiForToolPlan({
+    resolvedIntent,
+    dateRange: plannedDateRange,
+    text: effectiveText,
+    profile,
+  })) {
+    const planned = await planToolWithLocalAi(effectiveText, profile);
+    if (planned.intent) {
+      resolvedIntent = resolvedIntent || planned.intent;
+      provider = planned.provider || provider;
+      model = planned.model || model;
+    }
+    if (planned.dateRange) {
+      plannedDateRange = planned.dateRange;
+      provider = planned.provider || provider;
+      model = planned.model || model;
+    }
+    if (planned.normalizedQuestion) {
+      plannedText = `${effectiveText} (${planned.normalizedQuestion})`;
+    }
+  }
+
   const context = await loadEmployeeAssistantContext(pool, {
     userId: scope.userId,
-    message: effectiveText,
+    message: plannedText,
+    dateRange: plannedDateRange,
   });
 
-  if (profile.engine === 'direct') {
+  if (!resolvedIntent) {
+    const classified = await classifyIntentWithLocalAi(plannedText, profile);
+    resolvedIntent = classified.intent;
+    provider = classified.provider || provider;
+    model = classified.model || model;
+  }
+
+  if (profile.engine === 'direct' && !resolvedIntent) {
     const direct = await generateDirectAnswerWithAi({
-      text: effectiveText,
+      text: plannedText,
       context,
       profile,
     });
 
     setAssistantMemory(scope.userId, {
       intent: 'direct_ai',
-      leaveType:
-        requestedLeaveType(effectiveText) ||
-        inferLeaveTypeFromContext(effectiveText, context) ||
-        memory?.leaveType ||
-        null,
+      leaveType: memoryLeaveTypeForIntent('direct_ai', plannedText, context, memory),
       dateRange: context.date_range,
       toolData: {
         modelProfile: profile.id,
@@ -603,56 +994,44 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       mode: scope.mode,
       context,
       intent: 'direct_ai',
+      attachments: [],
     });
   }
 
-  let resolvedIntent =
-    detectEmployeeAssistantIntent(effectiveText, intent) ||
-    resolveIntentFromMemory(effectiveText, memory);
-  let model = 'hrms-intent-rules';
-  let provider = 'hrms';
-
-  if (!resolvedIntent) {
-    const classified = await classifyIntentWithLocalAi(effectiveText, profile);
-    resolvedIntent = classified.intent;
-    provider = classified.provider || provider;
-    model = classified.model || model;
-  }
-
   const fastReply = buildFastEmployeeAssistantReply(
-    effectiveText,
+    plannedText,
     context,
     resolvedIntent
   );
   if (fastReply) {
     const toolData = buildToolData(resolvedIntent, context);
-    const refined = await refineToolAnswerWithLocalAi({
-      text,
-      intent: resolvedIntent,
-      toolAnswer: fastReply,
-      toolData,
-      profile,
-    });
+    const attachments = buildAttachments(resolvedIntent, context);
+    const refined = shouldSkipToolRefinement(resolvedIntent)
+      ? null
+      : await refineToolAnswerWithLocalAi({
+          text,
+          intent: resolvedIntent,
+          toolAnswer: fastReply,
+          toolData,
+          profile,
+        });
 
     setAssistantMemory(scope.userId, {
       intent: resolvedIntent,
-      leaveType:
-        requestedLeaveType(effectiveText) ||
-        inferLeaveTypeFromContext(effectiveText, context) ||
-        memory?.leaveType ||
-        null,
+      leaveType: memoryLeaveTypeForIntent(resolvedIntent, plannedText, context, memory),
       dateRange: context.date_range,
       toolData,
       modelProfile: profile.id,
     });
 
     return buildAssistantResult({
-      content: refined?.content || fastReply,
+      content: compactAssistantContent(refined?.content || fastReply),
       provider: refined?.provider || 'hrms',
       model: refined?.model || model,
       mode: scope.mode,
       context,
       intent: resolvedIntent,
+      attachments,
     });
   }
 
@@ -663,6 +1042,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     mode: scope.mode,
     context,
     intent: resolvedIntent,
+    attachments: buildAttachments(resolvedIntent, context),
   });
 }
 
