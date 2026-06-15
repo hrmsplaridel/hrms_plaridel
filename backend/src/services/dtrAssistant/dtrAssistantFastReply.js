@@ -1382,20 +1382,73 @@ function dtrLeaveCoverageReply(context, message) {
 function dtrLocatorCoverageReply(context, message) {
   const language = languageOf(message);
   const label = context.date_range?.label || 'selected period';
+  const requestedSlot = requestedDtrSlot(message);
   const slips = (context.recent_locator_slips || []).filter((slip) => {
+    if (!context.date_range?.startDate || !context.date_range?.endDate) return true;
     return slip.slip_date >= context.date_range.startDate && slip.slip_date <= context.date_range.endDate;
   });
   if (slips.length === 0) {
-    if (language === 'bisaya') return `Wala koy nakitang locator slip para sa ${label}.`;
-    if (language === 'tagalog') return `Wala akong nakitang locator slip para sa ${label}.`;
-    return `I found no locator slip for ${label}.`;
+    return structuredReply(language, {
+      title: 'Locator coverage check',
+      summary:
+        language === 'bisaya'
+          ? `Wala koy nakitang locator slip para sa ${localizedPeriodLabel(label, language)}.`
+          : language === 'tagalog'
+            ? `Wala akong nakitang locator slip para sa ${localizedPeriodLabel(label, language)}.`
+            : `I found no locator slip for ${label}.`,
+      nextStep:
+        language === 'bisaya'
+          ? 'Kung missing log ni, i-check kung kinahanglan ba mag-file ug locator or DTR correction.'
+          : language === 'tagalog'
+            ? 'Kung missing log ito, i-check kung kailangan ng locator o DTR correction.'
+            : 'If this is for a missing log, check whether you need a locator slip or DTR correction.',
+    });
   }
-  const lines = slips.map((slip) => `${fmtFriendlyDate(slip.slip_date)}: ${locatorCoverageText(slip)}${slip.hr_remarks ? `, HR remarks ${slip.hr_remarks}` : ''}`);
+  const approvedMatching = requestedSlot
+    ? slips.filter((slip) => approvedStatus(slip.status) && locatorCoversSlot(slip, requestedSlot))
+    : slips.filter((slip) => approvedStatus(slip.status));
+  const lines = slips.map((slip) => {
+    const slotCheck = requestedSlot
+      ? locatorCoversSlot(slip, requestedSlot)
+        ? `covers ${requestedSlot}`
+        : `does not cover ${requestedSlot}`
+      : locatorSlots(slip).length > 0
+        ? `covers ${locatorSlots(slip).join(', ')}`
+        : 'no covered slot saved';
+    const finalCoverage = approvedStatus(slip.status) ? '' : ', not final coverage until approved';
+    return `${fmtFriendlyDate(slip.slip_date)}: ${locatorCoverageText(slip)} (${slotCheck}${finalCoverage})${
+      slip.hr_remarks ? `, HR remarks ${slip.hr_remarks}` : ''
+    }`;
+  });
+  const summary = requestedSlot
+    ? approvedMatching.length > 0
+      ? language === 'bisaya'
+        ? `Naa koy approved locator nga ni-cover sa ${requestedSlot} para sa ${localizedPeriodLabel(label, language)}.`
+        : language === 'tagalog'
+          ? `May approved locator na nag-cover sa ${requestedSlot} para sa ${localizedPeriodLabel(label, language)}.`
+          : `I found an approved locator covering ${requestedSlot} for ${label}.`
+      : language === 'bisaya'
+        ? `Naa koy locator slip, pero wala koy approved locator nga klarong ni-cover sa ${requestedSlot}.`
+        : language === 'tagalog'
+          ? `May locator slip, pero wala akong approved locator na malinaw na nag-cover sa ${requestedSlot}.`
+          : `I found locator slips, but no approved locator clearly covers ${requestedSlot}.`
+    : language === 'bisaya'
+      ? `Nakita nako ang ${slips.length} ka locator slip para sa ${localizedPeriodLabel(label, language)}.`
+      : language === 'tagalog'
+        ? `May nakita akong ${slips.length} locator slip para sa ${localizedPeriodLabel(label, language)}.`
+        : `I found ${slips.length} locator ${plural(slips.length, 'slip')} in this period.`;
   return structuredReply(language, {
     title: `Locator coverage for ${label}`,
-    summary: `I found ${slips.length} locator ${plural(slips.length, 'slip')} in this period.`,
+    summary,
     details: lines,
-    nextStep: 'If a specific log is missing, ask me to check locator coverage for that missing slot.',
+    nextStep:
+      requestedSlot && approvedMatching.length === 0
+        ? language === 'bisaya'
+          ? 'Kung mao ni ang missing slot, i-check kung naa bay lain approved locator, leave, holiday, or DTR correction.'
+          : language === 'tagalog'
+            ? 'Kung ito ang missing slot, i-check kung may ibang approved locator, leave, holiday, o DTR correction.'
+            : 'If this is the missing slot, check for another approved locator, leave, holiday, or DTR correction.'
+        : 'If a specific log is missing, ask me to check locator coverage for that missing slot.',
     limit: 5,
   });
 }
@@ -1504,12 +1557,12 @@ function dtrExportGuidanceReply(context, message) {
   const language = languageOf(message);
   return structuredReply(language, {
     title: 'DTR export',
-    summary: 'I generated a CSV export for the selected DTR period.',
+    summary: 'I generated an Excel export for the selected DTR period.',
     details: [
       'The file includes the DTR records currently loaded for this chat.',
-      'For signed or official PDF forms, still use the DTR/attendance report page or HR/Admin workflow.',
+      'For signed official DTR forms, still use the DTR/attendance report page or HR/Admin workflow.',
     ],
-    nextStep: 'Download the attached CSV from this message.',
+    nextStep: 'Download the attached Excel file from this message.',
   });
 }
 
@@ -2441,22 +2494,424 @@ function leaveApprovalHistoryReply(context, message) {
   });
 }
 
-function locatorReply(context, localized) {
-  const slip = context.recent_locator_slips?.[0];
+function locatorSlots(slip) {
+  const slots = [];
+  if (slip?.coverage?.am_in) slots.push('AM in');
+  if (slip?.coverage?.am_out) slots.push('AM out');
+  if (slip?.coverage?.pm_in) slots.push('PM in');
+  if (slip?.coverage?.pm_out) slots.push('PM out');
+  return slots;
+}
+
+function locatorStatusText(status) {
+  const value = lower(status);
+  if (value === 'pending_department_head') return 'waiting for department head review';
+  if (value === 'pending_hr' || value === 'pending') return 'waiting for HR review';
+  if (value === 'approved') return 'approved by HR';
+  if (value === 'rejected_by_department_head') return 'rejected by department head';
+  if (value === 'rejected_by_hr' || value === 'rejected') return 'rejected by HR';
+  if (value === 'cancelled' || value === 'canceled') return 'cancelled';
+  return statusLabel(status);
+}
+
+function requestedLocatorType(message) {
+  const text = lower(message);
+  if (/\b(wfh|work from home|home)\b/.test(text)) return 'work_from_home';
+  if (/\b(pass slip|pass-slip|passslip)\b/.test(text)) return 'pass_slip';
+  if (/\b(official business|official|business|ob|on field|field|fieldwork|field work|out of office|outside office|travel order|locator)\b/.test(text)) return 'locator';
+  return null;
+}
+
+function locatorTypeMatches(item, requestedType) {
+  if (!requestedType) return true;
+  const code = lower(item?.request_type || item?.code);
+  const label = lower(item?.request_type_label || item?.label);
+  if (requestedType === 'locator') {
+    return (
+      code === 'locator' ||
+      code === 'official_business' ||
+      code === 'official business' ||
+      label.includes('locator') ||
+      label.includes('official business') ||
+      label.includes('on field')
+    );
+  }
+  return (
+    code === requestedType ||
+    label.includes(requestedType.replace(/_/g, ' '))
+  );
+}
+
+function requestedLocatorStatus(message) {
+  const text = lower(message);
+  if (/\b(pending|waiting|awaiting|hold|holding|asa|where|kinsa|sino)\b/.test(text)) return 'pending';
+  if (/\b(approved|approve|na-approve)\b/.test(text)) return 'approved';
+  if (/\b(rejected|reject|declined|denied|gi reject|gireject|not approved|wala.*approve|dili.*approved|hindi.*approved)\b/.test(text)) return 'rejected';
+  if (/\b(cancelled|canceled|cancel)\b/.test(text)) return 'cancelled';
+  return null;
+}
+
+function locatorStatusMatches(status, requested) {
+  if (!requested) return true;
+  const value = lower(status);
+  if (requested === 'pending') return value === 'pending' || value === 'pending_department_head' || value === 'pending_hr';
+  if (requested === 'approved') return value === 'approved';
+  if (requested === 'rejected') return value === 'rejected' || value === 'rejected_by_department_head' || value === 'rejected_by_hr';
+  if (requested === 'cancelled') return value === 'cancelled' || value === 'canceled';
+  return true;
+}
+
+function locatorSlipsForMessage(context, message) {
+  const range = context.date_range || {};
+  const useRange = hasDateRangeHint(message);
+  const requestedType = requestedLocatorType(message);
+  const requestedStatus = requestedLocatorStatus(message);
+  return (context.recent_locator_slips || []).filter((slip) => {
+    if (useRange && range.startDate && range.endDate) {
+      if (slip.slip_date < range.startDate || slip.slip_date > range.endDate) return false;
+    }
+    if (!locatorTypeMatches(slip, requestedType)) return false;
+    if (!locatorStatusMatches(slip.status, requestedStatus)) return false;
+    return true;
+  });
+}
+
+function fmtLocatorSlip(slip) {
+  const slots = locatorSlots(slip);
+  const type = slip.request_type_label || slip.request_type || 'Locator';
+  const place = slip.office ? `, ${slip.office}` : '';
+  const attachment = slip.has_attachment ? ', with attachment' : '';
+  return `${type} on ${fmtFriendlyDate(slip.slip_date)} - ${locatorStatusText(slip.status)}${
+    slots.length > 0 ? `, covering ${slots.join(', ')}` : ''
+  }${place}${attachment}`;
+}
+
+function locatorRemarks(slip) {
+  return slip.hr_remarks || slip.dept_head_remarks || null;
+}
+
+function locatorReply(context, localized, message = '') {
+  const language = languageOf(message);
+  const slips = locatorSlipsForMessage(context, message);
+  const slip = slips[0] || context.recent_locator_slips?.[0];
   if (!slip) {
-    return localized
-      ? 'Wala akong nakitang locator slip records para sa account mo.'
-      : 'I found no locator slip records for your account.';
+    if (language === 'bisaya') return 'Wala koy nakitang locator slip records sa imong account.';
+    if (language === 'tagalog' || localized) return 'Wala akong nakitang locator slip records para sa account mo.';
+    return 'I found no locator slip records for your account.';
   }
 
-  const details = `${slip.request_type_label || slip.request_type || 'Locator'} for ${fmtFriendlyDate(
-    slip.slip_date
-  )} is ${statusLabel(slip.status)}`;
-  const remarks = slip.hr_remarks || slip.dept_head_remarks;
+  const remarks = locatorRemarks(slip);
+  const details = [
+    `Status: ${locatorStatusText(slip.status)}`,
+    `Date: ${fmtFriendlyDate(slip.slip_date)}`,
+    `Type: ${slip.request_type_label || slip.request_type || 'Locator'}`,
+    locatorSlots(slip).length > 0 ? `Coverage: ${locatorSlots(slip).join(', ')}` : null,
+    slip.office ? `${slip.request_type_location_label || 'Location'}: ${slip.office}` : null,
+    slip.reason ? `Reason: ${slip.reason}` : null,
+    slip.dept_head_reviewer_name ? `Department head reviewer: ${slip.dept_head_reviewer_name}` : null,
+    slip.hr_reviewer_name ? `HR reviewer: ${slip.hr_reviewer_name}` : null,
+    remarks ? `Remarks: ${remarks}` : null,
+  ];
+  const title = language === 'bisaya' ? 'Locator status' : language === 'tagalog' ? 'Status ng locator' : 'Locator status';
+  const summary =
+    language === 'bisaya'
+      ? `Ang locator request nimo kay ${locatorStatusText(slip.status)}.`
+      : language === 'tagalog'
+        ? `Ang locator request mo ay ${locatorStatusText(slip.status)}.`
+        : `Your locator request is ${locatorStatusText(slip.status)}.`;
+  return structuredReply(language, {
+    title,
+    summary,
+    details,
+    nextStep: lower(slip.status).startsWith('pending')
+      ? language === 'bisaya'
+        ? 'Hulat sa review, or i-check kung naa bay remarks/attachment nga kinahanglan.'
+        : language === 'tagalog'
+          ? 'Hintayin ang review, o i-check kung may remarks/attachment na kailangan.'
+          : 'Wait for review, or check if remarks/attachment are needed.'
+      : null,
+    limit: 9,
+  });
+}
 
-  return localized
-    ? `${details}.${remarks ? ` Remarks: ${remarks}.` : ''}`
-    : `Your latest locator request: ${details}.${remarks ? ` Remarks: ${remarks}.` : ''}`;
+function locatorSummaryReply(context, message) {
+  const language = languageOf(message);
+  const slips = locatorSlipsForMessage(context, message);
+  const label = hasDateRangeHint(message) ? context.date_range?.label || 'selected period' : 'recent records';
+  if (slips.length === 0) {
+    if (language === 'bisaya') return `Wala koy nakitang locator slip para sa ${label}.`;
+    if (language === 'tagalog') return `Wala akong nakitang locator slip para sa ${label}.`;
+    return `I found no locator slips for ${label}.`;
+  }
+  const counts = slips.reduce(
+    (acc, slip) => {
+      const status = lower(slip.status);
+      if (status === 'approved') acc.approved += 1;
+      else if (status === 'pending' || status === 'pending_department_head' || status === 'pending_hr') acc.pending += 1;
+      else if (status === 'rejected' || status === 'rejected_by_department_head' || status === 'rejected_by_hr') acc.rejected += 1;
+      else if (status === 'cancelled' || status === 'canceled') acc.cancelled += 1;
+      else acc.other += 1;
+      return acc;
+    },
+    { pending: 0, approved: 0, rejected: 0, cancelled: 0, other: 0 }
+  );
+  const lines = limitedRequests(slips, 6).map(fmtLocatorSlip);
+  const summary =
+    language === 'bisaya'
+      ? `Nakita nako ang ${slips.length} ka locator slip para sa ${label}.`
+      : language === 'tagalog'
+        ? `May nakita akong ${slips.length} locator slip para sa ${label}.`
+        : `I found ${slips.length} locator ${plural(slips.length, 'slip')} for ${label}.`;
+  return structuredReply(language, {
+    title: `Locator summary (${label})`,
+    summary,
+    details: [
+      `Pending: ${counts.pending}`,
+      `Approved: ${counts.approved}`,
+      `Rejected: ${counts.rejected}`,
+      `Cancelled: ${counts.cancelled}`,
+      ...lines,
+    ],
+    limit: 10,
+  });
+}
+
+function locatorRequirementsReply(context, message) {
+  const language = languageOf(message);
+  const requestedType = requestedLocatorType(message);
+  const types = (context.locator_types || []).filter((type) => locatorTypeMatches(type, requestedType));
+  const visible = types.length > 0 ? types : context.locator_types || [];
+  if (visible.length === 0) {
+    if (language === 'bisaya') return 'Wala koy nakitang locator request type rules sa system.';
+    if (language === 'tagalog') return 'Wala akong nakitang locator request type rules sa system.';
+    return 'I found no locator request type rules in the system.';
+  }
+  const lines = visible.map((type) => {
+    const coverage =
+      type.coverage_mode === 'wfh'
+        ? 'auto WFH coverage'
+        : 'manual AM/PM slot selection';
+    return `${type.label || type.code}: ${type.requires_attachment ? 'attachment required' : 'no attachment required'}, ${coverage}, DTR label ${type.dtr_slot_label || type.dtr_print_label || type.code}`;
+  });
+  const summary =
+    language === 'bisaya'
+      ? 'Base sa locator type setup, mao ni ang filing rules.'
+      : language === 'tagalog'
+        ? 'Base sa locator type setup, ito ang filing rules.'
+        : 'Based on the locator type setup, these are the filing rules.';
+  return structuredReply(language, {
+    title: 'Locator filing requirements',
+    summary,
+    details: [
+      ...lines,
+      'You need a valid working-day schedule for the slip date.',
+      'Choose at least one covered slot: AM in, AM out, PM in, or PM out.',
+      'Office/destination and reason are required.',
+    ],
+    nextStep:
+      language === 'bisaya'
+        ? 'Kung rejected or pending imong locator, ask me about its status or remarks.'
+        : language === 'tagalog'
+          ? 'Kung rejected or pending ang locator mo, tanungin mo ako tungkol sa status o remarks.'
+          : 'If your locator is rejected or pending, ask me about its status or remarks.',
+    limit: 9,
+  });
+}
+
+function locatorTypeRulesForMessage(context, message) {
+  const requestedType = requestedLocatorType(message);
+  const types = context.locator_types || [];
+  const matches = types.filter((type) => locatorTypeMatches(type, requestedType));
+  return matches.length > 0 ? matches : requestedType ? [] : types;
+}
+
+function locatorAvailabilityReply(context, message) {
+  const language = languageOf(message);
+  const range = context.date_range || {};
+  const date = range.startDate || range.endDate || null;
+  const day = date ? calendarDayForDate(context, date) : null;
+  const type = locatorTypeRulesForMessage(context, message)[0] || null;
+  const requestedSlot = requestedDtrSlot(message);
+  const requestedType = requestedLocatorType(message);
+  const existing = (context.recent_locator_slips || []).filter((slip) => {
+    if (date && slip.slip_date !== date) return false;
+    return locatorTypeMatches(slip, requestedType);
+  });
+  const issues = [];
+  if (!date) issues.push('No target date was detected.');
+  if (day?.holiday_name && day.holiday_coverage === 'whole_day') {
+    issues.push(`Date is marked as whole-day holiday: ${day.holiday_name}`);
+  }
+  if (day && !isCalendarWorkingDay(day)) {
+    issues.push('Schedule says this is not a required-log working day.');
+  }
+  if (!day && date) {
+    issues.push('Schedule details are not loaded for this date.');
+  }
+
+  const typeLabel = type?.label || type?.code || (requestedType ? requestedType.replace(/_/g, ' ') : 'not selected');
+  const details = [
+    date ? `Date: ${fmtFriendlyDate(date)}` : null,
+    `Locator type: ${typeLabel}`,
+    day?.shift_name
+      ? `Schedule: ${day.shift_name}${fmtScheduleRange(day) ? ` (${fmtScheduleRange(day)})` : ''}`
+      : null,
+    day?.holiday_name ? `Holiday: ${day.holiday_name} (${day.holiday_coverage || 'whole_day'})` : null,
+    requestedSlot
+      ? `Requested DTR coverage: ${requestedSlot}`
+      : 'DTR coverage: choose AM in, AM out, PM in, or PM out.',
+    type
+      ? `Attachment: ${type.requires_attachment ? 'required' : 'not required by this locator type'}`
+      : 'Type rules: choose the exact locator type to check attachment rules.',
+    existing.length > 0
+      ? `Existing locator on this date: ${existing.map(fmtLocatorSlip).join('; ')}`
+      : null,
+    ...issues,
+  ];
+  const hasBlockingIssue = issues.some((issue) => !issue.includes('not loaded'));
+  const title =
+    language === 'bisaya'
+      ? 'Locator filing check'
+      : language === 'tagalog'
+        ? 'Locator filing check'
+        : 'Locator filing check';
+  const summary =
+    hasBlockingIssue
+      ? language === 'bisaya'
+        ? 'Naay issue sa initial locator check. Tan-awa ang detalye sa ubos.'
+        : language === 'tagalog'
+          ? 'May issue sa initial locator check. Tingnan ang detalye sa baba.'
+          : 'The initial locator filing check found an issue.'
+      : language === 'bisaya'
+        ? 'Initial check: murag pwede ka mag-file, basta kompleto ang type, slots, destination, reason, ug required attachment.'
+        : language === 'tagalog'
+          ? 'Initial check: mukhang puwede kang mag-file kung kumpleto ang type, slots, destination, reason, at required attachment.'
+          : 'Initial check: you can file if the type, slots, destination, reason, and required attachment are complete.';
+  return structuredReply(language, {
+    title,
+    summary,
+    details,
+    nextStep:
+      language === 'bisaya'
+        ? 'Submit gihapon sa normal approval workflow; dili pa ni final approval.'
+        : language === 'tagalog'
+          ? 'I-submit pa rin sa normal approval workflow; hindi pa ito final approval.'
+          : 'Submit it through the normal approval workflow; this is not final approval.',
+    limit: 10,
+  });
+}
+
+function locatorRejectionReasonReply(context, message) {
+  const language = languageOf(message);
+  const slips = locatorSlipsForMessage(context, message);
+  const slip =
+    slips.find((item) => rejectedStatus(item.status)) ||
+    (context.recent_locator_slips || []).find((item) => rejectedStatus(item.status));
+  if (!slip) {
+    if (language === 'bisaya') return 'Wala koy nakitang rejected locator slip sa imong recent records.';
+    if (language === 'tagalog') return 'Wala akong nakitang rejected locator slip sa recent records mo.';
+    return 'I found no rejected locator slip in your recent records.';
+  }
+  const rejectedBy = /department_head/.test(lower(slip.status))
+    ? 'department head'
+    : /hr/.test(lower(slip.status))
+      ? 'HR'
+      : 'reviewer';
+  const remarks = locatorRemarks(slip);
+  const summary =
+    language === 'bisaya'
+      ? `Gi-reject ang locator request nimo ${fmtLocalizedDateRange(slip.slip_date, slip.slip_date, language)}.`
+      : language === 'tagalog'
+        ? `Na-reject ang locator request mo ${fmtLocalizedDateRange(slip.slip_date, slip.slip_date, language)}.`
+        : `Your locator request ${fmtLocalizedDateRange(slip.slip_date, slip.slip_date, language)} was rejected.`;
+  return structuredReply(language, {
+    title: 'Locator rejection reason',
+    summary,
+    details: [
+      fmtLocatorSlip(slip),
+      `Rejected by: ${rejectedBy}`,
+      remarks ? `Remarks: ${remarks}` : 'Remarks: no rejection remarks saved in the record.',
+      slip.dept_head_reviewer_name ? `Department head reviewer: ${slip.dept_head_reviewer_name}` : null,
+      slip.hr_reviewer_name ? `HR reviewer: ${slip.hr_reviewer_name}` : null,
+    ],
+    nextStep:
+      language === 'bisaya'
+        ? 'Kung kulang ang remarks, i-check sa reviewer or HR unsay kinahanglan usbon.'
+        : language === 'tagalog'
+          ? 'Kung kulang ang remarks, i-check sa reviewer o HR kung ano ang kailangang ayusin.'
+          : 'If the remarks are not enough, check with the reviewer or HR what needs to be corrected.',
+    limit: 7,
+  });
+}
+
+function locatorApprovalOwner(slip) {
+  const status = lower(slip?.status);
+  if (status === 'pending_department_head') {
+    return slip.dept_head_reviewer_name
+      ? `department head (${slip.dept_head_reviewer_name})`
+      : 'department head review';
+  }
+  if (status === 'pending_hr' || status === 'pending') {
+    return slip.hr_reviewer_name ? `HR (${slip.hr_reviewer_name})` : 'HR review';
+  }
+  if (status === 'approved') {
+    return slip.hr_reviewer_name ? `completed by HR (${slip.hr_reviewer_name})` : 'completed by HR';
+  }
+  if (/department_head/.test(status)) {
+    return slip.dept_head_reviewer_name
+      ? `department head (${slip.dept_head_reviewer_name})`
+      : 'department head';
+  }
+  if (/hr/.test(status)) {
+    return slip.hr_reviewer_name ? `HR (${slip.hr_reviewer_name})` : 'HR';
+  }
+  return 'reviewer';
+}
+
+function locatorApprovalTrackerReply(context, message) {
+  const language = languageOf(message);
+  const slips = locatorSlipsForMessage(context, message);
+  const slip = slips.find((item) => pendingStatus(item.status)) || slips[0] || context.recent_locator_slips?.[0];
+  if (!slip) {
+    if (language === 'bisaya') return 'Wala koy nakitang locator slip nga ma-track sa imong account.';
+    if (language === 'tagalog') return 'Wala akong nakitang locator slip na puwedeng i-track sa account mo.';
+    return 'I found no locator slip to track for your account.';
+  }
+  const owner = locatorApprovalOwner(slip);
+  const status = locatorStatusText(slip.status);
+  const summary =
+    pendingStatus(slip.status)
+      ? language === 'bisaya'
+        ? `Pending pa ang locator request nimo. Naa siya sa ${owner}.`
+        : language === 'tagalog'
+          ? `Pending pa ang locator request mo. Nasa ${owner} siya.`
+          : `Your locator request is still pending with ${owner}.`
+      : language === 'bisaya'
+        ? `Dili na pending ang locator request nimo; status niya kay ${status}.`
+        : language === 'tagalog'
+          ? `Hindi na pending ang locator request mo; status nito ay ${status}.`
+          : `Your locator request is no longer pending; its status is ${status}.`;
+  return structuredReply(language, {
+    title: 'Locator approval tracker',
+    summary,
+    details: [
+      fmtLocatorSlip(slip),
+      `Current step: ${owner}`,
+      slip.created_at ? `Filed: ${fmtFriendlyDate(slip.created_at)}` : null,
+      slip.dept_head_reviewed_at ? `Department head reviewed: ${fmtFriendlyDate(slip.dept_head_reviewed_at)}` : null,
+      slip.hr_reviewed_at ? `HR reviewed: ${fmtFriendlyDate(slip.hr_reviewed_at)}` : null,
+      locatorRemarks(slip) ? `Remarks: ${locatorRemarks(slip)}` : null,
+    ],
+    nextStep:
+      pendingStatus(slip.status)
+        ? language === 'bisaya'
+          ? 'Kung dugay na pending, i-follow up sa current reviewer.'
+          : language === 'tagalog'
+            ? 'Kung matagal nang pending, i-follow up sa current reviewer.'
+            : 'If it has been pending for a while, follow up with the current reviewer.'
+        : null,
+    limit: 8,
+  });
 }
 
 function buildFastEmployeeAssistantReply(message, context, intent) {
@@ -2605,7 +3060,25 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
     return leaveRequirementsReply(context, message);
   }
   if (intent === 'latest_locator_request') {
-    return locatorReply(context, localized);
+    return locatorReply(context, localized, message);
+  }
+  if (intent === 'locator_status') {
+    return locatorReply(context, localized, message);
+  }
+  if (intent === 'locator_summary') {
+    return locatorSummaryReply(context, message);
+  }
+  if (intent === 'locator_requirements') {
+    return locatorRequirementsReply(context, message);
+  }
+  if (intent === 'locator_availability_check') {
+    return locatorAvailabilityReply(context, message);
+  }
+  if (intent === 'locator_rejection_reason') {
+    return locatorRejectionReasonReply(context, message);
+  }
+  if (intent === 'locator_approval_tracker') {
+    return locatorApprovalTrackerReply(context, message);
   }
 
   if (/\b(dtr|attendance|late|time[\s-]?in|time[\s-]?out)\b/.test(text)) {
