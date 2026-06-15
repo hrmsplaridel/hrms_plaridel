@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 
@@ -24,14 +26,37 @@ class _DraggableDtrAssistantLauncherState
 
   final ValueNotifier<Offset?> _position = ValueNotifier<Offset?>(null);
   final ValueNotifier<bool> _dragging = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> _showGreeting = ValueNotifier<bool>(false);
+  Timer? _showGreetingTimer;
+  Timer? _hideGreetingTimer;
   Offset _dragStartLocalPosition = Offset.zero;
   Offset _dragStartWidgetPosition = Offset.zero;
 
   @override
+  void initState() {
+    super.initState();
+    _showGreetingTimer = Timer(const Duration(milliseconds: 900), () {
+      if (!mounted || _dragging.value) return;
+      _showGreeting.value = true;
+      _hideGreetingTimer = Timer(const Duration(seconds: 6), () {
+        if (mounted) _showGreeting.value = false;
+      });
+    });
+  }
+
+  @override
   void dispose() {
+    _showGreetingTimer?.cancel();
+    _hideGreetingTimer?.cancel();
     _position.dispose();
     _dragging.dispose();
+    _showGreeting.dispose();
     super.dispose();
+  }
+
+  void _hideGreeting() {
+    _hideGreetingTimer?.cancel();
+    _showGreeting.value = false;
   }
 
   double _buttonSizeForWidth(double width) {
@@ -95,9 +120,9 @@ class _DraggableDtrAssistantLauncherState
                         onPointerMove: (event) {
                           final delta =
                               event.localPosition - _dragStartLocalPosition;
-                          if (!_dragging.value &&
-                              delta.distance >= 4.0) {
+                          if (!_dragging.value && delta.distance >= 4.0) {
                             _dragging.value = true;
+                            _hideGreeting();
                           }
                           if (_dragging.value) {
                             _position.value = _clamp(
@@ -111,10 +136,14 @@ class _DraggableDtrAssistantLauncherState
                               event.localPosition - _dragStartLocalPosition;
                           _dragging.value = false;
                           if (delta.distance < 4.0) {
+                            _hideGreeting();
                             widget.onPressed();
                           }
                         },
-                        onPointerCancel: (_) => _dragging.value = false,
+                        onPointerCancel: (_) {
+                          _dragging.value = false;
+                          _hideGreeting();
+                        },
                         child: child,
                       ),
                     ),
@@ -126,15 +155,107 @@ class _DraggableDtrAssistantLauncherState
               child: ValueListenableBuilder<bool>(
                 valueListenable: _dragging,
                 builder: (context, dragging, _) {
-                  return DtrAssistantFab(
-                    size: buttonSize,
-                    animate: !dragging,
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: _showGreeting,
+                    builder: (context, showGreeting, _) {
+                      return _DtrAssistantLauncherContent(
+                        size: buttonSize,
+                        animate: !dragging,
+                        showGreeting: showGreeting && !dragging,
+                      );
+                    },
                   );
                 },
               ),
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _DtrAssistantLauncherContent extends StatelessWidget {
+  const _DtrAssistantLauncherContent({
+    required this.size,
+    required this.animate,
+    required this.showGreeting,
+  });
+
+  final double size;
+  final bool animate;
+  final bool showGreeting;
+
+  @override
+  Widget build(BuildContext context) {
+    final bubbleWidth = size >= 108 ? 214.0 : 188.0;
+    final bubbleOffset = size >= 108 ? size * 0.78 : size * 0.72;
+    return SizedBox(
+      width: size + bubbleWidth,
+      height: size,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.centerLeft,
+        children: [
+          Positioned(
+            left: bubbleOffset,
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                opacity: showGreeting ? 1 : 0,
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                child: AnimatedSlide(
+                  offset: showGreeting ? Offset.zero : const Offset(0.04, 0),
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  child: const _AssistantGreetingBubble(),
+                ),
+              ),
+            ),
+          ),
+          DtrAssistantFab(size: size, animate: animate),
+        ],
+      ),
+    );
+  }
+}
+
+class _AssistantGreetingBubble extends StatelessWidget {
+  const _AssistantGreetingBubble();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: dark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: dark
+              ? Colors.white.withValues(alpha: 0.14)
+              : Colors.black.withValues(alpha: 0.08),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.24 : 0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        child: Text(
+          'Hi, need help with DTR?',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: dark ? Colors.white : const Color(0xFF111827),
+            fontWeight: FontWeight.w700,
+            height: 1.15,
+          ),
+        ),
       ),
     );
   }
