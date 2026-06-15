@@ -9,7 +9,8 @@
     "db:init": "psql -d $npm_config_db -f scripts/init-schema.sql",
     "leave:accrual": "node scripts/run-leave-monthly-accrual.js",
     "leave:accrual:dry": "node scripts/run-leave-monthly-accrual.js --dry-run",
-    "llm:smoke": "node scripts/test-llm.js"
+    "llm:smoke": "node scripts/test-llm.js",
+    "test:dtr-assistant": "node --test test/dtrAssistantRegression.test.js"
   },
   "keywords": [],
   "author": "",
