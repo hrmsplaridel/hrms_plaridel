@@ -1,15 +1,23 @@
 class DtrAssistantMessage {
   const DtrAssistantMessage({
+    this.id,
     required this.role,
     required this.content,
     required this.createdAt,
+    this.intent,
+    this.provider,
+    this.model,
     this.suggestions = const <DtrAssistantSuggestion>[],
     this.attachments = const <DtrAssistantAttachment>[],
   });
 
+  final String? id;
   final String role;
   final String content;
   final DateTime createdAt;
+  final String? intent;
+  final String? provider;
+  final String? model;
   final List<DtrAssistantSuggestion> suggestions;
   final List<DtrAssistantAttachment> attachments;
 
@@ -17,6 +25,7 @@ class DtrAssistantMessage {
 
   factory DtrAssistantMessage.user(String content) {
     return DtrAssistantMessage(
+      id: 'local-${DateTime.now().microsecondsSinceEpoch}',
       role: 'user',
       content: content,
       createdAt: DateTime.now(),
@@ -29,11 +38,15 @@ class DtrAssistantMessage {
     final rawSuggestions = json['suggestions'];
     final rawAttachments = json['attachments'];
     return DtrAssistantMessage(
+      id: json['id']?.toString(),
       role: json['role']?.toString() ?? 'assistant',
       content: json['content']?.toString() ?? '',
       createdAt:
           DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
+      intent: json['intent']?.toString(),
+      provider: json['provider']?.toString(),
+      model: json['model']?.toString(),
       suggestions: rawSuggestions is List
           ? rawSuggestions
                 .whereType<Map>()
@@ -55,7 +68,9 @@ class DtrAssistantMessage {
                 )
                 .where(
                   (item) =>
-                      item.filename.isNotEmpty && item.contentBase64.isNotEmpty,
+                      item.filename.isNotEmpty &&
+                      (item.contentBase64.isNotEmpty ||
+                          item.downloadUrl.isNotEmpty),
                 )
                 .toList(growable: false)
           : const <DtrAssistantAttachment>[],
@@ -67,21 +82,33 @@ class DtrAssistantAttachment {
   const DtrAssistantAttachment({
     required this.filename,
     required this.mimeType,
-    required this.contentBase64,
+    this.contentBase64 = '',
+    this.downloadUrl = '',
+    this.id,
+    this.kind,
+    this.expiresAt,
     this.encoding = 'base64',
   });
 
+  final String? id;
   final String filename;
   final String mimeType;
   final String encoding;
   final String contentBase64;
+  final String downloadUrl;
+  final String? kind;
+  final DateTime? expiresAt;
 
   factory DtrAssistantAttachment.fromJson(Map<String, dynamic> json) {
     return DtrAssistantAttachment(
+      id: json['id']?.toString(),
       filename: json['filename']?.toString() ?? '',
       mimeType: json['mimeType']?.toString() ?? 'application/octet-stream',
       encoding: json['encoding']?.toString() ?? 'base64',
       contentBase64: json['contentBase64']?.toString() ?? '',
+      downloadUrl: json['downloadUrl']?.toString() ?? '',
+      kind: json['kind']?.toString(),
+      expiresAt: DateTime.tryParse(json['expiresAt']?.toString() ?? ''),
     );
   }
 }

@@ -50,14 +50,15 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
   bool get _useMobileLeaveFab => width < 600 && selectedIndex == 2;
   bool get _useMobileLocatorFab => selectedIndex == 3;
   bool get _showAssistantFab =>
-      selectedIndex == 1 || selectedIndex == 2 || selectedIndex == 3;
+      selectedIndex == 0 ||
+      selectedIndex == 1 ||
+      selectedIndex == 2 ||
+      selectedIndex == 3;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
-      floatingActionButton: _buildActionButton(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: DashboardMobileBottomNav(
         items: employeeDashboardMobileNavItems,
         selectedIndex: selectedIndex < employeeDashboardMobileNavItems.length
@@ -118,20 +119,18 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
               ],
             ),
           ),
+          if (_buildFileActionButton() case final actionButton?)
+            Positioned(right: 16, bottom: 16, child: actionButton),
           if (_showAssistantFab)
             DraggableDtrAssistantLauncher(
               onPressed: onDtrAssistant,
               initialBottom: _useMobileLeaveFab || _useMobileLocatorFab
-                  ? 96
+                  ? 108
                   : 16,
             ),
         ],
       ),
     );
-  }
-
-  Widget? _buildActionButton() {
-    return _buildFileActionButton();
   }
 
   Widget? _buildFileActionButton() {

@@ -249,6 +249,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   }
 
   bool get _showDtrAssistantFab =>
+      _selectedNavIndex == 0 ||
       _selectedNavIndex == 1 ||
       _selectedNavIndex == 2 ||
       _selectedNavIndex == 3;
