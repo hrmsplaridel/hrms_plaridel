@@ -31,6 +31,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       createdAt: DateTime.now(),
     ),
   ];
+  final _feedbackByMessageId = <String, String>{};
   List<DtrAssistantModelProfile> _modelProfiles = const [
     DtrAssistantModelProfile(
       id: 'tools_ollama',
@@ -150,6 +151,50 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     });
   }
 
+  Future<void> _submitFeedback(
+    DtrAssistantMessage message,
+    String rating,
+  ) async {
+    final id = message.id;
+    if (id == null || id.isEmpty) return;
+    final previous = _feedbackByMessageId[id];
+    setState(() => _feedbackByMessageId[id] = rating);
+    try {
+      await _api.submitFeedback(
+        message: message,
+        rating: rating,
+        modelProfile: _selectedModelProfile,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(rating == 'up' ? 'Marked correct.' : 'Marked wrong.'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (previous == null) {
+          _feedbackByMessageId.remove(id);
+        } else {
+          _feedbackByMessageId[id] = previous;
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save feedback: ${userFacingApiError(e)}'),
+        ),
+      );
+    }
+  }
+
+  Future<List<int>> _downloadAttachment(
+    DtrAssistantAttachment attachment,
+  ) async {
+    return _api.downloadAttachment(attachment);
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
@@ -186,6 +231,13 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
                       children: [
                         DtrAssistantMessageBubble(
                           message: message,
+                          feedback: message.id == null
+                              ? null
+                              : _feedbackByMessageId[message.id],
+                          onFeedback: message.isUser
+                              ? null
+                              : (rating) => _submitFeedback(message, rating),
+                          onDownloadAttachment: _downloadAttachment,
                           onEdit: message.isUser
                               ? () {
                                   _inputController.text = message.content;

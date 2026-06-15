@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { chatCompletion } = require('../llm/llmClient');
 const { getLlmConfig } = require('../llm/llmConfig');
 const { loadEmployeeAssistantContext } = require('./dtrAssistantDataService');
@@ -21,6 +22,7 @@ const {
   buildDtrAssistantToolPlanMessages,
   buildDtrAssistantToolAnswerMessages,
 } = require('./dtrAssistantPrompt');
+const { createDtrExportAttachment } = require('./dtrAssistantExportService');
 const {
   addDays,
   parseAssistantDateRange,
@@ -165,6 +167,19 @@ function isLeaveIntent(intent) {
   );
 }
 
+function isLocatorIntent(intent) {
+  const value = String(intent || '');
+  return (
+    value === 'latest_locator_request' ||
+    value === 'locator_status' ||
+    value === 'locator_summary' ||
+    value === 'locator_requirements' ||
+    value === 'locator_availability_check' ||
+    value === 'locator_rejection_reason' ||
+    value === 'locator_approval_tracker'
+  );
+}
+
 function memoryLeaveTypeForIntent(intent, effectiveText, context, memory) {
   if (!isLeaveIntent(intent)) return null;
   return (
@@ -176,7 +191,7 @@ function memoryLeaveTypeForIntent(intent, effectiveText, context, memory) {
 }
 
 function shouldSkipToolRefinement(intent) {
-  return isStructuredDtrIntent(intent) || isLeaveIntent(intent);
+  return isStructuredDtrIntent(intent) || isLeaveIntent(intent) || isLocatorIntent(intent);
 }
 
 function normalizedText(value) {
@@ -248,6 +263,22 @@ function buildSuggestions(intent) {
       { text: 'How do I fix DTR issues?', intent: 'dtr_correction_guidance' },
     ];
   }
+  if (
+    intent === 'latest_locator_request' ||
+    intent === 'locator_status' ||
+    intent === 'locator_summary' ||
+    intent === 'locator_requirements' ||
+    intent === 'locator_availability_check' ||
+    intent === 'locator_rejection_reason' ||
+    intent === 'locator_approval_tracker' ||
+    intent === 'dtr_locator_coverage_check'
+  ) {
+    return [
+      { text: 'What is my locator status?', intent: 'locator_status' },
+      { text: 'Can I file locator tomorrow?', intent: 'locator_availability_check' },
+      { text: 'What are locator requirements?', intent: 'locator_requirements' },
+    ];
+  }
   if (intent === 'leave_availability_check') {
     return [
       { text: 'Check leave requirements', intent: 'leave_requirements' },
@@ -310,86 +341,23 @@ function buildSuggestions(intent) {
   ];
 }
 
-function csvCell(value) {
-  const text = String(value ?? '');
-  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
-}
-
-function buildDtrCsvAttachment(context) {
-  const recordsByDate = new Map(
-    (context.dtr_records || []).map((record) => [String(record.attendance_date).slice(0, 10), record])
-  );
-  const calendarDays = context.dtr_calendar_days || [];
-  const dates =
-    calendarDays.length > 0
-      ? calendarDays.map((day) => day.attendance_date)
-      : [...recordsByDate.keys()].sort();
-  const header = [
-    'Date',
-    'Shift',
-    'Schedule',
-    'Grace Minutes',
-    'Holiday',
-    'Status',
-    'AM In',
-    'AM Out',
-    'PM In',
-    'PM Out',
-    'Total Hours',
-    'Late Minutes',
-    'Undertime Minutes',
-    'Overtime Minutes',
-    'Leave Type',
-    'Source',
-    'Remarks',
-  ];
-  const calendarByDate = new Map(calendarDays.map((day) => [day.attendance_date, day]));
-  const rows = dates.map((date) => {
-    const record = recordsByDate.get(date) || {};
-    const day = calendarByDate.get(date) || {};
-    return [
-      date,
-      day.shift_name || '',
-      day.start_time || day.end_time ? `${day.start_time || ''}-${day.end_time || ''}` : '',
-      day.grace_period_minutes ?? '',
-      day.holiday_name ? `${day.holiday_name} (${day.holiday_coverage || 'whole_day'})` : record.holiday_name || '',
-      record.status || (day.shift_id ? 'no_record' : 'no_schedule'),
-      record.time_in || '',
-      record.break_out || '',
-      record.break_in || '',
-      record.time_out || '',
-      record.total_hours ?? '',
-      record.late_minutes ?? '',
-      record.undertime_minutes ?? '',
-      record.overtime_minutes ?? '',
-      record.leave_type || '',
-      record.source || '',
-      record.remarks || '',
-    ];
-  });
-  const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
-  const start = context.date_range?.startDate || 'dtr';
-  const end = context.date_range?.endDate || start;
-  return {
-    filename: `dtr_export_${start}_${end}.csv`,
-    mimeType: 'text/csv',
-    encoding: 'base64',
-    contentBase64: Buffer.from(csv, 'utf8').toString('base64'),
-  };
-}
-
-function buildAttachments(intent, context) {
-  if (intent === 'dtr_export_guidance') return [buildDtrCsvAttachment(context)];
+function buildAttachments(intent, context, userId) {
+  if (intent === 'dtr_export_guidance') {
+    return [createDtrExportAttachment(context, userId, 'xls')];
+  }
   return [];
 }
 
 function buildAssistantResult({ content, provider, model, mode, context, intent, attachments }) {
   return {
     message: {
+      id: crypto.randomUUID(),
       role: 'assistant',
       content: compactAssistantContent(content),
       createdAt: new Date().toISOString(),
+      intent: intent || null,
+      provider: provider || null,
+      model: model || null,
       suggestions: buildSuggestions(intent),
       attachments: attachments || [],
     },
@@ -410,7 +378,7 @@ function parseIntentClassifierResponse(content) {
     return normalizeIntent(parsed.intent);
   } catch (_) {
     const match = text.match(
-      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|unknown)\b/i
+      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|locator_status|locator_summary|locator_requirements|locator_availability_check|locator_rejection_reason|locator_approval_tracker|unknown)\b/i
     );
     return normalizeIntent(match?.[1]);
   }
@@ -475,17 +443,17 @@ function shouldAskAiForToolPlan({ resolvedIntent, dateRange, text, profile }) {
 }
 
 function fallbackContent() {
-  return 'I can help only with your DTR, missing logs, late/undertime/overtime, absences, DTR correction guidance, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave eligibility, leave form guidance, leave DTR impact, approval tracking, leave summaries, leave types, and locator slip status.';
+  return 'I can help only with your DTR, missing logs, late/undertime/overtime, absences, DTR correction guidance, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave eligibility, leave form guidance, leave DTR impact, approval tracking, leave summaries, leave types, locator slip status, locator summaries, locator requirements, locator filing checks, locator rejection reasons, locator approval tracking, and locator DTR coverage.';
 }
 
 function hasExplicitHrmsTopic(text) {
-  return /\b(dtr|attendance|log|logs|leave|locator|pass slip|wfh|official business|sick|vacation|vl|sl)\b/.test(
+  return /\b(dtr|attendance|log|logs|leave|locator|pass slip|wfh|official business|fieldwork|field work|out of office|travel order|sick|vacation|vl|sl)\b/.test(
     lower(text)
   );
 }
 
 function isFollowUpQuestion(text) {
-  return /\b(it|that|this|one|same|about|how about|what about|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?)\b/.test(
+  return /\b(it|that|this|one|same|about|how about|what about|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|today|tomorrow|yesterday|ugma|gahapon|kagahapon|week|month|semana|semanaha|bulan|bulana|buwan|buwana|aning|karong|ngayong|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?|remarks?|reason|who|where|asa|kinsa|sino|can|file|pwede|puwede|allowed|eligible)\b/.test(
     lower(text)
   );
 }
@@ -507,6 +475,27 @@ function memoryRelativeDate(text, memory) {
 
 function resolveIntentFromMemory(text, memory) {
   if (!memory || hasExplicitHrmsTopic(text) || !isFollowUpQuestion(text)) return null;
+  if (isLocatorIntent(memory.intent)) {
+    if (/\b(can file|can i file|pwede|puwede|allowed|eligible|qualified|available|tomorrow|ugma|karon|today)\b/.test(lower(text))) {
+      return 'locator_availability_check';
+    }
+    if (/\b(why|ngano|bakit|reason|remarks|comment|rejected|reject|declined|denied|gi reject|gireject)\b/.test(lower(text))) {
+      return 'locator_rejection_reason';
+    }
+    if (/\b(who|kinsa|sino|where|asa|kanino|holding|hold|pending with|waiting|awaiting)\b/.test(lower(text))) {
+      return 'locator_approval_tracker';
+    }
+    if (/\b(requirement|requirements|attachment|document|docs|need|needed|kinahanglan|kailangan|rule|rules|policy|how to file|unsaon|paano)\b/.test(lower(text))) {
+      return 'locator_requirements';
+    }
+    if (/\b(summary|total|count|counts|pila|ilan|how many|history|list|show)\b/.test(lower(text))) {
+      return 'locator_summary';
+    }
+    if (/\b(status|approved|approve|pending|rejected|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|remarks|reason|ngano|bakit|why)\b/.test(lower(text))) {
+      return 'locator_status';
+    }
+    return memory.intent;
+  }
   if (/\b(fix|correct|correction|buhaton|gagawin|resolve)\b/.test(lower(text))) {
     return 'dtr_correction_guidance';
   }
@@ -627,6 +616,13 @@ function resolveIntentFromMemory(text, memory) {
       'leave_request_lookup',
       'leave_requirements',
       'leave_types',
+      'latest_locator_request',
+      'locator_status',
+      'locator_summary',
+      'locator_requirements',
+      'locator_availability_check',
+      'locator_rejection_reason',
+      'locator_approval_tracker',
     ].includes(memory.intent)
   ) {
     return memory.intent;
@@ -664,6 +660,18 @@ function enrichMessageWithMemory(text, memory, memoryIntent = null) {
     /\b(what|which|unsa|unsay|ano|that|to|gi file|g-file|filed|leave type)\b/i.test(
       enriched
     )
+  ) {
+    enriched = `${enriched} (${memory.dateRange.startDate}${
+      memory.dateRange.endDate && memory.dateRange.endDate !== memory.dateRange.startDate
+        ? ` to ${memory.dateRange.endDate}`
+        : ''
+    })`;
+  }
+  if (
+    !hasDateHint &&
+    memory?.dateRange?.startDate &&
+    isLocatorIntent(activeIntent) &&
+    isFollowUpQuestion(enriched)
   ) {
     enriched = `${enriched} (${memory.dateRange.startDate}${
       memory.dateRange.endDate && memory.dateRange.endDate !== memory.dateRange.startDate
@@ -790,6 +798,23 @@ function buildToolData(intent, context) {
   if (intent === 'latest_locator_request') {
     return {
       slip: context.recent_locator_slips?.[0] || null,
+      locatorTypes: context.locator_types || [],
+    };
+  }
+  if (
+    intent === 'locator_status' ||
+    intent === 'locator_summary' ||
+    intent === 'locator_requirements' ||
+    intent === 'locator_availability_check' ||
+    intent === 'locator_rejection_reason' ||
+    intent === 'locator_approval_tracker'
+  ) {
+    return {
+      dateRange: context.date_range,
+      slips: context.recent_locator_slips || [],
+      locatorTypes: context.locator_types || [],
+      dtrRecords: context.dtr_records || [],
+      calendarDays: context.dtr_calendar_days || [],
     };
   }
   return {};
@@ -1005,7 +1030,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   );
   if (fastReply) {
     const toolData = buildToolData(resolvedIntent, context);
-    const attachments = buildAttachments(resolvedIntent, context);
+    const attachments = buildAttachments(resolvedIntent, context, scope.userId);
     const refined = shouldSkipToolRefinement(resolvedIntent)
       ? null
       : await refineToolAnswerWithLocalAi({
@@ -1042,7 +1067,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     mode: scope.mode,
     context,
     intent: resolvedIntent,
-    attachments: buildAttachments(resolvedIntent, context),
+    attachments: buildAttachments(resolvedIntent, context, scope.userId),
   });
 }
 

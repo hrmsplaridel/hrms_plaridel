@@ -54,6 +54,12 @@ function normalizeIntent(value) {
     'leave_requirements',
     'latest_leave_request',
     'latest_locator_request',
+    'locator_status',
+    'locator_summary',
+    'locator_requirements',
+    'locator_availability_check',
+    'locator_rejection_reason',
+    'locator_approval_tracker',
   ].includes(intent)
     ? intent
     : null;
@@ -72,6 +78,51 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
     /\b(date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|ngayon|karong adlawa|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|ana|ato|adto|same day|same date|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/.test(
       text
     );
+  const hasLocatorTopic =
+    /\b(locator|locator slip|pass slip|wfh|work from home|official business|ob request|ob|on field|field work|fieldwork|out of office|outside office|travel order)\b/.test(
+      text
+    );
+
+  if (hasLocatorTopic) {
+    if (
+      /\b(covered|cover|covers|sakop|coverage|na cover|na-cover)\b/.test(text) &&
+      /\b(dtr|attendance|missing|incomplete|log|logs|am in|am out|pm in|pm out|time[\s-]?in|time[\s-]?out)\b/.test(text)
+    ) {
+      return 'dtr_locator_coverage_check';
+    }
+    if (
+      /\b(why|ngano|bakit|reason|remarks|comment|rejected|reject|declined|denied|gi reject|gireject|not approved)\b/.test(text)
+    ) {
+      return 'locator_rejection_reason';
+    }
+    if (
+      /\b(who|kinsa|sino|where|asa|kanino|holding|hold|pending with|waiting|awaiting|naa.*kinsa|nasa.*kanino)\b/.test(text)
+    ) {
+      return 'locator_approval_tracker';
+    }
+    if (
+      /\b(can i file|can file|pwede.*file|puwede.*file|pwede ba|puwede ba|allowed|eligible|eligibility|qualified|available.*file|file.*tomorrow|file.*today|file.*ugma|file.*karon)\b/.test(text)
+    ) {
+      return 'locator_availability_check';
+    }
+    if (
+      /\b(requirements?|requirement|attachment|document|docs|need|needed|kinahanglan|kailangan|rules?|policy|how to file|how do i file|unsaon|paano|pwede|can i file|slots?|coverage)\b/.test(text)
+    ) {
+      return 'locator_requirements';
+    }
+    if (
+      /\b(summary|summarize|summarise|overview|recap|total|count|counts|pila|kabuok|ilan|how many|history|list|show|records|requests|rejected|approved|pending|cancelled|canceled|this month|this week|month|week|bulan|bulana|semana|semanaha)\b/.test(text)
+    ) {
+      return 'locator_summary';
+    }
+    if (
+      /\b(status|approve|approved|na-approve|pending|rejected|returned|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|latest|last|recent|remarks|reason)\b/.test(text) ||
+      hasDateTopic
+    ) {
+      return 'locator_status';
+    }
+    return 'latest_locator_request';
+  }
 
   if (
     /\b(export|download|print|pdf|excel|csv|report)\b/.test(text) &&
@@ -276,6 +327,17 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
   }
 
   if (
+    /\b(why|ngano|bakit|gamay|small|low|maliit|nabilin|natira|remaining)\b/.test(
+      text
+    ) &&
+    /\b(balance|credit|credits|available|remaining|leave balance|sick leave|vacation leave|vl|sl)\b/.test(
+      text
+    )
+  ) {
+    return 'leave_balance';
+  }
+
+  if (
     /\b(why|ngano|bakit|reason|remarks|comment|returned|rejected|declined|denied|gi reject|gibalik|binalik)\b/.test(
       text
     ) &&
@@ -475,7 +537,28 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
   }
 
   if (
-    /\b(locator|pass slip|locator slip|wfh|work from home|official business|ob request|na-approve|approved.*locator|status.*locator)\b/.test(
+    /\b(locator|locator slip|pass slip|wfh|work from home|official business|ob request|ob|on field|field work|fieldwork|out of office|outside office|travel order)\b/.test(text) &&
+    /\b(requirements?|requirement|attachment|document|docs|need|needed|kinahanglan|kailangan|rules?|policy|how to file|how do i file|unsaon|paano|pwede|can i file|coverage|cover|slots?)\b/.test(text)
+  ) {
+    return 'locator_requirements';
+  }
+
+  if (
+    /\b(locator|locator slip|pass slip|wfh|work from home|official business|ob request|ob|on field|field work|fieldwork|out of office|outside office|travel order)\b/.test(text) &&
+    /\b(summary|summarize|summarise|overview|recap|total|count|counts|pila|kabuok|ilan|how many|history|list|show|records|requests|this month|this week|month|week|bulan|bulana|semana|semanaha)\b/.test(text)
+  ) {
+    return 'locator_summary';
+  }
+
+  if (
+    /\b(locator|locator slip|pass slip|wfh|work from home|official business|ob request|ob|on field|field work|fieldwork|out of office|outside office|travel order|na-approve|approved.*locator|status.*locator)\b/.test(text) &&
+    /\b(status|approve|approved|pending|rejected|returned|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|latest|last|recent|today|tomorrow|yesterday|ugma|gahapon|kagahapon|date|january|february|march|april|may|june|july|august|september|october|november|december|\d{4}-\d{2}-\d{2})\b/.test(text)
+  ) {
+    return 'locator_status';
+  }
+
+  if (
+    /\b(locator|pass slip|locator slip|wfh|work from home|official business|ob request|on field|field work|fieldwork|out of office|outside office|travel order|na-approve|approved.*locator|status.*locator)\b/.test(
       text
     )
   ) {

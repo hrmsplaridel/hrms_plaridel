@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -11,10 +9,17 @@ class DtrAssistantMessageBubble extends StatelessWidget {
     super.key,
     required this.message,
     this.onEdit,
+    this.feedback,
+    this.onFeedback,
+    this.onDownloadAttachment,
   });
 
   final DtrAssistantMessage message;
   final VoidCallback? onEdit;
+  final String? feedback;
+  final ValueChanged<String>? onFeedback;
+  final Future<List<int>> Function(DtrAssistantAttachment attachment)?
+  onDownloadAttachment;
 
   void _copyToClipboard(BuildContext context) {
     Clipboard.setData(ClipboardData(text: message.content));
@@ -45,8 +50,9 @@ class DtrAssistantMessageBubble extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 720),
         child: Column(
-          crossAxisAlignment:
-              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment: isUser
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
           children: [
             Container(
               margin: const EdgeInsets.symmetric(vertical: 6),
@@ -67,12 +73,19 @@ class DtrAssistantMessageBubble extends StatelessWidget {
                 children: [
                   SelectableText(
                     message.content,
-                    style: TextStyle(color: textColor, height: 1.35, fontSize: 14),
+                    style: TextStyle(
+                      color: textColor,
+                      height: 1.35,
+                      fontSize: 14,
+                    ),
                   ),
                   if (!isUser && message.attachments.isNotEmpty) ...[
                     const SizedBox(height: 10),
                     for (final attachment in message.attachments)
-                      _AssistantAttachmentButton(attachment: attachment),
+                      _AssistantAttachmentButton(
+                        attachment: attachment,
+                        onDownloadAttachment: onDownloadAttachment,
+                      ),
                   ],
                 ],
               ),
@@ -90,6 +103,46 @@ class DtrAssistantMessageBubble extends StatelessWidget {
                     color: AppTheme.dashTextSecondaryOf(context),
                   ),
                 if (isUser && onEdit != null) const SizedBox(width: 8),
+                if (!isUser &&
+                    message.id != null &&
+                    message.id!.isNotEmpty) ...[
+                  IconButton(
+                    icon: Icon(
+                      feedback == 'up'
+                          ? Icons.thumb_up_alt_rounded
+                          : Icons.thumb_up_alt_outlined,
+                      size: 16,
+                    ),
+                    onPressed: onFeedback == null
+                        ? null
+                        : () => onFeedback!.call('up'),
+                    tooltip: 'Correct',
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                    color: feedback == 'up'
+                        ? Colors.orange.shade800
+                        : AppTheme.dashTextSecondaryOf(context),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: Icon(
+                      feedback == 'down'
+                          ? Icons.thumb_down_alt_rounded
+                          : Icons.thumb_down_alt_outlined,
+                      size: 16,
+                    ),
+                    onPressed: onFeedback == null
+                        ? null
+                        : () => onFeedback!.call('down'),
+                    tooltip: 'Wrong',
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                    color: feedback == 'down'
+                        ? Colors.orange.shade800
+                        : AppTheme.dashTextSecondaryOf(context),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 IconButton(
                   icon: const Icon(Icons.content_copy_rounded, size: 16),
                   onPressed: () => _copyToClipboard(context),
@@ -108,23 +161,31 @@ class DtrAssistantMessageBubble extends StatelessWidget {
 }
 
 class _AssistantAttachmentButton extends StatelessWidget {
-  const _AssistantAttachmentButton({required this.attachment});
+  const _AssistantAttachmentButton({
+    required this.attachment,
+    this.onDownloadAttachment,
+  });
 
   final DtrAssistantAttachment attachment;
+  final Future<List<int>> Function(DtrAssistantAttachment attachment)?
+  onDownloadAttachment;
 
   Future<void> _shareAttachment(BuildContext context) async {
     try {
-      final bytes = Uint8List.fromList(base64Decode(attachment.contentBase64));
-      await Share.shareXFiles(
-        [
-          XFile.fromData(
-            bytes,
-            name: attachment.filename,
-            mimeType: attachment.mimeType,
-          ),
-        ],
-        subject: attachment.filename,
-      );
+      final rawBytes = onDownloadAttachment == null
+          ? const <int>[]
+          : await onDownloadAttachment!(attachment);
+      final bytes = Uint8List.fromList(rawBytes);
+      if (bytes.isEmpty) {
+        throw Exception('The file was empty or unavailable.');
+      }
+      await Share.shareXFiles([
+        XFile.fromData(
+          bytes,
+          name: attachment.filename,
+          mimeType: attachment.mimeType,
+        ),
+      ], subject: attachment.filename);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -138,10 +199,7 @@ class _AssistantAttachmentButton extends StatelessWidget {
     return OutlinedButton.icon(
       onPressed: () => _shareAttachment(context),
       icon: const Icon(Icons.download_rounded, size: 18),
-      label: Text(
-        attachment.filename,
-        overflow: TextOverflow.ellipsis,
-      ),
+      label: Text(attachment.filename, overflow: TextOverflow.ellipsis),
     );
   }
 }
