@@ -7,60 +7,178 @@ import 'package:hrms_plaridel/features/landing/presentation/widgets/section_cont
 
 enum _VacancyCardStatus { nowOpen, slotsFull, closed }
 
-/// Compact requirement chip (education / experience / training).
-class _RequirementChip extends StatelessWidget {
-  const _RequirementChip({required this.icon, required this.label});
+const _accent = Color(0xFFE85D04);
 
-  final IconData icon;
-  final String label;
+bool _isMeaningfulRequirement(String? raw) {
+  final text = raw?.trim();
+  if (text == null || text.isEmpty) return false;
+  final lower = text.toLowerCase();
+  return lower != 'none' &&
+      lower != 'n/a' &&
+      lower != 'na' &&
+      lower != '-' &&
+      lower != '—';
+}
 
-  @override
-  Widget build(BuildContext context) {
+String _formatClosingDate(DateTime date) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  final local = date.toLocal();
+  return '${months[local.month - 1]} ${local.day}, ${local.year}';
+}
+
+Widget _requirementPanel(JobVacancyItem vacancy) {
+  String displayValue(String? raw) {
+    if (_isMeaningfulRequirement(raw)) return raw!.trim();
+    return 'Not specified';
+  }
+
+  Widget tileContent(
+    String caption,
+    IconData icon,
+    String value, {
+    required bool specified,
+  }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppTheme.primaryNavy.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.12)),
+        color: specified
+            ? _accent.withValues(alpha: 0.06)
+            : AppTheme.offWhite,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: specified
+              ? _accent.withValues(alpha: 0.16)
+              : const Color(0xFFE2E6EA),
+        ),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 14, color: AppTheme.primaryNavy),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                height: 1.25,
+          Row(
+            children: [
+              Icon(
+                icon,
+                size: 14,
+                color: specified ? _accent : AppTheme.textSecondary,
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+              const SizedBox(width: 6),
+              Text(
+                caption,
+                style: TextStyle(
+                  color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              color: specified
+                  ? AppTheme.textPrimary
+                  : AppTheme.textSecondary.withValues(alpha: 0.85),
+              fontSize: 12.5,
+              fontWeight: specified ? FontWeight.w700 : FontWeight.w500,
+              fontStyle: specified ? FontStyle.normal : FontStyle.italic,
+              height: 1.3,
             ),
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
     );
   }
-}
 
-Widget? _requirementChips(JobVacancyItem vacancy) {
-  final chips = <Widget>[];
-  void add(String? raw, IconData icon) {
-    final text = raw?.trim();
-    if (text == null || text.isEmpty) return;
-    chips.add(_RequirementChip(icon: icon, label: text));
-  }
+  final education = displayValue(vacancy.education);
+  final experience = displayValue(vacancy.experience);
+  final training = displayValue(vacancy.training);
+  final hasAnySpecified = _isMeaningfulRequirement(vacancy.education) ||
+      _isMeaningfulRequirement(vacancy.experience) ||
+      _isMeaningfulRequirement(vacancy.training);
 
-  add(vacancy.education, Icons.school_outlined);
-  add(vacancy.experience, Icons.schedule_outlined);
-  add(vacancy.training, Icons.cast_for_education_outlined);
+  final captions = const [
+    ('Education', Icons.school_outlined),
+    ('Experience', Icons.schedule_outlined),
+    ('Training', Icons.cast_for_education_outlined),
+  ];
+  final values = [education, experience, training];
+  final specifiedFlags = [
+    _isMeaningfulRequirement(vacancy.education),
+    _isMeaningfulRequirement(vacancy.experience),
+    _isMeaningfulRequirement(vacancy.training),
+  ];
 
-  if (chips.isEmpty) return null;
-  return Wrap(spacing: 8, runSpacing: 8, children: chips);
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      LayoutBuilder(
+        builder: (context, c) {
+          final stack = c.maxWidth < 640;
+          if (stack) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < captions.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 8),
+                  tileContent(
+                    captions[i].$1,
+                    captions[i].$2,
+                    values[i],
+                    specified: specifiedFlags[i],
+                  ),
+                ],
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < captions.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                Expanded(
+                  child: tileContent(
+                    captions[i].$1,
+                    captions[i].$2,
+                    values[i],
+                    specified: specifiedFlags[i],
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+      if (!hasAnySpecified) ...[
+        const SizedBox(height: 10),
+        Text(
+          'HR has not listed minimum requirements yet. Required documents are collected in the application form.',
+          style: TextStyle(
+            fontSize: 12,
+            height: 1.4,
+            color: AppTheme.textSecondary.withValues(alpha: 0.9),
+          ),
+        ),
+      ],
+    ],
+  );
 }
 
 IconData _iconForVacancyTitle(String title) {
@@ -154,17 +272,17 @@ class JobVacanciesSection extends StatelessWidget {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      AppTheme.primaryNavy.withValues(alpha: 0.18),
-                      AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      _accent.withValues(alpha: 0.18),
+                      _accent.withValues(alpha: 0.08),
                     ],
                   ),
                   border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.15),
+                    color: _accent.withValues(alpha: 0.2),
                   ),
                 ),
                 child: const Icon(
                   Icons.work_outline_rounded,
-                  color: AppTheme.primaryNavy,
+                  color: _accent,
                   size: 26,
                 ),
               ),
@@ -178,7 +296,7 @@ class JobVacanciesSection extends StatelessWidget {
                         Text(
                           'Job Vacancies',
                           style: TextStyle(
-                            color: AppTheme.primaryNavy,
+                            color: _accent,
                             fontSize: isWide ? 28 : 24,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.35,
@@ -216,8 +334,8 @@ class JobVacanciesSection extends StatelessWidget {
                         borderRadius: BorderRadius.circular(4),
                         gradient: LinearGradient(
                           colors: [
-                            AppTheme.primaryNavy,
-                            AppTheme.primaryNavyLight.withValues(alpha: 0.7),
+                            _accent,
+                            _accent.withValues(alpha: 0.65),
                           ],
                         ),
                       ),
@@ -287,11 +405,12 @@ class JobVacanciesSection extends StatelessWidget {
                   return _VacancyCard(
                     headline: headlineText,
                     fallbackBody: _displayBody(v.body),
-                    requirementChips: _requirementChips(v),
+                    requirementPanel: _requirementPanel(v),
                     hasVacancies: hasVacancies,
                     minTall: twoColumns,
                     status: status,
                     roleIcon: _iconForVacancyTitle(headlineText),
+                    closingDate: v.closingDate,
                     slotsFilled: active,
                     slotsMax: max,
                     slotDetailLine: slotDetailLine,
@@ -358,7 +477,9 @@ class JobVacanciesSection extends StatelessWidget {
             _VacancyCard(
               headline: _displayHeadline(headline),
               fallbackBody: _displayBody(body),
-              requirementChips: null,
+              requirementPanel: _requirementPanel(
+                JobVacancyItem(headline: headline, body: body),
+              ),
               hasVacancies: hasVacancies,
               minTall: false,
               status: hasVacancies
@@ -588,8 +709,8 @@ class _SlotProgressBar extends StatelessWidget {
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
-                          AppTheme.primaryNavy,
-                          AppTheme.primaryNavyLight,
+                          _accent,
+                          _accent.withValues(alpha: 0.65),
                         ],
                       ),
                     ),
@@ -629,11 +750,12 @@ class _VacancyCard extends StatefulWidget {
   const _VacancyCard({
     required this.headline,
     required this.fallbackBody,
-    this.requirementChips,
+    required this.requirementPanel,
     required this.hasVacancies,
     this.minTall = false,
     required this.status,
     required this.roleIcon,
+    this.closingDate,
     this.slotsFilled,
     this.slotsMax,
     this.slotDetailLine,
@@ -642,11 +764,12 @@ class _VacancyCard extends StatefulWidget {
 
   final String headline;
   final String fallbackBody;
-  final Widget? requirementChips;
+  final Widget requirementPanel;
   final bool hasVacancies;
   final bool minTall;
   final _VacancyCardStatus status;
   final IconData roleIcon;
+  final DateTime? closingDate;
   final int? slotsFilled;
   final int? slotsMax;
   final String? slotDetailLine;
@@ -661,46 +784,17 @@ class _VacancyCardState extends State<_VacancyCard> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = widget.hasVacancies
-        ? AppTheme.primaryNavy
-        : AppTheme.textSecondary;
+    final accent = widget.hasVacancies ? _accent : AppTheme.textSecondary;
     const radius = 18.0;
     final showSlots =
         widget.hasVacancies &&
         widget.slotsMax != null &&
         widget.slotsMax! >= 1 &&
         widget.slotsFilled != null;
-
-    final iconTile = Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppTheme.primaryNavy.withValues(alpha: 0.16),
-            AppTheme.primaryNavy.withValues(alpha: 0.06),
-          ],
-        ),
-        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.14)),
-      ),
-      child: Icon(widget.roleIcon, size: 22, color: accent),
-    );
+    final closing = widget.closingDate;
 
     final detailsSection = widget.hasVacancies
-        ? (widget.requirementChips ??
-              (widget.fallbackBody.trim().isNotEmpty
-                  ? Text(
-                      widget.fallbackBody,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary.withValues(alpha: 0.9),
-                        fontSize: 14,
-                        height: 1.5,
-                      ),
-                    )
-                  : null))
+        ? widget.requirementPanel
         : Container(
             width: double.infinity,
             decoration: BoxDecoration(
@@ -720,7 +814,7 @@ class _VacancyCardState extends State<_VacancyCard> {
                       bottom: 12,
                     ),
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy,
+                      color: _accent,
                       borderRadius: BorderRadius.circular(3),
                     ),
                   ),
@@ -746,31 +840,31 @@ class _VacancyCardState extends State<_VacancyCard> {
     final applyButton = widget.onApplyTap != null
         ? FilledButton.icon(
             onPressed: widget.onApplyTap,
-            icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+            icon: const Icon(Icons.arrow_forward_rounded, size: 18),
             label: const Text('Apply now'),
             style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
+              backgroundColor: _accent,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-              minimumSize: Size.zero,
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+              minimumSize: const Size(double.infinity, 44),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
               ),
-              elevation: _hovering ? 2 : 0,
+              elevation: _hovering ? 3 : 1,
+              shadowColor: _accent.withValues(alpha: 0.35),
             ),
           )
         : OutlinedButton(
             onPressed: null,
             style: OutlinedButton.styleFrom(
               disabledForegroundColor: AppTheme.textSecondary,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              minimumSize: Size.zero,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              minimumSize: const Size(double.infinity, 44),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               side: const BorderSide(color: Color(0xFFE2E6EA)),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
             child: const Text(
@@ -780,7 +874,7 @@ class _VacancyCardState extends State<_VacancyCard> {
           );
 
     final content = Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -788,24 +882,72 @@ class _VacancyCardState extends State<_VacancyCard> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              iconTile,
-              const Spacer(),
-              if (widget.hasVacancies) _StatusBadge(status: widget.status),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      _accent.withValues(alpha: 0.16),
+                      _accent.withValues(alpha: 0.06),
+                    ],
+                  ),
+                  border: Border.all(color: _accent.withValues(alpha: 0.18)),
+                ),
+                child: Icon(widget.roleIcon, size: 22, color: accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (widget.hasVacancies)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: _StatusBadge(status: widget.status),
+                      ),
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.headline,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: widget.hasVacancies ? 19 : 17,
+                        fontWeight: FontWeight.w800,
+                        height: 1.2,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    if (closing != null && widget.hasVacancies) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.event_outlined,
+                            size: 14,
+                            color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            'Apply until ${_formatClosingDate(closing)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            widget.headline,
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: widget.hasVacancies ? 18 : 17,
-              fontWeight: FontWeight.w800,
-              height: 1.2,
-              letterSpacing: -0.15,
-            ),
-          ),
-          if (detailsSection != null) ...[
-            const SizedBox(height: 12),
+          if (widget.hasVacancies) ...[
+            const SizedBox(height: 14),
             detailsSection,
           ],
           if (showSlots) ...[
@@ -815,10 +957,6 @@ class _VacancyCardState extends State<_VacancyCard> {
               max: widget.slotsMax!,
               detailLine: widget.slotDetailLine,
             ),
-          ],
-          if (widget.hasVacancies) ...[
-            const SizedBox(height: 14),
-            Align(alignment: Alignment.centerRight, child: applyButton),
           ],
         ],
       ),
@@ -834,25 +972,21 @@ class _VacancyCardState extends State<_VacancyCard> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         constraints: BoxConstraints(
-          minHeight: widget.minTall && widget.hasVacancies ? 248 : 0,
+          minHeight: widget.minTall && widget.hasVacancies ? 260 : 0,
         ),
         decoration: BoxDecoration(
           color: AppTheme.white,
           borderRadius: BorderRadius.circular(radius),
           border: Border.all(
             color: widget.hasVacancies
-                ? AppTheme.primaryNavy.withValues(
-                    alpha: _hovering ? 0.28 : 0.14,
-                  )
+                ? _accent.withValues(alpha: _hovering ? 0.35 : 0.18)
                 : const Color(0xFFE2E6EA),
           ),
           boxShadow: [
             BoxShadow(
-              color: AppTheme.primaryNavy.withValues(
-                alpha: _hovering ? 0.12 : 0.06,
-              ),
-              blurRadius: _hovering ? 20 : 14,
-              offset: Offset(0, _hovering ? 8 : 5),
+              color: _accent.withValues(alpha: _hovering ? 0.14 : 0.07),
+              blurRadius: _hovering ? 22 : 14,
+              offset: Offset(0, _hovering ? 10 : 5),
             ),
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.03),
@@ -869,14 +1003,21 @@ class _VacancyCardState extends State<_VacancyCard> {
             children: [
               if (widget.hasVacancies)
                 Container(
-                  height: 3,
-                  decoration: const BoxDecoration(
+                  height: 4,
+                  decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+                      colors: [_accent, _accent.withValues(alpha: 0.55)],
                     ),
                   ),
                 ),
               content,
+              if (widget.hasVacancies) ...[
+                Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  child: applyButton,
+                ),
+              ],
             ],
           ),
         ),

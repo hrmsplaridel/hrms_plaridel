@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/recruitment/data/recruitment_hire_prefill.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_applicant_exam_ui.dart';
 
 /// Admin dialog: send hire congratulations + HRMS login credentials via server email.
@@ -14,11 +15,17 @@ class RspHireApplicantEmailDialog extends StatefulWidget {
     required this.applicantEmail,
     required this.applicantName,
     required this.sendHireEmail,
+    this.initialUsername,
+    this.initialPassword,
   });
 
   final String applicantEmail;
   final String applicantName;
   final Future<void> Function(String username, String password) sendHireEmail;
+
+  /// Prefill from the account HR just created (login email + password used).
+  final String? initialUsername;
+  final String? initialPassword;
 
   @override
   State<RspHireApplicantEmailDialog> createState() =>
@@ -39,6 +46,14 @@ class _RspHireApplicantEmailDialogState
   @override
   void initState() {
     super.initState();
+    final user = widget.initialUsername?.trim();
+    final pass = widget.initialPassword;
+    _userCtrl.text = (user != null && user.isNotEmpty)
+        ? user
+        : widget.applicantEmail.trim();
+    _passCtrl.text = (pass != null && pass.isNotEmpty)
+        ? pass
+        : kDefaultEmployeeAccountPassword;
     _userCtrl.addListener(_onCredentialsChanged);
     _passCtrl.addListener(_onCredentialsChanged);
   }

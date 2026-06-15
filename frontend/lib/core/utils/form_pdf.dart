@@ -14,6 +14,8 @@ import 'package:hrms_plaridel/features/learning_development/models/individual_de
 import 'package:hrms_plaridel/features/learning_development/models/performance_evaluation_form.dart';
 import 'package:hrms_plaridel/features/learning_development/models/promotion_certification.dart';
 import 'package:hrms_plaridel/features/learning_development/models/action_brainstorming_coaching.dart';
+import 'package:hrms_plaridel/features/learning_development/models/computation_of_points.dart';
+import 'package:hrms_plaridel/features/learning_development/models/work_experience_sheet.dart';
 import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_need_analysis.dart';
@@ -1819,93 +1821,123 @@ class FormPdf {
   ) async {
     await ensureLogoLoaded();
     final doc = pw.Document();
-    doc.addPage(
-      pw.Page(
-        pageFormat: pageLongLandscape,
-        build: (ctx) => _formLayout(
-          'APPLICANTS PROFILE',
-          pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              _row('Position Applied for:', _s(e.positionAppliedFor)),
-              _row('Minimum Requirements:', _s(e.minimumRequirements)),
-              _row('Date of Posting:', _s(e.dateOfPosting)),
-              _row('Closing Date:', _s(e.closingDate)),
-              pw.SizedBox(height: 12),
-              if (e.applicants.isEmpty)
-                pw.Text('—', style: const pw.TextStyle(fontSize: 10))
-              else
-                pw.Table(
-                  border: pw.TableBorder.all(width: 0.5),
-                  columnWidths: {
-                    0: const pw.FlexColumnWidth(1.2),
-                    1: const pw.FlexColumnWidth(1),
-                    2: const pw.FlexColumnWidth(1.5),
-                    3: const pw.FlexColumnWidth(0.4),
-                    4: const pw.FlexColumnWidth(0.4),
-                    5: const pw.FlexColumnWidth(0.8),
-                    6: const pw.FlexColumnWidth(1),
-                  },
-                  children: [
-                    pw.TableRow(
-                      decoration: const pw.BoxDecoration(
-                        color: PdfColors.grey300,
+    final perPage = ApplicantsProfileEntry.applicantsPerFormPage;
+    final applicants = e.applicants;
+    final pageCount = applicants.isEmpty
+        ? 1
+        : ((applicants.length - 1) ~/ perPage) + 1;
+
+    pw.Widget applicantsTable(List<ApplicantsProfileApplicant> chunk) {
+      if (chunk.isEmpty) {
+        return pw.Text('—', style: const pw.TextStyle(fontSize: 10));
+      }
+      return pw.Table(
+        border: pw.TableBorder.all(width: 0.5),
+        columnWidths: {
+          0: const pw.FlexColumnWidth(1.2),
+          1: const pw.FlexColumnWidth(1),
+          2: const pw.FlexColumnWidth(1.5),
+          3: const pw.FlexColumnWidth(0.4),
+          4: const pw.FlexColumnWidth(0.4),
+          5: const pw.FlexColumnWidth(0.8),
+          6: const pw.FlexColumnWidth(1),
+        },
+        children: [
+          pw.TableRow(
+            decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+            children:
+                [
+                      'NAME',
+                      'COURSE',
+                      'ADDRESS',
+                      'SEX',
+                      'AGE',
+                      'CIVIL STATUS',
+                      'REMARK (DISABILITY)',
+                    ]
+                    .map(
+                      (h) => pw.Padding(
+                        padding: const pw.EdgeInsets.all(4),
+                        child: pw.Text(
+                          h,
+                          style: const pw.TextStyle(fontSize: 8),
+                        ),
                       ),
-                      children:
-                          [
-                                'NAME',
-                                'COURSE',
-                                'ADDRESS',
-                                'SEX',
-                                'AGE',
-                                'CIVIL STATUS',
-                                'REMARK (DISABILITY)',
-                              ]
-                              .map(
-                                (h) => pw.Padding(
-                                  padding: const pw.EdgeInsets.all(4),
-                                  child: pw.Text(
-                                    h,
-                                    style: const pw.TextStyle(fontSize: 8),
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                    ),
-                    ...e.applicants.map(
-                      (a) => pw.TableRow(
-                        children:
-                            [
-                                  _s(a.name),
-                                  _s(a.course),
-                                  _s(a.address),
-                                  _s(a.sex),
-                                  _s(a.age),
-                                  _s(a.civilStatus),
-                                  _s(a.remarkDisability),
-                                ]
-                                .map(
-                                  (v) => pw.Padding(
-                                    padding: const pw.EdgeInsets.all(4),
-                                    child: pw.Text(
-                                      v,
-                                      style: const pw.TextStyle(fontSize: 8),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                      ),
-                    ),
-                  ],
-                ),
-              pw.SizedBox(height: 12),
-              _row('Prepared by:', _s(e.preparedBy)),
-              _row('Checked by:', _s(e.checkedBy)),
-            ],
+                    )
+                    .toList(),
+          ),
+          ...chunk.map(
+            (a) => pw.TableRow(
+              children:
+                  [
+                        _s(a.name),
+                        _s(a.course),
+                        _s(a.address),
+                        _s(a.sex),
+                        _s(a.age),
+                        _s(a.civilStatus),
+                        _s(a.remarkDisability),
+                      ]
+                      .map(
+                        (v) => pw.Padding(
+                          padding: const pw.EdgeInsets.all(4),
+                          child: pw.Text(
+                            v,
+                            style: const pw.TextStyle(fontSize: 8),
+                          ),
+                        ),
+                      )
+                      .toList(),
+            ),
+          ),
+        ],
+      );
+    }
+
+    for (var page = 0; page < pageCount; page++) {
+      final start = page * perPage;
+      final end = (start + perPage).clamp(0, applicants.length);
+      final chunk = applicants.isEmpty
+          ? const <ApplicantsProfileApplicant>[]
+          : applicants.sublist(start, end);
+      final title = page == 0
+          ? 'APPLICANTS PROFILE'
+          : 'APPLICANTS PROFILE (Continuation — Form ${page + 1})';
+
+      doc.addPage(
+        pw.Page(
+          pageFormat: pageLongLandscape,
+          build: (ctx) => _formLayout(
+            title,
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                if (page == 0) ...[
+                  _row('Position Applied for:', _s(e.positionAppliedFor)),
+                  _row('Minimum Requirements:', _s(e.minimumRequirements)),
+                  _row('Date of Posting:', _s(e.dateOfPosting)),
+                  _row('Closing Date:', _s(e.closingDate)),
+                ] else ...[
+                  _row('Position Applied for:', _s(e.positionAppliedFor)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    'Continuation of applicants list (rows ${start + 1}–${end == 0 ? start : end}).',
+                    style: const pw.TextStyle(fontSize: 8),
+                  ),
+                ],
+                pw.SizedBox(height: 12),
+                applicantsTable(chunk),
+                pw.SizedBox(height: 12),
+                if (page == pageCount - 1) ...[
+                  _row('Prepared by:', _s(e.preparedBy)),
+                  _row('Checked by:', _s(e.checkedBy)),
+                ],
+              ],
+            ),
           ),
         ),
-      ),
-    );
+      );
+    }
     return doc;
   }
 
@@ -2347,6 +2379,395 @@ class FormPdf {
               pw.Text(
                 _s(e.preparedByTitle),
                 style: const pw.TextStyle(fontSize: 9),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return doc;
+  }
+
+  static Future<pw.Document> buildComputationOfPointsPdf(
+    ComputationOfPointsEntry e,
+  ) async {
+    await ensureLogoLoaded();
+    final doc = pw.Document();
+
+    pw.Widget candidateCell(ComputationOfPointsCandidate c) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.all(3),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              '1. Name of Candidate',
+              style: const pw.TextStyle(fontSize: 5.5),
+            ),
+            pw.Text(_s(c.name), style: const pw.TextStyle(fontSize: 6.5)),
+            pw.SizedBox(height: 2),
+            pw.Text('2. Position', style: const pw.TextStyle(fontSize: 5.5)),
+            pw.Text(_s(c.position), style: const pw.TextStyle(fontSize: 6.5)),
+            pw.SizedBox(height: 2),
+            pw.Text(
+              '3. Salary Grade',
+              style: const pw.TextStyle(fontSize: 5.5),
+            ),
+            pw.Text(_s(c.salaryGrade), style: const pw.TextStyle(fontSize: 6.5)),
+            pw.SizedBox(height: 2),
+            pw.Text('4. Rate', style: const pw.TextStyle(fontSize: 5.5)),
+            pw.Text(_s(c.rate), style: const pw.TextStyle(fontSize: 6.5)),
+          ],
+        ),
+      );
+    }
+
+    pw.Widget scoreCell(String? v) => pw.Padding(
+      padding: const pw.EdgeInsets.all(3),
+      child: pw.Center(
+        child: pw.Text(_s(v), style: const pw.TextStyle(fontSize: 7)),
+      ),
+    );
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: pageLetterLandscape,
+        build: (ctx) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            _pdfHeaderMayorOffice('COMPUTATION OF POINTS'),
+            pw.Center(
+              child: pw.Text(
+                'Personnel Selection Board',
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.end,
+              children: [
+                pw.Text(
+                  'Date: ${_s(e.date)}',
+                  style: const pw.TextStyle(fontSize: 9),
+                ),
+              ],
+            ),
+            pw.Center(
+              child: pw.Text(
+                '(${_s(e.positionLevel).isEmpty ? "Second Level Position" : _s(e.positionLevel)})',
+                style: const pw.TextStyle(fontSize: 8),
+              ),
+            ),
+            pw.SizedBox(height: 8),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      _row('POSITION :', _s(e.position)),
+                      _row('SALARY GRADE :', _s(e.salaryGrade)),
+                      _row('RATE :', _s(e.rate)),
+                      _row('OFFICE :', _s(e.office)),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(width: 16),
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      _row('EDUCATION :', _s(e.minEducation)),
+                      _row('TRAINING :', _s(e.minTraining)),
+                      _row('EXPERIENCE :', _s(e.minExperience)),
+                      _row('ELIGIBILITY :', _s(e.minEligibility)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 8),
+            if (e.candidates.isEmpty)
+              pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+            else
+              pw.Table(
+                border: pw.TableBorder.all(width: 0.5),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(2.2),
+                  1: const pw.FlexColumnWidth(0.55),
+                  2: const pw.FlexColumnWidth(0.55),
+                  3: const pw.FlexColumnWidth(0.55),
+                  4: const pw.FlexColumnWidth(0.55),
+                  5: const pw.FlexColumnWidth(0.55),
+                  6: const pw.FlexColumnWidth(0.55),
+                  7: const pw.FlexColumnWidth(0.55),
+                  8: const pw.FlexColumnWidth(0.55),
+                  9: const pw.FlexColumnWidth(0.45),
+                },
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(
+                      color: PdfColors.grey300,
+                    ),
+                    children:
+                        [
+                              'NAME OF CANDIDATES',
+                              'EDUCATION (25%)',
+                              'ELIGIBILITY (20%)',
+                              'EXPERIENCE (15%)',
+                              'TRAINING (10%)',
+                              'PERFORMANCE (10%)',
+                              'POTENTIAL (10%)',
+                              'WORK ATTITUDE (10%)',
+                              'TOTAL (100%)',
+                              'RANK',
+                            ]
+                            .map(
+                              (h) => pw.Padding(
+                                padding: const pw.EdgeInsets.all(3),
+                                child: pw.Text(
+                                  h,
+                                  style: const pw.TextStyle(fontSize: 5.5),
+                                  textAlign: pw.TextAlign.center,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                  ),
+                  ...e.candidates.map(
+                    (c) => pw.TableRow(
+                      children: [
+                        candidateCell(c),
+                        scoreCell(c.education),
+                        scoreCell(c.eligibility),
+                        scoreCell(c.experience),
+                        scoreCell(c.training),
+                        scoreCell(c.performance),
+                        scoreCell(c.potential),
+                        scoreCell(c.workAttitude),
+                        scoreCell(c.total),
+                        scoreCell(c.rank),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            pw.SizedBox(height: 12),
+            pw.Text(
+              'Prepared by:',
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.Text(
+              _s(e.preparedByName),
+              style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.Text(
+              '(Printed Name/Over Signature)',
+              style: const pw.TextStyle(fontSize: 8),
+            ),
+            pw.Spacer(),
+            _pdfFooter(),
+          ],
+        ),
+      ),
+    );
+    return doc;
+  }
+
+  static pw.Widget _pdfHeaderMayorOffice(String formTitle) {
+    return pw.Column(
+      children: [
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            _logoBytes != null
+                ? pw.Container(
+                    width: 48,
+                    height: 48,
+                    decoration: pw.BoxDecoration(
+                      shape: pw.BoxShape.circle,
+                      border: pw.Border.all(color: _letterheadNavy, width: 1),
+                    ),
+                    child: pw.ClipOval(
+                      child: pw.Image(
+                        pw.MemoryImage(_logoBytes!),
+                        fit: pw.BoxFit.cover,
+                      ),
+                    ),
+                  )
+                : pw.SizedBox(width: 48, height: 48),
+            pw.Expanded(
+              child: pw.Column(
+                children: [
+                  pw.Text(
+                    'Republic of the Philippines',
+                    style: const pw.TextStyle(fontSize: 8),
+                    textAlign: pw.TextAlign.center,
+                  ),
+                  pw.Text(
+                    'PROVINCE OF MISAMIS OCCIDENTAL',
+                    style: pw.TextStyle(
+                      fontSize: 8,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                    textAlign: pw.TextAlign.center,
+                  ),
+                  pw.Text(
+                    'MUNICIPALITY OF PLARIDEL',
+                    style: pw.TextStyle(
+                      fontSize: 10,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                    textAlign: pw.TextAlign.center,
+                  ),
+                  pw.Text(
+                    'OFFICE OF THE MUNICIPAL MAYOR',
+                    style: pw.TextStyle(
+                      fontSize: 8,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                    textAlign: pw.TextAlign.center,
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    formTitle,
+                    style: pw.TextStyle(
+                      fontSize: 11,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                    textAlign: pw.TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(width: 48),
+          ],
+        ),
+        pw.SizedBox(height: 6),
+      ],
+    );
+  }
+
+  static Future<pw.Document> buildWorkExperienceSheetPdf(
+    WorkExperienceSheetEntry e,
+  ) async {
+    await ensureLogoLoaded();
+    final doc = pw.Document();
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.letter,
+        build: (ctx) => _formLayout(
+          'WORK EXPERIENCE SHEET',
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Center(
+                child: pw.Text(
+                  'Human Resource Management and Development Office',
+                  style: const pw.TextStyle(fontSize: 9),
+                ),
+              ),
+              pw.SizedBox(height: 12),
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(
+                    flex: 5,
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        _row('POSITION APPLIED FOR :', _s(e.positionAppliedFor)),
+                        _row('DEPARTMENT :', _s(e.department)),
+                        pw.SizedBox(height: 8),
+                        pw.Text(
+                          '4 MINIMUM STANDARDS :',
+                          style: pw.TextStyle(
+                            fontSize: 9,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                        pw.SizedBox(height: 4),
+                        _row('1. Education :', _s(e.minEducation)),
+                        _row('2. Experience :', _s(e.minExperience)),
+                        _row('3. Training :', _s(e.minTraining)),
+                        _row('4. Eligibility :', _s(e.minEligibility)),
+                      ],
+                    ),
+                  ),
+                  pw.SizedBox(width: 12),
+                  pw.Expanded(
+                    flex: 4,
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          'Job Description of Last Work',
+                          style: pw.TextStyle(
+                            fontSize: 9,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                        pw.SizedBox(height: 4),
+                        pw.Container(
+                          height: 200,
+                          padding: const pw.EdgeInsets.all(6),
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border.all(width: 0.5),
+                          ),
+                          child: pw.Text(
+                            _s(e.jobDescriptionLastWork),
+                            style: const pw.TextStyle(fontSize: 9),
+                          ),
+                        ),
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          'Note: With COE with detail position description details',
+                          style: pw.TextStyle(
+                            fontSize: 7,
+                            fontStyle: pw.FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 28),
+              pw.Center(
+                child: pw.Column(
+                  children: [
+                    pw.Text(
+                      'Submitted by:',
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 16),
+                    pw.Container(
+                      width: 220,
+                      decoration: const pw.BoxDecoration(
+                        border: pw.Border(
+                          bottom: pw.BorderSide(width: 0.5),
+                        ),
+                      ),
+                      child: pw.Text(
+                        _s(e.applicantName),
+                        textAlign: pw.TextAlign.center,
+                        style: const pw.TextStyle(fontSize: 10),
+                      ),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text(
+                      'Name of Applicant',
+                      style: const pw.TextStyle(fontSize: 8),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

@@ -11,6 +11,9 @@ import 'package:hrms_plaridel/features/learning_development/models/action_brains
 import 'package:hrms_plaridel/features/learning_development/models/training_need_analysis.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/features/learning_development/presentation/shared/widgets/training_daily_report_date_filter.dart';
+import 'package:hrms_plaridel/features/learning_development/presentation/admin/sections/idp_admin_section.dart';
+import 'package:hrms_plaridel/features/learning_development/presentation/admin/sections/ld_training_requirements_admin_section.dart';
+import 'package:hrms_plaridel/features/learning_development/presentation/admin/widgets/ld_admin_hub.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
@@ -55,6 +58,8 @@ import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_
 import 'package:hrms_plaridel/features/notifications/data/notification_provider.dart';
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 import 'package:hrms_plaridel/features/notifications/presentation/widgets/open_notifications_panel.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_hub_analytics.dart';
+import 'package:hrms_plaridel/shared/widgets/admin_welcome_status_card.dart';
 
 /// Dashboard accent colors for summary cards and accents (orange theme).
 class _DashboardColors {
@@ -261,48 +266,97 @@ class _AdminWelcomeBanner extends StatelessWidget {
       (a) => a.displayName.isNotEmpty ? a.displayName : 'Admin',
     );
     final greeting = personalizedTimeGreeting(displayName);
+    final firstName = greetingFirstName(displayName);
+    final initial = firstName.isNotEmpty ? firstName[0].toUpperCase() : 'A';
 
-    final copy = Column(
+    final copy = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          width: isNarrow ? 48 : 56,
+          height: isNarrow ? 48 : 56,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.15),
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
             ),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.28),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
-          child: const Text(
-            'Admin Portal',
+          child: Text(
+            initial,
             style: TextStyle(
-              color: AppTheme.primaryNavy,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.4,
+              color: Colors.white,
+              fontSize: isNarrow ? 20 : 24,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        Text(
-          greeting,
-          style: TextStyle(
-            color: primary,
-            fontSize: isNarrow ? 22 : 28,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.6,
-            height: 1.15,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          "Here's the latest overview of the HR activities.",
-          style: TextStyle(
-            color: secondary,
-            fontSize: isNarrow ? 14 : 15,
-            height: 1.45,
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.15),
+                  ),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.admin_panel_settings_rounded,
+                      size: 13,
+                      color: AppTheme.primaryNavy,
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      'Admin Portal',
+                      style: TextStyle(
+                        color: AppTheme.primaryNavy,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                greeting,
+                style: TextStyle(
+                  color: primary,
+                  fontSize: isNarrow ? 22 : 28,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.6,
+                  height: 1.15,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Here's the latest overview of HR activities for Plaridel.",
+                style: TextStyle(
+                  color: secondary,
+                  fontSize: isNarrow ? 14 : 15,
+                  height: 1.45,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -354,9 +408,9 @@ class _AdminWelcomeBanner extends StatelessWidget {
               children: [
                 const Align(
                   alignment: Alignment.centerRight,
-                  child: RealTimeClock(),
+                  child: AdminWelcomeStatusCard(),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 copy,
               ],
             )
@@ -365,8 +419,8 @@ class _AdminWelcomeBanner extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(child: copy),
-                const SizedBox(width: 20),
-                const RealTimeClock(),
+                const SizedBox(width: 14),
+                const AdminWelcomeStatusCard(),
               ],
             ),
         ],
@@ -593,7 +647,9 @@ class _AdminDashboardState extends State<AdminDashboard>
   Widget _buildContent(String displayName) {
     switch (_selectedMenu) {
       case AdminMenu.dashboard:
-        return const _DashboardContent();
+        return _DashboardContent(
+          onOpenRecruitment: () => _onMenuSelected(AdminMenu.rsp),
+        );
       case AdminMenu.myAttendance:
         return EmployeeAttendanceOverviewSection(
           displayName: displayName,
@@ -1070,7 +1126,9 @@ class _Sidebar extends StatelessWidget {
 }
 
 class _DashboardContent extends StatelessWidget {
-  const _DashboardContent();
+  const _DashboardContent({this.onOpenRecruitment});
+
+  final VoidCallback? onOpenRecruitment;
 
   static bool _sectionVisible(String query, List<String> keywords) {
     final q = query.trim().toLowerCase();
@@ -1134,20 +1192,12 @@ class _DashboardContent extends StatelessWidget {
       'biometric',
       'device',
     ]);
-    final showAnnouncements = _sectionVisible(q, [
-      'announcement',
-      'announcements',
-      'landing',
-      'news',
-    ]);
     final showRecruitment = _sectionVisible(q, [
       'recruit',
       'recruitment',
       'rsp',
       'overview',
       'hiring',
-    ]);
-    final showPending = _sectionVisible(q, [
       'pending',
       'application',
       'review',
@@ -1162,9 +1212,7 @@ class _DashboardContent extends StatelessWidget {
         showSummary ||
         showDocu ||
         showDtr ||
-        showAnnouncements ||
-        showRecruitment ||
-        showPending;
+        showRecruitment;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1192,7 +1240,7 @@ class _DashboardContent extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Walang tumugma sa “$q”. Subukan: docu, dtr, recruit, pending, time, announcement…',
+                      'Walang tumugma sa “$q”. Subukan: docu, dtr, recruit, pending, time…',
                       style: TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 13,
@@ -1207,7 +1255,11 @@ class _DashboardContent extends StatelessWidget {
         if (showWelcome) _AdminWelcomeBanner(isNarrow: isNarrow),
         if (showWelcome && showSummary) const SizedBox(height: 28),
         if (showSummary) const _SummaryCards(),
-        if ((showWelcome || showSummary) && showDocu)
+        if ((showWelcome || showSummary) && showRecruitment)
+          const SizedBox(height: 28),
+        if (showRecruitment)
+          _RecruitmentHubCard(onOpenRecruitment: onOpenRecruitment),
+        if ((showWelcome || showSummary || showRecruitment) && showDocu)
           const SizedBox(height: 28),
         if (showDocu) ...[
           _AdminSectionHeader(
@@ -1240,27 +1292,6 @@ class _DashboardContent extends StatelessWidget {
             child: const DtrDashboard(),
           ),
         ],
-        if ((showWelcome || showSummary || showDocu || showDtr) &&
-            showAnnouncements)
-          const SizedBox(height: 28),
-        if (showAnnouncements) _AnnouncementsCard(),
-        if ((showWelcome ||
-                showSummary ||
-                showDocu ||
-                showDtr ||
-                showAnnouncements) &&
-            showRecruitment)
-          const SizedBox(height: 28),
-        if (showRecruitment) _RecruitmentOverviewCard(),
-        if ((showWelcome ||
-                showSummary ||
-                showDocu ||
-                showDtr ||
-                showAnnouncements ||
-                showRecruitment) &&
-            showPending)
-          const SizedBox(height: 28),
-        if (showPending) _PendingApplicationsCard(),
         const SizedBox(height: 32),
       ],
     );
@@ -1572,195 +1603,94 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-class _AnnouncementsCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: _AdminDashUi.elevatedPanel(context),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _AdminSectionHeader(
-            title: 'Announcements',
-            icon: Icons.campaign_outlined,
-            subtitle: 'Landing page hiring visibility',
-            trailing: TextButton.icon(
-              onPressed: () {},
-              icon: const Icon(Icons.arrow_forward_rounded, size: 16),
-              label: const Text('View All'),
-              style: _AdminDashUi.ghostAction(context),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppTheme.dashMutedSurfaceOf(context),
-              borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
-              border: Border.all(color: AppTheme.dashHairlineOf(context)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Job Vacancies (Hiring)',
-                  style: TextStyle(
-                    color: AppTheme.dashTextPrimaryOf(context),
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Control whether the landing page shows "We are currently accepting applications" or "There are no job vacancies at the moment." Manage this in Job Vacancies.',
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 14,
-                    height: 1.55,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+class _RecruitmentPipelineStats {
+  const _RecruitmentPipelineStats({
+    required this.pending,
+    required this.inProgress,
+    required this.hired,
+    required this.closed,
+    required this.total,
+  });
+
+  final int pending;
+  final int inProgress;
+  final int hired;
+  final int closed;
+  final int total;
+
+  static _RecruitmentPipelineStats fromApps(List<RecruitmentApplication> apps) {
+    var pending = 0;
+    var inProgress = 0;
+    var hired = 0;
+    var closed = 0;
+    for (final a in apps) {
+      final status = a.status;
+      if (status == 'submitted') {
+        pending++;
+      } else if (status == 'document_approved' ||
+          status == 'exam_taken' ||
+          status == 'passed') {
+        inProgress++;
+      } else if (status == 'registered' || a.hiredUserId != null) {
+        hired++;
+      } else {
+        closed++;
+      }
+    }
+    return _RecruitmentPipelineStats(
+      pending: pending,
+      inProgress: inProgress,
+      hired: hired,
+      closed: closed,
+      total: apps.length,
     );
   }
 }
 
-class _RecruitmentOverviewCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    final isCompact = width < 480;
+class _RecruitmentHubCard extends StatefulWidget {
+  const _RecruitmentHubCard({this.onOpenRecruitment});
 
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: _AdminDashUi.elevatedPanel(context),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _AdminSectionHeader(
-            title: 'Recruitment Overview',
-            icon: Icons.pie_chart_rounded,
-            subtitle: 'Application pipeline and hiring metrics',
-            trailing: isCompact
-                ? null
-                : TextButton.icon(
-                    onPressed: () {},
-                    icon: const Icon(Icons.insights_rounded, size: 16),
-                    label: const Text('View Report'),
-                    style: _AdminDashUi.ghostAction(context),
-                  ),
-          ),
-          if (isCompact) ...[
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () {},
-                icon: const Icon(Icons.insights_rounded, size: 16),
-                label: const Text('View Report'),
-                style: _AdminDashUi.ghostAction(context),
-              ),
-            ),
-          ],
-          const SizedBox(height: 22),
-          Container(
-            height: 200,
-            decoration: BoxDecoration(
-              color: AppTheme.dashMutedSurfaceOf(context),
-              borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
-              border: Border.all(color: AppTheme.dashHairlineOf(context)),
-            ),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _DashboardColors.accentOrange.withValues(
-                        alpha: 0.1,
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.analytics_outlined,
-                      size: 40,
-                      color: _DashboardColors.accentOrange.withValues(
-                        alpha: 0.7,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No application data yet',
-                    style: TextStyle(
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(
-                      'Data will appear when applicants complete the recruitment process.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 13,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: () {},
-              icon: const Icon(Icons.insights_rounded, size: 20),
-              label: const Text('View Report'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 0,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  final VoidCallback? onOpenRecruitment;
+
+  @override
+  State<_RecruitmentHubCard> createState() => _RecruitmentHubCardState();
 }
 
-class _PendingApplicationsCard extends StatefulWidget {
-  @override
-  State<_PendingApplicationsCard> createState() =>
-      _PendingApplicationsCardState();
-}
-
-class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
+class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
   bool _loading = true;
   bool _refreshing = false;
   String? _error;
   List<RecruitmentApplication> _all = const [];
 
-  List<RecruitmentApplication> get _pending =>
-      _all.where((a) => a.status == 'submitted').toList()..sort(
+  List<RecruitmentApplication> get _activePipeline =>
+      _all.where((a) => a.isActiveInPipeline).toList()..sort(
         (a, b) => (b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
             .compareTo(a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0)),
       );
+
+  String _pipelineStatusLabel(RecruitmentApplication app) {
+    if (app.hiredUserId != null || app.status == 'registered') return 'Hired';
+    if (app.hrAccountSetupDone) return 'Account setup done';
+    if (app.orientationAttended == true) return 'Orientation attended';
+    if (app.orientationAttended == false) return 'Orientation missed';
+    if (app.orientationAt != null) return 'Orientation scheduled';
+    if (app.finalRequirementsApproved) return 'Final requirements approved';
+    if (app.finalInterviewPassed == true) return 'Final interview passed';
+    if (app.finalInterviewPassed == false) return 'Final interview failed';
+
+    switch (app.status) {
+      case 'submitted':
+        return 'Pending review';
+      case 'document_approved':
+        return 'Docs approved';
+      case 'exam_taken':
+        return 'Exam taken';
+      case 'passed':
+        return 'Passed exam';
+      default:
+        return app.status.replaceAll('_', ' ');
+    }
+  }
 
   @override
   void initState() {
@@ -1803,22 +1733,27 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
     return MaterialLocalizations.of(context).formatMediumDate(dt.toLocal());
   }
 
+  void _openRecruitment() {
+    if (widget.onOpenRecruitment != null) {
+      widget.onOpenRecruitment!();
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Open the Recruitment module to review all applicants.'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final isCompact = width < 480;
-    final pending = _pending;
-    final pendingPreview = pending.take(5).toList();
-    final allCount = _all.length;
-    final pendingCount = pending.length;
-    final inProgressCount = _all
-        .where(
-          (a) =>
-              a.status == 'document_approved' ||
-              a.status == 'exam_taken' ||
-              a.status == 'passed',
-        )
-        .length;
+    final activePipeline = _activePipeline;
+    final pipelinePreview = activePipeline.take(5).toList();
+    final stats = _RecruitmentPipelineStats.fromApps(_all);
+    final pendingCount = stats.pending;
+    final inProgressCount = stats.inProgress;
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1827,16 +1762,16 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _AdminSectionHeader(
-            title: 'Pending Applications',
-            icon: Icons.assignment_rounded,
-            subtitle: 'Applicants awaiting document review',
+            title: 'Recruitment',
+            icon: Icons.groups_rounded,
+            subtitle: 'Application pipeline and pending reviews',
             trailing: isCompact
                 ? null
                 : Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
-                        tooltip: 'Refresh list',
+                        tooltip: 'Refresh',
                         onPressed: _refreshing
                             ? null
                             : () => _load(refresh: true),
@@ -1852,17 +1787,9 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
                       ),
                       const SizedBox(width: 6),
                       TextButton.icon(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Open the Recruitment module to review all applicants.',
-                              ),
-                            ),
-                          );
-                        },
+                        onPressed: _openRecruitment,
                         icon: const Icon(Icons.arrow_forward_rounded, size: 16),
-                        label: const Text('View All'),
+                        label: const Text('Open Recruitment'),
                         style: _AdminDashUi.ghostAction(context),
                       ),
                     ],
@@ -1873,7 +1800,7 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
             Row(
               children: [
                 IconButton(
-                  tooltip: 'Refresh list',
+                  tooltip: 'Refresh',
                   onPressed: _refreshing ? null : () => _load(refresh: true),
                   icon: _refreshing
                       ? const SizedBox(
@@ -1884,48 +1811,16 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
                       : const Icon(Icons.refresh_rounded, size: 18),
                 ),
                 TextButton.icon(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Open the Recruitment module to review all applicants.',
-                        ),
-                      ),
-                    );
-                  },
+                  onPressed: _openRecruitment,
                   icon: const Icon(Icons.arrow_forward_rounded, size: 16),
-                  label: const Text('View All'),
+                  label: const Text('Open Recruitment'),
                   style: _AdminDashUi.ghostAction(context),
                 ),
               ],
             ),
           ],
           const SizedBox(height: 16),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _PendingKpiChip(
-                label: 'Pending Review',
-                value: '$pendingCount',
-                icon: Icons.hourglass_top_rounded,
-                color: AppTheme.primaryNavy,
-              ),
-              _PendingKpiChip(
-                label: 'In Progress',
-                value: '$inProgressCount',
-                icon: Icons.timelapse_rounded,
-                color: const Color(0xFF1565C0),
-              ),
-              _PendingKpiChip(
-                label: 'Total Applicants',
-                value: '$allCount',
-                icon: Icons.groups_rounded,
-                color: const Color(0xFF6A1B9A),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 8),
           if (_loading)
             const Center(
               child: Padding(
@@ -1963,7 +1858,35 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
                 ],
               ),
             )
-          else
+          else ...[
+            RecruitmentHubAnalyticsPanel(
+              applications: _all,
+              pending: stats.pending,
+              inProgress: stats.inProgress,
+              hired: stats.hired,
+              closed: stats.closed,
+              total: stats.total,
+            ),
+            const SizedBox(height: 22),
+            Text(
+              'Active applications',
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Applicants still in the recruitment pipeline',
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+          if (!_loading && _error == null)
             LayoutBuilder(
               builder: (context, constraints) {
                 final needScroll = constraints.maxWidth < 560;
@@ -1988,12 +1911,12 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
                         ),
                         children: const [
                           _TableHeader('Applicant'),
-                          _TableHeader('Type'),
+                          _TableHeader('Position'),
                           _TableHeader('Date'),
                           _TableHeader('Status'),
                         ],
                       ),
-                      if (pendingPreview.isEmpty)
+                      if (pipelinePreview.isEmpty)
                         TableRow(
                           decoration: BoxDecoration(
                             color: AppTheme.dashPanelOf(context),
@@ -2005,7 +1928,7 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
                                 horizontal: 16,
                               ),
                               child: Text(
-                                'No pending applications',
+                                'No active applications',
                                 style: TextStyle(
                                   color: AppTheme.dashTextSecondaryOf(context),
                                   fontSize: 14,
@@ -2019,7 +1942,7 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
                           ],
                         )
                       else
-                        ...pendingPreview.map(
+                        ...pipelinePreview.map(
                           (a) => TableRow(
                             decoration: BoxDecoration(
                               color: AppTheme.dashPanelOf(context),
@@ -2100,9 +2023,9 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
                                         ),
                                       ),
                                     ),
-                                    child: const Text(
-                                      'Pending',
-                                      style: TextStyle(
+                                    child: Text(
+                                      _pipelineStatusLabel(a),
+                                      style: const TextStyle(
                                         fontSize: 11.5,
                                         fontWeight: FontWeight.w700,
                                         color: AppTheme.primaryNavy,
@@ -2129,8 +2052,9 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
                 return table;
               },
             ),
-          const SizedBox(height: 16),
-          Container(
+          if (!_loading && _error == null) ...[
+            const SizedBox(height: 16),
+            Container(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             decoration: BoxDecoration(
               color: AppTheme.primaryNavy.withValues(alpha: 0.05),
@@ -2159,7 +2083,9 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
                   child: Text(
                     pendingCount > 0
                         ? 'You have $pendingCount application(s) waiting for document review. Open Recruitment > RSP to approve or decline documents.'
-                        : 'No documents are waiting for review right now. New recruitment submissions will appear here automatically.',
+                        : inProgressCount > 0
+                        ? 'You have $inProgressCount applicant(s) in the pipeline (exams, interviews, or hiring). Open Recruitment to manage them.'
+                        : 'No active applications right now. New recruitment submissions will appear here automatically.',
                     style: TextStyle(
                       color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 13.5,
@@ -2170,6 +2096,25 @@ class _PendingApplicationsCardState extends State<_PendingApplicationsCard> {
               ],
             ),
           ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _openRecruitment,
+                icon: const Icon(Icons.insights_rounded, size: 20),
+                label: const Text('Open Recruitment'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -2192,56 +2137,6 @@ class _PendingCell extends StatelessWidget {
           fontSize: 13,
           color: AppTheme.dashTextSecondaryOf(context),
         ),
-      ),
-    );
-  }
-}
-
-class _PendingKpiChip extends StatelessWidget {
-  const _PendingKpiChip({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: color),
-          const SizedBox(width: 6),
-          Text(
-            value,
-            style: TextStyle(
-              color: color,
-              fontSize: 13.5,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -2592,57 +2487,22 @@ class _LdContentState extends State<_LdContent> {
           ),
           const SizedBox(height: 20),
         ],
-        if (_ldSectionIndex == 0) ...[
-          Text(
-            'L&D',
-            style: TextStyle(
-              color: AppTheme.dashTextPrimaryOf(context),
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Learning & Development. Choose a feature below.',
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 14,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 24),
-          FeatureCardGrid(
-            children: [
-              FeatureCard(
-                title: 'Training Need Analysis and Consolidated Report',
-                subtitle:
-                    'FOR CY [year], DEPARTMENT. Table: Name/Position, Goal, Behavior, Skills/Knowledge, Need for Training, Training Recommendations.',
-                icon: Icons.school_rounded,
-                onTap: () => setState(() => _ldSectionIndex = 1),
-              ),
-              FeatureCard(
-                title: 'Action Brainstorming and Coaching Worksheet',
-                subtitle:
-                    'DEPARTMENT, DATE. Table: Name, Stop Doing, Do Less Of, Keep Doing, Do More Of, Start Doing, Goal. Certified by Department Head.',
-                icon: Icons.lightbulb_outline_rounded,
-                onTap: () => setState(() => _ldSectionIndex = 2),
-              ),
-              FeatureCard(
-                title: 'Training Daily Reports (Monitoring)',
-                subtitle:
-                    'Monitor daily reports submitted by employees under training, with attachments and status.',
-                icon: Icons.assignment_turned_in_outlined,
-                onTap: () => setState(() => _ldSectionIndex = 3),
-              ),
-            ],
-          ),
-        ] else if (_ldSectionIndex == 1)
+        if (_ldSectionIndex == 0)
+          LdAdminHub(
+            onOpenSection: (index) => setState(() => _ldSectionIndex = index),
+          )
+        else if (_ldSectionIndex == 1)
           const _TrainingNeedAnalysisSection()
         else if (_ldSectionIndex == 2)
           const _ActionBrainstormingSection()
+        else if (_ldSectionIndex == 3)
+          const _LdTrainingReportsSection()
+        else if (_ldSectionIndex == 4)
+          const IdpAdminSection()
+        else if (_ldSectionIndex == 5)
+          const LdTrainingRequirementsAdminSection()
         else
-          const _LdTrainingReportsSection(),
+          const IdpAdminSection(),
       ],
     );
   }

@@ -10,10 +10,11 @@ class RecruitmentProcessSection extends StatelessWidget {
 
   static const _steps = [
     ('Submit Basic Information', Icons.description),
-    ('Take Online Screening Exam', Icons.quiz_outlined),
-    ('View Exam Result', Icons.assignment_outlined),
-    ('Complete Registration (only if passed)', Icons.how_to_reg),
-    ('Interview & Final Hiring', Icons.groups_outlined),
+    ('Document Review', Icons.folder_open_outlined),
+    ('Screening Exams', Icons.quiz_outlined),
+    ('Deliberation', Icons.record_voice_over_outlined),
+    ('Final Requirements', Icons.health_and_safety_outlined),
+    ('Orientation & Account', Icons.badge_outlined),
   ];
 
   @override

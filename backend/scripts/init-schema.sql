@@ -1014,6 +1014,26 @@ CREATE TABLE IF NOT EXISTS training_report_attachments (
 );
 
 -- =========================================
+-- L&D — TRAINING REQUIREMENTS (pre / post)
+-- =========================================
+CREATE TABLE IF NOT EXISTS ld_training_requirement_records (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  training_title TEXT,
+  doc_invitation_letter_path TEXT,
+  doc_invitation_letter_name TEXT,
+  doc_lap_path TEXT,
+  doc_lap_name TEXT,
+  doc_training_certificate_path TEXT,
+  doc_training_certificate_name TEXT,
+  pre_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
+  post_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_ld_training_requirement_employee UNIQUE (employee_id)
+);
+
+-- =========================================
 -- RSP — RECRUITMENT
 -- =========================================
 CREATE TABLE IF NOT EXISTS recruitment_applications (
@@ -1023,6 +1043,10 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   last_name TEXT,
   suffix TEXT,
   sex TEXT,
+  course TEXT,
+  address TEXT,
+  age TEXT,
+  civil_status TEXT,
   full_name TEXT NOT NULL,
   email TEXT NOT NULL,
   phone TEXT,
@@ -1038,6 +1062,15 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   doc_tor_name TEXT,
   doc_eligibility_trainings_path TEXT,
   doc_eligibility_trainings_name TEXT,
+  doc_medical_certificate_path TEXT,
+  doc_medical_certificate_name TEXT,
+  doc_drug_test_path TEXT,
+  doc_drug_test_name TEXT,
+  doc_nbi_clearance_path TEXT,
+  doc_nbi_clearance_name TEXT,
+  final_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
+  orientation_at TIMESTAMPTZ,
+  orientation_attended BOOLEAN,
   status TEXT NOT NULL DEFAULT 'submitted'
     CHECK (
       status IN (
@@ -1103,6 +1136,38 @@ CREATE TABLE IF NOT EXISTS selection_lineup_entries (
   applicants JSONB DEFAULT '[]',
   prepared_by_name TEXT,
   prepared_by_title TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS computation_of_points_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  date TEXT,
+  position_level TEXT,
+  position TEXT,
+  salary_grade TEXT,
+  rate TEXT,
+  office TEXT,
+  min_education TEXT,
+  min_training TEXT,
+  min_experience TEXT,
+  min_eligibility TEXT,
+  candidates JSONB DEFAULT '[]',
+  prepared_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS work_experience_sheet_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_applied_for TEXT,
+  department TEXT,
+  min_education TEXT,
+  min_experience TEXT,
+  min_training TEXT,
+  min_eligibility TEXT,
+  job_description_last_work TEXT,
+  applicant_name TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -1868,6 +1933,8 @@ CREATE INDEX IF NOT EXISTS idx_training_daily_reports_status
   ON training_daily_reports(status);
 CREATE INDEX IF NOT EXISTS idx_training_report_attachments_report
   ON training_report_attachments(report_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ld_training_requirement_employee
+  ON ld_training_requirement_records(employee_id);
 
 CREATE INDEX IF NOT EXISTS idx_recruitment_applications_status
   ON recruitment_applications(status);

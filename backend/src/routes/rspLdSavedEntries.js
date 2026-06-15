@@ -111,6 +111,32 @@ const TABLE_COLUMNS = {
     'prepared_by_title',
     'updated_at',
   ],
+  computation_of_points_entries: [
+    'date',
+    'position_level',
+    'position',
+    'salary_grade',
+    'rate',
+    'office',
+    'min_education',
+    'min_training',
+    'min_experience',
+    'min_eligibility',
+    'candidates',
+    'prepared_by_name',
+    'updated_at',
+  ],
+  work_experience_sheet_entries: [
+    'position_applied_for',
+    'department',
+    'min_education',
+    'min_experience',
+    'min_training',
+    'min_eligibility',
+    'job_description_last_work',
+    'applicant_name',
+    'updated_at',
+  ],
   applicants_profile_entries: [
     'position_applied_for',
     'minimum_requirements',
@@ -197,6 +223,7 @@ const TABLE_JSONB_COLUMNS = {
   turn_around_time_entries: ['applicants'],
   idp_entries: ['development_plan_rows'],
   selection_lineup_entries: ['applicants'],
+  computation_of_points_entries: ['candidates'],
   applicants_profile_entries: ['applicants'],
   comparative_assessment_entries: ['candidates'],
   promotion_certification_entries: ['candidates'],
@@ -376,6 +403,42 @@ async function ensureRspLdSavedEntryTables() {
       applicants JSONB DEFAULT '[]',
       prepared_by_name TEXT,
       prepared_by_title TEXT,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.computation_of_points_entries (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      date TEXT,
+      position_level TEXT,
+      position TEXT,
+      salary_grade TEXT,
+      rate TEXT,
+      office TEXT,
+      min_education TEXT,
+      min_training TEXT,
+      min_experience TEXT,
+      min_eligibility TEXT,
+      candidates JSONB DEFAULT '[]',
+      prepared_by_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.work_experience_sheet_entries (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      position_applied_for TEXT,
+      department TEXT,
+      min_education TEXT,
+      min_experience TEXT,
+      min_training TEXT,
+      min_eligibility TEXT,
+      job_description_last_work TEXT,
+      applicant_name TEXT,
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );

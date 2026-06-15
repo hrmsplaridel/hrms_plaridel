@@ -71,6 +71,9 @@ class ApplicantsProfileEntry {
 
   static const String tableName = 'applicants_profile_entries';
 
+  /// Max applicant rows per printed/UI form page before continuation.
+  static const int applicantsPerFormPage = 10;
+
   factory ApplicantsProfileEntry.fromJson(Map<String, dynamic> json) {
     List<ApplicantsProfileApplicant> list = [];
     final raw = json['applicants'];

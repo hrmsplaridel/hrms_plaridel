@@ -52,6 +52,7 @@ dependencies:
   shimmer: ^3.0.0
   web_socket_channel: ^3.0.3
   fl_chart: ^0.69.0
+  geolocator: ^13.0.4
   package_info_plus: ^9.0.1
 
   web: any

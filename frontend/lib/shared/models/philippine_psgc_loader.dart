@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
+
 /// Nationwide Philippines PSGC: Province → City/Municipality → Barangay (dropdowns).
 /// Index loads at startup; each province's full map loads on demand.
 class PhilippinePsgcData {
@@ -11,14 +13,32 @@ class PhilippinePsgcData {
   static const _indexPath = 'assets/data/ph_psgc/index.json';
   static const _provinceAssetPrefix = 'assets/data/ph_psgc/provinces/';
 
+  /// When the PSGC index is not loaded yet, at least Misamis Occidental still works.
+  static const Map<String, String> _legacyProvinceSlugs = {
+    kProvinceMisamisOccidental: 'misamis_occidental',
+  };
+
+  static const Map<String, List<String>> _legacyProvinceCities = {
+    kProvinceMisamisOccidental: misamisOccidentalCities,
+  };
+
   static Map<String, _ProvinceIndexEntry>? _index;
   static final Map<String, Map<String, List<String>>> _provinceCache = {};
+  static Future<void>? _indexLoadFuture;
 
   static bool get isIndexLoaded => _index != null;
 
   /// Call from [main] before [runApp].
   static Future<void> loadIndex() async {
     if (_index != null) return;
+    _indexLoadFuture ??= _loadIndexOnce();
+    await _indexLoadFuture;
+  }
+
+  /// Idempotent; safe to call from address forms if startup skipped index load.
+  static Future<void> ensureIndexLoaded() => loadIndex();
+
+  static Future<void> _loadIndexOnce() async {
     try {
       final raw = await rootBundle.loadString(_indexPath);
       final decoded = json.decode(raw) as Map<String, dynamic>;
@@ -48,10 +68,18 @@ class PhilippinePsgcData {
 
   /// City/municipality names for [province] (from index; no barangay load).
   static List<String>? citiesForProvince(String? province) {
-    if (province == null || _index == null) return null;
-    final entry = _index![province];
-    if (entry == null || entry.cities.isEmpty) return null;
-    return List<String>.from(entry.cities);
+    if (province == null) return null;
+    if (_index != null) {
+      final entry = _index![province];
+      if (entry != null && entry.cities.isNotEmpty) {
+        return List<String>.from(entry.cities);
+      }
+    }
+    final legacy = _legacyProvinceCities[province];
+    if (legacy != null && legacy.isNotEmpty) {
+      return List<String>.from(legacy);
+    }
+    return null;
   }
 
   /// Loads full city → barangays map for [province] (cached).
@@ -61,7 +89,8 @@ class PhilippinePsgcData {
     if (_provinceCache.containsKey(province)) {
       return _provinceCache[province];
     }
-    final slug = _index?[province]?.slug;
+    final slug =
+        _index?[province]?.slug ?? _legacyProvinceSlugs[province];
     if (slug == null || slug.isEmpty) return null;
     try {
       final raw = await rootBundle.loadString(
@@ -92,11 +121,11 @@ class PhilippinePsgcData {
     return list;
   }
 
-  /// Whether index lists this province with at least one city.
+  /// Whether this province has at least one city in index or legacy fallback.
   static bool hasProvinceData(String? province) {
-    if (province == null || _index == null) return false;
-    final entry = _index![province];
-    return entry != null && entry.cities.isNotEmpty;
+    if (province == null) return false;
+    final cities = citiesForProvince(province);
+    return cities != null && cities.isNotEmpty;
   }
 }
 

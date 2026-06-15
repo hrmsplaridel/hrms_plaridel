@@ -26,6 +26,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/my_
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/pages/employee_locator_slip_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/learning_development/presentation/employee/pages/training_daily_report_employee_screen.dart';
+import 'package:hrms_plaridel/features/learning_development/presentation/employee/pages/ld_training_requirements_employee_screen.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/attendance_overview/attendance_overview.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dash_ui.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dashboard_layout_metrics.dart';
@@ -66,11 +67,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     'My Leave',
     'Locator Requests',
     'Training Reports',
+    'Training Requirements',
     'DocuTracker',
   ];
 
   /// Shown only via account menu (not listed in sidebar).
-  static const int _profileNavIndex = 6;
+  static const int _profileNavIndex = 7;
   static const _settingsPanelKey = PageStorageKey<String>('employee_settings');
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
   final GlobalKey<State<StatefulWidget>> _locatorSlipKey =
@@ -109,7 +111,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   }
 
   void _prefetchDocuTrackerNotificationsIfNeeded(int index) {
-    if (index != 5) return;
+    if (index != 6) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<DocuTrackerProvider>().loadNotifications(forceRefresh: true);
@@ -312,6 +314,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       case 4:
         return const TrainingDailyReportEmployeeScreen();
       case 5:
+        return const LdTrainingRequirementsEmployeeScreen();
+      case 6:
         return const DocuTrackerMain(isAdmin: false);
       case _profileNavIndex:
         return const SizedBox.shrink();
@@ -716,10 +720,16 @@ class _EmployeeSidebar extends StatelessWidget {
           onTap: () => onTap(4),
         ),
         DashboardSidebarNavTile(
-          icon: Icons.description_outlined,
-          label: 'DocuTracker',
+          icon: Icons.fact_check_outlined,
+          label: 'Training Requirements',
           selected: selectedIndex == 5,
           onTap: () => onTap(5),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.description_outlined,
+          label: 'DocuTracker',
+          selected: selectedIndex == 6,
+          onTap: () => onTap(6),
         ),
         const SizedBox(height: 12),
       ],

@@ -121,7 +121,7 @@ abstract final class RspFinalInterviewReportExport {
       'Exam score %',
       'Pipeline status',
       'Final interview scheduled',
-      'Final interview result',
+      'Deliberation result',
       'HR account setup',
       'Hired',
       'Applied at',

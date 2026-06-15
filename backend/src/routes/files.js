@@ -7,6 +7,9 @@ const { execFile } = require('child_process');
 const { pool } = require('../config/db');
 const { isAttachmentPathAllowedInDb } = require('../utils/rspAttachmentPolicy');
 const {
+  isLdTrainingRequirementPathAllowed,
+} = require('../utils/ldTrainingRequirementPolicy');
+const {
   resolveLocalRspAttachment,
 } = require('../utils/rspLocalAttachment');
 
@@ -153,6 +156,60 @@ router.get('/recruitment-attachment', async (req, res) => {
     }
     console.error('[files recruitment-attachment]', e);
     res.status(500).json({ error: 'Failed to serve attachment' });
+  }
+});
+
+/**
+ * GET /api/files/ld-training-requirement?token=...&download=1
+ */
+router.get('/ld-training-requirement', async (req, res) => {
+  const token = req.query.token;
+  const asDownload =
+    req.query.download === '1' || req.query.download === 'true';
+
+  if (!token || String(token).trim() === '') {
+    return res.status(400).json({ error: 'token query parameter is required' });
+  }
+  if (!process.env.JWT_SECRET) {
+    return res.status(503).json({ error: 'Server misconfiguration' });
+  }
+
+  try {
+    const payload = jwt.verify(String(token).trim(), process.env.JWT_SECRET);
+    if (payload.typ !== 'ld_training_req' || !payload.path) {
+      return res.status(403).json({ error: 'Invalid token' });
+    }
+
+    const objectPath = String(payload.path).trim();
+    const allowed = await isLdTrainingRequirementPathAllowed(objectPath);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const localAbs = path.join(UPLOAD_DIR, 'ld-training-requirements', objectPath);
+    if (!fs.existsSync(localAbs)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    const safeName = (payload.fn || path.basename(objectPath) || 'attachment')
+      .replace(/[^\w.\- ()]/g, '_')
+      .slice(0, 180);
+    if (asDownload) {
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+    } else {
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+      if (path.extname(localAbs).toLowerCase() === '.pdf') {
+        res.setHeader('Content-Type', 'application/pdf');
+      }
+    }
+    return res.sendFile(path.resolve(localAbs));
+  } catch (e) {
+    if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Invalid or expired link' });
+    }
+    console.error('[files ld-training-requirement]', e);
+    return res.status(500).json({ error: 'Failed to serve attachment' });
   }
 });
 

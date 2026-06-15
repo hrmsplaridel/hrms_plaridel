@@ -135,8 +135,8 @@ class RspApplicationStatusTimeline extends StatelessWidget {
             ? (_beiGradingPending
                   ? 'HR is grading your BEI. Final pass/fail appears when all BEI scores are entered.'
                   : (_passed
-                        ? 'Passed — ${_score.toStringAsFixed(0)}%.'
-                        : 'Not passed — ${_score.toStringAsFixed(0)}%. You may reapply with a new application.'))
+                        ? 'Passed.'
+                        : 'Not passed. You may reapply with a new application.'))
             : (application.status == 'passed' ||
                   application.status == 'registered')
             ? 'Passed. (Open Recruitment Application with your email for the exact score.)'
@@ -155,13 +155,27 @@ class RspApplicationStatusTimeline extends StatelessWidget {
       ),
       _StepData(
         step: 5,
-        title: 'Final Interview',
+        title: 'Deliberation',
         subtitle: _interviewSubtitle(context),
         status: _interviewStatus(_examPassedInferred),
         icon: Icons.record_voice_over_rounded,
       ),
       _StepData(
         step: 6,
+        title: 'Final Requirements',
+        subtitle: _finalRequirementsSubtitle(),
+        status: _finalRequirementsStatus(_examPassedInferred),
+        icon: Icons.health_and_safety_rounded,
+      ),
+      _StepData(
+        step: 7,
+        title: 'Orientation',
+        subtitle: _orientationSubtitle(context),
+        status: _orientationStatus(_examPassedInferred),
+        icon: Icons.school_rounded,
+      ),
+      _StepData(
+        step: 8,
         title: 'Registration & Account',
         subtitle: _registrationSubtitle(
           status: application.status,
@@ -354,10 +368,28 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if (application.finalInterviewPassed == false) {
       return 'HR recorded the final interview outcome. Follow HR instructions if you continue.';
     }
-    if (application.finalInterviewPassed == true) {
-      return 'You passed the final interview. HR will create your account and email you when ready.';
+    if (application.finalRequirementsApproved &&
+        application.orientationAttended == true) {
+      return 'Orientation attended. HR will create your account next.';
     }
-    return 'Waiting for final interview results. Use Recruitment Application for details.';
+    if (application.finalRequirementsApproved &&
+        application.orientationAttended == false) {
+      return 'HR recorded that you did not attend orientation. Contact HR.';
+    }
+    if (application.finalRequirementsApproved &&
+        application.orientationAt != null) {
+      return 'Orientation is scheduled. HR will confirm attendance after the session.';
+    }
+    if (application.finalRequirementsApproved) {
+      return 'Final requirements approved. HR will schedule your orientation, then set up your account.';
+    }
+    if (application.hasAllFinalRequirementsUploaded) {
+      return 'Documents submitted. HR is reviewing your medical certificate, drug test, and NBI clearance.';
+    }
+    if (application.finalInterviewPassed == true) {
+      return 'Upload medical certificate, drug test result, and NBI clearance in Step 8.';
+    }
+    return 'Waiting for deliberation results. Use Recruitment Application for details.';
   }
 
   _TimelineStepStatus _registrationStatus({
@@ -369,6 +401,10 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if (application.finalInterviewPassed == false) {
       return _TimelineStepStatus.failed;
     }
+    if (application.finalInterviewPassed == true &&
+        !application.finalRequirementsApproved) {
+      return _TimelineStepStatus.pending;
+    }
     return _TimelineStepStatus.current;
   }
 
@@ -377,10 +413,10 @@ class RspApplicationStatusTimeline extends StatelessWidget {
       return 'Complete — you are hired and linked to an employee account.';
     }
     if (application.finalInterviewPassed == true) {
-      return 'You passed the final interview. HR will create your employee account.';
+      return 'You passed deliberation. Submit your final requirements next.';
     }
     if (application.finalInterviewPassed == false) {
-      return 'HR has recorded your final interview result. Contact the HR office if you have questions.';
+      return 'HR has recorded your deliberation result. Contact the HR office if you have questions.';
     }
     final at = application.finalInterviewAt?.toLocal();
     if (at != null) {
@@ -392,7 +428,7 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if ((_examPassedInferred) ||
         application.status == 'passed' ||
         application.status == 'registered') {
-      return 'Exam passed. HR will schedule your final interview — check back here.';
+      return 'Exam passed. HR will schedule deliberation — check back here.';
     }
     return 'HR will contact you if you are shortlisted. Final decision is from the HR office.';
   }
@@ -406,6 +442,70 @@ class RspApplicationStatusTimeline extends StatelessWidget {
       return _TimelineStepStatus.failed;
     }
     if (!examPassed) return _TimelineStepStatus.pending;
+    return _TimelineStepStatus.current;
+  }
+
+  String _finalRequirementsSubtitle() {
+    if (_employeeAccountLinked) {
+      return 'Complete — you are hired.';
+    }
+    if (application.finalInterviewPassed != true) {
+      return 'Available after you pass deliberation.';
+    }
+    if (application.finalRequirementsApproved) {
+      return 'HR approved your medical certificate, drug test, and NBI clearance.';
+    }
+    if (application.hasAllFinalRequirementsUploaded) {
+      return 'All three documents uploaded. Awaiting HR review.';
+    }
+    return 'Submit medical certificate, drug test result, and NBI clearance (PDF).';
+  }
+
+  _TimelineStepStatus _finalRequirementsStatus(bool examPassed) {
+    if (_employeeAccountLinked) return _TimelineStepStatus.done;
+    if (application.finalInterviewPassed != true) {
+      return application.finalInterviewPassed == false
+          ? _TimelineStepStatus.failed
+          : _TimelineStepStatus.pending;
+    }
+    if (application.finalRequirementsApproved) return _TimelineStepStatus.done;
+    if (application.hasAllFinalRequirementsUploaded) {
+      return _TimelineStepStatus.current;
+    }
+    return _TimelineStepStatus.current;
+  }
+
+  String _orientationSubtitle(BuildContext context) {
+    if (_employeeAccountLinked) return 'Complete — you are hired.';
+    if (!application.finalRequirementsApproved) {
+      return 'Available after HR approves your final requirements.';
+    }
+    if (application.orientationAttended == true) {
+      return 'HR confirmed your orientation attendance.';
+    }
+    if (application.orientationAttended == false) {
+      return 'HR recorded that you did not attend orientation. Contact HR.';
+    }
+    final at = application.orientationAt?.toLocal();
+    if (at != null) {
+      final loc = MaterialLocalizations.of(context);
+      final dateStr = loc.formatFullDate(at);
+      final t = TimeOfDay.fromDateTime(at);
+      return 'Scheduled: $dateStr · ${t.format(context)}. Attend orientation as instructed by HR.';
+    }
+    return 'HR will schedule your orientation after final requirements are approved.';
+  }
+
+  _TimelineStepStatus _orientationStatus(bool examPassed) {
+    if (_employeeAccountLinked) return _TimelineStepStatus.done;
+    if (!application.finalRequirementsApproved) {
+      return _TimelineStepStatus.pending;
+    }
+    if (application.orientationAttended == true) return _TimelineStepStatus.done;
+    if (application.orientationAttended == false) {
+      return _TimelineStepStatus.failed;
+    }
+    if (application.orientationAt != null) return _TimelineStepStatus.current;
     return _TimelineStepStatus.current;
   }
 }
