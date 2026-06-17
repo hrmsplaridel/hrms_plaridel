@@ -131,9 +131,18 @@ function normalizeMessage(message) {
 function buildSources(context) {
   return {
     dateRange: context.date_range,
-    dtrSummaryIds: context.dtr_records.map((r) => r.id),
-    leaveRequestIds: context.recent_leave_requests.map((r) => r.id),
-    locatorSlipIds: context.recent_locator_slips.map((r) => r.id),
+    dtrSummaryIds: (context.dtr_records || []).map((r) => r.id),
+    leaveRequestIds: (context.recent_leave_requests || []).map((r) => r.id),
+    locatorSlipIds: (context.recent_locator_slips || []).map((r) => r.id),
+  };
+}
+
+function emptyAssistantContext(dateRange = null) {
+  return {
+    date_range: dateRange || null,
+    dtr_records: [],
+    recent_leave_requests: [],
+    recent_locator_slips: [],
   };
 }
 
@@ -187,6 +196,12 @@ function topicForIntent(intent) {
   if (isStructuredDtrIntent(intent)) return 'dtr';
   if (isLeaveIntent(intent)) return 'leave';
   if (isLocatorIntent(intent)) return 'locator';
+  if (
+    intent === 'clarify_filing_topic' ||
+    intent === 'clarify_status_topic'
+  ) {
+    return 'clarify';
+  }
   if (intent === 'direct_ai') return 'direct';
   return null;
 }
@@ -208,7 +223,7 @@ function explicitTopicFromText(text) {
 function memoryTopicState(memory, intentOrTopic) {
   if (!memory) return null;
   const topic =
-    ['dtr', 'leave', 'locator', 'direct'].includes(String(intentOrTopic || ''))
+    ['dtr', 'leave', 'locator', 'clarify', 'direct'].includes(String(intentOrTopic || ''))
       ? intentOrTopic
       : topicForIntent(intentOrTopic || memory.intent);
   if (!topic) return memory;
@@ -330,6 +345,20 @@ function inferLeaveTypeFromContext(text, context) {
 }
 
 function buildSuggestions(intent) {
+  if (intent === 'clarify_filing_topic') {
+    return [
+      { text: 'File a leave request', intent: 'leave_guided_filing' },
+      { text: 'File a locator / WFH', intent: 'locator_types' },
+      { text: 'Check leave balance first', intent: 'leave_balance' },
+    ];
+  }
+  if (intent === 'clarify_status_topic') {
+    return [
+      { text: 'Check DTR status', intent: 'today_dtr' },
+      { text: 'Check leave request status', intent: 'latest_leave_request' },
+      { text: 'Check locator status', intent: 'locator_status' },
+    ];
+  }
   if (
     intent === 'today_dtr' ||
     intent === 'missing_logs' ||
@@ -546,6 +575,69 @@ function shouldAskAiForToolPlan({ resolvedIntent, dateRange, text, profile }) {
   return false;
 }
 
+function simpleLanguageOf(text) {
+  const value = lower(text);
+  if (/\b(unsa|unsay|ngano|pila|naa|akong|nako|imong|nimo|ug|karon|pwede|adto|ato|ana|bulana|semanaha)\b/.test(value)) {
+    return 'bisaya';
+  }
+  if (/\b(ano|bakit|ilan|ngayon|kailangan|puwede|pwede|ako|ko|ba|may|wala)\b/.test(value)) {
+    return 'tagalog';
+  }
+  return 'english';
+}
+
+function hasDateOrAvailabilityHint(text) {
+  return /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|ngayon|date|day|adlaw|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/i.test(
+    text
+  );
+}
+
+function isAmbiguousFilingQuestion(text) {
+  const value = lower(text);
+  if (explicitTopicFromText(value)) return false;
+  const hasFilingIntent =
+    /\b(file|filing|apply|submit|avail|can file|can i file|pwede.*file|puwede.*file|pwede ba|puwede ba|allowed|eligible|qualified|mag file|mag-file|i file|i-file)\b/.test(
+      value
+    );
+  if (!hasFilingIntent) return false;
+  return !/\b(dtr correction|correction|correct|adjustment|manual log)\b/.test(value);
+}
+
+function isAmbiguousStatusQuestion(text) {
+  const value = lower(text);
+  if (explicitTopicFromText(value)) return false;
+  return /\b(status|approved|approve|na-approve|pending|rejected|returned|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|remarks|reason|approved na|na approve)\b/.test(
+    value
+  );
+}
+
+function clarificationIntentForMessage(text, explicitIntent, memoryIntent) {
+  if (normalizeIntent(explicitIntent) || memoryIntent) return null;
+  if (isAmbiguousFilingQuestion(text)) return 'clarify_filing_topic';
+  if (isAmbiguousStatusQuestion(text)) return 'clarify_status_topic';
+  return null;
+}
+
+function clarificationContent(intent, text) {
+  const language = simpleLanguageOf(text);
+  if (intent === 'clarify_filing_topic') {
+    if (language === 'bisaya') {
+      return 'Unsay gusto nimo i-file: leave request ba, or locator slip/WFH?';
+    }
+    if (language === 'tagalog') {
+      return 'Alin ang gusto mong i-file: leave request o locator slip/WFH?';
+    }
+    return 'Which one do you want to file: a leave request or a locator slip/WFH?';
+  }
+  if (language === 'bisaya') {
+    return 'Unsa nga status imong gusto i-check: DTR, leave request, or locator slip?';
+  }
+  if (language === 'tagalog') {
+    return 'Aling status ang gusto mong i-check: DTR, leave request, o locator slip?';
+  }
+  return 'Which status do you want to check: DTR, leave request, or locator slip?';
+}
+
 function fallbackContent() {
   return 'I can help only with your DTR, missing logs, late/undertime/overtime, absences, DTR correction guidance, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave eligibility, leave form guidance, leave DTR impact, approval tracking, leave summaries, leave types, locator slip status, locator summaries, locator requirements, locator filing checks, locator rejection reasons, locator approval tracking, and locator DTR coverage.';
 }
@@ -572,10 +664,35 @@ function memoryRelativeDate(text, memory) {
 }
 
 function resolveIntentFromMemory(text, memory) {
-  if (!memory || !isFollowUpQuestion(text)) return null;
+  if (!memory) return null;
   const value = lower(text);
   const memoryTopic = memory.topic || topicForIntent(memory.intent);
   const explicitTopic = explicitTopicFromText(text);
+  if (
+    memoryTopic === 'clarify' ||
+    memory.intent === 'clarify_filing_topic' ||
+    memory.intent === 'clarify_status_topic'
+  ) {
+    if (memory.intent === 'clarify_filing_topic') {
+      if (explicitTopic === 'leave') {
+        return hasDateOrAvailabilityHint(value)
+          ? 'leave_availability_check'
+          : 'leave_guided_filing';
+      }
+      if (explicitTopic === 'locator') {
+        return hasDateOrAvailabilityHint(value)
+          ? 'locator_availability_check'
+          : 'locator_types';
+      }
+      if (explicitTopic === 'dtr') return 'dtr_correction_guidance';
+    }
+    if (memory.intent === 'clarify_status_topic') {
+      if (explicitTopic === 'dtr') return 'today_dtr';
+      if (explicitTopic === 'leave') return 'latest_leave_request';
+      if (explicitTopic === 'locator') return 'locator_status';
+    }
+  }
+  if (!isFollowUpQuestion(text)) return null;
   if (explicitTopic && memoryTopic && explicitTopic !== memoryTopic) return null;
   const activeMemory = memoryTopicState(memory, explicitTopic || memoryTopic) || memory;
   const activeIntent = activeMemory.intent || memory.intent;
@@ -1150,6 +1267,35 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     memory,
     memoryIntent
   );
+  const clarificationIntent = clarificationIntentForMessage(
+    normalizedTextForRules,
+    intent,
+    memoryIntent
+  );
+  if (clarificationIntent) {
+    const clarificationContext = emptyAssistantContext(
+      parseAssistantDateRange(normalizedTextForRules)
+    );
+    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
+      intent: clarificationIntent,
+      text: normalizedTextForRules,
+      dateRange: clarificationContext.date_range,
+      toolData: {
+        reason: clarificationIntent,
+      },
+      modelProfile: profile.id,
+    }));
+
+    return buildAssistantResult({
+      content: clarificationContent(clarificationIntent, normalizedTextForRules),
+      provider: 'hrms',
+      model: 'hrms-clarification-rules',
+      mode: scope.mode,
+      context: clarificationContext,
+      intent: clarificationIntent,
+      attachments: [],
+    });
+  }
   let resolvedIntent =
     detectEmployeeAssistantIntent(effectiveText, intent) ||
     memoryIntent ||
@@ -1279,7 +1425,11 @@ module.exports = {
   getDtrAssistantModelProfiles,
   __test: {
     buildNextAssistantMemory,
+    clarificationContent,
+    clarificationIntentForMessage,
     enrichMessageWithMemory,
+    isAmbiguousFilingQuestion,
+    isAmbiguousStatusQuestion,
     resolveIntentFromMemory,
     topicForIntent,
   },

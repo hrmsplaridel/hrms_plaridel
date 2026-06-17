@@ -192,6 +192,88 @@ test('DTR assistant regression: conversation memory does not leak stale leave ty
   assert.doesNotMatch(enriched, /sick leave/i);
 });
 
+test('DTR assistant regression: vague filing/status prompts ask clarification instead of guessing', () => {
+  assert.equal(
+    assistantServiceTest.clarificationIntentForMessage(
+      'pwede ba ko mag file?',
+      null,
+      null
+    ),
+    'clarify_filing_topic'
+  );
+  assert.match(
+    assistantServiceTest.clarificationContent(
+      'clarify_filing_topic',
+      'pwede ba ko mag file?'
+    ),
+    /leave request.*locator slip\/WFH/i
+  );
+  assert.equal(
+    assistantServiceTest.clarificationIntentForMessage(
+      'pwede ba ko mag file ug pass slip ugma?',
+      null,
+      null
+    ),
+    null
+  );
+  assert.equal(
+    assistantServiceTest.clarificationIntentForMessage(
+      'approved na ba?',
+      null,
+      null
+    ),
+    'clarify_status_topic'
+  );
+  assert.equal(
+    assistantServiceTest.clarificationIntentForMessage(
+      'where is my request?',
+      null,
+      null
+    ),
+    'clarify_status_topic'
+  );
+
+  const filingMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'clarify_filing_topic',
+    text: 'pwede ba ko mag file?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('leave', filingMemory),
+    'leave_guided_filing'
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('wfh tomorrow', filingMemory),
+    'locator_availability_check'
+  );
+
+  const statusMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'clarify_status_topic',
+    text: 'approved na ba?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('locator', statusMemory),
+    'locator_status'
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('DTR', statusMemory),
+    'today_dtr'
+  );
+});
+
 test('DTR assistant regression: locator exact slot coverage requires approved matching slot', () => {
   const context = {
     date_range: {
