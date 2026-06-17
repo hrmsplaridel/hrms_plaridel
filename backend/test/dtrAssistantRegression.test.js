@@ -350,3 +350,72 @@ test('DTR assistant regression: feedback rating aliases normalize safely', () =>
   assert.equal(normalizeRating('wrong'), 'down');
   assert.equal(normalizeRating('maybe'), null);
 });
+
+test('DTR assistant regression: replies use friendly dates and day counts', () => {
+  const leaveReply = buildFastEmployeeAssistantReply(
+    'pila ka leave request nako ang rejected?',
+    {
+      recent_leave_requests: [
+        {
+          leave_type: 'Sick leave',
+          start_date: '2026-04-01',
+          end_date: '2026-04-01',
+          status: 'rejected_by_hr',
+          days: '1.00',
+          hr_remarks: 'dili madawat ang rason',
+        },
+      ],
+    },
+    'rejected_leave_requests'
+  );
+
+  assert.match(leaveReply, /sa April 1, 2026/);
+  assert.match(leaveReply, /1 ka adlaw/);
+  assert.doesNotMatch(leaveReply, /1\.00 day\(s\)/);
+
+  const dtrReply = buildFastEmployeeAssistantReply(
+    'pila present nako adtong april nga month?',
+    {
+      date_range: {
+        label: 'april 2026',
+        startDate: '2026-04-01',
+        endDate: '2026-04-02',
+      },
+      dtr_records: [
+        {
+          attendance_date: '2026-04-01',
+          status: 'present',
+          total_hours: 8,
+          time_in: '2026-04-01T00:00:00.000Z',
+          break_out: '2026-04-01T04:00:00.000Z',
+          break_in: '2026-04-01T05:00:00.000Z',
+          time_out: '2026-04-01T09:00:00.000Z',
+        },
+      ],
+      dtr_calendar_days: [
+        {
+          attendance_date: '2026-04-01',
+          shift_id: 'shift-1',
+          shift_name: 'Morning Shift',
+          start_time: '08:00',
+          end_time: '17:00',
+          working_days: [1, 2, 3, 4, 5],
+        },
+        {
+          attendance_date: '2026-04-02',
+          shift_id: 'shift-1',
+          shift_name: 'Morning Shift',
+          start_time: '08:00',
+          end_time: '17:00',
+          working_days: [1, 2, 3, 4, 5],
+        },
+      ],
+    },
+    'dtr_range_summary'
+  );
+
+  assert.match(dtrReply, /April 2026/);
+  assert.match(dtrReply, /1 ka present\/complete DTR day/);
+  assert.match(dtrReply, /Total hours: 8 hr/);
+  assert.doesNotMatch(dtrReply, /8\.00/);
+});
