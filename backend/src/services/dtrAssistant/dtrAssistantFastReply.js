@@ -2522,6 +2522,15 @@ function requestedLocatorType(message) {
   return null;
 }
 
+function requestedSpecificLocatorType(message) {
+  const requestedType = requestedLocatorType(message);
+  if (requestedType !== 'locator') return requestedType;
+  const text = lower(message);
+  return /\b(official business|official|business|ob|on field|field|fieldwork|field work|out of office|outside office|travel order)\b/.test(text)
+    ? 'locator'
+    : null;
+}
+
 function locatorTypeMatches(item, requestedType) {
   if (!requestedType) return true;
   const code = lower(item?.request_type || item?.code);
@@ -2573,6 +2582,99 @@ function locatorSlipsForMessage(context, message) {
     if (!locatorTypeMatches(slip, requestedType)) return false;
     if (!locatorStatusMatches(slip.status, requestedStatus)) return false;
     return true;
+  });
+}
+
+function locatorTypeRulesForMessage(context, message, { genericLocatorMeansAll = true } = {}) {
+  const requestedType = genericLocatorMeansAll
+    ? requestedSpecificLocatorType(message)
+    : requestedLocatorType(message);
+  const types = context.locator_types || [];
+  const matches = types.filter((type) => locatorTypeMatches(type, requestedType));
+  return matches.length > 0 ? matches : requestedType ? [] : types;
+}
+
+function locatorTypeName(type) {
+  const label = type?.label || type?.code || 'Locator';
+  if (type?.short_label && !lower(label).includes(lower(type.short_label))) {
+    return `${label} (${type.short_label})`;
+  }
+  return label;
+}
+
+function locatorCoverageModeText(type, language) {
+  if (type?.coverage_mode === 'wfh') {
+    if (language === 'bisaya') return 'WFH coverage sa DTR';
+    if (language === 'tagalog') return 'WFH coverage sa DTR';
+    return 'WFH coverage in DTR';
+  }
+  if (language === 'bisaya') return 'manual AM/PM slot selection';
+  if (language === 'tagalog') return 'manual AM/PM slot selection';
+  return 'manual AM/PM slot selection';
+}
+
+function locatorAttachmentText(type, language) {
+  if (type?.requires_attachment) {
+    if (language === 'bisaya') return 'attachment required';
+    if (language === 'tagalog') return 'attachment required';
+    return 'attachment required';
+  }
+  if (language === 'bisaya') return 'walay attachment required by this type';
+  if (language === 'tagalog') return 'walang attachment required by this type';
+  return 'no attachment required by this type';
+}
+
+function fmtLocatorTypeRule(type, language) {
+  const parts = [
+    locatorCoverageModeText(type, language),
+    locatorAttachmentText(type, language),
+    type?.location_label ? `${type.location_label}${type.location_hint ? `: ${type.location_hint}` : ''}` : null,
+    type?.dtr_slot_label ? `DTR label: ${type.dtr_slot_label}` : null,
+  ].filter(Boolean);
+  return `${locatorTypeName(type)}: ${parts.join('; ')}`;
+}
+
+function locatorTypesReply(context, message) {
+  const language = languageOf(message);
+  const requestedType = requestedSpecificLocatorType(message);
+  const types = locatorTypeRulesForMessage(context, message);
+  if (types.length === 0) {
+    if (language === 'bisaya') return 'Wala koy nakitang matching locator type sa system.';
+    if (language === 'tagalog') return 'Wala akong nakitang matching locator type sa system.';
+    return 'I found no matching locator type in the system.';
+  }
+
+  const singleType = requestedType && types.length === 1;
+  const summary = singleType
+    ? language === 'bisaya'
+      ? `${locatorTypeName(types[0])} kay available nga locator type sa HRMS.`
+      : language === 'tagalog'
+        ? `${locatorTypeName(types[0])} ay available na locator type sa HRMS.`
+        : `${locatorTypeName(types[0])} is available as a locator type in HRMS.`
+    : language === 'bisaya'
+      ? `Mao ni ang ${types.length} ka locator type nga pwede i-file sa HRMS.`
+      : language === 'tagalog'
+        ? `Ito ang ${types.length} locator type na puwedeng i-file sa HRMS.`
+        : `These are the ${types.length} locator types you can file in HRMS.`;
+
+  return structuredReply(language, {
+    title: singleType ? 'Locator type details' : 'Locator types you can file',
+    summary,
+    details: [
+      ...types.map((type) => fmtLocatorTypeRule(type, language)),
+      singleType && types[0]?.coverage_mode === 'wfh'
+        ? 'WFH usually marks covered DTR slots as WFH after approval.'
+        : null,
+      'You still need a slip date, covered slots, location/destination, and reason.',
+      'Approval is still required before it becomes final DTR coverage.',
+    ],
+    nextStep:
+      language === 'bisaya'
+        ? 'Kung gusto nimo i-check kung pwede ka mag-file sa specific date, pangutan-a ko: "Can I file WFH tomorrow?"'
+        : language === 'tagalog'
+          ? 'Kung gusto mong i-check ang specific date, itanong: "Can I file WFH tomorrow?"'
+          : 'To check a specific date, ask: "Can I file WFH tomorrow?"',
+    limit: 8,
   });
 }
 
@@ -2678,21 +2780,13 @@ function locatorSummaryReply(context, message) {
 
 function locatorRequirementsReply(context, message) {
   const language = languageOf(message);
-  const requestedType = requestedLocatorType(message);
-  const types = (context.locator_types || []).filter((type) => locatorTypeMatches(type, requestedType));
-  const visible = types.length > 0 ? types : context.locator_types || [];
+  const visible = locatorTypeRulesForMessage(context, message);
   if (visible.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang locator request type rules sa system.';
     if (language === 'tagalog') return 'Wala akong nakitang locator request type rules sa system.';
     return 'I found no locator request type rules in the system.';
   }
-  const lines = visible.map((type) => {
-    const coverage =
-      type.coverage_mode === 'wfh'
-        ? 'auto WFH coverage'
-        : 'manual AM/PM slot selection';
-    return `${type.label || type.code}: ${type.requires_attachment ? 'attachment required' : 'no attachment required'}, ${coverage}, DTR label ${type.dtr_slot_label || type.dtr_print_label || type.code}`;
-  });
+  const lines = visible.map((type) => fmtLocatorTypeRule(type, language));
   const summary =
     language === 'bisaya'
       ? 'Base sa locator type setup, mao ni ang filing rules.'
@@ -2716,13 +2810,6 @@ function locatorRequirementsReply(context, message) {
           : 'If your locator is rejected or pending, ask me about its status or remarks.',
     limit: 9,
   });
-}
-
-function locatorTypeRulesForMessage(context, message) {
-  const requestedType = requestedLocatorType(message);
-  const types = context.locator_types || [];
-  const matches = types.filter((type) => locatorTypeMatches(type, requestedType));
-  return matches.length > 0 ? matches : requestedType ? [] : types;
 }
 
 function locatorAvailabilityReply(context, message) {
@@ -3068,6 +3155,9 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
   if (intent === 'locator_summary') {
     return locatorSummaryReply(context, message);
   }
+  if (intent === 'locator_types') {
+    return locatorTypesReply(context, message);
+  }
   if (intent === 'locator_requirements') {
     return locatorRequirementsReply(context, message);
   }
@@ -3090,4 +3180,8 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
   return null;
 }
 
-module.exports = { buildFastEmployeeAssistantReply, requestedLeaveType };
+module.exports = {
+  buildFastEmployeeAssistantReply,
+  requestedLeaveType,
+  requestedLocatorType,
+};

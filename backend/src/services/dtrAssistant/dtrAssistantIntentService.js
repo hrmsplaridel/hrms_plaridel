@@ -56,6 +56,7 @@ function normalizeIntent(value) {
     'latest_locator_request',
     'locator_status',
     'locator_summary',
+    'locator_types',
     'locator_requirements',
     'locator_availability_check',
     'locator_rejection_reason',
@@ -84,6 +85,12 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
     );
 
   if (hasLocatorTopic) {
+    if (
+      /\b(types?|kinds?|options?|available.*locator|locator.*available|what.*locator.*file|which.*locator.*file|what.*type|which.*type|what is.*(wfh|work from home|pass slip|official business|ob|fieldwork)|unsa.*(wfh|work from home|pass slip|official business|ob|fieldwork)|ano.*(wfh|work from home|pass slip|official business|ob|fieldwork)|unsa.*type|unsay.*type|ano.*type|list.*locator|how about|what about)\b/.test(text) &&
+      !/\b(status|approve|approved|pending|rejected|returned|cancelled|canceled|latest|last|recent|remarks|reason|who|where|asa|kinsa|sino|holding|waiting)\b/.test(text)
+    ) {
+      return 'locator_types';
+    }
     if (
       /\b(covered|cover|covers|sakop|coverage|na cover|na-cover)\b/.test(text) &&
       /\b(dtr|attendance|missing|incomplete|log|logs|am in|am out|pm in|pm out|time[\s-]?in|time[\s-]?out)\b/.test(text)
@@ -534,6 +541,13 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
     )
   ) {
     return 'leave_balance';
+  }
+
+  if (
+    /\b(locator|locator slip|pass slip|wfh|work from home|official business|ob request|ob|on field|field work|fieldwork|out of office|outside office|travel order)\b/.test(text) &&
+    /\b(types?|kinds?|options?|available.*locator|locator.*available|what.*locator.*file|which.*locator.*file|what.*type|which.*type|what is.*(wfh|work from home|pass slip|official business|ob|fieldwork)|unsa.*(wfh|work from home|pass slip|official business|ob|fieldwork)|ano.*(wfh|work from home|pass slip|official business|ob|fieldwork)|unsa.*type|unsay.*type|ano.*type|list.*locator|how about|what about)\b/.test(text)
+  ) {
+    return 'locator_types';
   }
 
   if (

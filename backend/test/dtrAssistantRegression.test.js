@@ -30,12 +30,73 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['ngano gi reject akong locator?', 'locator_rejection_reason'],
     ['asa na akong official business request?', 'locator_approval_tracker'],
     ['covered ba sa locator akong PM out?', 'dtr_locator_coverage_check'],
+    ['what are the locator types i can file?', 'locator_types'],
+    ['how about the wfh?', 'locator_types'],
+    ['unsa ang wfh?', 'locator_types'],
     ['export my dtr this month', 'dtr_export_guidance'],
   ];
 
   for (const [message, expected] of cases) {
     assert.equal(detectEmployeeAssistantIntent(message), expected, message);
   }
+});
+
+test('DTR assistant regression: locator type questions list active request types', () => {
+  const context = {
+    locator_types: [
+      {
+        code: 'locator',
+        label: 'Locator / Official Business',
+        short_label: 'Locator',
+        location_label: 'Office / Destination',
+        location_hint: 'Enter office or destination',
+        dtr_slot_label: 'On Field',
+        requires_attachment: false,
+        coverage_mode: 'manual',
+      },
+      {
+        code: 'pass_slip',
+        label: 'Pass Slip',
+        short_label: 'Pass Slip',
+        location_label: 'Destination / Location',
+        location_hint: 'Enter destination or location',
+        dtr_slot_label: 'Pass Slip',
+        requires_attachment: false,
+        coverage_mode: 'manual',
+      },
+      {
+        code: 'work_from_home',
+        label: 'Work From Home',
+        short_label: 'WFH',
+        location_label: 'Work Location',
+        location_hint: 'Enter work location',
+        dtr_slot_label: 'WFH',
+        requires_attachment: false,
+        coverage_mode: 'wfh',
+      },
+    ],
+  };
+
+  const listReply = buildFastEmployeeAssistantReply(
+    'what are the locator types i can file?',
+    context,
+    'locator_types'
+  );
+
+  assert.match(listReply, /Locator \/ Official Business/);
+  assert.match(listReply, /Pass Slip/);
+  assert.match(listReply, /Work From Home/);
+
+  const wfhReply = buildFastEmployeeAssistantReply(
+    'how about the wfh?',
+    context,
+    'locator_types'
+  );
+
+  assert.match(wfhReply, /Work From Home/);
+  assert.match(wfhReply, /WFH coverage/i);
+  assert.doesNotMatch(wfhReply, /locator request is approved/i);
+  assert.doesNotMatch(wfhReply, /Pass Slip/);
 });
 
 test('DTR assistant regression: locator exact slot coverage requires approved matching slot', () => {
