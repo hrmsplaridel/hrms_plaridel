@@ -13,6 +13,9 @@ const {
 const {
   normalizeRating,
 } = require('../src/services/dtrAssistant/dtrAssistantFeedbackService');
+const {
+  __test: assistantServiceTest,
+} = require('../src/services/dtrAssistant/dtrAssistantService');
 
 test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected intents', () => {
   const cases = [
@@ -97,6 +100,96 @@ test('DTR assistant regression: locator type questions list active request types
   assert.match(wfhReply, /WFH coverage/i);
   assert.doesNotMatch(wfhReply, /locator request is approved/i);
   assert.doesNotMatch(wfhReply, /Pass Slip/);
+});
+
+test('DTR assistant regression: conversation memory keeps topic and entity follow-ups', () => {
+  let memory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'locator_types',
+    text: 'how about wfh?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    locatorType: 'work_from_home',
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('what about tomorrow?', memory),
+    'locator_availability_check'
+  );
+  assert.match(
+    assistantServiceTest.enrichMessageWithMemory(
+      'what about tomorrow?',
+      memory,
+      'locator_availability_check'
+    ),
+    /work from home/i
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('what about tomorrow for wfh?', memory),
+    'locator_availability_check'
+  );
+
+  memory = assistantServiceTest.buildNextAssistantMemory(memory, {
+    intent: 'dtr_status_explanation',
+    text: 'unsay status sa akong dtr adtung niaging miyerkules?',
+    dateRange: {
+      label: 'previous Wednesday',
+      startDate: '2026-06-10',
+      endDate: '2026-06-10',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('same date?', memory),
+    'dtr_status_explanation'
+  );
+  assert.match(
+    assistantServiceTest.enrichMessageWithMemory(
+      'same date?',
+      memory,
+      'dtr_status_explanation'
+    ),
+    /2026-06-10/
+  );
+  assert.equal(memory.history.length, 2);
+  assert.equal(memory.topics.locator.locatorType, 'work_from_home');
+});
+
+test('DTR assistant regression: conversation memory does not leak stale leave type into explicit topic switches', () => {
+  let memory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_balance',
+    text: 'pila akong sick leave balance?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    leaveType: 'sick',
+    modelProfile: 'tools_ollama',
+  });
+
+  memory = assistantServiceTest.buildNextAssistantMemory(memory, {
+    intent: 'locator_types',
+    text: 'what are locator types?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  const enriched = assistantServiceTest.enrichMessageWithMemory(
+    'what is my leave balance?',
+    memory,
+    null
+  );
+
+  assert.doesNotMatch(enriched, /sick leave/i);
 });
 
 test('DTR assistant regression: locator exact slot coverage requires approved matching slot', () => {

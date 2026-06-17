@@ -31,6 +31,7 @@ const {
 } = require('../../utils/dateRangeParser');
 
 const MAX_ASSISTANT_REPLY_CHARS = 900;
+const MAX_MEMORY_TURNS = 6;
 
 const DEFAULT_MODEL_PROFILE_ID = 'tools_ollama';
 
@@ -182,11 +183,50 @@ function isLocatorIntent(intent) {
   );
 }
 
+function topicForIntent(intent) {
+  if (isStructuredDtrIntent(intent)) return 'dtr';
+  if (isLeaveIntent(intent)) return 'leave';
+  if (isLocatorIntent(intent)) return 'locator';
+  if (intent === 'direct_ai') return 'direct';
+  return null;
+}
+
+function explicitTopicFromText(text) {
+  const value = lower(text);
+  if (/\b(locator|locator slip|pass slip|wfh|work from home|official business|ob|fieldwork|field work|out of office|travel order)\b/.test(value)) {
+    return 'locator';
+  }
+  if (/\b(leave|leaves|sick|vacation|paternity|maternity|adoption|solo parent|vawc|calamity|mandatory|forced|vl|sl)\b/.test(value)) {
+    return 'leave';
+  }
+  if (/\b(dtr|attendance|daily time|log|logs|time[\s-]?in|time[\s-]?out|late|undertime|overtime|absent|absence|present|shift|schedule|sched|missing|incomplete)\b/.test(value)) {
+    return 'dtr';
+  }
+  return null;
+}
+
+function memoryTopicState(memory, intentOrTopic) {
+  if (!memory) return null;
+  const topic =
+    ['dtr', 'leave', 'locator', 'direct'].includes(String(intentOrTopic || ''))
+      ? intentOrTopic
+      : topicForIntent(intentOrTopic || memory.intent);
+  if (!topic) return memory;
+  return memory.topics?.[topic] || (memory.topic === topic ? memory : null) || memory;
+}
+
+function strictMemoryTopicState(memory, topic) {
+  if (!memory || !topic) return null;
+  return memory.topics?.[topic] || (memory.topic === topic ? memory : null);
+}
+
 function memoryLeaveTypeForIntent(intent, effectiveText, context, memory) {
   if (!isLeaveIntent(intent)) return null;
+  const leaveMemory = memoryTopicState(memory, 'leave');
   return (
     requestedLeaveType(effectiveText) ||
     inferLeaveTypeFromContext(effectiveText, context) ||
+    leaveMemory?.leaveType ||
     memory?.leaveType ||
     null
   );
@@ -194,7 +234,63 @@ function memoryLeaveTypeForIntent(intent, effectiveText, context, memory) {
 
 function memoryLocatorTypeForIntent(intent, effectiveText, memory) {
   if (!isLocatorIntent(intent)) return null;
-  return requestedLocatorType(effectiveText) || memory?.locatorType || null;
+  const locatorMemory = memoryTopicState(memory, 'locator');
+  return (
+    requestedLocatorType(effectiveText) ||
+    locatorMemory?.locatorType ||
+    memory?.locatorType ||
+    null
+  );
+}
+
+function buildNextAssistantMemory(previous, next) {
+  const topic = topicForIntent(next.intent);
+  const previousTopicState = strictMemoryTopicState(previous, topic) || {};
+  const leaveType =
+    next.leaveType || (topic === 'leave' ? previousTopicState.leaveType : previous?.leaveType) || null;
+  const locatorType =
+    next.locatorType || (topic === 'locator' ? previousTopicState.locatorType : previous?.locatorType) || null;
+  const turn = {
+    intent: next.intent || null,
+    topic,
+    text: String(next.text || '').slice(0, 500),
+    dateRange: next.dateRange || null,
+    leaveType,
+    locatorType,
+    modelProfile: next.modelProfile || null,
+    createdAt: new Date().toISOString(),
+  };
+  const history = [turn, ...(previous?.history || [])]
+    .filter((item) => item && item.intent)
+    .slice(0, MAX_MEMORY_TURNS);
+  const topics = {
+    ...(previous?.topics || {}),
+  };
+
+  if (topic) {
+    topics[topic] = {
+      intent: next.intent || previousTopicState.intent || null,
+      topic,
+      dateRange: next.dateRange || previousTopicState.dateRange || null,
+      leaveType: topic === 'leave' ? leaveType : previousTopicState.leaveType || null,
+      locatorType: topic === 'locator' ? locatorType : previousTopicState.locatorType || null,
+      toolData: next.toolData || previousTopicState.toolData || null,
+      updatedAt: turn.createdAt,
+    };
+  }
+
+  return {
+    intent: next.intent || previous?.intent || null,
+    topic,
+    leaveType,
+    locatorType,
+    dateRange: next.dateRange || previous?.dateRange || null,
+    toolData: next.toolData || null,
+    modelProfile: next.modelProfile || previous?.modelProfile || null,
+    lastUserMessage: turn.text,
+    history,
+    topics,
+  };
 }
 
 function shouldSkipToolRefinement(intent) {
@@ -454,12 +550,6 @@ function fallbackContent() {
   return 'I can help only with your DTR, missing logs, late/undertime/overtime, absences, DTR correction guidance, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave eligibility, leave form guidance, leave DTR impact, approval tracking, leave summaries, leave types, locator slip status, locator summaries, locator requirements, locator filing checks, locator rejection reasons, locator approval tracking, and locator DTR coverage.';
 }
 
-function hasExplicitHrmsTopic(text) {
-  return /\b(dtr|attendance|log|logs|leave|locator|pass slip|wfh|official business|fieldwork|field work|out of office|travel order|sick|vacation|vl|sl)\b/.test(
-    lower(text)
-  );
-}
-
 function isFollowUpQuestion(text) {
   return /\b(it|that|this|one|same|about|how about|what about|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|today|tomorrow|yesterday|ugma|gahapon|kagahapon|week|month|semana|semanaha|bulan|bulana|buwan|buwana|aning|karong|ngayong|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?|remarks?|reason|who|where|asa|kinsa|sino|can|file|pwede|puwede|allowed|eligible)\b/.test(
     lower(text)
@@ -482,40 +572,92 @@ function memoryRelativeDate(text, memory) {
 }
 
 function resolveIntentFromMemory(text, memory) {
+  if (!memory || !isFollowUpQuestion(text)) return null;
   const value = lower(text);
+  const memoryTopic = memory.topic || topicForIntent(memory.intent);
+  const explicitTopic = explicitTopicFromText(text);
+  if (explicitTopic && memoryTopic && explicitTopic !== memoryTopic) return null;
+  const activeMemory = memoryTopicState(memory, explicitTopic || memoryTopic) || memory;
+  const activeIntent = activeMemory.intent || memory.intent;
   const locatorTypeFollowUp =
-    isLocatorIntent(memory?.intent) &&
+    isLocatorIntent(activeIntent) &&
     /\b(types?|kinds?|options?|how about|what about|wfh|work from home|pass slip|official business|ob|on field|fieldwork|field work)\b/.test(value);
-  if (!memory || (!locatorTypeFollowUp && hasExplicitHrmsTopic(text)) || !isFollowUpQuestion(text)) return null;
-  if (isLocatorIntent(memory.intent)) {
+  if (!locatorTypeFollowUp && explicitTopic && explicitTopic !== memoryTopic) return null;
+  if (isLocatorIntent(activeIntent)) {
+    if (/\b(can file|can i file|pwede|puwede|allowed|eligible|qualified|available|tomorrow|ugma|karon|today|date|day|file)\b/.test(value)) {
+      return 'locator_availability_check';
+    }
     if (
       locatorTypeFollowUp &&
       !/\b(status|approved|approve|pending|rejected|returned|cancelled|canceled|latest|last|recent|remarks|reason|who|where|asa|kinsa|sino|holding|waiting)\b/.test(value)
     ) {
       return 'locator_types';
     }
-    if (/\b(can file|can i file|pwede|puwede|allowed|eligible|qualified|available|tomorrow|ugma|karon|today)\b/.test(lower(text))) {
-      return 'locator_availability_check';
-    }
-    if (/\b(why|ngano|bakit|reason|remarks|comment|rejected|reject|declined|denied|gi reject|gireject)\b/.test(lower(text))) {
+    if (/\b(why|ngano|bakit|reason|remarks|comment|rejected|reject|declined|denied|gi reject|gireject|same reason)\b/.test(value)) {
       return 'locator_rejection_reason';
     }
-    if (/\b(who|kinsa|sino|where|asa|kanino|holding|hold|pending with|waiting|awaiting)\b/.test(lower(text))) {
+    if (/\b(who|kinsa|sino|where|asa|kanino|holding|hold|pending with|waiting|awaiting)\b/.test(value)) {
       return 'locator_approval_tracker';
     }
-    if (/\b(requirement|requirements|attachment|document|docs|need|needed|kinahanglan|kailangan|rule|rules|policy|how to file|unsaon|paano)\b/.test(lower(text))) {
+    if (/\b(requirement|requirements|attachment|document|docs|need|needed|kinahanglan|kailangan|rule|rules|policy|how to file|unsaon|paano)\b/.test(value)) {
       return 'locator_requirements';
     }
-    if (/\b(summary|total|count|counts|pila|ilan|how many|history|list|show)\b/.test(lower(text))) {
+    if (/\b(summary|total|count|counts|pila|ilan|how many|history|list|show)\b/.test(value)) {
       return 'locator_summary';
     }
-    if (/\b(types?|kinds?|options?|available.*locator|locator.*available)\b/.test(lower(text))) {
+    if (/\b(types?|kinds?|options?|available.*locator|locator.*available)\b/.test(value)) {
       return 'locator_types';
     }
-    if (/\b(status|approved|approve|pending|rejected|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|remarks|reason|ngano|bakit|why)\b/.test(lower(text))) {
+    if (/\b(status|approved|approve|pending|rejected|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|remarks|reason|ngano|bakit|why)\b/.test(value)) {
       return 'locator_status';
     }
-    return memory.intent;
+    return activeIntent;
+  }
+  if (isStructuredDtrIntent(activeIntent)) {
+    if (/\b(fix|correct|correction|buhaton|gagawin|resolve)\b/.test(value)) {
+      return 'dtr_correction_guidance';
+    }
+    if (/\b(absent|absence|no record|walay record)\b/.test(value)) {
+      return 'dtr_absent_summary';
+    }
+    if (/\b(missing|incomplete|kulang|kuwang|what.*missing|unsa.*kulang)\b/.test(value)) {
+      return 'dtr_missing_log_reason';
+    }
+    if (/\b(late|tardy)\b/.test(value)) {
+      return 'dtr_late_summary';
+    }
+    if (/\b(undertime|under time)\b/.test(value)) {
+      return 'dtr_undertime_summary';
+    }
+    if (/\b(overtime|over time|ot)\b/.test(value)) {
+      return 'dtr_overtime_summary';
+    }
+    if (/\b(status|same day|same date|that day|that date|ana|ato|adto|niya|today|tomorrow|yesterday|ugma|gahapon|kagahapon)\b/.test(value)) {
+      return activeIntent;
+    }
+  }
+  if (isLeaveIntent(activeIntent)) {
+    if (/\b(can file|can i file|pwede|puwede|allowed|eligible|qualified|available|tomorrow|ugma|karon|today|date|day|file)\b/.test(value)) {
+      return 'leave_availability_check';
+    }
+    if (/\b(why|ngano|bakit|reason|remarks|returned|rejected|declined|denied|same reason)\b/.test(value)) {
+      return 'leave_rejection_reason';
+    }
+    if (/\b(requirement|requirements|needed|need|kinahanglan|kailangan)\b/.test(value)) {
+      return 'leave_requirements';
+    }
+    if (/\b(attachment|attachments|document|documents|docs|proof|supporting|medical certificate|med cert)\b/.test(value)) {
+      return 'leave_attachment_requirement';
+    }
+    if (/\b(who|kinsa|sino|where|asa|holding|waiting|awaiting|pending with)\b/.test(value)) {
+      return 'leave_approval_tracker';
+    }
+    if (/\b(status|approved|approve|pending|latest|last|recent)\b/.test(value)) {
+      return 'latest_leave_request';
+    }
+    if (/\b(summary|summarize|summarise|overview|recap|total|count|counts|history|list|show)\b/.test(value)) {
+      return 'leave_request_summary';
+    }
   }
   if (/\b(fix|correct|correction|buhaton|gagawin|resolve)\b/.test(lower(text))) {
     return 'dtr_correction_guidance';
@@ -589,7 +731,7 @@ function resolveIntentFromMemory(text, memory) {
   if (/\b(after filing|mabilin|matira|nabilin|natira|remaining after|balance after|pila.*mabilin|pila.*nabilin|how much.*remain|what.*remain)\b/.test(lower(text))) {
     return 'leave_balance_after_filing';
   }
-  if (memory.intent === 'leave_balance' && /\b(why|ngano|bakit|gamay|low|small|nabilin|natira)\b/.test(lower(text))) {
+  if (activeIntent === 'leave_balance' && /\b(why|ngano|bakit|gamay|low|small|nabilin|natira)\b/.test(lower(text))) {
     return 'leave_balance';
   }
   if (
@@ -645,17 +787,23 @@ function resolveIntentFromMemory(text, memory) {
       'locator_availability_check',
       'locator_rejection_reason',
       'locator_approval_tracker',
-    ].includes(memory.intent)
+    ].includes(activeIntent)
   ) {
-    return memory.intent;
+    return activeIntent;
   }
   return null;
 }
 
 function enrichMessageWithMemory(text, memory, memoryIntent = null) {
   let enriched = text;
-  const activeIntent = memoryIntent || memory?.intent || null;
-  const relativeDate = memoryRelativeDate(enriched, memory);
+  const explicitTopic = explicitTopicFromText(enriched);
+  const topicMemory = explicitTopic
+    ? strictMemoryTopicState(memory, explicitTopic)
+    : memoryTopicState(memory, memoryIntent || memory?.intent);
+  const activeIntent =
+    memoryIntent || topicMemory?.intent || (!explicitTopic ? memory?.intent : null);
+  const activeMemory = topicMemory || (!explicitTopic ? memory : null);
+  const relativeDate = memoryRelativeDate(enriched, activeMemory);
   if (relativeDate) {
     enriched = `${enriched} (${relativeDate})`;
   }
@@ -665,45 +813,54 @@ function enrichMessageWithMemory(text, memory, memoryIntent = null) {
     );
   if (
     !hasDateHint &&
-    memory?.dateRange?.startDate &&
+    activeMemory?.dateRange?.startDate &&
     isStructuredDtrIntent(activeIntent) &&
     isFollowUpQuestion(enriched)
   ) {
-    enriched = `${enriched} (${memory.dateRange.startDate}${
-      memory.dateRange.endDate && memory.dateRange.endDate !== memory.dateRange.startDate
-        ? ` to ${memory.dateRange.endDate}`
+    enriched = `${enriched} (${activeMemory.dateRange.startDate}${
+      activeMemory.dateRange.endDate &&
+      activeMemory.dateRange.endDate !== activeMemory.dateRange.startDate
+        ? ` to ${activeMemory.dateRange.endDate}`
         : ''
     })`;
   }
   if (
     !hasDateHint &&
-    memory?.dateRange?.startDate &&
+    activeMemory?.dateRange?.startDate &&
     isLeaveIntent(activeIntent) &&
     /\b(what|which|unsa|unsay|ano|that|to|gi file|g-file|filed|leave type)\b/i.test(
       enriched
     )
   ) {
-    enriched = `${enriched} (${memory.dateRange.startDate}${
-      memory.dateRange.endDate && memory.dateRange.endDate !== memory.dateRange.startDate
-        ? ` to ${memory.dateRange.endDate}`
+    enriched = `${enriched} (${activeMemory.dateRange.startDate}${
+      activeMemory.dateRange.endDate &&
+      activeMemory.dateRange.endDate !== activeMemory.dateRange.startDate
+        ? ` to ${activeMemory.dateRange.endDate}`
         : ''
     })`;
   }
   if (
     !hasDateHint &&
-    memory?.dateRange?.startDate &&
+    activeMemory?.dateRange?.startDate &&
     isLocatorIntent(activeIntent) &&
     isFollowUpQuestion(enriched)
   ) {
-    enriched = `${enriched} (${memory.dateRange.startDate}${
-      memory.dateRange.endDate && memory.dateRange.endDate !== memory.dateRange.startDate
-        ? ` to ${memory.dateRange.endDate}`
+    enriched = `${enriched} (${activeMemory.dateRange.startDate}${
+      activeMemory.dateRange.endDate &&
+      activeMemory.dateRange.endDate !== activeMemory.dateRange.startDate
+        ? ` to ${activeMemory.dateRange.endDate}`
         : ''
     })`;
   }
 
   if (isLocatorIntent(activeIntent) || /\b(locator|pass slip|wfh|work from home|official business|ob)\b/i.test(enriched)) {
-    const locatorType = requestedLocatorType(enriched) || memory?.locatorType;
+    const canUseRememberedLocatorType =
+      isFollowUpQuestion(text) || isLocatorIntent(activeIntent);
+    const locatorType =
+      requestedLocatorType(enriched) ||
+      (canUseRememberedLocatorType
+        ? activeMemory?.locatorType || (!explicitTopic ? memory?.locatorType : null)
+        : null);
     if (locatorType && !requestedLocatorType(enriched)) {
       const locatorTypeLabel = locatorType.replace(/_/g, ' ');
       if (
@@ -719,19 +876,23 @@ function enrichMessageWithMemory(text, memory, memoryIntent = null) {
   if (!isLeaveIntent(activeIntent) && !/\b(leave|sick|vacation|vl|sl)\b/i.test(enriched)) {
     return enriched;
   }
-  const leaveType = requestedLeaveType(enriched) || memory?.leaveType;
+  const leaveType =
+    requestedLeaveType(enriched) ||
+    (isFollowUpQuestion(text) || (!explicitTopic && isLeaveIntent(activeIntent))
+      ? activeMemory?.leaveType || (!explicitTopic ? memory?.leaveType : null)
+      : null);
   if (!leaveType) return enriched;
   if (requestedLeaveType(enriched)) return enriched;
   const leaveTypeLabel = /\bleave\b/i.test(leaveType)
     ? leaveType
     : `${leaveType} leave`;
   if (
-    memory?.intent === 'leave_balance' &&
+    activeIntent === 'leave_balance' &&
     /\b(why|ngano|bakit|gamay|low|small|nabilin|natira)\b/.test(lower(text))
   ) {
     return `${enriched} (${leaveTypeLabel})`;
   }
-  if (/leave_|leave\b|requirements?|attachment|balance|pending|history|summary|overlap/i.test(memory?.intent || enriched)) {
+  if (/leave_|leave\b|requirements?|attachment|balance|pending|history|summary|overlap/i.test(activeIntent || enriched)) {
     return `${enriched} (${leaveTypeLabel})`;
   }
   return enriched;
@@ -1040,15 +1201,17 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       profile,
     });
 
-    setAssistantMemory(scope.userId, {
+    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
       intent: 'direct_ai',
+      text: plannedText,
       leaveType: memoryLeaveTypeForIntent('direct_ai', plannedText, context, memory),
       locatorType: memoryLocatorTypeForIntent('direct_ai', plannedText, memory),
       dateRange: context.date_range,
       toolData: {
         modelProfile: profile.id,
       },
-    });
+      modelProfile: profile.id,
+    }));
 
     return buildAssistantResult({
       content: direct.content,
@@ -1079,14 +1242,15 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
           profile,
         });
 
-    setAssistantMemory(scope.userId, {
+    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
       intent: resolvedIntent,
+      text: plannedText,
       leaveType: memoryLeaveTypeForIntent(resolvedIntent, plannedText, context, memory),
       locatorType: memoryLocatorTypeForIntent(resolvedIntent, plannedText, memory),
       dateRange: context.date_range,
       toolData,
       modelProfile: profile.id,
-    });
+    }));
 
     return buildAssistantResult({
       content: compactAssistantContent(refined?.content || fastReply),
@@ -1110,4 +1274,13 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   });
 }
 
-module.exports = { chatWithDtrAssistant, getDtrAssistantModelProfiles };
+module.exports = {
+  chatWithDtrAssistant,
+  getDtrAssistantModelProfiles,
+  __test: {
+    buildNextAssistantMemory,
+    enrichMessageWithMemory,
+    resolveIntentFromMemory,
+    topicForIntent,
+  },
+};
