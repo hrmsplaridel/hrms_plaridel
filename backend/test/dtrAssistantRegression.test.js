@@ -13,6 +13,9 @@ const {
 const {
   normalizeRating,
 } = require('../src/services/dtrAssistant/dtrAssistantFeedbackService');
+const {
+  __test: assistantServiceTest,
+} = require('../src/services/dtrAssistant/dtrAssistantService');
 
 test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected intents', () => {
   const cases = [
@@ -99,6 +102,178 @@ test('DTR assistant regression: locator type questions list active request types
   assert.doesNotMatch(wfhReply, /Pass Slip/);
 });
 
+test('DTR assistant regression: conversation memory keeps topic and entity follow-ups', () => {
+  let memory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'locator_types',
+    text: 'how about wfh?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    locatorType: 'work_from_home',
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('what about tomorrow?', memory),
+    'locator_availability_check'
+  );
+  assert.match(
+    assistantServiceTest.enrichMessageWithMemory(
+      'what about tomorrow?',
+      memory,
+      'locator_availability_check'
+    ),
+    /work from home/i
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('what about tomorrow for wfh?', memory),
+    'locator_availability_check'
+  );
+
+  memory = assistantServiceTest.buildNextAssistantMemory(memory, {
+    intent: 'dtr_status_explanation',
+    text: 'unsay status sa akong dtr adtung niaging miyerkules?',
+    dateRange: {
+      label: 'previous Wednesday',
+      startDate: '2026-06-10',
+      endDate: '2026-06-10',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('same date?', memory),
+    'dtr_status_explanation'
+  );
+  assert.match(
+    assistantServiceTest.enrichMessageWithMemory(
+      'same date?',
+      memory,
+      'dtr_status_explanation'
+    ),
+    /2026-06-10/
+  );
+  assert.equal(memory.history.length, 2);
+  assert.equal(memory.topics.locator.locatorType, 'work_from_home');
+});
+
+test('DTR assistant regression: conversation memory does not leak stale leave type into explicit topic switches', () => {
+  let memory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_balance',
+    text: 'pila akong sick leave balance?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    leaveType: 'sick',
+    modelProfile: 'tools_ollama',
+  });
+
+  memory = assistantServiceTest.buildNextAssistantMemory(memory, {
+    intent: 'locator_types',
+    text: 'what are locator types?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  const enriched = assistantServiceTest.enrichMessageWithMemory(
+    'what is my leave balance?',
+    memory,
+    null
+  );
+
+  assert.doesNotMatch(enriched, /sick leave/i);
+});
+
+test('DTR assistant regression: vague filing/status prompts ask clarification instead of guessing', () => {
+  assert.equal(
+    assistantServiceTest.clarificationIntentForMessage(
+      'pwede ba ko mag file?',
+      null,
+      null
+    ),
+    'clarify_filing_topic'
+  );
+  assert.match(
+    assistantServiceTest.clarificationContent(
+      'clarify_filing_topic',
+      'pwede ba ko mag file?'
+    ),
+    /leave request.*locator slip\/WFH/i
+  );
+  assert.equal(
+    assistantServiceTest.clarificationIntentForMessage(
+      'pwede ba ko mag file ug pass slip ugma?',
+      null,
+      null
+    ),
+    null
+  );
+  assert.equal(
+    assistantServiceTest.clarificationIntentForMessage(
+      'approved na ba?',
+      null,
+      null
+    ),
+    'clarify_status_topic'
+  );
+  assert.equal(
+    assistantServiceTest.clarificationIntentForMessage(
+      'where is my request?',
+      null,
+      null
+    ),
+    'clarify_status_topic'
+  );
+
+  const filingMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'clarify_filing_topic',
+    text: 'pwede ba ko mag file?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('leave', filingMemory),
+    'leave_guided_filing'
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('wfh tomorrow', filingMemory),
+    'locator_availability_check'
+  );
+
+  const statusMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'clarify_status_topic',
+    text: 'approved na ba?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('locator', statusMemory),
+    'locator_status'
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('DTR', statusMemory),
+    'today_dtr'
+  );
+});
+
 test('DTR assistant regression: locator exact slot coverage requires approved matching slot', () => {
   const context = {
     date_range: {
@@ -174,4 +349,73 @@ test('DTR assistant regression: feedback rating aliases normalize safely', () =>
   assert.equal(normalizeRating('correct'), 'up');
   assert.equal(normalizeRating('wrong'), 'down');
   assert.equal(normalizeRating('maybe'), null);
+});
+
+test('DTR assistant regression: replies use friendly dates and day counts', () => {
+  const leaveReply = buildFastEmployeeAssistantReply(
+    'pila ka leave request nako ang rejected?',
+    {
+      recent_leave_requests: [
+        {
+          leave_type: 'Sick leave',
+          start_date: '2026-04-01',
+          end_date: '2026-04-01',
+          status: 'rejected_by_hr',
+          days: '1.00',
+          hr_remarks: 'dili madawat ang rason',
+        },
+      ],
+    },
+    'rejected_leave_requests'
+  );
+
+  assert.match(leaveReply, /sa April 1, 2026/);
+  assert.match(leaveReply, /1 ka adlaw/);
+  assert.doesNotMatch(leaveReply, /1\.00 day\(s\)/);
+
+  const dtrReply = buildFastEmployeeAssistantReply(
+    'pila present nako adtong april nga month?',
+    {
+      date_range: {
+        label: 'april 2026',
+        startDate: '2026-04-01',
+        endDate: '2026-04-02',
+      },
+      dtr_records: [
+        {
+          attendance_date: '2026-04-01',
+          status: 'present',
+          total_hours: 8,
+          time_in: '2026-04-01T00:00:00.000Z',
+          break_out: '2026-04-01T04:00:00.000Z',
+          break_in: '2026-04-01T05:00:00.000Z',
+          time_out: '2026-04-01T09:00:00.000Z',
+        },
+      ],
+      dtr_calendar_days: [
+        {
+          attendance_date: '2026-04-01',
+          shift_id: 'shift-1',
+          shift_name: 'Morning Shift',
+          start_time: '08:00',
+          end_time: '17:00',
+          working_days: [1, 2, 3, 4, 5],
+        },
+        {
+          attendance_date: '2026-04-02',
+          shift_id: 'shift-1',
+          shift_name: 'Morning Shift',
+          start_time: '08:00',
+          end_time: '17:00',
+          working_days: [1, 2, 3, 4, 5],
+        },
+      ],
+    },
+    'dtr_range_summary'
+  );
+
+  assert.match(dtrReply, /April 2026/);
+  assert.match(dtrReply, /1 ka present\/complete DTR day/);
+  assert.match(dtrReply, /Total hours: 8 hr/);
+  assert.doesNotMatch(dtrReply, /8\.00/);
 });

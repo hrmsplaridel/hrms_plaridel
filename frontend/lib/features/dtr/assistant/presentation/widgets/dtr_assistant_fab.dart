@@ -23,6 +23,8 @@ class DraggableDtrAssistantLauncher extends StatefulWidget {
 class _DraggableDtrAssistantLauncherState
     extends State<DraggableDtrAssistantLauncher> {
   static const double _edgePadding = 10;
+  static const double _bubbleGap = 8;
+  static const double _bubbleHeight = 40;
 
   final ValueNotifier<Offset?> _position = ValueNotifier<Offset?>(null);
   final ValueNotifier<bool> _dragging = ValueNotifier<bool>(false);
@@ -65,6 +67,56 @@ class _DraggableDtrAssistantLauncherState
     return 88;
   }
 
+  double _bubbleWidthForButton(double buttonSize) {
+    if (buttonSize >= 108) return 214;
+    return 188;
+  }
+
+  bool _shouldShowBubbleOnLeft(
+    Offset position,
+    Size size,
+    double buttonSize,
+    double bubbleWidth,
+  ) {
+    final rightRoom = size.width - (position.dx + buttonSize) - _edgePadding;
+    final leftRoom = position.dx - _edgePadding;
+    final requiredRoom = bubbleWidth + _bubbleGap;
+
+    if (rightRoom >= requiredRoom && leftRoom < requiredRoom) return false;
+    if (leftRoom >= requiredRoom && rightRoom < requiredRoom) return true;
+    if (rightRoom >= requiredRoom && leftRoom >= requiredRoom) {
+      return position.dx + (buttonSize / 2) > size.width / 2;
+    }
+    return position.dx + (buttonSize / 2) > size.width / 2;
+  }
+
+  Offset _bubblePosition({
+    required Offset buttonPosition,
+    required Size size,
+    required double buttonSize,
+    required double bubbleWidth,
+    required bool onLeft,
+  }) {
+    final preferredLeft = onLeft
+        ? buttonPosition.dx - bubbleWidth - _bubbleGap
+        : buttonPosition.dx + buttonSize + _bubbleGap;
+    final maxLeft = (size.width - bubbleWidth - _edgePadding).clamp(
+      _edgePadding,
+      double.infinity,
+    );
+    final maxTop = (size.height - _bubbleHeight - _edgePadding).clamp(
+      _edgePadding,
+      double.infinity,
+    );
+
+    return Offset(
+      preferredLeft.clamp(_edgePadding, maxLeft).toDouble(),
+      (buttonPosition.dy + ((buttonSize - _bubbleHeight) / 2))
+          .clamp(_edgePadding, maxTop)
+          .toDouble(),
+    );
+  }
+
   Offset _initialPosition(Size size) {
     final buttonSize = _buttonSizeForWidth(size.width);
     return Offset(
@@ -104,9 +156,55 @@ class _DraggableDtrAssistantLauncherState
                 position ?? _initialPosition(size),
                 size,
               );
+              final bubbleWidth = _bubbleWidthForButton(buttonSize);
+              final bubbleOnLeft = _shouldShowBubbleOnLeft(
+                effectivePosition,
+                size,
+                buttonSize,
+                bubbleWidth,
+              );
+              final bubblePosition = _bubblePosition(
+                buttonPosition: effectivePosition,
+                size: size,
+                buttonSize: buttonSize,
+                bubbleWidth: bubbleWidth,
+                onLeft: bubbleOnLeft,
+              );
 
               return Stack(
                 children: [
+                  Positioned(
+                    left: bubblePosition.dx,
+                    top: bubblePosition.dy,
+                    child: IgnorePointer(
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: _dragging,
+                        builder: (context, dragging, _) {
+                          return ValueListenableBuilder<bool>(
+                            valueListenable: _showGreeting,
+                            builder: (context, showGreeting, _) {
+                              final visible = showGreeting && !dragging;
+                              return AnimatedOpacity(
+                                opacity: visible ? 1 : 0,
+                                duration: const Duration(milliseconds: 220),
+                                curve: Curves.easeOut,
+                                child: AnimatedSlide(
+                                  offset: visible
+                                      ? Offset.zero
+                                      : Offset(bubbleOnLeft ? -0.04 : 0.04, 0),
+                                  duration: const Duration(milliseconds: 220),
+                                  curve: Curves.easeOut,
+                                  child: _AssistantGreetingBubble(
+                                    width: bubbleWidth,
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ),
                   Transform.translate(
                     offset: effectivePosition,
                     child: MouseRegion(
@@ -155,16 +253,7 @@ class _DraggableDtrAssistantLauncherState
               child: ValueListenableBuilder<bool>(
                 valueListenable: _dragging,
                 builder: (context, dragging, _) {
-                  return ValueListenableBuilder<bool>(
-                    valueListenable: _showGreeting,
-                    builder: (context, showGreeting, _) {
-                      return _DtrAssistantLauncherContent(
-                        size: buttonSize,
-                        animate: !dragging,
-                        showGreeting: showGreeting && !dragging,
-                      );
-                    },
-                  );
+                  return DtrAssistantFab(size: buttonSize, animate: !dragging);
                 },
               ),
             ),
@@ -175,85 +264,45 @@ class _DraggableDtrAssistantLauncherState
   }
 }
 
-class _DtrAssistantLauncherContent extends StatelessWidget {
-  const _DtrAssistantLauncherContent({
-    required this.size,
-    required this.animate,
-    required this.showGreeting,
-  });
-
-  final double size;
-  final bool animate;
-  final bool showGreeting;
-
-  @override
-  Widget build(BuildContext context) {
-    final bubbleWidth = size >= 108 ? 214.0 : 188.0;
-    final bubbleOffset = size >= 108 ? size * 0.78 : size * 0.72;
-    return SizedBox(
-      width: size + bubbleWidth,
-      height: size,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.centerLeft,
-        children: [
-          Positioned(
-            left: bubbleOffset,
-            child: IgnorePointer(
-              child: AnimatedOpacity(
-                opacity: showGreeting ? 1 : 0,
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOut,
-                child: AnimatedSlide(
-                  offset: showGreeting ? Offset.zero : const Offset(0.04, 0),
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOut,
-                  child: const _AssistantGreetingBubble(),
-                ),
-              ),
-            ),
-          ),
-          DtrAssistantFab(size: size, animate: animate),
-        ],
-      ),
-    );
-  }
-}
-
 class _AssistantGreetingBubble extends StatelessWidget {
-  const _AssistantGreetingBubble();
+  const _AssistantGreetingBubble({required this.width});
+
+  final double width;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: dark ? const Color(0xFF1F2937) : Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: dark
-              ? Colors.white.withValues(alpha: 0.14)
-              : Colors.black.withValues(alpha: 0.08),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: dark ? 0.24 : 0.12),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+    return SizedBox(
+      width: width,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: dark ? const Color(0xFF1F2937) : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: dark
+                ? Colors.white.withValues(alpha: 0.14)
+                : Colors.black.withValues(alpha: 0.08),
           ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        child: Text(
-          'Hi, need help with DTR?',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: dark ? Colors.white : const Color(0xFF111827),
-            fontWeight: FontWeight.w700,
-            height: 1.15,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: dark ? 0.24 : 0.12),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          child: Text(
+            'Hi, need help with DTR?',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: dark ? Colors.white : const Color(0xFF111827),
+              fontWeight: FontWeight.w700,
+              height: 1.15,
+            ),
           ),
         ),
       ),

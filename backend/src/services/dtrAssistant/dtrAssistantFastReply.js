@@ -73,6 +73,13 @@ function fmtDayCount(value) {
   return `${text} ${Number(value) === 1 ? 'day' : 'days'}`;
 }
 
+function fmtLocalizedDayCount(value, language) {
+  const text = fmtDays(value);
+  if (language === 'bisaya') return `${text} ka adlaw`;
+  if (language === 'tagalog') return `${text} araw`;
+  return fmtDayCount(value);
+}
+
 function plural(count, singular, pluralValue = `${singular}s`) {
   return Number(count) === 1 ? singular : pluralValue;
 }
@@ -94,6 +101,14 @@ function localizedPeriodLabel(label, language) {
     if (value === 'next month') return 'susunod na buwan';
   }
   return label || 'selected period';
+}
+
+function displayPeriodLabel(label, language) {
+  const localized = localizedPeriodLabel(label, language);
+  return String(localized || 'selected period').replace(
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
+    (month) => `${month[0].toUpperCase()}${month.slice(1).toLowerCase()}`
+  );
 }
 
 function asNumber(value) {
@@ -150,6 +165,129 @@ function responseLabels(language) {
   };
 }
 
+function localizeTitle(title, language) {
+  const value = String(title || '').trim();
+  if (!value) return value;
+
+  if (language === 'bisaya') {
+    return value
+      .replace(/^Leave balance$/i, 'Leave balance nimo')
+      .replace(/^Leave requirements$/i, 'Leave requirements')
+      .replace(/^Attachment requirement$/i, 'Attachment requirement')
+      .replace(/^Pending leave requests$/i, 'Pending leave requests nimo')
+      .replace(/^Approved leave requests$/i, 'Approved leave requests nimo')
+      .replace(/^Rejected leave requests$/i, 'Rejected leave requests nimo')
+      .replace(/^Locator types you can file$/i, 'Locator types nga pwede nimo ma-file')
+      .replace(/^Locator filing requirements$/i, 'Locator filing requirements')
+      .replace(/^Locator filing check$/i, 'Locator filing check')
+      .replace(/^Absence check/i, 'Absence check')
+      .replace(/^Missing logs/i, 'Missing logs')
+      .replace(/^DTR summary/i, 'DTR summary');
+  }
+
+  if (language === 'tagalog') {
+    return value
+      .replace(/^Leave balance$/i, 'Leave balance mo')
+      .replace(/^Leave requirements$/i, 'Leave requirements')
+      .replace(/^Attachment requirement$/i, 'Attachment requirement')
+      .replace(/^Pending leave requests$/i, 'Pending leave requests mo')
+      .replace(/^Approved leave requests$/i, 'Approved leave requests mo')
+      .replace(/^Rejected leave requests$/i, 'Rejected leave requests mo')
+      .replace(/^Locator types you can file$/i, 'Locator types na puwede mong i-file')
+      .replace(/^Locator filing requirements$/i, 'Locator filing requirements')
+      .replace(/^Locator filing check$/i, 'Locator filing check')
+      .replace(/^Absence check/i, 'Absence check')
+      .replace(/^Missing logs/i, 'Missing logs')
+      .replace(/^DTR summary/i, 'DTR summary');
+  }
+
+  return value;
+}
+
+function normalizeDayCountText(value, language) {
+  return String(value || '')
+    .replace(/\b(\d+(?:\.\d+)?)\s*calendar\s+day\(s\)/gi, (_, n) => {
+      const text = fmtDays(n);
+      if (language === 'bisaya') return `${text} ka calendar day`;
+      if (language === 'tagalog') return `${text} calendar day`;
+      return `${text} calendar ${Number(n) === 1 ? 'day' : 'days'}`;
+    })
+    .replace(/\b(\d+(?:\.\d+)?)\s*day\(s\)/gi, (_, n) => fmtLocalizedDayCount(n, language))
+    .replace(/\b(\d+)\.00\s+days?\b/gi, (_, n) => fmtLocalizedDayCount(n, language));
+}
+
+function localizeDetailPrefix(line, language) {
+  const maps = {
+    bisaya: {
+      Date: 'Petsa',
+      Type: 'Type',
+      Status: 'Status',
+      Coverage: 'Coverage',
+      Location: 'Lugar',
+      Reason: 'Rason',
+      Remarks: 'Remarks',
+      Attachment: 'Attachment',
+      Schedule: 'Schedule',
+      Shift: 'Shift',
+      Holiday: 'Holiday',
+      'Expected logs': 'Expected logs',
+      'Missing logs': 'Missing logs',
+      'Total hours': 'Total hours',
+      Late: 'Late',
+      Undertime: 'Undertime',
+      Overtime: 'Overtime',
+      Pending: 'Pending',
+      Approved: 'Approved',
+      Rejected: 'Rejected',
+      Cancelled: 'Cancelled',
+    },
+    tagalog: {
+      Date: 'Petsa',
+      Type: 'Uri',
+      Status: 'Status',
+      Coverage: 'Coverage',
+      Location: 'Lugar',
+      Reason: 'Reason',
+      Remarks: 'Remarks',
+      Attachment: 'Attachment',
+      Schedule: 'Schedule',
+      Shift: 'Shift',
+      Holiday: 'Holiday',
+      'Expected logs': 'Expected logs',
+      'Missing logs': 'Missing logs',
+      'Total hours': 'Total hours',
+      Late: 'Late',
+      Undertime: 'Undertime',
+      Overtime: 'Overtime',
+      Pending: 'Pending',
+      Approved: 'Approved',
+      Rejected: 'Rejected',
+      Cancelled: 'Cancelled',
+    },
+    english: {},
+  };
+  const labels = maps[language] || maps.english;
+  for (const [source, target] of Object.entries(labels)) {
+    if (line.startsWith(`${source}:`)) {
+      return `${target}: ${line.slice(source.length + 1).trim()}`;
+    }
+  }
+  return line;
+}
+
+function friendlyText(value, language) {
+  return normalizeDayCountText(value, language)
+    .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (match) => fmtFriendlyDate(match))
+    .replace(/\bapproved by HR\b/gi, 'approved by HR')
+    .replace(/\bwaiting for HR final review\b/gi, 'waiting for HR final review')
+    .replace(/\bwaiting for department head review\b/gi, 'waiting for department head review')
+    .trim();
+}
+
+function friendlyDetailLine(item, language) {
+  return localizeDetailPrefix(friendlyText(item, language), language);
+}
+
 function bulletLines(items, limit = 7) {
   const clean = (items || []).filter(Boolean);
   const visible = clean.slice(0, limit);
@@ -161,13 +299,20 @@ function bulletLines(items, limit = 7) {
 
 function structuredReply(language, { title, summary, details = [], nextStep, limit = 7 }) {
   const labels = responseLabels(language);
-  const parts = [title, '', summary].filter((part) => part != null && part !== '');
-  const lines = bulletLines(details, limit);
+  const parts = [
+    localizeTitle(title, language),
+    '',
+    friendlyText(summary, language),
+  ].filter((part) => part != null && part !== '');
+  const lines = bulletLines(
+    details.map((detail) => friendlyDetailLine(detail, language)),
+    limit
+  );
   if (lines.length > 0) {
     parts.push('', `${labels.details}:`, ...lines);
   }
   if (nextStep) {
-    parts.push('', `${labels.nextStep}: ${nextStep}`);
+    parts.push('', `${labels.nextStep}: ${friendlyText(nextStep, language)}`);
   }
   return parts.join('\n');
 }
@@ -360,11 +505,12 @@ function labelLeaveType(value) {
   return text.replace(/\bleave\b/i, 'leave');
 }
 
-function fmtLeaveRequest(request) {
-  const days = request.days != null ? ` (${fmtDayCount(request.days)})` : '';
-  return `${labelLeaveType(request.leave_type)} ${fmtFriendlyDateRange(
+function fmtLeaveRequest(request, language = 'english') {
+  const days = request.days != null ? ` (${fmtLocalizedDayCount(request.days, language)})` : '';
+  return `${labelLeaveType(request.leave_type)} ${fmtLocalizedDateRange(
     request.start_date,
-    request.end_date
+    request.end_date,
+    language
   )} - ${workflowStatusText(request.status)}${days}`;
 }
 
@@ -399,12 +545,20 @@ function limitedRequests(requests, limit = 5) {
   return requests.slice(0, limit);
 }
 
-function balanceFormulaLine(b) {
-  return `earned ${fmtDays(b.earned_days)}, used ${fmtDays(b.used_days)}, adjusted ${fmtDays(
-    b.adjusted_days
-  )}, pending ${fmtDays(b.pending_days)}, remaining ${fmtDays(
-    b.remaining_days
-  )}, available ${fmtDays(b.available_days)}`;
+function balanceFormulaLine(b, language = 'english') {
+  return `earned ${fmtLocalizedDayCount(b.earned_days, language)}, used ${fmtLocalizedDayCount(
+    b.used_days,
+    language
+  )}, adjusted ${fmtLocalizedDayCount(
+    b.adjusted_days,
+    language
+  )}, pending ${fmtLocalizedDayCount(
+    b.pending_days,
+    language
+  )}, remaining ${fmtLocalizedDayCount(
+    b.remaining_days,
+    language
+  )}, available ${fmtLocalizedDayCount(b.available_days, language)}`;
 }
 
 function attachmentRequiredForType(type, days) {
@@ -611,7 +765,12 @@ function fmtMinutes(value) {
 
 function fmtHours(value) {
   const n = Number(value || 0);
-  return Number.isFinite(n) ? n.toFixed(2) : '0.00';
+  if (!Number.isFinite(n) || n <= 0) return '0 min';
+  const totalMinutes = Math.round(n * 60);
+  if (totalMinutes < 60) return `${totalMinutes} min`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0 ? `${hours} hr ${minutes} min` : `${hours} hr`;
 }
 
 function timeTextToMinutes(value) {
@@ -871,7 +1030,7 @@ function dtrDailyRecordReply(context, message) {
 function dtrRangeSummaryReply(context, message) {
   const language = languageOf(message);
   const records = dtrRecords(context);
-  const label = context.date_range?.label || 'selected period';
+  const label = displayPeriodLabel(context.date_range?.label || 'selected period', language);
   const noRecords = noRecordWorkingDays(context);
   if (records.length === 0 && noRecords.length === 0) {
     if (language === 'bisaya') return `Wala koy nakitang DTR records para sa ${label}.`;
@@ -901,10 +1060,16 @@ function dtrRangeSummaryReply(context, message) {
   const wantsPresent =
     /\b(present|complete|kompleto|kumpleto)\b/.test(lower(message)) &&
     /\b(pila|ilan|how many|count|counts|total)\b/.test(lower(message));
+  const wantsAbsent =
+    /\b(absent|absence|absences|pasabot|wala|no record|no-record)\b/.test(lower(message)) &&
+    /\b(pila|ilan|how many|count|counts|total)\b/.test(lower(message));
   const summary = (() => {
     if (language === 'bisaya') {
       if (wantsPresent) {
-        return `Naa kay ${totals.present} present/complete DTR ${plural(totals.present, 'day')} sa ${label}.`;
+        return `Naa kay ${totals.present} ka present/complete DTR day sa ${label}.`;
+      }
+      if (wantsAbsent) {
+        return `Naa koy nakitang ${possibleAbsentOrNoRecord} ka possible absent/no-record workday sa ${label}.`;
       }
       return issues > 0
         ? `Nakita nako ang ${issues} ka DTR ${plural(issues, 'item')} nga angay i-review para ani nga period.`
@@ -912,7 +1077,10 @@ function dtrRangeSummaryReply(context, message) {
     }
     if (language === 'tagalog') {
       if (wantsPresent) {
-        return `May ${totals.present} present/complete DTR ${plural(totals.present, 'day')} ka sa ${label}.`;
+        return `May ${totals.present} present/complete DTR day ka sa ${label}.`;
+      }
+      if (wantsAbsent) {
+        return `May nakita akong ${possibleAbsentOrNoRecord} possible absent/no-record workday sa ${label}.`;
       }
       return issues > 0
         ? `May nakita akong ${issues} DTR ${plural(issues, 'item')} na kailangang i-review para sa period na ito.`
@@ -920,6 +1088,9 @@ function dtrRangeSummaryReply(context, message) {
     }
     if (wantsPresent) {
       return `You have ${totals.present} present/complete DTR ${plural(totals.present, 'day')} for ${label}.`;
+    }
+    if (wantsAbsent) {
+      return `You have ${possibleAbsentOrNoRecord} possible absent/no-record workday ${plural(possibleAbsentOrNoRecord, 'entry', 'entries')} for ${label}.`;
     }
     return issues > 0
       ? `I found ${issues} DTR ${plural(issues, 'item')} to review for this period.`
@@ -952,13 +1123,13 @@ function dtrRangeSummaryReply(context, message) {
     summary,
     details: [
       `Saved DTR rows: ${records.length}`,
-      `Present/complete: ${totals.present}`,
+      `Present/complete days: ${totals.present}`,
       absenceTotalLine,
       `Incomplete: ${totals.incomplete}`,
       savedAbsentLine,
       noRecordLine,
-      `On leave: ${totals.onLeave}`,
-      `Holiday: ${totals.holiday}`,
+      `On leave days: ${totals.onLeave}`,
+      `Holiday days: ${totals.holiday}`,
       `Total hours: ${fmtHours(totals.hours)}`,
       `Late: ${fmtMinutes(totals.late)}`,
       `Undertime: ${fmtMinutes(totals.undertime)}`,
@@ -1001,9 +1172,19 @@ function dtrMissingLogsReply(context, message, explain = false) {
   const count = incomplete.length + noRecords.length;
   return structuredReply(language, {
     title: `Missing logs for ${label}`,
-    summary: `I found ${count} missing or incomplete DTR ${plural(count, 'item')}.`,
+    summary:
+      language === 'bisaya'
+        ? `Naa koy nakitang ${count} ka missing or incomplete DTR item.`
+        : language === 'tagalog'
+          ? `May nakita akong ${count} missing or incomplete DTR item.`
+          : `I found ${count} missing or incomplete DTR ${plural(count, 'item')}.`,
     details: lines,
-    nextStep: 'For each date, check if it should be corrected by HR/Admin, covered by a locator slip, or covered by leave.',
+    nextStep:
+      language === 'bisaya'
+        ? 'I-check kada date kung kinahanglan ba ug HR/Admin correction, locator slip, or leave coverage.'
+        : language === 'tagalog'
+          ? 'I-check bawat date kung kailangan ng HR/Admin correction, locator slip, o leave coverage.'
+          : 'For each date, check if it should be corrected by HR/Admin, covered by a locator slip, or covered by leave.',
     limit: 8,
   });
 }
@@ -1028,7 +1209,12 @@ function dtrMinuteSummaryReply(context, message, kind) {
   const lines = issueRecords.map((record) => `${fmtFriendlyDate(record.attendance_date)}: ${fmtMinutes(record[field])}`);
   return structuredReply(language, {
     title: `${kind} summary for ${label}`,
-    summary: `I found ${issueRecords.length} ${kind} ${plural(issueRecords.length, 'record')}, total ${fmtMinutes(total)}.`,
+    summary:
+      language === 'bisaya'
+        ? `Naa koy nakitang ${issueRecords.length} ka ${kind} record, total ${fmtMinutes(total)}.`
+        : language === 'tagalog'
+          ? `May nakita akong ${issueRecords.length} ${kind} record, total ${fmtMinutes(total)}.`
+          : `I found ${issueRecords.length} ${kind} ${plural(issueRecords.length, 'record')}, total ${fmtMinutes(total)}.`,
     details: lines,
     nextStep: kind === 'late'
       ? 'Ask why you were late if you want the schedule/grace-period breakdown.'
@@ -1075,7 +1261,12 @@ function dtrLateReasonReply(context, message) {
   });
   return structuredReply(language, {
     title: 'Late details',
-    summary: `I found ${records.length} late ${plural(records.length, 'record')} in the selected DTR records.`,
+    summary:
+      language === 'bisaya'
+        ? `Naa koy nakitang ${records.length} ka late record sa selected DTR records.`
+        : language === 'tagalog'
+          ? `May nakita akong ${records.length} late record sa selected DTR records.`
+          : `I found ${records.length} late ${plural(records.length, 'record')} in the selected DTR records.`,
     details: lines,
     nextStep: 'If the late minutes look wrong, compare the cutoff time with your actual time-in and ask HR/Admin to review.',
     limit: 5,
@@ -1085,7 +1276,7 @@ function dtrLateReasonReply(context, message) {
 function dtrAbsentSummaryReply(context, message) {
   const language = languageOf(message);
   const label = context.date_range?.label || 'selected period';
-  const displayLabel = localizedPeriodLabel(label, language);
+  const displayLabel = displayPeriodLabel(label, language);
   const absent = dtrIssueRecords(dtrRecords(context), isAbsentDtrRecord);
   const noRecords = noRecordWorkingDays(context);
   if (absent.length === 0 && noRecords.length === 0) {
@@ -1093,14 +1284,18 @@ function dtrAbsentSummaryReply(context, message) {
     if (language === 'tagalog') return `Wala akong nakitang DTR record na marked absent sa ${displayLabel}.`;
     return `I found no DTR records marked absent for ${displayLabel}.`;
   }
-  const absentLines = absent.map((record) => `${fmtFriendlyDate(record.attendance_date)}: marked ${statusLabel(record.status)}`);
-  const noRecordLines = noRecords.map((day) => `${fmtFriendlyDate(day.attendance_date)}: no DTR record on a scheduled workday${day.shift_name ? ` (${day.shift_name})` : ''}`);
+  const absentLines = absent.map((record) => `${fmtFriendlyDate(record.attendance_date)}: saved as ${statusLabel(record.status)}`);
+  const noRecordLines = noRecords.map((day) => `${fmtFriendlyDate(day.attendance_date)}: no DTR record saved for a scheduled workday${day.shift_name ? ` (${day.shift_name})` : ''}`);
   const all = [...absentLines, ...noRecordLines];
   if (language === 'bisaya') {
     return structuredReply(language, {
       title: `Absence check - ${displayLabel}`,
-      summary: `Nakita nako ang ${all.length} ka posible nga absent/no-record ${plural(all.length, 'day')}.`,
-      details: all,
+      summary: `Naa koy nakitang ${all.length} ka possible absent/no-record workday sa ${displayLabel}.`,
+      details: all.map((line) =>
+        line
+          .replace(/saved as/i, 'saved as')
+          .replace(/no DTR record saved for a scheduled workday/i, 'walay DTR record nga na-save sa scheduled workday')
+      ),
       nextStep: 'I-check kung dapat ba ni ma-cover sa leave, locator, holiday, or DTR correction.',
       limit: 8,
     });
@@ -1109,7 +1304,9 @@ function dtrAbsentSummaryReply(context, message) {
     return structuredReply(language, {
       title: `Absence check para sa ${displayLabel}`,
       summary: `May nakita akong ${all.length} possible absence/no-record ${plural(all.length, 'day')}.`,
-      details: all,
+      details: all.map((line) =>
+        line.replace(/no DTR record saved for a scheduled workday/i, 'walang DTR record na na-save para sa scheduled workday')
+      ),
       nextStep: 'I-check kung dapat ba itong ma-cover ng leave, locator, holiday, o DTR correction.',
       limit: 8,
     });
@@ -1369,12 +1566,22 @@ function dtrLeaveCoverageReply(context, message) {
     if (language === 'tagalog') return `Wala akong nakitang approved leave na nag-cover sa ${label}.`;
     return `I found no approved leave covering ${label}.`;
   }
-  const lines = leaves.map(fmtLeaveRequest);
+  const lines = leaves.map((request) => fmtLeaveRequest(request, language));
   return structuredReply(language, {
     title: `Leave coverage for ${label}`,
-    summary: `I found ${leaves.length} approved leave ${plural(leaves.length, 'request')} covering this period.`,
+    summary:
+      language === 'bisaya'
+        ? `Naa koy nakitang ${leaves.length} ka approved leave request nga ni-cover ani nga period.`
+        : language === 'tagalog'
+          ? `May nakita akong ${leaves.length} approved leave request na nag-cover sa period na ito.`
+          : `I found ${leaves.length} approved leave ${plural(leaves.length, 'request')} covering this period.`,
     details: lines,
-    nextStep: 'If the DTR still shows absent/missing logs, ask HR/Admin to verify whether the leave was posted to DTR.',
+    nextStep:
+      language === 'bisaya'
+        ? 'Kung absent/missing logs gihapon sa DTR, ipa-check sa HR/Admin kung na-post ba ang leave sa DTR.'
+        : language === 'tagalog'
+          ? 'Kung absent/missing logs pa rin sa DTR, ipa-check sa HR/Admin kung na-post na ang leave sa DTR.'
+          : 'If the DTR still shows absent/missing logs, ask HR/Admin to verify whether the leave was posted to DTR.',
     limit: 5,
   });
 }
@@ -1546,7 +1753,12 @@ function dtrScheduleContextReply(context, message) {
   });
   return structuredReply(language, {
     title: `Schedule context for ${context.date_range?.label || 'selected period'}`,
-    summary: `I found ${days.length} schedule/holiday ${plural(days.length, 'day')}.`,
+    summary:
+      language === 'bisaya'
+        ? `Naa koy nakitang ${days.length} ka schedule/holiday day.`
+        : language === 'tagalog'
+          ? `May nakita akong ${days.length} schedule/holiday day.`
+          : `I found ${days.length} schedule/holiday ${plural(days.length, 'day')}.`,
     details: lines,
     nextStep: 'Use this to verify expected logs, late cutoff, undertime, rest day, or holiday handling.',
     limit: 7,
@@ -1557,7 +1769,12 @@ function dtrExportGuidanceReply(context, message) {
   const language = languageOf(message);
   return structuredReply(language, {
     title: 'DTR export',
-    summary: 'I generated an Excel export for the selected DTR period.',
+    summary:
+      language === 'bisaya'
+        ? 'Nakahimo ko ug Excel export para sa selected DTR period.'
+        : language === 'tagalog'
+          ? 'Nakagawa ako ng Excel export para sa selected DTR period.'
+          : 'I generated an Excel export for the selected DTR period.',
     details: [
       'The file includes the DTR records currently loaded for this chat.',
       'For signed official DTR forms, still use the DTR/attendance report page or HR/Admin workflow.',
@@ -1588,29 +1805,35 @@ function leaveBalanceReply(context, localized, message) {
     const b = visibleBalances[0];
     const type = labelLeaveType(b.leave_type);
     if (language === 'bisaya') {
-      return `Ang ${type} balance nimo kay ${fmtDays(
-        b.available_days
-      )} available. Gamay siya kung gamay pa ang na-earn or naa nay nagamit/pending: ${balanceFormulaLine(
-        b
+      return `Ang ${type} balance nimo kay ${fmtLocalizedDayCount(
+        b.available_days,
+        language
+      )} available to file. Gamay siya kung gamay pa ang na-earn or naa nay nagamit/pending: ${balanceFormulaLine(
+        b,
+        language
       )}.`;
     }
     if (language === 'tagalog') {
-      return `Ang ${type} balance mo ay ${fmtDays(
-        b.available_days
-      )} available. Maliit ito kung kaunti pa ang earned o may used/pending days: ${balanceFormulaLine(
-        b
+      return `Ang ${type} balance mo ay ${fmtLocalizedDayCount(
+        b.available_days,
+        language
+      )} available to file. Maliit ito kung kaunti pa ang earned o may used/pending days: ${balanceFormulaLine(
+        b,
+        language
       )}.`;
     }
-    return `Your ${type} balance is ${fmtDays(
-      b.available_days
-    )} available. It may be low because of earned, used, adjusted, and pending days: ${balanceFormulaLine(
-      b
+    return `Your ${type} balance is ${fmtLocalizedDayCount(
+      b.available_days,
+      language
+    )} available to file. It may be low because of earned, used, adjusted, and pending days: ${balanceFormulaLine(
+      b,
+      language
     )}.`;
   }
 
   if (why) {
     const explanations = visibleBalances.map((b) => {
-      return `${labelLeaveType(b.leave_type)}: ${balanceFormulaLine(b)}`;
+      return `${labelLeaveType(b.leave_type)}: ${balanceFormulaLine(b, language)}`;
     });
     if (language === 'bisaya') {
       return `Base sa records, mao ni nganong mao ra ang nabilin nga leave balance: ${explanations.join(
@@ -1628,20 +1851,30 @@ function leaveBalanceReply(context, localized, message) {
   }
 
   const lines = visibleBalances.map((b) => {
-    return `${labelLeaveType(b.leave_type)}: ${fmtDays(b.available_days)} available, ${fmtDays(
-      b.remaining_days
-    )} remaining, ${fmtDays(b.pending_days)} pending`;
+    return `${labelLeaveType(b.leave_type)}: ${fmtLocalizedDayCount(
+      b.available_days,
+      language
+    )} available to file; ${fmtLocalizedDayCount(
+      b.remaining_days,
+      language
+    )} remaining; ${fmtLocalizedDayCount(b.pending_days, language)} pending`;
   });
 
   return structuredReply(language, {
     title: 'Leave balance',
-    summary: `I found ${visibleBalances.length} leave balance ${plural(visibleBalances.length, 'record')}.`,
+    summary:
+      language === 'bisaya'
+        ? `Mao ni ang leave balance nga naa sa imong HRMS records.`
+        : language === 'tagalog'
+          ? `Ito ang leave balance na nasa HRMS records mo.`
+          : `Here are the leave balances in your HRMS records.`,
     details: lines,
     limit: 8,
   });
 }
 
-function latestLeaveReply(context, localized) {
+function latestLeaveReply(context, localized, message = '') {
+  const language = languageOf(message);
   const request = context.recent_leave_requests?.[0];
   if (!request) {
     return localized
@@ -1649,9 +1882,10 @@ function latestLeaveReply(context, localized) {
       : 'I found no leave request records for your account.';
   }
 
-  const details = `${labelLeaveType(request.leave_type || 'Leave')} ${fmtFriendlyDateRange(
+  const details = `${labelLeaveType(request.leave_type || 'Leave')} ${fmtLocalizedDateRange(
     request.start_date,
-    request.end_date
+    request.end_date,
+    language
   )} is ${workflowStatusText(request.status)}`;
   const reviewer =
     request.reviewer_name || request.approver_name || request.latest_history?.actor_name;
@@ -1683,11 +1917,18 @@ function leaveRequestsByStatusReply(context, message, matcher, labels) {
 
   const lines = requests.map((request) => {
     const reason = firstReviewReason(request);
-    return `${fmtLeaveRequest(request)}${reason ? `. Remarks: ${trimTrailingSentencePunctuation(reason)}.` : ''}`;
+    return `${fmtLeaveRequest(request, language)}${
+      reason ? `. Remarks: ${trimTrailingSentencePunctuation(reason)}.` : ''
+    }`;
   });
   return structuredReply(language, {
     title: `${labels.english[0].toUpperCase()}${labels.english.slice(1)} leave requests`,
-    summary: `I found ${requests.length} ${labels.english} leave request${requests.length === 1 ? '' : 's'}.`,
+    summary:
+      language === 'bisaya'
+        ? `Nakita nako ang ${requests.length} ka ${labels.bisaya} leave request.`
+        : language === 'tagalog'
+          ? `May nakita akong ${requests.length} ${labels.tagalog} leave request.`
+          : `I found ${requests.length} ${labels.english} leave request${requests.length === 1 ? '' : 's'}.`,
     details: lines,
     limit: 5,
   });
@@ -1709,8 +1950,13 @@ function leaveHistoryReply(context, message) {
   const label = useRange ? context.date_range?.label || 'selected period' : 'recent requests';
   return structuredReply(language, {
     title: `Leave history (${label})`,
-    summary: `I found ${requests.length} leave request${requests.length === 1 ? '' : 's'}.`,
-    details: requests.map(fmtLeaveRequest),
+    summary:
+      language === 'bisaya'
+        ? `Naa koy nakitang ${requests.length} ka leave request.`
+        : language === 'tagalog'
+          ? `May nakita akong ${requests.length} leave request.`
+          : `I found ${requests.length} leave request${requests.length === 1 ? '' : 's'}.`,
+    details: requests.map((request) => fmtLeaveRequest(request, language)),
     limit: 5,
   });
 }
@@ -1782,21 +2028,25 @@ function leaveAvailabilityReply(context, message) {
       return true;
     });
     if (overlaps.length > 0) {
-      blockers.push(`Overlap found: ${limitedRequests(overlaps, 2).map(fmtLeaveRequest).join(' | ')}`);
+      blockers.push(
+        `Overlap found: ${limitedRequests(overlaps, 2)
+          .map((request) => fmtLeaveRequest(request, language))
+          .join(' | ')}`
+      );
     }
   }
   const baseBalanceEnglish =
     available == null
       ? `I could not verify a balance row for ${type}, but I checked the filing rules for ${fmtDayCount(days)}`
-      : `you have ${fmtDays(available)} available ${type} for ${fmtDayCount(days)}`;
+      : `you have ${fmtLocalizedDayCount(available, language)} available ${type} for ${fmtDayCount(days)}`;
   const baseBalanceBisaya =
     available == null
-      ? `wala koy matching balance row para sa ${type}, pero na-check nako ang filing rules para sa ${fmtDayCount(days)}`
-      : `naa kay ${fmtDays(available)} available ${type} para sa ${fmtDayCount(days)}`;
+      ? `wala koy matching balance row para sa ${type}, pero na-check nako ang filing rules para sa ${fmtLocalizedDayCount(days, language)}`
+      : `naa kay ${fmtLocalizedDayCount(available, language)} available ${type} para sa ${fmtLocalizedDayCount(days, language)}`;
   const baseBalanceTagalog =
     available == null
-      ? `wala akong matching balance row para sa ${type}, pero na-check ko ang filing rules para sa ${fmtDayCount(days)}`
-      : `may ${fmtDays(available)} available ${type} para sa ${fmtDayCount(days)}`;
+      ? `wala akong matching balance row para sa ${type}, pero na-check ko ang filing rules para sa ${fmtLocalizedDayCount(days, language)}`
+      : `may ${fmtLocalizedDayCount(available, language)} available ${type} para sa ${fmtLocalizedDayCount(days, language)}`;
 
   if (language === 'bisaya') {
     const details = [
@@ -1807,7 +2057,7 @@ function leaveAvailabilityReply(context, message) {
     if (blockers.length > 0 || enough === false) {
       const balanceText =
         enough === false
-          ? `dili igo ang balance: naa kay ${fmtDays(available)} available ${type}, pero ${fmtDayCount(days)} imong plano`
+          ? `dili igo ang balance: naa kay ${fmtLocalizedDayCount(available, language)} available ${type}, pero ${fmtLocalizedDayCount(days, language)} imong plano`
           : baseBalanceBisaya;
       return structuredReply(language, {
         title: 'Leave filing check',
@@ -1832,7 +2082,7 @@ function leaveAvailabilityReply(context, message) {
     if (blockers.length > 0 || enough === false) {
       const balanceText =
         enough === false
-          ? `hindi sapat ang balance: may ${fmtDays(available)} available ${type}, pero ${fmtDayCount(days)} ang plano mo`
+          ? `hindi sapat ang balance: may ${fmtLocalizedDayCount(available, language)} available ${type}, pero ${fmtLocalizedDayCount(days, language)} ang plano mo`
           : baseBalanceTagalog;
       return structuredReply(language, {
         title: 'Leave filing check',
@@ -1856,7 +2106,7 @@ function leaveAvailabilityReply(context, message) {
   if (blockers.length > 0 || enough === false) {
     const balanceText =
       enough === false
-        ? `balance is not enough: you have ${fmtDays(available)} available ${type}, but plan to file ${fmtDayCount(days)}`
+        ? `balance is not enough: you have ${fmtLocalizedDayCount(available, language)} available ${type}, but plan to file ${fmtDayCount(days)}`
         : baseBalanceEnglish;
     return structuredReply(language, {
       title: 'Leave filing check',
@@ -1924,7 +2174,12 @@ function leaveRequirementsReply(context, message) {
 
   return structuredReply(language, {
     title: 'Leave requirements',
-    summary: 'Here are the filing requirements I found from the HRMS setup and guidelines.',
+    summary:
+      language === 'bisaya'
+        ? 'Mao ni ang filing requirements base sa HRMS setup ug leave guidelines.'
+        : language === 'tagalog'
+          ? 'Ito ang filing requirements base sa HRMS setup at leave guidelines.'
+          : 'Here are the filing requirements I found from the HRMS setup and guidelines.',
     details: lines.map(trimTrailingSentencePunctuation),
     nextStep: 'Final approval still follows the HR review workflow.',
     limit: 4,
@@ -1981,7 +2236,12 @@ function leaveAttachmentRequirementReply(context, message) {
 
   return structuredReply(language, {
     title: 'Attachment requirement',
-    summary: 'Here is what the HRMS setup says about attachments.',
+    summary:
+      language === 'bisaya'
+        ? 'Mao ni ang attachment rule base sa HRMS setup.'
+        : language === 'tagalog'
+          ? 'Ito ang attachment rule base sa HRMS setup.'
+          : 'Here is what the HRMS setup says about attachments.',
     details: lines.map(trimTrailingSentencePunctuation),
     limit: 4,
   });
@@ -2008,7 +2268,12 @@ function leaveFilingPolicyReply(context, message) {
 
   return structuredReply(language, {
     title: 'Leave filing policy',
-    summary: 'Here is the filing policy from the HRMS setup and guidelines.',
+    summary:
+      language === 'bisaya'
+        ? 'Mao ni ang filing policy base sa HRMS setup ug guidelines.'
+        : language === 'tagalog'
+          ? 'Ito ang filing policy base sa HRMS setup at guidelines.'
+          : 'Here is the filing policy from the HRMS setup and guidelines.',
     details: lines.map(trimTrailingSentencePunctuation),
     nextStep: 'Approval still follows the HR workflow.',
     limit: 4,
@@ -2070,7 +2335,12 @@ function leaveEligibilityReply(context, message) {
 
   return structuredReply(language, {
     title: 'Eligibility check',
-    summary: 'This is only an initial filing check.',
+    summary:
+      language === 'bisaya'
+        ? 'Initial filing check ra ni.'
+        : language === 'tagalog'
+          ? 'Initial filing check lang ito.'
+          : 'This is only an initial filing check.',
     details: lines,
     nextStep: 'Final approval still follows the HR workflow.',
     limit: 3,
@@ -2099,7 +2369,12 @@ function leaveDtrImpactReply(context, message) {
 
   return structuredReply(language, {
     title: 'DTR impact',
-    summary: 'Here is how the leave can affect DTR after approval/posting.',
+    summary:
+      language === 'bisaya'
+        ? 'Mao ni ang possible DTR effect after approval/posting.'
+        : language === 'tagalog'
+          ? 'Ito ang possible DTR effect after approval/posting.'
+          : 'Here is how the leave can affect DTR after approval/posting.',
     details: lines,
     nextStep: 'Final posting or approval is still the basis.',
     limit: 3,
@@ -2120,7 +2395,12 @@ function leaveGuidelineSectionReply(context, message) {
     )}. Requirement: ${attachmentRuleText(type, requestedDaysOrRangeDays(message, context))}.`;
     return structuredReply(language, {
       title: 'Guideline answer',
-      summary: 'Here is the guideline detail I found.',
+      summary:
+        language === 'bisaya'
+          ? 'Mao ni ang guideline detail nga akong nakita.'
+          : language === 'tagalog'
+            ? 'Ito ang guideline detail na nakita ko.'
+            : 'Here is the guideline detail I found.',
       details: [line],
     });
   }
@@ -2162,7 +2442,12 @@ function leaveTypeCompareReply(context, message) {
 
   return structuredReply(language, {
     title: 'Leave type comparison',
-    summary: 'Here is the side-by-side comparison.',
+    summary:
+      language === 'bisaya'
+        ? 'Mao ni ang side-by-side comparison.'
+        : language === 'tagalog'
+          ? 'Ito ang side-by-side comparison.'
+          : 'Here is the side-by-side comparison.',
     details: lines,
     limit: 2,
   });
@@ -2226,9 +2511,19 @@ function leaveOverlapCheckReply(context, message) {
 
   return structuredReply(language, {
     title: 'Leave overlap check',
-    summary: `I found ${overlaps.length} overlapping leave ${plural(overlaps.length, 'request')}.`,
-    details: overlaps.map(fmtLeaveRequest),
-    nextStep: 'Review the overlapping request before filing another leave for the same date.',
+    summary:
+      language === 'bisaya'
+        ? `Naa koy nakitang ${overlaps.length} ka overlapping leave request.`
+        : language === 'tagalog'
+          ? `May nakita akong ${overlaps.length} overlapping leave request.`
+          : `I found ${overlaps.length} overlapping leave ${plural(overlaps.length, 'request')}.`,
+    details: overlaps.map((request) => fmtLeaveRequest(request, language)),
+    nextStep:
+      language === 'bisaya'
+        ? 'I-review ang overlapping request before ka mag-file ug another leave sa same date.'
+        : language === 'tagalog'
+          ? 'I-review ang overlapping request bago mag-file ng another leave sa same date.'
+          : 'Review the overlapping request before filing another leave for the same date.',
     limit: 5,
   });
 }
@@ -2254,14 +2549,21 @@ function leavePendingDaysExplanationReply(context, message) {
   }
 
   const balanceLines = pendingBalances.map((b) => {
-    return `${labelLeaveType(b.leave_type)} pending ${fmtDayCount(b.pending_days)}`;
+    return `${labelLeaveType(b.leave_type)} pending ${fmtLocalizedDayCount(b.pending_days, language)}`;
   });
-  const requestLines = limitedRequests(pendingRequests, 4).map(fmtLeaveRequest);
+  const requestLines = limitedRequests(pendingRequests, 4).map((request) =>
+    fmtLeaveRequest(request, language)
+  );
   const details = [...balanceLines, ...requestLines];
 
   return structuredReply(language, {
     title: 'Pending leave days',
-    summary: 'Here is where the pending leave days are coming from.',
+    summary:
+      language === 'bisaya'
+        ? 'Mao ni kung asa gikan ang pending leave days.'
+        : language === 'tagalog'
+          ? 'Ito kung saan galing ang pending leave days.'
+          : 'Here is where the pending leave days are coming from.',
     details,
     limit: 6,
   });
@@ -2300,18 +2602,32 @@ function leaveBalanceAfterFilingReply(context, message) {
   const after = available - days;
   const type = labelLeaveType(balance.leave_type);
   if (language === 'bisaya') {
-    return `Kung mag-file ka ug ${fmtDayCount(days)} nga ${type}, gikan sa ${fmtDays(
-      available
-    )} available mahimong ${fmtDays(after)} ang estimated balance. Balance estimate ra ni, dili pa approval.`;
+    return `Kung mag-file ka ug ${fmtLocalizedDayCount(
+      days,
+      language
+    )} nga ${type}, gikan sa ${fmtLocalizedDayCount(
+      available,
+      language
+    )} available mahimong ${fmtLocalizedDayCount(
+      after,
+      language
+    )} ang estimated balance. Balance estimate ra ni, dili pa approval.`;
   }
   if (language === 'tagalog') {
-    return `Kung mag-file ka ng ${fmtDayCount(days)} na ${type}, mula ${fmtDays(
-      available
-    )} available magiging ${fmtDays(after)} ang estimated balance. Estimate lang ito, hindi pa approval.`;
+    return `Kung mag-file ka ng ${fmtLocalizedDayCount(
+      days,
+      language
+    )} na ${type}, mula ${fmtLocalizedDayCount(
+      available,
+      language
+    )} available magiging ${fmtLocalizedDayCount(
+      after,
+      language
+    )} ang estimated balance. Estimate lang ito, hindi pa approval.`;
   }
-  return `If you file ${fmtDayCount(days)} of ${type}, your estimated balance would go from ${fmtDays(
+  return `If you file ${fmtDayCount(days)} of ${type}, your estimated balance would go from ${fmtDayCount(
     available
-  )} to ${fmtDays(after)}. This is only an estimate, not approval.`;
+  )} to ${fmtDayCount(after)}. This is only an estimate, not approval.`;
 }
 
 function leaveRequestSummaryReply(context, message) {
@@ -2343,7 +2659,18 @@ function leaveRequestSummaryReply(context, message) {
   const label = useRange ? context.date_range?.label || 'selected period' : 'recent records';
   return structuredReply(language, {
     title: `Leave summary (${label})`,
-    summary: `I found ${requests.length} leave ${plural(requests.length, 'request')}, total ${fmtDayCount(counts.days)}.`,
+    summary:
+      language === 'bisaya'
+        ? `Naa koy nakitang ${requests.length} ka leave request, total ${fmtLocalizedDayCount(
+            counts.days,
+            language
+          )}.`
+        : language === 'tagalog'
+          ? `May nakita akong ${requests.length} leave request, total ${fmtLocalizedDayCount(
+              counts.days,
+              language
+            )}.`
+          : `I found ${requests.length} leave ${plural(requests.length, 'request')}, total ${fmtDayCount(counts.days)}.`,
     details: [
       `Pending: ${counts.pending}`,
       `Approved: ${counts.approved}`,
@@ -2371,7 +2698,11 @@ function leaveRequestLookupReply(context, message) {
   const lines = limitedRequests(requests, 3).map((request) => {
     return `${labelLeaveType(request.leave_type)} (${workflowStatusText(
       request.status
-    )}, ${fmtDayCount(request.days)}, ${fmtFriendlyDateRange(request.start_date, request.end_date).replace(
+    )}, ${fmtLocalizedDayCount(request.days, language)}, ${fmtLocalizedDateRange(
+      request.start_date,
+      request.end_date,
+      language
+    ).replace(
       /^on /,
       ''
     )})`;
@@ -2381,7 +2712,12 @@ function leaveRequestLookupReply(context, message) {
 
   return structuredReply(language, {
     title: `Leave request for ${label}`,
-    summary: `I found ${requests.length} matching leave ${plural(requests.length, 'request')}.`,
+    summary:
+      language === 'bisaya'
+        ? `Naa koy nakitang ${requests.length} ka matching leave request.`
+        : language === 'tagalog'
+          ? `May nakita akong ${requests.length} matching leave request.`
+          : `I found ${requests.length} matching leave ${plural(requests.length, 'request')}.`,
     details: [...lines, ...(more ? [more.trim()] : [])],
     limit: 4,
   });
@@ -2402,7 +2738,7 @@ function leaveRejectionReasonReply(context, message) {
   }
 
   const reason = firstReviewReason(request);
-  const base = `${fmtLeaveRequest(request)}`;
+  const base = `${fmtLeaveRequest(request, language)}`;
   if (!reason) {
     return structuredReply(language, {
       title: 'Leave rejection reason',
@@ -2444,9 +2780,10 @@ function leaveApprovalTrackerReply(context, message) {
   const actorText = actor ? ` Last action/reviewer: ${actor}.` : '';
   const remarks = firstReviewReason(request);
   const remarksText = remarks ? ` Remarks: ${remarks}.` : '';
-  const content = `${labelLeaveType(request.leave_type)} ${fmtFriendlyDateRange(
+  const content = `${labelLeaveType(request.leave_type)} ${fmtLocalizedDateRange(
     request.start_date,
-    request.end_date
+    request.end_date,
+    language
   )} is ${owner}.${actorText}${remarksText}`;
 
   if (language === 'bisaya') return content;
@@ -2469,7 +2806,7 @@ function leaveApprovalHistoryReply(context, message) {
 
   const history = Array.isArray(request.history) ? request.history : [];
   if (history.length === 0 && !request.latest_history) {
-    const base = fmtLeaveRequest(request);
+    const base = fmtLeaveRequest(request, language);
     if (language === 'bisaya') return `${base}. Wala koy detailed approval history sa record.`;
     if (language === 'tagalog') return `${base}. Wala akong detailed approval history sa record.`;
     return `${base}. I found no detailed approval history in the record.`;
@@ -2484,7 +2821,7 @@ function leaveApprovalHistoryReply(context, message) {
     return `${action}${actor}${when}${remarks}`;
   });
   const more = events.length > 6 ? ` plus ${events.length - 6} more` : '';
-  const base = fmtLeaveRequest(request);
+  const base = fmtLeaveRequest(request, language);
 
   return structuredReply(language, {
     title: 'Approval timeline',
@@ -3063,7 +3400,7 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
     return leaveBalanceReply(context, localized, message);
   }
   if (intent === 'latest_leave_request') {
-    return latestLeaveReply(context, localized);
+    return latestLeaveReply(context, localized, message);
   }
   if (intent === 'pending_leave_requests') {
     return leaveRequestsByStatusReply(context, message, pendingStatus, {
