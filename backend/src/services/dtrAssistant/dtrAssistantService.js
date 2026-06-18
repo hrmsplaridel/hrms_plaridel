@@ -481,7 +481,366 @@ function buildAttachments(intent, context, userId) {
   return [];
 }
 
-function buildAssistantResult({ content, provider, model, mode, context, intent, attachments }) {
+function action(id, label, type, { icon, intent, prompt, payload, autoExecute } = {}) {
+  return {
+    id,
+    label,
+    type,
+    icon: icon || null,
+    intent: intent || null,
+    prompt: prompt || null,
+    payload: payload || {},
+    autoExecute: autoExecute === true,
+  };
+}
+
+function dateRangePayload(context) {
+  const range = context?.date_range || {};
+  return {
+    dateRangeLabel: range.label || null,
+    startDate: range.startDate || null,
+    endDate: range.endDate || null,
+  };
+}
+
+function actionLeaveType(text) {
+  const type = requestedLeaveType(text);
+  if (type === 'sick') return 'sick';
+  if (type === 'vacation') return 'vacation';
+  return null;
+}
+
+function actionLocatorType(text) {
+  return requestedLocatorType(text);
+}
+
+function dtrRecordMissingSlots(record) {
+  if (!record) return ['no DTR record'];
+  const status = lower(record.status);
+  if (status === 'on_leave' || status === 'holiday' || record.leave_type || record.holiday_name) {
+    return [];
+  }
+  const missing = [];
+  if (!record.time_in) missing.push('AM in');
+  if (!record.break_out) missing.push('AM out');
+  if (!record.break_in) missing.push('PM in');
+  if (!record.time_out) missing.push('PM out');
+  return missing;
+}
+
+function firstDtrIssueForAction(context) {
+  const records = context?.dtr_records || [];
+  const record = records.find((item) => {
+    const status = lower(item.status);
+    return (
+      status === 'absent' ||
+      status === 'no_record' ||
+      status === 'missing' ||
+      status === 'incomplete' ||
+      dtrRecordMissingSlots(item).length > 0
+    );
+  });
+  if (record) {
+    const slots = dtrRecordMissingSlots(record);
+    return {
+      date: String(record.attendance_date || '').slice(0, 10),
+      slots,
+    };
+  }
+
+  const recordDates = new Set(records.map((item) => String(item.attendance_date || '').slice(0, 10)));
+  const today = todayInHrmsTimezone();
+  const noRecordDay = (context?.dtr_calendar_days || []).find((day) => {
+    const date = String(day.attendance_date || '').slice(0, 10);
+    if (!date || date > today || recordDates.has(date)) return false;
+    return !!day.shift_id && !!day.start_time && day.holiday_coverage !== 'whole_day';
+  });
+  if (!noRecordDay) return null;
+  return {
+    date: String(noRecordDay.attendance_date || '').slice(0, 10),
+    slots: ['no DTR record'],
+  };
+}
+
+function correctionPromptForAction(context) {
+  const issue = firstDtrIssueForAction(context);
+  if (!issue?.date) return null;
+  const slotText =
+    issue.slots && issue.slots.length > 0
+      ? issue.slots.join(', ')
+      : 'DTR issue';
+  return `How do I fix ${slotText} on ${issue.date}?`;
+}
+
+function uniqueActions(actions) {
+  const seen = new Set();
+  return actions.filter((item) => {
+    if (!item || !item.id || !item.label || !item.type) return false;
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  }).slice(0, 4);
+}
+
+function buildActions(intent, context, text, attachments = []) {
+  const value = String(intent || '');
+  const actions = [];
+  const rangePayload = dateRangePayload(context);
+  const leaveType = actionLeaveType(text);
+  const locatorType = actionLocatorType(text);
+  const exportAttachment = attachments.find((item) => item?.downloadUrl || item?.contentBase64);
+
+  if (exportAttachment) {
+    actions.push(
+      action('download_dtr_export', 'Download DTR export', 'download_attachment', {
+        icon: 'download',
+        payload: {
+          attachmentId: exportAttachment.id || null,
+          filename: exportAttachment.filename || null,
+          downloadUrl: exportAttachment.downloadUrl || null,
+        },
+      })
+    );
+  }
+
+  if (isLeaveIntent(value)) {
+    const payload = {
+      ...rangePayload,
+      leaveType,
+    };
+    if (
+      value === 'leave_availability_check' ||
+      value === 'leave_guided_filing' ||
+      value === 'leave_balance_after_filing' ||
+      value === 'leave_form_guidance'
+    ) {
+      actions.push(
+        action('open_leave_form', 'Open leave form', 'open_leave_form', {
+          icon: 'event_available',
+          payload,
+        })
+      );
+    }
+    actions.push(
+      action('open_leave_page', 'Open My Leave', 'open_leave_page', {
+        icon: 'event_note',
+        payload,
+      })
+    );
+  }
+
+  if (isLocatorIntent(value) || value === 'dtr_locator_coverage_check') {
+    const payload = {
+      ...rangePayload,
+      locatorType,
+    };
+    if (
+      value === 'locator_types' ||
+      value === 'locator_requirements' ||
+      value === 'locator_availability_check'
+    ) {
+      actions.push(
+        action('open_locator_form', 'Open locator form', 'open_locator_form', {
+          icon: 'add_location',
+          payload,
+        })
+      );
+    }
+    actions.push(
+      action('open_locator_page', 'Open Locator Requests', 'open_locator_page', {
+        icon: 'pin_drop',
+        payload,
+      })
+    );
+  }
+
+  if (isStructuredDtrIntent(value)) {
+    const correctionPrompt = correctionPromptForAction(context);
+    actions.push(
+      action('open_dtr_time_logs', 'Open DTR logs', 'open_dtr_time_logs', {
+        icon: 'schedule',
+        payload: rangePayload,
+      })
+    );
+    if (
+      correctionPrompt &&
+      (
+        value === 'dtr_missing_logs' ||
+        value === 'dtr_missing_log_reason' ||
+        value === 'dtr_absent_summary' ||
+        value === 'dtr_status_explanation' ||
+        value === 'dtr_daily_record' ||
+        value === 'today_dtr' ||
+        value === 'missing_logs'
+      )
+    ) {
+      actions.push(
+        action('show_correction_steps', 'Show correction steps', 'send_prompt', {
+          icon: 'build',
+          intent: 'dtr_correction_guidance',
+          prompt: correctionPrompt,
+          payload: rangePayload,
+        })
+      );
+    }
+    if (value !== 'dtr_export_guidance') {
+      actions.push(
+        action('generate_dtr_export', 'Generate DTR export', 'send_prompt', {
+          icon: 'file_download',
+          intent: 'dtr_export_guidance',
+          prompt: 'Generate my DTR export for this period.',
+          payload: rangePayload,
+        })
+      );
+    }
+  }
+
+  return uniqueActions(actions);
+}
+
+function directOpenCommandForMessage(text) {
+  const value = lower(text);
+  const hasNavigationCommand =
+    /\b(open|navigate|go to|take me to|buksan|puntahan|punta sa|adto sa|adto ko sa|dalha ko sa)\b/.test(
+      value
+    );
+  if (!hasNavigationCommand) return null;
+
+  const wantsForm =
+    /\b(form|create|new|start|fill|apply|submit|file|filing|mag file|mag-file|i-file|i file)\b/.test(
+      value
+    );
+  const rangePayload = dateRangePayload({
+    date_range: parseAssistantDateRange(text),
+  });
+  const language = simpleLanguageOf(text);
+  const say = (english, bisaya, tagalog) => {
+    if (language === 'bisaya') return bisaya;
+    if (language === 'tagalog') return tagalog;
+    return english;
+  };
+
+  if (
+    /\b(locator|locator slip|locator request|locator requests|pass slip|wfh|work from home|official business|ob|fieldwork|field work|travel order)\b/.test(
+      value
+    )
+  ) {
+    const payload = {
+      ...rangePayload,
+      locatorType: actionLocatorType(text),
+    };
+    if (wantsForm) {
+      return {
+        intent: 'locator_availability_check',
+        content: say(
+          'Opening the locator form now.',
+          'Sige, akong ablihan ang locator form.',
+          'Sige, bubuksan ko ang locator form.'
+        ),
+        actions: uniqueActions([
+          action('open_locator_form', 'Open locator form', 'open_locator_form', {
+            icon: 'add_location',
+            payload,
+            autoExecute: true,
+          }),
+        ]),
+      };
+    }
+    return {
+      intent: 'locator_status',
+      content: say(
+        'Opening your locator requests now.',
+        'Sige, akong ablihan imong locator requests.',
+        'Sige, bubuksan ko ang locator requests mo.'
+      ),
+      actions: uniqueActions([
+        action('open_locator_page', 'Open Locator Requests', 'open_locator_page', {
+          icon: 'pin_drop',
+          payload,
+          autoExecute: true,
+        }),
+      ]),
+    };
+  }
+
+  if (/\b(leave|leave request|leave requests|sick leave|vacation leave|vl|sl)\b/.test(value)) {
+    const payload = {
+      ...rangePayload,
+      leaveType: actionLeaveType(text),
+    };
+    if (wantsForm) {
+      return {
+        intent: 'leave_guided_filing',
+        content: say(
+          'Opening the leave form now.',
+          'Sige, akong ablihan ang leave form.',
+          'Sige, bubuksan ko ang leave form.'
+        ),
+        actions: uniqueActions([
+          action('open_leave_form', 'Open leave form', 'open_leave_form', {
+            icon: 'event_available',
+            payload,
+            autoExecute: true,
+          }),
+        ]),
+      };
+    }
+    return {
+      intent: 'leave_history',
+      content: say(
+        'Opening My Leave now.',
+        'Sige, akong ablihan ang My Leave.',
+        'Sige, bubuksan ko ang My Leave.'
+      ),
+      actions: uniqueActions([
+        action('open_leave_page', 'Open My Leave', 'open_leave_page', {
+          icon: 'event_note',
+          payload,
+          autoExecute: true,
+        }),
+      ]),
+    };
+  }
+
+  if (
+    /\b(dtr|attendance|daily time|time log|time logs|logs|report|reports)\b/.test(
+      value
+    )
+  ) {
+    const openReports = /\b(report|reports|print|export)\b/.test(value);
+    return {
+      intent: openReports ? 'dtr_export_guidance' : 'dtr_daily_record',
+      content: openReports
+        ? say(
+            'Opening DTR reports now.',
+            'Sige, akong ablihan ang DTR reports.',
+            'Sige, bubuksan ko ang DTR reports.'
+          )
+        : say(
+            'Opening your DTR logs now.',
+            'Sige, akong ablihan imong DTR logs.',
+            'Sige, bubuksan ko ang DTR logs mo.'
+          ),
+      actions: uniqueActions([
+        action(
+          openReports ? 'open_dtr_reports' : 'open_dtr_time_logs',
+          openReports ? 'Open DTR reports' : 'Open DTR logs',
+          openReports ? 'open_dtr_reports' : 'open_dtr_time_logs',
+          {
+            icon: openReports ? 'file_download' : 'schedule',
+            payload: rangePayload,
+            autoExecute: true,
+          }
+        ),
+      ]),
+    };
+  }
+
+  return null;
+}
+
+function buildAssistantResult({ content, provider, model, mode, context, intent, attachments, text, actions }) {
+  const safeAttachments = attachments || [];
   return {
     message: {
       id: crypto.randomUUID(),
@@ -492,7 +851,8 @@ function buildAssistantResult({ content, provider, model, mode, context, intent,
       provider: provider || null,
       model: model || null,
       suggestions: buildSuggestions(intent),
-      attachments: attachments || [],
+      attachments: safeAttachments,
+      actions: actions || buildActions(intent, context, text || '', safeAttachments),
     },
     provider,
     model,
@@ -1294,8 +1654,38 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       context: clarificationContext,
       intent: clarificationIntent,
       attachments: [],
+      text: normalizedTextForRules,
     });
   }
+
+  const directOpenCommand = directOpenCommandForMessage(normalizedTextForRules);
+  if (directOpenCommand) {
+    const actionContext = emptyAssistantContext(
+      parseAssistantDateRange(normalizedTextForRules)
+    );
+    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
+      intent: directOpenCommand.intent,
+      text: normalizedTextForRules,
+      dateRange: actionContext.date_range,
+      toolData: {
+        reason: 'direct_open_command',
+      },
+      modelProfile: profile.id,
+    }));
+
+    return buildAssistantResult({
+      content: directOpenCommand.content,
+      provider: 'hrms',
+      model: 'hrms-action-rules',
+      mode: scope.mode,
+      context: actionContext,
+      intent: directOpenCommand.intent,
+      attachments: [],
+      text: normalizedTextForRules,
+      actions: directOpenCommand.actions,
+    });
+  }
+
   let resolvedIntent =
     detectEmployeeAssistantIntent(effectiveText, intent) ||
     memoryIntent ||
@@ -1367,6 +1757,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       context,
       intent: 'direct_ai',
       attachments: [],
+      text: plannedText,
     });
   }
 
@@ -1406,9 +1797,11 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       context,
       intent: resolvedIntent,
       attachments,
+      text: plannedText,
     });
   }
 
+  const fallbackAttachments = buildAttachments(resolvedIntent, context, scope.userId);
   return buildAssistantResult({
     content: fallbackContent(),
     provider,
@@ -1416,7 +1809,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     mode: scope.mode,
     context,
     intent: resolvedIntent,
-    attachments: buildAttachments(resolvedIntent, context, scope.userId),
+    attachments: fallbackAttachments,
+    text: plannedText,
   });
 }
 
@@ -1424,9 +1818,11 @@ module.exports = {
   chatWithDtrAssistant,
   getDtrAssistantModelProfiles,
   __test: {
+    buildActions,
     buildNextAssistantMemory,
     clarificationContent,
     clarificationIntentForMessage,
+    directOpenCommandForMessage,
     enrichMessageWithMemory,
     isAmbiguousFilingQuestion,
     isAmbiguousStatusQuestion,

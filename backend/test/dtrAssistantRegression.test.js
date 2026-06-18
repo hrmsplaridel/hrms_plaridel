@@ -419,3 +419,96 @@ test('DTR assistant regression: replies use friendly dates and day counts', () =
   assert.match(dtrReply, /Total hours: 8 hr/);
   assert.doesNotMatch(dtrReply, /8\.00/);
 });
+
+test('DTR assistant regression: action metadata is generated for next-step work', () => {
+  const leaveActions = assistantServiceTest.buildActions(
+    'leave_availability_check',
+    {
+      date_range: {
+        label: 'tomorrow',
+        startDate: '2026-06-16',
+        endDate: '2026-06-16',
+      },
+    },
+    'can I file 1 day vacation leave tomorrow?',
+    []
+  );
+  assert.equal(leaveActions[0].type, 'open_leave_form');
+  assert.equal(leaveActions[0].payload.leaveType, 'vacation');
+  assert.equal(leaveActions[0].payload.startDate, '2026-06-16');
+
+  const locatorActions = assistantServiceTest.buildActions(
+    'locator_availability_check',
+    {
+      date_range: {
+        label: 'tomorrow',
+        startDate: '2026-06-16',
+        endDate: '2026-06-16',
+      },
+    },
+    'can I file WFH tomorrow?',
+    []
+  );
+  assert.equal(locatorActions[0].type, 'open_locator_form');
+  assert.equal(locatorActions[0].payload.locatorType, 'work_from_home');
+
+  const dtrActions = assistantServiceTest.buildActions(
+    'dtr_missing_log_reason',
+    {
+      date_range: {
+        label: 'June 10, 2026',
+        startDate: '2026-06-10',
+        endDate: '2026-06-10',
+      },
+      dtr_records: [
+        {
+          attendance_date: '2026-06-10',
+          status: 'incomplete',
+          time_in: '2026-06-10T00:00:00.000Z',
+          break_out: '2026-06-10T04:00:00.000Z',
+          break_in: '2026-06-10T05:00:00.000Z',
+          time_out: null,
+        },
+      ],
+    },
+    'why is my dtr incomplete?',
+    []
+  );
+  assert.equal(dtrActions[0].type, 'open_dtr_time_logs');
+  assert.equal(dtrActions[1].type, 'send_prompt');
+  assert.match(dtrActions[1].prompt, /PM out on 2026-06-10/);
+
+  const exportActions = assistantServiceTest.buildActions(
+    'dtr_export_guidance',
+    {},
+    'export my dtr',
+    [
+      {
+        id: 'export-1',
+        filename: 'dtr.xls',
+        downloadUrl: '/api/dtr-assistant/exports/export-1',
+      },
+    ]
+  );
+  assert.equal(exportActions[0].type, 'download_attachment');
+});
+
+test('DTR assistant regression: direct open commands generate auto navigation actions', () => {
+  const locatorCommand =
+    assistantServiceTest.directOpenCommandForMessage('open my locator request');
+  assert.equal(locatorCommand.intent, 'locator_status');
+  assert.equal(locatorCommand.actions.length, 1);
+  assert.equal(locatorCommand.actions[0].type, 'open_locator_page');
+  assert.equal(locatorCommand.actions[0].autoExecute, true);
+  assert.doesNotMatch(locatorCommand.content, /approved|pending|rejected/i);
+
+  const leaveCommand =
+    assistantServiceTest.directOpenCommandForMessage('open leave form');
+  assert.equal(leaveCommand.intent, 'leave_guided_filing');
+  assert.equal(leaveCommand.actions[0].type, 'open_leave_form');
+  assert.equal(leaveCommand.actions[0].autoExecute, true);
+
+  const question =
+    assistantServiceTest.directOpenCommandForMessage('what are locator types?');
+  assert.equal(question, null);
+});
