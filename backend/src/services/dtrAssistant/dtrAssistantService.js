@@ -950,7 +950,7 @@ function simpleLanguageOf(text) {
 }
 
 function hasDateOrAvailabilityHint(text) {
-  return /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|ngayon|date|day|adlaw|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/i.test(
+  return /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|ngayon|date|day|adlaw|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/i.test(
     text
   );
 }
@@ -1020,7 +1020,7 @@ function fallbackContent() {
 }
 
 function isFollowUpQuestion(text) {
-  return /\b(it|that|this|one|same|about|how about|what about|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|today|tomorrow|yesterday|ugma|gahapon|kagahapon|week|month|semana|semanaha|bulan|bulana|buwan|buwana|aning|karong|ngayong|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?|remarks?|reason|who|where|asa|kinsa|sino|can|file|pwede|puwede|allowed|eligible)\b/.test(
+  return /\b(it|that|this|one|same|about|how about|what about|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|today|tomorrow|yesterday|ugma|gahapon|kagahapon|week|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|ago|from|to|semana|semanaha|bulan|bulana|buwan|buwana|aning|karong|ngayong|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?|remarks?|reason|who|where|asa|kinsa|sino|can|file|pwede|puwede|allowed|eligible)\b/.test(
     lower(text)
   );
 }
@@ -1041,7 +1041,7 @@ function memoryRelativeDate(text, memory) {
 }
 
 function hasRangeDateHint(text) {
-  return /\b(this week|current week|last week|previous week|next week|week|semana|semanaha|this month|current month|last month|previous month|next month|month|bulan|bulana|buwan|buwana|aning bulana|karong bulana|karong buwan)\b/.test(
+  return /\b(this week|current week|last week|previous week|next week|week|semana|semanaha|this month|current month|last month|previous month|next month|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|bulan|bulana|buwan|buwana|aning bulana|karong bulana|karong buwan)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b|\b(?:from\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo)\s*(?:to|until|through|-|–)\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo)\b/.test(
     lower(text)
   );
 }
@@ -1366,7 +1366,7 @@ function enrichMessageWithMemory(text, memory, memoryIntent = null) {
     enriched = `${enriched} (${relativeDate})`;
   }
   const hasDateHint =
-    /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|week|semana|semanaha|month|bulan|bulana|buwan|buwana|aning bulana|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|same day|same date|ana|ato|adto|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/i.test(
+    /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|week|semana|semanaha|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|ago|from|to|bulan|bulana|buwan|buwana|aning bulana|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|same day|same date|ana|ato|adto|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/i.test(
       enriched
     );
   if (
