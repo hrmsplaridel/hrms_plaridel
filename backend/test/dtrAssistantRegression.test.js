@@ -16,15 +16,23 @@ const {
 const {
   __test: assistantServiceTest,
 } = require('../src/services/dtrAssistant/dtrAssistantService');
+const {
+  parseAssistantDateRange,
+} = require('../src/utils/dateRangeParser');
 
 test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected intents', () => {
   const cases = [
     ['pila kabuok absent nako aning bulana?', 'dtr_absent_summary'],
+    ['how many absents i have for this month?', 'dtr_absent_summary'],
     ['unsay status sa akong dtr adtung niaging miyerkules?', 'dtr_status_explanation'],
     ['naa koy absent gahapon?', 'dtr_absent_summary'],
     ['pila akong balance sa sick leave?', 'leave_balance'],
     ['ngano gamay nalang akong vacation leave?', 'leave_balance'],
     ['why is my vacation leave balance low?', 'leave_balance'],
+    ['how can I file sick leave?', 'leave_form_guidance'],
+    ['paano mag file ng sick leave?', 'leave_form_guidance'],
+    ['unsaon pag file ug sick leave?', 'leave_form_guidance'],
+    ['can I file 1 day sick leave tomorrow?', 'leave_availability_check'],
     ['unsay requirements sa maternity leave?', 'leave_requirements'],
     ['need med cert if 5 days sick leave?', 'leave_attachment_requirement'],
     ['kinsa nag hold sa akong leave request?', 'leave_approval_tracker'],
@@ -37,11 +45,43 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['how about the wfh?', 'locator_types'],
     ['unsa ang wfh?', 'locator_types'],
     ['export my dtr this month', 'dtr_export_guidance'],
+    ['what are the dtr rules?', 'dtr_policy_guidance'],
+    ['how many absent last pay period?', 'dtr_absent_summary'],
+    ['show my dtr from Monday to Friday', 'dtr_range_summary'],
   ];
 
   for (const [message, expected] of cases) {
     assert.equal(detectEmployeeAssistantIntent(message), expected, message);
   }
+});
+
+test('DTR assistant regression: stronger date phrases resolve to useful ranges', () => {
+  const today = '2026-06-18';
+  assert.deepEqual(parseAssistantDateRange('show my DTR next cutoff', { today }), {
+    label: 'next cutoff',
+    startDate: '2026-06-16',
+    endDate: '2026-06-30',
+  });
+  assert.deepEqual(parseAssistantDateRange('how many absences last pay period?', { today }), {
+    label: 'last pay period',
+    startDate: '2026-06-01',
+    endDate: '2026-06-15',
+  });
+  assert.deepEqual(parseAssistantDateRange('my DTR 2 weeks ago', { today }), {
+    label: '2 weeks ago',
+    startDate: '2026-06-01',
+    endDate: '2026-06-07',
+  });
+  assert.deepEqual(parseAssistantDateRange('what is my status first Monday of June?', { today }), {
+    label: 'first monday of june',
+    startDate: '2026-06-01',
+    endDate: '2026-06-01',
+  });
+  assert.deepEqual(parseAssistantDateRange('show DTR from Monday to Friday', { today }), {
+    label: 'monday to friday',
+    startDate: '2026-06-15',
+    endDate: '2026-06-19',
+  });
 });
 
 test('DTR assistant regression: locator type questions list active request types', () => {
@@ -102,6 +142,71 @@ test('DTR assistant regression: locator type questions list active request types
   assert.doesNotMatch(wfhReply, /Pass Slip/);
 });
 
+test('DTR assistant regression: DTR and locator policy knowledge appears in replies', () => {
+  const dtrReply = buildFastEmployeeAssistantReply(
+    'what are the dtr rules?',
+    {
+      date_range: {
+        label: 'this month',
+        startDate: '2026-06-01',
+        endDate: '2026-06-30',
+      },
+      dtr_records: [],
+      dtr_calendar_days: [],
+      recent_leave_requests: [],
+      recent_locator_slips: [],
+    },
+    'dtr_policy_guidance'
+  );
+  assert.match(dtrReply, /DTR policy guide/);
+  assert.match(dtrReply, /Required DTR logs are based on the employee schedule/i);
+  assert.match(dtrReply, /Pending leave or locator requests are not final/i);
+
+  const locatorReply = buildFastEmployeeAssistantReply(
+    'what are locator requirements?',
+    {
+      locator_types: [
+        {
+          code: 'work_from_home',
+          label: 'Work From Home',
+          short_label: 'WFH',
+          location_label: 'Work Location',
+          location_hint: 'Enter work location',
+          dtr_slot_label: 'WFH',
+          requires_attachment: false,
+          coverage_mode: 'wfh',
+        },
+      ],
+    },
+    'locator_requirements'
+  );
+  assert.match(locatorReply, /Locator filing requirements/);
+  assert.match(locatorReply, /A locator slip needs a slip date/i);
+  assert.match(locatorReply, /A locator slip helps DTR only after approval/i);
+});
+
+test('DTR assistant regression: how-to-file leave questions show form guidance', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'how can I file sick leave?',
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+          requires_attachment: false,
+        },
+      ],
+    },
+    detectEmployeeAssistantIntent('how can I file sick leave?')
+  );
+
+  assert.match(reply, /Leave form guide/);
+  assert.match(reply, /Sick Leave/i);
+  assert.match(reply, /leave form/i);
+  assert.doesNotMatch(reply, /balance is not enough/i);
+});
+
 test('DTR assistant regression: conversation memory keeps topic and entity follow-ups', () => {
   let memory = assistantServiceTest.buildNextAssistantMemory(null, {
     intent: 'locator_types',
@@ -157,6 +262,51 @@ test('DTR assistant regression: conversation memory keeps topic and entity follo
   );
   assert.equal(memory.history.length, 2);
   assert.equal(memory.topics.locator.locatorType, 'work_from_home');
+
+  const mistakenDtrMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'dtr_status_explanation',
+    text: 'how many absents i have for this month?',
+    dateRange: {
+      label: 'June 9, 2026',
+      startDate: '2026-06-09',
+      endDate: '2026-06-09',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'this month not today',
+      mistakenDtrMemory
+    ),
+    'dtr_absent_summary'
+  );
+  assert.doesNotMatch(
+    assistantServiceTest.enrichMessageWithMemory(
+      'this month not today',
+      mistakenDtrMemory,
+      'dtr_absent_summary'
+    ),
+    /2026-06-09/
+  );
+
+  const dailyDtrMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'today_dtr',
+    text: 'show my DTR today',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'this month not today',
+      dailyDtrMemory
+    ),
+    'dtr_range_summary'
+  );
 });
 
 test('DTR assistant regression: conversation memory does not leak stale leave type into explicit topic switches', () => {
@@ -251,6 +401,22 @@ test('DTR assistant regression: vague filing/status prompts ask clarification in
   assert.equal(
     assistantServiceTest.resolveIntentFromMemory('wfh tomorrow', filingMemory),
     'locator_availability_check'
+  );
+
+  const howToFilingMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'clarify_filing_topic',
+    text: 'how can I file?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('sick leave', howToFilingMemory),
+    'leave_form_guidance'
   );
 
   const statusMemory = assistantServiceTest.buildNextAssistantMemory(null, {
@@ -418,4 +584,104 @@ test('DTR assistant regression: replies use friendly dates and day counts', () =
   assert.match(dtrReply, /1 ka present\/complete DTR day/);
   assert.match(dtrReply, /Total hours: 8 hr/);
   assert.doesNotMatch(dtrReply, /8\.00/);
+});
+
+test('DTR assistant regression: action metadata is generated for next-step work', () => {
+  const leaveActions = assistantServiceTest.buildActions(
+    'leave_availability_check',
+    {
+      date_range: {
+        label: 'tomorrow',
+        startDate: '2026-06-16',
+        endDate: '2026-06-16',
+      },
+    },
+    'can I file 1 day vacation leave tomorrow?',
+    []
+  );
+  assert.equal(leaveActions[0].type, 'open_leave_form');
+  assert.equal(leaveActions[0].payload.leaveType, 'vacation');
+  assert.equal(leaveActions[0].payload.startDate, '2026-06-16');
+
+  const locatorActions = assistantServiceTest.buildActions(
+    'locator_availability_check',
+    {
+      date_range: {
+        label: 'tomorrow',
+        startDate: '2026-06-16',
+        endDate: '2026-06-16',
+      },
+    },
+    'can I file WFH tomorrow?',
+    []
+  );
+  assert.equal(locatorActions[0].type, 'open_locator_form');
+  assert.equal(locatorActions[0].payload.locatorType, 'work_from_home');
+
+  const dtrActions = assistantServiceTest.buildActions(
+    'dtr_missing_log_reason',
+    {
+      date_range: {
+        label: 'June 10, 2026',
+        startDate: '2026-06-10',
+        endDate: '2026-06-10',
+      },
+      dtr_records: [
+        {
+          attendance_date: '2026-06-10',
+          status: 'incomplete',
+          time_in: '2026-06-10T00:00:00.000Z',
+          break_out: '2026-06-10T04:00:00.000Z',
+          break_in: '2026-06-10T05:00:00.000Z',
+          time_out: null,
+        },
+      ],
+    },
+    'why is my dtr incomplete?',
+    []
+  );
+  assert.equal(dtrActions[0].type, 'open_dtr_time_logs');
+  assert.equal(dtrActions[1].type, 'send_prompt');
+  assert.match(dtrActions[1].prompt, /PM out on 2026-06-10/);
+
+  const exportActions = assistantServiceTest.buildActions(
+    'dtr_export_guidance',
+    {},
+    'export my dtr',
+    [
+      {
+        id: 'export-1',
+        filename: 'dtr.xls',
+        downloadUrl: '/api/dtr-assistant/exports/export-1',
+      },
+    ]
+  );
+  assert.equal(exportActions[0].type, 'download_attachment');
+});
+
+test('DTR assistant regression: direct open commands generate auto navigation actions', () => {
+  const locatorCommand =
+    assistantServiceTest.directOpenCommandForMessage('open my locator request');
+  assert.equal(locatorCommand.intent, 'locator_status');
+  assert.equal(locatorCommand.actions.length, 1);
+  assert.equal(locatorCommand.actions[0].type, 'open_locator_page');
+  assert.equal(locatorCommand.actions[0].autoExecute, true);
+  assert.doesNotMatch(locatorCommand.content, /approved|pending|rejected/i);
+
+  const leaveCommand =
+    assistantServiceTest.directOpenCommandForMessage('open leave form');
+  assert.equal(leaveCommand.intent, 'leave_guided_filing');
+  assert.equal(leaveCommand.actions[0].type, 'open_leave_form');
+  assert.equal(leaveCommand.actions[0].autoExecute, true);
+
+  const attendanceCommand =
+    assistantServiceTest.directOpenCommandForMessage('open my attendance');
+  assert.equal(attendanceCommand.intent, 'dtr_daily_record');
+  assert.equal(attendanceCommand.actions[0].type, 'open_dtr_time_logs');
+  assert.equal(attendanceCommand.actions[0].label, 'Open My Attendance');
+  assert.equal(attendanceCommand.actions[0].autoExecute, true);
+
+  const question =
+    assistantServiceTest.directOpenCommandForMessage('what are locator types?');
+  assert.equal(question, null);
 });

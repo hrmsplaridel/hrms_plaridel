@@ -9,6 +9,7 @@ class DtrAssistantMessage {
     this.model,
     this.suggestions = const <DtrAssistantSuggestion>[],
     this.attachments = const <DtrAssistantAttachment>[],
+    this.actions = const <DtrAssistantAction>[],
   });
 
   final String? id;
@@ -20,6 +21,7 @@ class DtrAssistantMessage {
   final String? model;
   final List<DtrAssistantSuggestion> suggestions;
   final List<DtrAssistantAttachment> attachments;
+  final List<DtrAssistantAction> actions;
 
   bool get isUser => role == 'user';
 
@@ -31,12 +33,14 @@ class DtrAssistantMessage {
       createdAt: DateTime.now(),
       suggestions: const <DtrAssistantSuggestion>[],
       attachments: const <DtrAssistantAttachment>[],
+      actions: const <DtrAssistantAction>[],
     );
   }
 
   factory DtrAssistantMessage.fromJson(Map<String, dynamic> json) {
     final rawSuggestions = json['suggestions'];
     final rawAttachments = json['attachments'];
+    final rawActions = json['actions'];
     return DtrAssistantMessage(
       id: json['id']?.toString(),
       role: json['role']?.toString() ?? 'assistant',
@@ -74,6 +78,55 @@ class DtrAssistantMessage {
                 )
                 .toList(growable: false)
           : const <DtrAssistantAttachment>[],
+      actions: rawActions is List
+          ? rawActions
+                .whereType<Map>()
+                .map(
+                  (item) => DtrAssistantAction.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .where((item) => item.label.isNotEmpty && item.type.isNotEmpty)
+                .toList(growable: false)
+          : const <DtrAssistantAction>[],
+    );
+  }
+}
+
+class DtrAssistantAction {
+  const DtrAssistantAction({
+    required this.id,
+    required this.label,
+    required this.type,
+    this.icon,
+    this.intent,
+    this.prompt,
+    this.payload = const <String, dynamic>{},
+    this.autoExecute = false,
+  });
+
+  final String id;
+  final String label;
+  final String type;
+  final String? icon;
+  final String? intent;
+  final String? prompt;
+  final Map<String, dynamic> payload;
+  final bool autoExecute;
+
+  factory DtrAssistantAction.fromJson(Map<String, dynamic> json) {
+    final rawPayload = json['payload'];
+    return DtrAssistantAction(
+      id: json['id']?.toString() ?? '',
+      label: json['label']?.toString() ?? '',
+      type: json['type']?.toString() ?? '',
+      icon: json['icon']?.toString(),
+      intent: json['intent']?.toString(),
+      prompt: json['prompt']?.toString(),
+      payload: rawPayload is Map
+          ? Map<String, dynamic>.from(rawPayload)
+          : const <String, dynamic>{},
+      autoExecute: json['autoExecute'] == true,
     );
   }
 }

@@ -22,8 +22,9 @@ const PHRASE_REPLACEMENTS = [
 
 const TOKEN_REPLACEMENTS = {
   absentt: 'absent',
+  absents: 'absent',
   absnt: 'absent',
-  absnts: 'absents',
+  absnts: 'absent',
   aproval: 'approval',
   aproved: 'approved',
   aprove: 'approve',

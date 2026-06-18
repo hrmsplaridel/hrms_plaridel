@@ -7,6 +7,19 @@ function lower(value) {
 const LEAVE_TOPIC_PATTERN =
   /\b(leave|leaves|vl|sl|sick|vacation|paternity|maternity|adoption|solo parent|vawc|calamity|mandatory|forced|special privilege)\b/;
 
+function isLeaveHowToFileQuestion(text) {
+  if (
+    /\b(requirements?|requirement|attachment|attachments?|document|documents|docs|proof|supporting|need|needed|kinahanglan|kailangan)\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
+  return /\b(how can i file|how do i file|how to file|how can i apply|how do i apply|how to apply|steps? to file|procedure.*file|guide.*file|paano.*file|paano.*apply|unsaon.*file|unsaon.*apply|paunsa.*file|pag file|pag-file)\b/.test(
+    text
+  );
+}
+
 function normalizeIntent(value) {
   const intent = String(value || '').trim().toLowerCase();
   return [
@@ -28,6 +41,7 @@ function normalizeIntent(value) {
     'dtr_holiday_check',
     'dtr_schedule_context',
     'dtr_export_guidance',
+    'dtr_policy_guidance',
     'leave_balance',
     'pending_leave_requests',
     'approved_leave_requests',
@@ -76,7 +90,7 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
       text
     );
   const hasDateTopic =
-    /\b(date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|ngayon|karong adlawa|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|ana|ato|adto|same day|same date|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/.test(
+    /\b(date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|ngayon|karong adlawa|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|ana|ato|adto|same day|same date|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/.test(
       text
     );
   const hasLocatorTopic =
@@ -136,6 +150,13 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
     /\b(dtr|attendance|daily time)\b/.test(text)
   ) {
     return 'dtr_export_guidance';
+  }
+
+  if (
+    /\b(policy|policies|rule|rules|guideline|guidelines|requirements?|requirement|how.*dtr.*work|attendance.*policy|attendance.*rules)\b/.test(text) &&
+    (hasDtrTopic || /\b(dtr|attendance|daily time)\b/.test(text))
+  ) {
+    return 'dtr_policy_guidance';
   }
 
   if (
@@ -209,28 +230,28 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
 
   if (
     /\b(late|lates|tardy|tardiness)\b/.test(text) &&
-    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|today|yesterday|kagahapon|gahapon|adtong|adtung|atong|niadtong|niadtung)\b/.test(text))
+    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|today|yesterday|kagahapon|gahapon|adtong|adtung|atong|niadtong|niadtung|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(text))
   ) {
     return 'dtr_late_summary';
   }
 
   if (
     /\b(undertime|under time|early out|early-out|short hours|kulang.*oras)\b/.test(text) &&
-    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|adtong|adtung|atong|niadtong|niadtung)\b/.test(text))
+    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|adtong|adtung|atong|niadtong|niadtung|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(text))
   ) {
     return 'dtr_undertime_summary';
   }
 
   if (
     /\b(overtime|over time|ot)\b/.test(text) &&
-    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|adtong|adtung|atong|niadtong|niadtung)\b/.test(text))
+    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|adtong|adtung|atong|niadtong|niadtung|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(text))
   ) {
     return 'dtr_overtime_summary';
   }
 
   if (
     /\b(absent|absence|absences|pasabot|no record|walay record|wala.*record|wala.*dtr|pila.*absent|ilan.*absent|how many.*absent)\b/.test(text) &&
-    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|today|yesterday|kagahapon|gahapon|adtong|adtung|atong|niadtong|niadtung)\b/.test(text))
+    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|today|yesterday|kagahapon|gahapon|adtong|adtung|atong|niadtong|niadtung|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(text))
   ) {
     return 'dtr_absent_summary';
   }
@@ -246,7 +267,7 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
 
   if (
     /\b(missing|incomplete|kulang|kuwang|wala|no log|nolog|logs?|entries|kompleto|kumpleto|complete)\b/.test(text) &&
-    /\b(logs?|dtr|attendance|time[\s-]?in|time[\s-]?out|am in|am out|pm in|pm out|this week|week|semanaha|semana|karon|ngayon)\b/.test(
+    /\b(logs?|dtr|attendance|time[\s-]?in|time[\s-]?out|am in|am out|pm in|pm out|this week|week|semanaha|semana|karon|ngayon|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(
       text
     )
   ) {
@@ -255,7 +276,7 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
 
   if (
     /\b(present|complete|kompleto|kumpleto|status)\b/.test(text) &&
-    /\b(summary|summarize|summarise|overview|recap|total|count|counts|pila|kabuok|how many|month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/.test(
+    /\b(summary|summarize|summarise|overview|recap|total|count|counts|pila|kabuok|how many|month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(
       text
     ) &&
     !LEAVE_TOPIC_PATTERN.test(text)
@@ -281,7 +302,16 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
 
   if (
     hasDtrTopic &&
-    /\b(week|semana|semanaha|month|bulan|bulana|buwan|buwana|last week|this week|next week|last month|this month|next month|aning bulana|karong semana|karong semanaha|karong bulan|karong bulana)\b/.test(
+    /\b(week|semana|semanaha|month|bulan|bulana|buwan|buwana|last week|this week|next week|last month|this month|next month|aning bulana|karong semana|karong semanaha|karong bulan|karong bulana|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(
+      text
+    )
+  ) {
+    return 'dtr_range_summary';
+  }
+
+  if (
+    hasDtrTopic &&
+    /\b(?:from\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo)\s*(?:to|until|through|-|–)\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo)\b/.test(
       text
     )
   ) {
@@ -402,6 +432,13 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
     !/\b(\d+\s*(day|days|adlaw)|tomorrow|today|yesterday|ugma|kagahapon|gahapon|\d{4}-\d{2}-\d{2})\b/.test(text)
   ) {
     return 'leave_eligibility_check';
+  }
+
+  if (
+    isLeaveHowToFileQuestion(text) &&
+    LEAVE_TOPIC_PATTERN.test(text)
+  ) {
+    return 'leave_form_guidance';
   }
 
   if (

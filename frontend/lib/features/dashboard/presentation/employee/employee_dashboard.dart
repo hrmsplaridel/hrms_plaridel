@@ -6,7 +6,7 @@ import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/pa
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/web/pages/employee_dashboard_web_page.dart';
 
 export 'package:hrms_plaridel/features/dashboard/presentation/employee/desktop/pages/employee_dashboard_desktop_page.dart'
-    show EmployeeAttendanceOverviewSection;
+    show EmployeeAttendanceDetailsSection, EmployeeAttendanceOverviewSection;
 
 class EmployeeDashboard extends StatelessWidget {
   const EmployeeDashboard({super.key});
