@@ -9,6 +9,7 @@ import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_input_bar.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_message_bubble.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_prompt_chips.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_main.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_routes.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
@@ -276,8 +277,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         return;
       case 'open_dtr_time_logs':
         _openStandalonePage(
-          title: 'DTR Logs',
-          child: const DtrMain(section: DtrSection.timeLogs),
+          title: 'My Attendance',
+          child: const EmployeeAttendanceDetailsSection(),
         );
         return;
       case 'open_dtr_reports':

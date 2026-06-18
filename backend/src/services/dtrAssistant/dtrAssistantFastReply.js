@@ -1,5 +1,10 @@
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const {
+  getDtrPolicySectionsForMessage,
+  getLocatorPolicySectionsForMessage,
+  policyPointLines,
+} = require('./attendanceLocatorPolicies');
+const {
   GUIDELINE_SECTIONS,
   getFormGuidanceForType,
   getLeaveGuidanceForType,
@@ -315,6 +320,20 @@ function structuredReply(language, { title, summary, details = [], nextStep, lim
     parts.push('', `${labels.nextStep}: ${friendlyText(nextStep, language)}`);
   }
   return parts.join('\n');
+}
+
+function dtrPolicyLines(message, fallbackKeys, options = {}) {
+  return policyPointLines(
+    getDtrPolicySectionsForMessage(message, { fallbackKeys }),
+    options
+  );
+}
+
+function locatorPolicyLines(message, fallbackKeys, options = {}) {
+  return policyPointLines(
+    getLocatorPolicySectionsForMessage(message, { fallbackKeys }),
+    options
+  );
 }
 
 function requestedLeaveType(message) {
@@ -1061,7 +1080,7 @@ function dtrRangeSummaryReply(context, message) {
     /\b(present|complete|kompleto|kumpleto)\b/.test(lower(message)) &&
     /\b(pila|ilan|how many|count|counts|total)\b/.test(lower(message));
   const wantsAbsent =
-    /\b(absent|absence|absences|pasabot|wala|no record|no-record)\b/.test(lower(message)) &&
+    /\b(absent|absents|absence|absences|pasabot|wala|no record|no-record)\b/.test(lower(message)) &&
     /\b(pila|ilan|how many|count|counts|total)\b/.test(lower(message));
   const summary = (() => {
     if (language === 'bisaya') {
@@ -1456,6 +1475,9 @@ function dtrStatusExplanationReply(context, message) {
           `Grace period: ${fmtMinutes(day.grace_period_minutes || 0)}`,
           `Expected logs: ${expected.join(', ') || 'none'}`,
           coverage ? `Locator coverage: ${coverage}` : null,
+          ...dtrPolicyLines(message, ['daily_logs', 'coverage'], {
+            maxPointsPerSection: 1,
+          }),
         ],
         nextStep:
           language === 'bisaya'
@@ -1550,8 +1572,14 @@ function dtrCorrectionGuidanceReply(context, message) {
   return structuredReply(language, {
     title: 'How to fix this DTR issue',
     summary: `Target issue: ${issue}.`,
-    details: guidance,
+    details: [
+      ...guidance,
+      ...dtrPolicyLines(message, ['coverage', 'correction'], {
+        maxPointsPerSection: 1,
+      }),
+    ],
     nextStep: 'Start with the option that matches what actually happened on that date.',
+    limit: 7,
   });
 }
 
@@ -1759,9 +1787,14 @@ function dtrScheduleContextReply(context, message) {
         : language === 'tagalog'
           ? `May nakita akong ${days.length} schedule/holiday day.`
           : `I found ${days.length} schedule/holiday ${plural(days.length, 'day')}.`,
-    details: lines,
+    details: [
+      ...lines,
+      ...dtrPolicyLines(message, ['daily_logs', 'schedule_late_undertime'], {
+        maxPointsPerSection: 1,
+      }),
+    ],
     nextStep: 'Use this to verify expected logs, late cutoff, undertime, rest day, or holiday handling.',
-    limit: 7,
+    limit: 10,
   });
 }
 
@@ -1778,8 +1811,41 @@ function dtrExportGuidanceReply(context, message) {
     details: [
       'The file includes the DTR records currently loaded for this chat.',
       'For signed official DTR forms, still use the DTR/attendance report page or HR/Admin workflow.',
+      ...dtrPolicyLines(message, ['export_review'], { maxPointsPerSection: 2 }),
     ],
     nextStep: 'Download the attached Excel file from this message.',
+    limit: 5,
+  });
+}
+
+function dtrPolicyGuidanceReply(context, message) {
+  const language = languageOf(message);
+  const sections = getDtrPolicySectionsForMessage('', {
+    fallbackKeys: [
+      'daily_logs',
+      'schedule_late_undertime',
+      'coverage',
+      'correction',
+      'export_review',
+    ],
+  });
+  const label = context.date_range?.label || 'selected period';
+  return structuredReply(language, {
+    title: 'DTR policy guide',
+    summary:
+      language === 'bisaya'
+        ? 'Mao ni ang DTR rules nga gamit sa assistant para mo-explain sa logs, absences, late, undertime, coverage, ug corrections.'
+        : language === 'tagalog'
+          ? 'Ito ang DTR rules na ginagamit ng assistant para i-explain ang logs, absences, late, undertime, coverage, at corrections.'
+          : 'These are the DTR rules the assistant uses to explain logs, absences, late, undertime, coverage, and corrections.',
+    details: policyPointLines(sections, { maxPointsPerSection: 2 }),
+    nextStep:
+      language === 'bisaya'
+        ? `Kung gusto nimo exact check, ask about a specific date or period like ${label}.`
+        : language === 'tagalog'
+          ? `Kung gusto mo ng exact check, magtanong tungkol sa specific date o period tulad ng ${label}.`
+          : `For an exact check, ask about a specific date or period such as ${label}.`,
+    limit: 10,
   });
 }
 
@@ -3002,6 +3068,9 @@ function locatorTypesReply(context, message) {
       singleType && types[0]?.coverage_mode === 'wfh'
         ? 'WFH usually marks covered DTR slots as WFH after approval.'
         : null,
+      ...locatorPolicyLines(message, ['types', 'dtr_coverage'], {
+        maxPointsPerSection: 1,
+      }),
       'You still need a slip date, covered slots, location/destination, and reason.',
       'Approval is still required before it becomes final DTR coverage.',
     ],
@@ -3135,6 +3204,15 @@ function locatorRequirementsReply(context, message) {
     summary,
     details: [
       ...lines,
+      ...policyPointLines(getLocatorPolicySectionsForMessage('', {
+        fallbackKeys: [
+          'filing_requirements',
+          'dtr_coverage',
+          'approval_workflow',
+        ],
+      }), {
+        maxPointsPerSection: 2,
+      }),
       'You need a valid working-day schedule for the slip date.',
       'Choose at least one covered slot: AM in, AM out, PM in, or PM out.',
       'Office/destination and reason are required.',
@@ -3145,7 +3223,7 @@ function locatorRequirementsReply(context, message) {
         : language === 'tagalog'
           ? 'Kung rejected or pending ang locator mo, tanungin mo ako tungkol sa status o remarks.'
           : 'If your locator is rejected or pending, ask me about its status or remarks.',
-    limit: 9,
+    limit: 12,
   });
 }
 
@@ -3191,6 +3269,9 @@ function locatorAvailabilityReply(context, message) {
       ? `Existing locator on this date: ${existing.map(fmtLocatorSlip).join('; ')}`
       : null,
     ...issues,
+    ...locatorPolicyLines(message, ['filing_checks', 'dtr_coverage'], {
+      maxPointsPerSection: 1,
+    }),
   ];
   const hasBlockingIssue = issues.some((issue) => !issue.includes('not loaded'));
   const title =
@@ -3221,7 +3302,7 @@ function locatorAvailabilityReply(context, message) {
         : language === 'tagalog'
           ? 'I-submit pa rin sa normal approval workflow; hindi pa ito final approval.'
           : 'Submit it through the normal approval workflow; this is not final approval.',
-    limit: 10,
+    limit: 12,
   });
 }
 
@@ -3395,6 +3476,9 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
   }
   if (intent === 'dtr_export_guidance') {
     return dtrExportGuidanceReply(context, message);
+  }
+  if (intent === 'dtr_policy_guidance') {
+    return dtrPolicyGuidanceReply(context, message);
   }
   if (intent === 'leave_balance') {
     return leaveBalanceReply(context, localized, message);

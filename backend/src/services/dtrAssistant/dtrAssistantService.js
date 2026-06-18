@@ -134,6 +134,8 @@ function buildSources(context) {
     dtrSummaryIds: (context.dtr_records || []).map((r) => r.id),
     leaveRequestIds: (context.recent_leave_requests || []).map((r) => r.id),
     locatorSlipIds: (context.recent_locator_slips || []).map((r) => r.id),
+    dtrPolicyKeys: (context.dtr_policies || []).map((item) => item.key),
+    locatorPolicyKeys: (context.locator_policies || []).map((item) => item.key),
   };
 }
 
@@ -387,7 +389,8 @@ function buildSuggestions(intent) {
     intent === 'dtr_late_summary' ||
     intent === 'dtr_late_reason' ||
     intent === 'dtr_undertime_summary' ||
-    intent === 'dtr_overtime_summary'
+    intent === 'dtr_overtime_summary' ||
+    intent === 'dtr_policy_guidance'
   ) {
     return [
       { text: 'Show all late records this month', intent: 'dtr_late_summary' },
@@ -657,7 +660,7 @@ function buildActions(intent, context, text, attachments = []) {
   if (isStructuredDtrIntent(value)) {
     const correctionPrompt = correctionPromptForAction(context);
     actions.push(
-      action('open_dtr_time_logs', 'Open DTR logs', 'open_dtr_time_logs', {
+      action('open_dtr_time_logs', 'Open My Attendance', 'open_dtr_time_logs', {
         icon: 'schedule',
         payload: rangePayload,
       })
@@ -817,14 +820,14 @@ function directOpenCommandForMessage(text) {
             'Sige, bubuksan ko ang DTR reports.'
           )
         : say(
-            'Opening your DTR logs now.',
-            'Sige, akong ablihan imong DTR logs.',
-            'Sige, bubuksan ko ang DTR logs mo.'
+            'Opening My Attendance now.',
+            'Sige, akong ablihan imong My Attendance.',
+            'Sige, bubuksan ko ang My Attendance mo.'
           ),
       actions: uniqueActions([
         action(
           openReports ? 'open_dtr_reports' : 'open_dtr_time_logs',
-          openReports ? 'Open DTR reports' : 'Open DTR logs',
+          openReports ? 'Open DTR reports' : 'Open My Attendance',
           openReports ? 'open_dtr_reports' : 'open_dtr_time_logs',
           {
             icon: openReports ? 'file_download' : 'schedule',
@@ -871,7 +874,7 @@ function parseIntentClassifierResponse(content) {
     return normalizeIntent(parsed.intent);
   } catch (_) {
     const match = text.match(
-      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|locator_status|locator_summary|locator_types|locator_requirements|locator_availability_check|locator_rejection_reason|locator_approval_tracker|unknown)\b/i
+      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|dtr_policy_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|locator_status|locator_summary|locator_types|locator_requirements|locator_availability_check|locator_rejection_reason|locator_approval_tracker|unknown)\b/i
     );
     return normalizeIntent(match?.[1]);
   }
@@ -952,6 +955,20 @@ function hasDateOrAvailabilityHint(text) {
   );
 }
 
+function isHowToFileInstructionQuestion(text) {
+  const value = lower(text);
+  if (
+    /\b(requirements?|requirement|attachment|attachments?|document|documents|docs|proof|supporting|need|needed|kinahanglan|kailangan)\b/.test(
+      value
+    )
+  ) {
+    return false;
+  }
+  return /\b(how can i file|how do i file|how to file|how can i apply|how do i apply|how to apply|steps? to file|procedure.*file|guide.*file|paano.*file|paano.*apply|unsaon.*file|unsaon.*apply|paunsa.*file|pag file|pag-file)\b/.test(
+    value
+  );
+}
+
 function isAmbiguousFilingQuestion(text) {
   const value = lower(text);
   if (explicitTopicFromText(value)) return false;
@@ -1023,6 +1040,51 @@ function memoryRelativeDate(text, memory) {
   return null;
 }
 
+function hasRangeDateHint(text) {
+  return /\b(this week|current week|last week|previous week|next week|week|semana|semanaha|this month|current month|last month|previous month|next month|month|bulan|bulana|buwan|buwana|aning bulana|karong bulana|karong buwan)\b/.test(
+    lower(text)
+  );
+}
+
+function dtrAbsenceQuestionText(text) {
+  return /\b(absent|absents|absence|absences|no record|no-record|walay record|wala.*record|wala.*dtr|pasabot)\b/.test(
+    lower(text)
+  );
+}
+
+function recentMemoryMatches(memory, topic, matcher) {
+  const items = [
+    memory?.lastUserMessage,
+    ...(memory?.history || [])
+      .filter((item) => !topic || item.topic === topic)
+      .map((item) => item.text),
+  ].filter(Boolean);
+  return items.some((item) => matcher(item));
+}
+
+function rangeCorrectionIntentForDtr(activeIntent, text, memory) {
+  if (!hasRangeDateHint(text)) return null;
+  if (
+    activeIntent === 'dtr_absent_summary' ||
+    recentMemoryMatches(memory, 'dtr', dtrAbsenceQuestionText)
+  ) {
+    return 'dtr_absent_summary';
+  }
+  if (activeIntent === 'dtr_late_reason' || activeIntent === 'dtr_late_summary') {
+    return 'dtr_late_summary';
+  }
+  if (activeIntent === 'dtr_undertime_summary') return 'dtr_undertime_summary';
+  if (activeIntent === 'dtr_overtime_summary') return 'dtr_overtime_summary';
+  if (
+    activeIntent === 'dtr_missing_logs' ||
+    activeIntent === 'dtr_missing_log_reason' ||
+    activeIntent === 'missing_logs'
+  ) {
+    return 'dtr_missing_logs';
+  }
+  return 'dtr_range_summary';
+}
+
 function resolveIntentFromMemory(text, memory) {
   if (!memory) return null;
   const value = lower(text);
@@ -1035,6 +1097,12 @@ function resolveIntentFromMemory(text, memory) {
   ) {
     if (memory.intent === 'clarify_filing_topic') {
       if (explicitTopic === 'leave') {
+        if (
+          isHowToFileInstructionQuestion(value) ||
+          isHowToFileInstructionQuestion(memory.lastUserMessage)
+        ) {
+          return 'leave_form_guidance';
+        }
         return hasDateOrAvailabilityHint(value)
           ? 'leave_availability_check'
           : 'leave_guided_filing';
@@ -1091,10 +1159,16 @@ function resolveIntentFromMemory(text, memory) {
     return activeIntent;
   }
   if (isStructuredDtrIntent(activeIntent)) {
+    const rangeCorrectionIntent = rangeCorrectionIntentForDtr(
+      activeIntent,
+      value,
+      memory
+    );
+    if (rangeCorrectionIntent) return rangeCorrectionIntent;
     if (/\b(fix|correct|correction|buhaton|gagawin|resolve)\b/.test(value)) {
       return 'dtr_correction_guidance';
     }
-    if (/\b(absent|absence|no record|walay record)\b/.test(value)) {
+    if (dtrAbsenceQuestionText(value)) {
       return 'dtr_absent_summary';
     }
     if (/\b(missing|incomplete|kulang|kuwang|what.*missing|unsa.*kulang)\b/.test(value)) {
@@ -1114,6 +1188,9 @@ function resolveIntentFromMemory(text, memory) {
     }
   }
   if (isLeaveIntent(activeIntent)) {
+    if (isHowToFileInstructionQuestion(value)) {
+      return 'leave_form_guidance';
+    }
     if (/\b(can file|can i file|pwede|puwede|allowed|eligible|qualified|available|tomorrow|ugma|karon|today|date|day|file)\b/.test(value)) {
       return 'leave_availability_check';
     }
@@ -1154,7 +1231,7 @@ function resolveIntentFromMemory(text, memory) {
   if (/\b(overtime|over time|ot)\b/.test(lower(text))) {
     return 'dtr_overtime_summary';
   }
-  if (/\b(absent|absence|no record|walay record)\b/.test(lower(text))) {
+  if (dtrAbsenceQuestionText(text)) {
     return 'dtr_absent_summary';
   }
   if (/\b(missing|incomplete|kulang|kuwang|what.*missing|unsa.*kulang)\b/.test(lower(text))) {
@@ -1170,6 +1247,9 @@ function resolveIntentFromMemory(text, memory) {
     return 'leave_requirements';
   }
   if (/\b(fill|field|fields|form|details|what to put|i-fill|input)\b/.test(lower(text))) {
+    return 'leave_form_guidance';
+  }
+  if (isHowToFileInstructionQuestion(text)) {
     return 'leave_form_guidance';
   }
   if (/\b(eligible|eligibility|qualified|avail|entitled|pwede|puwede)\b/.test(lower(text))) {
@@ -1232,6 +1312,7 @@ function resolveIntentFromMemory(text, memory) {
       'dtr_holiday_check',
       'dtr_schedule_context',
       'dtr_export_guidance',
+      'dtr_policy_guidance',
       'leave_history',
       'pending_leave_requests',
       'approved_leave_requests',
@@ -1399,7 +1480,8 @@ function buildToolData(intent, context) {
     intent === 'dtr_locator_coverage_check' ||
     intent === 'dtr_holiday_check' ||
     intent === 'dtr_schedule_context' ||
-    intent === 'dtr_export_guidance'
+    intent === 'dtr_export_guidance' ||
+    intent === 'dtr_policy_guidance'
   ) {
     return {
       dateRange: context.date_range,
@@ -1407,6 +1489,8 @@ function buildToolData(intent, context) {
       calendarDays: context.dtr_calendar_days || [],
       leaveRequests: context.recent_leave_requests || [],
       locatorSlips: context.recent_locator_slips || [],
+      dtrPolicies: context.dtr_policies || [],
+      locatorPolicies: context.locator_policies || [],
     };
   }
   if (intent === 'leave_balance') {
@@ -1488,8 +1572,10 @@ function buildToolData(intent, context) {
       dateRange: context.date_range,
       slips: context.recent_locator_slips || [],
       locatorTypes: context.locator_types || [],
+      locatorPolicies: context.locator_policies || [],
       dtrRecords: context.dtr_records || [],
       calendarDays: context.dtr_calendar_days || [],
+      dtrPolicies: context.dtr_policies || [],
     };
   }
   return {};

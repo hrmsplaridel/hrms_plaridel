@@ -1,4 +1,8 @@
 const { parseAssistantDateRange } = require('../../utils/dateRangeParser');
+const {
+  buildDtrPolicyKnowledge,
+  buildLocatorPolicyKnowledge,
+} = require('./attendanceLocatorPolicies');
 const { buildGuidelinesForTypes } = require('./leaveFilingGuidelines');
 
 function toNumber(value) {
@@ -503,6 +507,8 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
     leave_guidelines: buildGuidelinesForTypes(leaveTypes),
     recent_locator_slips: locatorSlips,
     locator_types: locatorTypes,
+    dtr_policies: buildDtrPolicyKnowledge(),
+    locator_policies: buildLocatorPolicyKnowledge(),
   };
 }
 

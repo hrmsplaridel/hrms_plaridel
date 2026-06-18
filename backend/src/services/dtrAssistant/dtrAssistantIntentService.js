@@ -7,6 +7,19 @@ function lower(value) {
 const LEAVE_TOPIC_PATTERN =
   /\b(leave|leaves|vl|sl|sick|vacation|paternity|maternity|adoption|solo parent|vawc|calamity|mandatory|forced|special privilege)\b/;
 
+function isLeaveHowToFileQuestion(text) {
+  if (
+    /\b(requirements?|requirement|attachment|attachments?|document|documents|docs|proof|supporting|need|needed|kinahanglan|kailangan)\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
+  return /\b(how can i file|how do i file|how to file|how can i apply|how do i apply|how to apply|steps? to file|procedure.*file|guide.*file|paano.*file|paano.*apply|unsaon.*file|unsaon.*apply|paunsa.*file|pag file|pag-file)\b/.test(
+    text
+  );
+}
+
 function normalizeIntent(value) {
   const intent = String(value || '').trim().toLowerCase();
   return [
@@ -28,6 +41,7 @@ function normalizeIntent(value) {
     'dtr_holiday_check',
     'dtr_schedule_context',
     'dtr_export_guidance',
+    'dtr_policy_guidance',
     'leave_balance',
     'pending_leave_requests',
     'approved_leave_requests',
@@ -136,6 +150,13 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
     /\b(dtr|attendance|daily time)\b/.test(text)
   ) {
     return 'dtr_export_guidance';
+  }
+
+  if (
+    /\b(policy|policies|rule|rules|guideline|guidelines|requirements?|requirement|how.*dtr.*work|attendance.*policy|attendance.*rules)\b/.test(text) &&
+    (hasDtrTopic || /\b(dtr|attendance|daily time)\b/.test(text))
+  ) {
+    return 'dtr_policy_guidance';
   }
 
   if (
@@ -402,6 +423,13 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
     !/\b(\d+\s*(day|days|adlaw)|tomorrow|today|yesterday|ugma|kagahapon|gahapon|\d{4}-\d{2}-\d{2})\b/.test(text)
   ) {
     return 'leave_eligibility_check';
+  }
+
+  if (
+    isLeaveHowToFileQuestion(text) &&
+    LEAVE_TOPIC_PATTERN.test(text)
+  ) {
+    return 'leave_form_guidance';
   }
 
   if (

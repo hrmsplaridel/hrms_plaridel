@@ -20,11 +20,16 @@ const {
 test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected intents', () => {
   const cases = [
     ['pila kabuok absent nako aning bulana?', 'dtr_absent_summary'],
+    ['how many absents i have for this month?', 'dtr_absent_summary'],
     ['unsay status sa akong dtr adtung niaging miyerkules?', 'dtr_status_explanation'],
     ['naa koy absent gahapon?', 'dtr_absent_summary'],
     ['pila akong balance sa sick leave?', 'leave_balance'],
     ['ngano gamay nalang akong vacation leave?', 'leave_balance'],
     ['why is my vacation leave balance low?', 'leave_balance'],
+    ['how can I file sick leave?', 'leave_form_guidance'],
+    ['paano mag file ng sick leave?', 'leave_form_guidance'],
+    ['unsaon pag file ug sick leave?', 'leave_form_guidance'],
+    ['can I file 1 day sick leave tomorrow?', 'leave_availability_check'],
     ['unsay requirements sa maternity leave?', 'leave_requirements'],
     ['need med cert if 5 days sick leave?', 'leave_attachment_requirement'],
     ['kinsa nag hold sa akong leave request?', 'leave_approval_tracker'],
@@ -37,6 +42,7 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['how about the wfh?', 'locator_types'],
     ['unsa ang wfh?', 'locator_types'],
     ['export my dtr this month', 'dtr_export_guidance'],
+    ['what are the dtr rules?', 'dtr_policy_guidance'],
   ];
 
   for (const [message, expected] of cases) {
@@ -102,6 +108,71 @@ test('DTR assistant regression: locator type questions list active request types
   assert.doesNotMatch(wfhReply, /Pass Slip/);
 });
 
+test('DTR assistant regression: DTR and locator policy knowledge appears in replies', () => {
+  const dtrReply = buildFastEmployeeAssistantReply(
+    'what are the dtr rules?',
+    {
+      date_range: {
+        label: 'this month',
+        startDate: '2026-06-01',
+        endDate: '2026-06-30',
+      },
+      dtr_records: [],
+      dtr_calendar_days: [],
+      recent_leave_requests: [],
+      recent_locator_slips: [],
+    },
+    'dtr_policy_guidance'
+  );
+  assert.match(dtrReply, /DTR policy guide/);
+  assert.match(dtrReply, /Required DTR logs are based on the employee schedule/i);
+  assert.match(dtrReply, /Pending leave or locator requests are not final/i);
+
+  const locatorReply = buildFastEmployeeAssistantReply(
+    'what are locator requirements?',
+    {
+      locator_types: [
+        {
+          code: 'work_from_home',
+          label: 'Work From Home',
+          short_label: 'WFH',
+          location_label: 'Work Location',
+          location_hint: 'Enter work location',
+          dtr_slot_label: 'WFH',
+          requires_attachment: false,
+          coverage_mode: 'wfh',
+        },
+      ],
+    },
+    'locator_requirements'
+  );
+  assert.match(locatorReply, /Locator filing requirements/);
+  assert.match(locatorReply, /A locator slip needs a slip date/i);
+  assert.match(locatorReply, /A locator slip helps DTR only after approval/i);
+});
+
+test('DTR assistant regression: how-to-file leave questions show form guidance', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'how can I file sick leave?',
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+          requires_attachment: false,
+        },
+      ],
+    },
+    detectEmployeeAssistantIntent('how can I file sick leave?')
+  );
+
+  assert.match(reply, /Leave form guide/);
+  assert.match(reply, /Sick Leave/i);
+  assert.match(reply, /leave form/i);
+  assert.doesNotMatch(reply, /balance is not enough/i);
+});
+
 test('DTR assistant regression: conversation memory keeps topic and entity follow-ups', () => {
   let memory = assistantServiceTest.buildNextAssistantMemory(null, {
     intent: 'locator_types',
@@ -157,6 +228,51 @@ test('DTR assistant regression: conversation memory keeps topic and entity follo
   );
   assert.equal(memory.history.length, 2);
   assert.equal(memory.topics.locator.locatorType, 'work_from_home');
+
+  const mistakenDtrMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'dtr_status_explanation',
+    text: 'how many absents i have for this month?',
+    dateRange: {
+      label: 'June 9, 2026',
+      startDate: '2026-06-09',
+      endDate: '2026-06-09',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'this month not today',
+      mistakenDtrMemory
+    ),
+    'dtr_absent_summary'
+  );
+  assert.doesNotMatch(
+    assistantServiceTest.enrichMessageWithMemory(
+      'this month not today',
+      mistakenDtrMemory,
+      'dtr_absent_summary'
+    ),
+    /2026-06-09/
+  );
+
+  const dailyDtrMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'today_dtr',
+    text: 'show my DTR today',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'this month not today',
+      dailyDtrMemory
+    ),
+    'dtr_range_summary'
+  );
 });
 
 test('DTR assistant regression: conversation memory does not leak stale leave type into explicit topic switches', () => {
@@ -251,6 +367,22 @@ test('DTR assistant regression: vague filing/status prompts ask clarification in
   assert.equal(
     assistantServiceTest.resolveIntentFromMemory('wfh tomorrow', filingMemory),
     'locator_availability_check'
+  );
+
+  const howToFilingMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'clarify_filing_topic',
+    text: 'how can I file?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('sick leave', howToFilingMemory),
+    'leave_form_guidance'
   );
 
   const statusMemory = assistantServiceTest.buildNextAssistantMemory(null, {
@@ -507,6 +639,13 @@ test('DTR assistant regression: direct open commands generate auto navigation ac
   assert.equal(leaveCommand.intent, 'leave_guided_filing');
   assert.equal(leaveCommand.actions[0].type, 'open_leave_form');
   assert.equal(leaveCommand.actions[0].autoExecute, true);
+
+  const attendanceCommand =
+    assistantServiceTest.directOpenCommandForMessage('open my attendance');
+  assert.equal(attendanceCommand.intent, 'dtr_daily_record');
+  assert.equal(attendanceCommand.actions[0].type, 'open_dtr_time_logs');
+  assert.equal(attendanceCommand.actions[0].label, 'Open My Attendance');
+  assert.equal(attendanceCommand.actions[0].autoExecute, true);
 
   const question =
     assistantServiceTest.directOpenCommandForMessage('what are locator types?');
