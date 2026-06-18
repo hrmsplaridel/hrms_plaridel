@@ -113,6 +113,97 @@ function dateFromParts(year, month, day) {
   return `${year}-${pad2(month)}-${pad2(day)}`;
 }
 
+function daysInMonth(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function startOfMonth(isoDate) {
+  return `${String(isoDate).slice(0, 7)}-01`;
+}
+
+function semiMonthlyPeriodForDate(isoDate) {
+  const [year, month, day] = String(isoDate).split('-').map(Number);
+  if (day <= 15) {
+    return {
+      startDate: dateFromParts(year, month, 1),
+      endDate: dateFromParts(year, month, 15),
+    };
+  }
+  return {
+    startDate: dateFromParts(year, month, 16),
+    endDate: dateFromParts(year, month, daysInMonth(year, month)),
+  };
+}
+
+function nextSemiMonthlyPeriod(period) {
+  const [, , startDay] = String(period.startDate).split('-').map(Number);
+  if (startDay === 1) {
+    return {
+      startDate: `${period.startDate.slice(0, 7)}-16`,
+      endDate: endOfMonth(period.startDate),
+    };
+  }
+  const nextMonth = addMonths(period.startDate, 1);
+  return {
+    startDate: startOfMonth(nextMonth),
+    endDate: `${nextMonth.slice(0, 7)}-15`,
+  };
+}
+
+function previousSemiMonthlyPeriod(period) {
+  const [, , startDay] = String(period.startDate).split('-').map(Number);
+  if (startDay === 16) {
+    return {
+      startDate: `${period.startDate.slice(0, 7)}-01`,
+      endDate: `${period.startDate.slice(0, 7)}-15`,
+    };
+  }
+  const previousMonth = addMonths(period.startDate, -1);
+  return {
+    startDate: `${previousMonth.slice(0, 7)}-16`,
+    endDate: endOfMonth(previousMonth),
+  };
+}
+
+function semiMonthlyPeriodByOffset(today, offset) {
+  let period = semiMonthlyPeriodForDate(today);
+  let remaining = Number(offset || 0);
+  while (remaining > 0) {
+    period = nextSemiMonthlyPeriod(period);
+    remaining -= 1;
+  }
+  while (remaining < 0) {
+    period = previousSemiMonthlyPeriod(period);
+    remaining += 1;
+  }
+  return period;
+}
+
+function ordinalWeekdayOfMonth(year, month, weekday, ordinal) {
+  if (ordinal === 'last') {
+    let date = dateFromParts(year, month, daysInMonth(year, month));
+    while (dayOfWeekMondayIndex(date) !== weekday) {
+      date = addDays(date, -1);
+    }
+    return date;
+  }
+  const ordinalNumber = {
+    first: 1,
+    '1st': 1,
+    second: 2,
+    '2nd': 2,
+    third: 3,
+    '3rd': 3,
+    fourth: 4,
+    '4th': 4,
+  }[ordinal];
+  if (!ordinalNumber) return null;
+  let date = dateFromParts(year, month, 1);
+  const offset = (weekday - dayOfWeekMondayIndex(date) + 7) % 7;
+  date = addDays(date, offset + (ordinalNumber - 1) * 7);
+  return Number(date.slice(5, 7)) === month ? date : null;
+}
+
 function weekdayDate(today, targetWeekday, mode = 'next') {
   const current = dayOfWeekMondayIndex(today);
   let offset = targetWeekday - current;
@@ -124,6 +215,8 @@ function weekdayDate(today, targetWeekday, mode = 'next') {
 function parseAssistantDateRange(message, options = {}) {
   const text = String(message || '').toLowerCase();
   const today = options.today || todayInHrmsTimezone(options.now);
+  const monthNames = Object.keys(MONTHS).join('|');
+  const weekdayNames = Object.keys(WEEKDAYS).join('|');
   const explicitRange = text.match(
     /\b(\d{4}-\d{2}-\d{2})\s*(?:to|until|through|-|–)\s*(\d{4}-\d{2}-\d{2})\b/
   );
@@ -145,7 +238,6 @@ function parseAssistantDateRange(message, options = {}) {
     };
   }
 
-  const monthNames = Object.keys(MONTHS).join('|');
   const markedMonthDay = text.match(
     new RegExp(
       `\\b(?:on|sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\\s+(${monthNames})\\s+(\\d{1,2})(?:,?\\s*(20\\d{2}))?\\b`
@@ -189,6 +281,71 @@ function parseAssistantDateRange(message, options = {}) {
     };
   }
 
+  const ordinalWeekday = text.match(
+    new RegExp(
+      `\\b(first|1st|second|2nd|third|3rd|fourth|4th|last)\\s+(${weekdayNames})\\s+(?:of|in|sa)\\s+(${monthNames})(?:,?\\s*(20\\d{2}))?\\b`
+    )
+  );
+  if (ordinalWeekday) {
+    const currentYear = Number(today.slice(0, 4));
+    const year = Number(ordinalWeekday[4] || currentYear);
+    const date = ordinalWeekdayOfMonth(
+      year,
+      MONTHS[ordinalWeekday[3]],
+      WEEKDAYS[ordinalWeekday[2]],
+      ordinalWeekday[1]
+    );
+    if (date) {
+      return {
+        label: `${ordinalWeekday[1]} ${ordinalWeekday[2]} of ${ordinalWeekday[3]}`,
+        startDate: date,
+        endDate: date,
+      };
+    }
+  }
+
+  const firstSecondCutoff = text.match(
+    new RegExp(
+      `\\b(first|1st|second|2nd)\\s+(?:pay\\s*period|payroll\\s*period|cut[-\\s]?off|cutoff)(?:\\s+(?:of|in|sa|for)\\s+(${monthNames})(?:,?\\s*(20\\d{2}))?)?\\b`
+    )
+  );
+  if (firstSecondCutoff) {
+    const currentYear = Number(today.slice(0, 4));
+    const currentMonth = Number(today.slice(5, 7));
+    const year = Number(firstSecondCutoff[3] || currentYear);
+    const month = firstSecondCutoff[2] ? MONTHS[firstSecondCutoff[2]] : currentMonth;
+    const startDate =
+      firstSecondCutoff[1] === 'first' || firstSecondCutoff[1] === '1st'
+        ? dateFromParts(year, month, 1)
+        : dateFromParts(year, month, 16);
+    const endDate =
+      firstSecondCutoff[1] === 'first' || firstSecondCutoff[1] === '1st'
+        ? dateFromParts(year, month, 15)
+        : dateFromParts(year, month, daysInMonth(year, month));
+    return {
+      label: `${firstSecondCutoff[1]} cutoff`,
+      startDate,
+      endDate,
+    };
+  }
+
+  const payPeriod = text.match(
+    /\b(?:(last|previous|next|this|current|upcoming)\s+)?(pay\s*period|payroll\s*period|cut[-\s]?off|cutoff)\b/
+  );
+  if (payPeriod) {
+    const qualifier = payPeriod[1] || 'current';
+    const phrase = payPeriod[2] || 'cutoff';
+    let offset = 0;
+    if (qualifier === 'last' || qualifier === 'previous') offset = -1;
+    if (qualifier === 'next' && /pay/.test(phrase)) offset = 1;
+    const period = semiMonthlyPeriodByOffset(today, offset);
+    return {
+      label: `${qualifier} ${phrase.replace(/\s+/g, ' ')}`,
+      startDate: period.startDate,
+      endDate: period.endDate,
+    };
+  }
+
   const monthOnly = text.match(
     new RegExp(
       `\\b(?:in|sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung|last\\s+)?(${monthNames})(?:\\s+(?:nga\\s+)?(?:month|bulan|bulana|buwan|buwana))?(?:,?\\s*(20\\d{2}))?\\b`
@@ -212,7 +369,66 @@ function parseAssistantDateRange(message, options = {}) {
     return { label: 'yesterday', startDate: date, endDate: date };
   }
 
-  const weekdayNames = Object.keys(WEEKDAYS).join('|');
+  const daysAgo = text.match(/\b(\d{1,2})\s+days?\s+ago\b/);
+  if (daysAgo) {
+    const count = Number(daysAgo[1]);
+    const date = addDays(today, -count);
+    return {
+      label: `${count} ${count === 1 ? 'day' : 'days'} ago`,
+      startDate: date,
+      endDate: date,
+    };
+  }
+
+  const weeksAgo = text.match(/\b(\d{1,2})\s+weeks?\s+ago\b/);
+  if (weeksAgo) {
+    const count = Number(weeksAgo[1]);
+    const startDate = startOfWeekMonday(addDays(today, -count * 7));
+    return {
+      label: `${count} ${count === 1 ? 'week' : 'weeks'} ago`,
+      startDate,
+      endDate: addDays(startDate, 6),
+    };
+  }
+
+  const monthsAgo = text.match(/\b(\d{1,2})\s+months?\s+ago\b/);
+  if (monthsAgo) {
+    const count = Number(monthsAgo[1]);
+    const month = addMonths(today, -count);
+    const startDate = startOfMonth(month);
+    return {
+      label: `${count} ${count === 1 ? 'month' : 'months'} ago`,
+      startDate,
+      endDate: endOfMonth(month),
+    };
+  }
+
+  const weekdayRange = text.match(
+    new RegExp(
+      `\\b(?:from\\s+)?(?:(last|previous|next|this|current)\\s+)?(${weekdayNames})\\s*(?:to|until|through|-|–)\\s*(?:(last|previous|next|this|current)\\s+)?(${weekdayNames})\\b`
+    )
+  );
+  if (weekdayRange) {
+    const startQualifier = weekdayRange[1] || 'this';
+    const endQualifier = weekdayRange[3] || startQualifier;
+    const qualifierOffset = (qualifier) => {
+      if (qualifier === 'last' || qualifier === 'previous') return -7;
+      if (qualifier === 'next') return 7;
+      return 0;
+    };
+    const thisWeekStart = startOfWeekMonday(today);
+    const startWeek = addDays(thisWeekStart, qualifierOffset(startQualifier));
+    const endWeek = addDays(thisWeekStart, qualifierOffset(endQualifier));
+    const startDate = addDays(startWeek, WEEKDAYS[weekdayRange[2]]);
+    let endDate = addDays(endWeek, WEEKDAYS[weekdayRange[4]]);
+    if (endDate < startDate) endDate = addDays(endDate, 7);
+    return {
+      label: `${weekdayRange[2]} to ${weekdayRange[4]}`,
+      startDate,
+      endDate,
+    };
+  }
+
   const nextWeekday = text.match(
     new RegExp(`\\b(?:next|sunod|sunod nga|sunod na)\\s+(${weekdayNames})\\b`)
   );

@@ -16,6 +16,9 @@ const {
 const {
   __test: assistantServiceTest,
 } = require('../src/services/dtrAssistant/dtrAssistantService');
+const {
+  parseAssistantDateRange,
+} = require('../src/utils/dateRangeParser');
 
 test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected intents', () => {
   const cases = [
@@ -43,11 +46,42 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['unsa ang wfh?', 'locator_types'],
     ['export my dtr this month', 'dtr_export_guidance'],
     ['what are the dtr rules?', 'dtr_policy_guidance'],
+    ['how many absent last pay period?', 'dtr_absent_summary'],
+    ['show my dtr from Monday to Friday', 'dtr_range_summary'],
   ];
 
   for (const [message, expected] of cases) {
     assert.equal(detectEmployeeAssistantIntent(message), expected, message);
   }
+});
+
+test('DTR assistant regression: stronger date phrases resolve to useful ranges', () => {
+  const today = '2026-06-18';
+  assert.deepEqual(parseAssistantDateRange('show my DTR next cutoff', { today }), {
+    label: 'next cutoff',
+    startDate: '2026-06-16',
+    endDate: '2026-06-30',
+  });
+  assert.deepEqual(parseAssistantDateRange('how many absences last pay period?', { today }), {
+    label: 'last pay period',
+    startDate: '2026-06-01',
+    endDate: '2026-06-15',
+  });
+  assert.deepEqual(parseAssistantDateRange('my DTR 2 weeks ago', { today }), {
+    label: '2 weeks ago',
+    startDate: '2026-06-01',
+    endDate: '2026-06-07',
+  });
+  assert.deepEqual(parseAssistantDateRange('what is my status first Monday of June?', { today }), {
+    label: 'first monday of june',
+    startDate: '2026-06-01',
+    endDate: '2026-06-01',
+  });
+  assert.deepEqual(parseAssistantDateRange('show DTR from Monday to Friday', { today }), {
+    label: 'monday to friday',
+    startDate: '2026-06-15',
+    endDate: '2026-06-19',
+  });
 });
 
 test('DTR assistant regression: locator type questions list active request types', () => {
