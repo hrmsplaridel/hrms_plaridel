@@ -130,6 +130,21 @@ function trimTrailingSentencePunctuation(value) {
   return String(value || '').replace(/[.\s]+$/g, '').trim();
 }
 
+function firstSentence(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  const match = text.match(/^.*?[.!?](?:\s|$)/);
+  return trimTrailingSentencePunctuation(match ? match[0] : text);
+}
+
+function compactText(value, maxLength = 120) {
+  const text = firstSentence(value);
+  if (text.length <= maxLength) return text;
+  const cut = text.slice(0, maxLength - 3);
+  const atWord = cut.replace(/\s+\S*$/, '').trim();
+  return `${atWord || cut.trim()}...`;
+}
+
 function isTagalogOrBisaya(message) {
   const text = lower(message);
   return /\b(ano|ba|ko|akong|ngano|unsa|unsay|karon|ngayon|kumusta|pila|kabuok|naa|wala|pasok|na-approve|adtong|adtung|atong|niadtong|niadtung|ana|adto|ato)\b/.test(
@@ -180,6 +195,7 @@ function localizeTitle(title, language) {
       .replace(/^Leave balance$/i, 'Leave balance nimo')
       .replace(/^Leave requirements$/i, 'Leave requirements')
       .replace(/^Attachment requirement$/i, 'Attachment requirement nimo')
+      .replace(/^Leave types you can file$/i, 'Leave types nga pwede nimo ma-file')
       .replace(/^Pending leave requests$/i, 'Pending leave requests nimo')
       .replace(/^Approved leave requests$/i, 'Approved leave requests nimo')
       .replace(/^Rejected leave requests$/i, 'Rejected leave requests nimo')
@@ -196,6 +212,7 @@ function localizeTitle(title, language) {
       .replace(/^Leave balance$/i, 'Leave balance mo')
       .replace(/^Leave requirements$/i, 'Leave requirements')
       .replace(/^Attachment requirement$/i, 'Attachment requirement mo')
+      .replace(/^Leave types you can file$/i, 'Leave types na puwede mong i-file')
       .replace(/^Pending leave requests$/i, 'Pending leave requests mo')
       .replace(/^Approved leave requests$/i, 'Approved leave requests mo')
       .replace(/^Rejected leave requests$/i, 'Rejected leave requests mo')
@@ -2270,14 +2287,34 @@ function leaveTypesReply(context, message) {
     return 'I found no active leave types in the system records.';
   }
 
-  const lines = types
-    .filter((type) => type.employee_can_file !== false)
-    .slice(0, 8)
-    .map((type) => labelLeaveType(type.display_name || type.name))
-    .join(', ');
-  if (language === 'bisaya') return `Mao ni ang leave types nga pwede nimo ma-file: ${lines}.`;
-  if (language === 'tagalog') return `Ito ang leave types na puwede mong i-file: ${lines}.`;
-  return `These are the leave types you can file: ${lines}.`;
+  const visibleTypes = types
+    .filter((type) => type.employee_can_file !== false);
+  const details = visibleTypes.map((type) => {
+    const label = labelLeaveType(type.display_name || type.name);
+    const guidance = getLeaveGuidanceForType(type);
+    const description = guidance?.description
+      ? compactText(guidance.description, 125)
+      : 'available for filing in HRMS';
+    return `${label}: ${description}`;
+  });
+
+  return structuredReply(language, {
+    title: 'Leave types you can file',
+    summary:
+      language === 'bisaya'
+        ? 'Mao ni ang leave types nga pwede nimo ma-file, apil ang short explanation sa kada type.'
+        : language === 'tagalog'
+          ? 'Ito ang leave types na puwede mong i-file, kasama ang short explanation ng bawat type.'
+          : 'These are the leave types you can file, with a short explanation for each one.',
+    details,
+    nextStep:
+      language === 'bisaya'
+        ? 'Kung gusto nimo ang requirements, pangutana: "unsay requirements sa sick leave?"'
+        : language === 'tagalog'
+          ? 'Kung gusto mo ang requirements, itanong: "requirements sa sick leave?"'
+          : 'Ask for a specific type if you want requirements, for example: "requirements for sick leave".',
+    limit: details.length,
+  });
 }
 
 function leaveRequirementsReply(context, message) {
@@ -2526,36 +2563,63 @@ function isLeaveTypeGuidelineOverviewQuestion(message) {
     /\b(leave types?|types of leave|all leave|available leave)\b/.test(text);
 }
 
+function compactLeaveTypeGuidelineLine(type, guidance) {
+  const label = labelLeaveType(type.display_name || type.name || type.leave_type);
+  const description = compactText(guidance?.description, 110) || 'Available for filing in HRMS';
+  const requirements = compactText(guidance?.requirements, 95);
+  const limits = compactText(guidance?.limits, 70);
+  const parts = [description];
+  if (requirements) parts.push(`Req: ${requirements}`);
+  if (limits) parts.push(`Limit: ${limits}`);
+  return `${label}: ${parts.join(' | ')}`;
+}
+
+function uniqueLeaveGuidelineLines(lines) {
+  const seen = new Set();
+  const result = [];
+  for (const line of lines) {
+    const key = lower(String(line || '').split(':')[0]).replace(/[^a-z0-9]+/g, '');
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(line);
+  }
+  return result;
+}
+
 function leaveTypeGuidelineOverviewReply(context, message) {
   const language = languageOf(message);
   const typeGuidelines = (context.leave_types || [])
     .filter((type) => type.employee_can_file !== false)
     .map((type) => {
       const guidance = getLeaveGuidanceForType(type);
-      if (!guidance) return null;
-      const pieces = [
-        guidance.description,
-        guidance.requirements ? `Requirements: ${guidance.requirements}` : null,
-        guidance.limits ? `Limit: ${guidance.limits}` : null,
-        guidance.advanceFiling ? `Filing: ${guidance.advanceFiling}` : null,
-        guidance.notes ? `Note: ${guidance.notes}` : null,
-      ].filter(Boolean);
-      return `${labelLeaveType(type.display_name || type.name)}: ${pieces.join(' ')}`;
+      return compactLeaveTypeGuidelineLine(type, guidance);
     })
     .filter(Boolean);
 
   const fallbackGuidelines = (context.leave_guidelines || []).map((guidance) => {
-    const pieces = [
-      guidance.description,
-      guidance.requirements ? `Requirements: ${guidance.requirements}` : null,
-      guidance.limits ? `Limit: ${guidance.limits}` : null,
-      guidance.advanceFiling ? `Filing: ${guidance.advanceFiling}` : null,
-      guidance.notes ? `Note: ${guidance.notes}` : null,
-    ].filter(Boolean);
-    return `${labelLeaveType(guidance.leave_type)}: ${pieces.join(' ')}`;
+    return compactLeaveTypeGuidelineLine(
+      {
+        name: guidance.leave_type,
+        display_name: guidance.leave_type,
+      },
+      guidance
+    );
+  });
+  const catalogGuidelines = (context.leave_guideline_catalog || []).map((guidance) => {
+    return compactLeaveTypeGuidelineLine(
+      {
+        name: guidance.leave_type,
+        display_name: guidance.leave_type,
+      },
+      guidance
+    );
   });
 
-  const lines = typeGuidelines.length > 0 ? typeGuidelines : fallbackGuidelines;
+  const lines = uniqueLeaveGuidelineLines([
+    ...typeGuidelines,
+    ...fallbackGuidelines,
+    ...catalogGuidelines,
+  ]);
   if (lines.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang leave type guidelines sa system records.';
     if (language === 'tagalog') return 'Wala akong nakitang leave type guidelines sa system records.';
@@ -2577,7 +2641,7 @@ function leaveTypeGuidelineOverviewReply(context, message) {
         : language === 'tagalog'
           ? 'Pwede kang magtanong ng specific leave type, example: "requirements sa sick leave?"'
           : 'Ask for a specific leave type if you want more detail, for example: "requirements for sick leave".',
-    limit: 8,
+    limit: lines.length,
   });
 }
 

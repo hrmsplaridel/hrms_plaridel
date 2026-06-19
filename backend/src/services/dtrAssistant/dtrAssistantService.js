@@ -12,8 +12,8 @@ const {
   setAssistantMemory,
 } = require('./dtrAssistantMemoryService');
 const {
-  detectEmployeeAssistantIntent,
   normalizeIntent,
+  scoreEmployeeAssistantIntent,
 } = require('./dtrAssistantIntentService');
 const { getEmployeeSelfScope } = require('./dtrAssistantPermissionService');
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
@@ -30,7 +30,7 @@ const {
   todayInHrmsTimezone,
 } = require('../../utils/dateRangeParser');
 
-const MAX_ASSISTANT_REPLY_CHARS = 900;
+const MAX_ASSISTANT_REPLY_CHARS = 4000;
 const MAX_MEMORY_TURNS = 6;
 
 const DEFAULT_MODEL_PROFILE_ID = 'tools_ollama';
@@ -932,10 +932,65 @@ function dateRangeLooksDefaultToday(dateRange, text) {
   return !/\b(today|karong adlawa|karon nga adlaw|ngayon)\b/i.test(String(text || ''));
 }
 
-function shouldAskAiForToolPlan({ resolvedIntent, dateRange, text, profile }) {
+function intentUsuallyNeedsDateRange(intent) {
+  return [
+    'today_dtr',
+    'missing_logs',
+    'dtr_daily_record',
+    'dtr_range_summary',
+    'dtr_missing_logs',
+    'dtr_missing_log_reason',
+    'dtr_late_summary',
+    'dtr_late_reason',
+    'dtr_undertime_summary',
+    'dtr_overtime_summary',
+    'dtr_absent_summary',
+    'dtr_status_explanation',
+    'dtr_correction_guidance',
+    'dtr_leave_coverage_check',
+    'dtr_locator_coverage_check',
+    'dtr_holiday_check',
+    'dtr_schedule_context',
+    'dtr_export_guidance',
+    'leave_history',
+    'leave_availability_check',
+    'leave_overlap_check',
+    'leave_balance_after_filing',
+    'leave_request_summary',
+    'leave_approval_history',
+    'leave_rejection_reason',
+    'leave_approval_tracker',
+    'leave_request_lookup',
+    'latest_leave_request',
+    'pending_leave_requests',
+    'approved_leave_requests',
+    'rejected_leave_requests',
+    'latest_locator_request',
+    'locator_status',
+    'locator_summary',
+    'locator_availability_check',
+    'locator_rejection_reason',
+    'locator_approval_tracker',
+  ].includes(String(intent || ''));
+}
+
+function shouldAskAiForToolPlan({
+  resolvedIntent,
+  dateRange,
+  text,
+  profile,
+  intentConfidence = 1,
+  intentNeedsAiPlan = false,
+}) {
   if (!profile || profile.engine === 'direct') return false;
   if (!resolvedIntent) return true;
-  if (dateRangeLooksDefaultToday(dateRange, text)) return true;
+  if (intentNeedsAiPlan || intentConfidence < 0.62) return true;
+  if (
+    dateRangeLooksDefaultToday(dateRange, text) &&
+    intentUsuallyNeedsDateRange(resolvedIntent)
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -993,6 +1048,12 @@ function isExplainFollowUpQuestion(text) {
   return /\b(explain|describe|details?|detail|pasabot|meaning|ibig sabihin|daw na sila|na sila|them|those|that|it)\b/.test(
     lower(text)
   );
+}
+
+function isAllLeaveTypesFollowUpQuestion(text) {
+  const value = lower(text);
+  return /\b(all|complete|full|tanang|tanan|lahat)\b/.test(value) &&
+    /\b(leave|leaves|types?|klase|uri)\b/.test(value);
 }
 
 function requestedRestyleLanguage(text) {
@@ -1143,8 +1204,11 @@ function resolveIntentFromMemory(text, memory) {
     return recent?.intent || memory.intent || null;
   }
   const guidelineFollowUp =
-    (isLeaveGuidelineSectionQuestion(value) || isLeaveTypeExplanationQuestion(value)) &&
+    (isLeaveGuidelineSectionQuestion(value) ||
+      isLeaveTypeExplanationQuestion(value) ||
+      isAllLeaveTypesFollowUpQuestion(value)) &&
     (memory.intent === 'leave_guideline_section' ||
+      memory.intent === 'leave_types' ||
       memoryTopicState(memory, 'leave')?.intent === 'leave_guideline_section');
   if (guidelineFollowUp) return 'leave_guideline_section';
   if (
@@ -1248,6 +1312,7 @@ function resolveIntentFromMemory(text, memory) {
     if (
       isLeaveGuidelineSectionQuestion(value) ||
       isLeaveTypeExplanationQuestion(value) ||
+      isAllLeaveTypesFollowUpQuestion(value) ||
       (activeIntent === 'leave_types' && isExplainFollowUpQuestion(value))
     ) {
       return 'leave_guideline_section';
@@ -1443,12 +1508,21 @@ function enrichMessageWithMemory(text, memory, memoryIntent = null) {
     memoryIntent === 'leave_guideline_section' &&
     activeMemory?.text &&
     isExplainFollowUpQuestion(enriched) &&
+    !isAllLeaveTypesFollowUpQuestion(enriched) &&
     !isLeaveTypeExplanationQuestion(enriched) &&
     (
       activeMemory.intent === 'leave_types' ||
       isLeaveTypeExplanationQuestion(activeMemory.text) ||
       isLeaveGuidelineSectionQuestion(activeMemory.text)
     )
+  ) {
+    enriched = `${activeMemory.text} (${enriched})`;
+  }
+  if (
+    memoryIntent === 'leave_guideline_section' &&
+    activeMemory?.text &&
+    isAllLeaveTypesFollowUpQuestion(enriched) &&
+    !isLeaveGuidelineSectionQuestion(enriched)
   ) {
     enriched = `${activeMemory.text} (${enriched})`;
   }
@@ -1612,6 +1686,7 @@ function buildToolData(intent, context) {
       balances: context.leave_balances || [],
       leaveTypes: context.leave_types || [],
       leaveGuidelines: context.leave_guidelines || [],
+      leaveGuidelineCatalog: context.leave_guideline_catalog || [],
     };
   }
   if (
@@ -1631,12 +1706,14 @@ function buildToolData(intent, context) {
       requests: context.recent_leave_requests || [],
       leaveTypes: context.leave_types || [],
       leaveGuidelines: context.leave_guidelines || [],
+      leaveGuidelineCatalog: context.leave_guideline_catalog || [],
     };
   }
   if (intent === 'leave_requirements') {
     return {
       leaveTypes: context.leave_types || [],
       leaveGuidelines: context.leave_guidelines || [],
+      leaveGuidelineCatalog: context.leave_guideline_catalog || [],
     };
   }
   if (intent === 'latest_leave_request') {
@@ -1863,10 +1940,18 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     });
   }
 
-  let resolvedIntent =
-    detectEmployeeAssistantIntent(effectiveText, intent) ||
-    memoryIntent ||
-    resolveIntentFromMemory(effectiveText, memory);
+  const scoredIntent = scoreEmployeeAssistantIntent(effectiveText, intent);
+  const fallbackMemoryIntent =
+    memoryIntent || resolveIntentFromMemory(effectiveText, memory);
+  let resolvedIntent = scoredIntent.intent || fallbackMemoryIntent;
+  let intentConfidence = scoredIntent.intent
+    ? scoredIntent.confidence
+    : fallbackMemoryIntent
+      ? 0.72
+      : 0;
+  let intentNeedsAiPlan = scoredIntent.intent
+    ? scoredIntent.needsAiPlan
+    : !fallbackMemoryIntent;
   let model = 'hrms-intent-rules';
   let provider = 'hrms';
   let plannedDateRange = parseAssistantDateRange(effectiveText);
@@ -1877,10 +1962,16 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     dateRange: plannedDateRange,
     text: effectiveText,
     profile,
+    intentConfidence,
+    intentNeedsAiPlan,
   })) {
     const planned = await planToolWithLocalAi(effectiveText, profile);
     if (planned.intent) {
-      resolvedIntent = resolvedIntent || planned.intent;
+      if (!resolvedIntent || intentNeedsAiPlan || intentConfidence < 0.72) {
+        resolvedIntent = planned.intent;
+        intentConfidence = 0.82;
+        intentNeedsAiPlan = false;
+      }
       provider = planned.provider || provider;
       model = planned.model || model;
     }

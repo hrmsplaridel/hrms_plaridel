@@ -99,7 +99,334 @@ function normalizeIntent(value) {
     : null;
 }
 
-function detectEmployeeAssistantIntent(message, explicitIntent) {
+const FUZZY_INTENT_PROFILES = [
+  {
+    intent: 'dtr_absent_summary',
+    phrases: [
+      'how many absences',
+      'how many absent',
+      'pila absent',
+      'pila kabuok absent',
+      'naa koy absent',
+      'absent this month',
+      'absent karong bulana',
+      'absence summary',
+      'no record this month',
+    ],
+  },
+  {
+    intent: 'dtr_missing_logs',
+    phrases: [
+      'missing logs',
+      'missing log',
+      'incomplete dtr',
+      'kulang logs',
+      'kuwang logs',
+      'walay log',
+      'wala log',
+      'do i have missing logs',
+    ],
+  },
+  {
+    intent: 'dtr_status_explanation',
+    phrases: [
+      'dtr status',
+      'attendance status',
+      'why absent',
+      'ngano absent',
+      'bakit absent',
+      'explain my dtr',
+      'unsay status sa akong dtr',
+    ],
+  },
+  {
+    intent: 'dtr_schedule_context',
+    phrases: [
+      'current shift',
+      'my shift',
+      'schedule today',
+      'work schedule',
+      'naa koy duty',
+      'may pasok',
+      'office hours',
+    ],
+  },
+  {
+    intent: 'dtr_late_summary',
+    phrases: ['late summary', 'how many late', 'pila late', 'tardy this month', 'late records'],
+  },
+  {
+    intent: 'dtr_undertime_summary',
+    phrases: ['undertime summary', 'how many undertime', 'early out', 'short hours', 'kulang oras'],
+  },
+  {
+    intent: 'dtr_overtime_summary',
+    phrases: ['overtime summary', 'over time', 'ot hours', 'how many overtime'],
+  },
+  {
+    intent: 'dtr_export_guidance',
+    phrases: ['export dtr', 'download dtr', 'print dtr', 'dtr pdf', 'dtr excel', 'dtr report'],
+  },
+  {
+    intent: 'dtr_policy_guidance',
+    phrases: ['dtr rules', 'attendance rules', 'dtr policy', 'attendance policy', 'dtr guidelines'],
+  },
+  {
+    intent: 'leave_balance',
+    phrases: [
+      'leave balance',
+      'sick leave balance',
+      'vacation leave balance',
+      'remaining leave',
+      'available leave',
+      'leave credits',
+      'pila leave balance',
+      'pila akong sick leave',
+      'ngano gamay leave balance',
+    ],
+  },
+  {
+    intent: 'leave_guideline_section',
+    phrases: [
+      'explain leave types',
+      'explain sick leave',
+      'explain vacation leave',
+      'leave type guidelines',
+      'guidelines of leave types',
+      'leave guidelines',
+      'filing deadlines',
+      'supporting documents',
+      'leave credits and limits',
+      'what is sick leave',
+      'unsay pasabot sick leave',
+    ],
+  },
+  {
+    intent: 'leave_requirements',
+    phrases: [
+      'leave requirements',
+      'requirements sick leave',
+      'requirements maternity leave',
+      'unsay requirements',
+      'ano requirements',
+      'kinahanglan leave',
+      'kailangan leave',
+    ],
+  },
+  {
+    intent: 'leave_attachment_requirement',
+    phrases: [
+      'attachment requirement',
+      'medical certificate',
+      'med cert',
+      'supporting document',
+      'need attachment',
+      'need med cert',
+      'kinahanglan attachment',
+    ],
+  },
+  {
+    intent: 'leave_form_guidance',
+    phrases: ['how to file leave', 'how can i file leave', 'paano mag file leave', 'unsaon pag file leave', 'leave form'],
+  },
+  {
+    intent: 'leave_availability_check',
+    phrases: ['can i file leave', 'pwede mag file leave', 'eligible to file leave', 'can file sick leave', 'can file vacation'],
+  },
+  {
+    intent: 'leave_types',
+    phrases: ['leave types', 'types of leave', 'available leave types', 'what leave types', 'list leave types'],
+  },
+  {
+    intent: 'leave_approval_tracker',
+    phrases: ['who is holding leave', 'kinsa nag hold leave', 'where is my leave', 'pending with leave'],
+  },
+  {
+    intent: 'leave_rejection_reason',
+    phrases: ['why rejected leave', 'ngano gi reject leave', 'bakit rejected leave', 'leave rejection reason'],
+  },
+  {
+    intent: 'leave_history',
+    phrases: ['leave history', 'my leave requests', 'show my leaves', 'leave records'],
+  },
+  {
+    intent: 'locator_types',
+    phrases: ['locator types', 'types of locator', 'what is wfh', 'what is pass slip', 'how about wfh', 'available locator'],
+  },
+  {
+    intent: 'locator_status',
+    phrases: ['locator status', 'locator approved', 'na approve locator', 'latest locator', 'where is locator'],
+  },
+  {
+    intent: 'locator_requirements',
+    phrases: ['locator requirements', 'how to file locator', 'locator attachment', 'pass slip requirements', 'wfh requirements'],
+  },
+  {
+    intent: 'locator_availability_check',
+    phrases: ['can i file locator', 'can file pass slip', 'pwede locator', 'pwede wfh', 'file locator tomorrow'],
+  },
+  {
+    intent: 'locator_summary',
+    phrases: ['locator history', 'locator summary', 'how many locator', 'list locator requests'],
+  },
+  {
+    intent: 'locator_rejection_reason',
+    phrases: ['why rejected locator', 'ngano gi reject locator', 'locator rejection reason'],
+  },
+  {
+    intent: 'locator_approval_tracker',
+    phrases: ['who is holding locator', 'kinsa nag hold locator', 'pending with locator', 'where is locator request'],
+  },
+];
+
+function tokenize(value) {
+  return lower(value)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 1);
+}
+
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  const curr = Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i += 1) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(
+        curr[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cost
+      );
+    }
+    for (let j = 0; j <= b.length; j += 1) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function tokenSimilarity(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))) return 0.88;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen <= 2) return 0;
+  const distance = levenshtein(a, b);
+  const ratio = 1 - distance / maxLen;
+  if (maxLen <= 4) return ratio >= 0.75 ? ratio : 0;
+  return ratio >= 0.68 ? ratio : 0;
+}
+
+function phraseSimilarity(queryTokens, phrase) {
+  const phraseTokens = tokenize(phrase);
+  if (phraseTokens.length === 0 || queryTokens.length === 0) return 0;
+  const scores = phraseTokens.map((phraseToken) =>
+    Math.max(...queryTokens.map((queryToken) => tokenSimilarity(queryToken, phraseToken)))
+  );
+  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  const coverage = scores.filter((score) => score >= 0.68).length / phraseTokens.length;
+  return average * 0.65 + coverage * 0.35;
+}
+
+function scoreFuzzyIntents(message) {
+  const normalized = normalizeAssistantMessageForRules(message);
+  const queryTokens = tokenize(normalized);
+  const scores = FUZZY_INTENT_PROFILES.map((profile) => {
+    const phraseScores = profile.phrases.map((phrase) => phraseSimilarity(queryTokens, phrase));
+    const best = Math.max(0, ...phraseScores);
+    const second = phraseScores
+      .slice()
+      .sort((a, b) => b - a)[1] || 0;
+    return {
+      intent: profile.intent,
+      confidence: Math.min(1, best * 0.88 + second * 0.12),
+      source: 'fuzzy',
+    };
+  })
+    .filter((item) => item.confidence > 0)
+    .sort((a, b) => b.confidence - a.confidence);
+
+  return {
+    normalizedText: normalized,
+    top: scores[0] || null,
+    runnerUp: scores[1] || null,
+    scores: scores.slice(0, 5),
+  };
+}
+
+function scoreEmployeeAssistantIntent(message, explicitIntent) {
+  const forcedIntent = normalizeIntent(explicitIntent);
+  if (forcedIntent) {
+    return {
+      intent: forcedIntent,
+      confidence: 1,
+      source: 'explicit',
+      needsAiPlan: false,
+      fuzzy: scoreFuzzyIntents(message),
+    };
+  }
+
+  const fuzzy = scoreFuzzyIntents(message);
+  const ruleIntent = detectEmployeeAssistantIntentByRules(message, null);
+  const top = fuzzy.top;
+  const runnerUp = fuzzy.runnerUp;
+  const ruleScore =
+    fuzzy.scores.find((item) => item.intent === ruleIntent)?.confidence || 0;
+
+  if (ruleIntent) {
+    if (
+      top &&
+      top.intent !== ruleIntent &&
+      top.confidence >= 0.72 &&
+      top.confidence - ruleScore >= 0.16
+    ) {
+      return {
+        intent: top.intent,
+        confidence: top.confidence,
+        source: 'fuzzy_override',
+        needsAiPlan: top.confidence < 0.78,
+        fuzzy,
+        ruleIntent,
+      };
+    }
+
+    const confidence = Math.max(ruleScore, ruleScore >= 0.5 ? 0.84 : 0.74);
+    return {
+      intent: ruleIntent,
+      confidence,
+      source: ruleScore >= 0.5 ? 'rules_fuzzy' : 'rules',
+      needsAiPlan: confidence < 0.78,
+      fuzzy,
+      ruleIntent,
+    };
+  }
+
+  const margin = top && runnerUp ? top.confidence - runnerUp.confidence : top?.confidence || 0;
+  if (top && top.confidence >= 0.62 && margin >= 0.08) {
+    return {
+      intent: top.intent,
+      confidence: top.confidence,
+      source: 'fuzzy',
+      needsAiPlan: top.confidence < 0.72,
+      fuzzy,
+      ruleIntent: null,
+    };
+  }
+
+  return {
+    intent: null,
+    confidence: top?.confidence || 0,
+    source: 'unclear',
+    needsAiPlan: true,
+    fuzzy,
+    ruleIntent: null,
+  };
+}
+
+function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   const forcedIntent = normalizeIntent(explicitIntent);
   if (forcedIntent) return forcedIntent;
 
@@ -646,7 +973,13 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
   return null;
 }
 
+function detectEmployeeAssistantIntent(message, explicitIntent) {
+  return scoreEmployeeAssistantIntent(message, explicitIntent).intent;
+}
+
 module.exports = {
   detectEmployeeAssistantIntent,
   normalizeIntent,
+  scoreEmployeeAssistantIntent,
+  scoreFuzzyIntents,
 };
