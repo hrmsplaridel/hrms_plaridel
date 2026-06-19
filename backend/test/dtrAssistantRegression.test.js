@@ -393,6 +393,53 @@ test('DTR assistant regression: leave guideline catalog fills missing DB leave t
   assert.doesNotMatch(reply, /Plus \d+ more/);
 });
 
+test('DTR assistant regression: Bisaya leave type guideline replies localize standard descriptions', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'what are the guidelines of the leave types? bisayaa daw na',
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+        },
+      ],
+      leave_guideline_catalog: buildAllLeaveGuidelines(),
+    },
+    'leave_guideline_section'
+  );
+
+  assert.match(reply, /Leave Type Guidelines/);
+  assert.match(reply, /Mao ni ang guideline summary/i);
+  assert.match(reply, /Vacation Leave: Para sa personal nga pahuway/i);
+  assert.match(reply, /Sick Leave: Para kung dili ka makareport/i);
+  assert.doesNotMatch(reply, /Granted to employees for personal recreation/i);
+  assert.doesNotMatch(reply, /Granted when an employee is unable to report/i);
+});
+
+test('DTR assistant regression: Bisaya specific leave explanation localizes details', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'explain ang sick leave sa bisaya',
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+          requires_attachment: false,
+          requires_attachment_when_over_days: 5,
+        },
+      ],
+    },
+    'leave_guideline_section'
+  );
+
+  assert.match(reply, /Sick Leave guideline/i);
+  assert.match(reply, /Pasabot: Para kung dili ka makareport/i);
+  assert.match(reply, /Medical certificate kasagaran kinahanglan/i);
+  assert.doesNotMatch(reply, /unable to report due to personal illness/i);
+});
+
 test('DTR assistant regression: specific leave explain questions show guideline details', () => {
   const reply = buildFastEmployeeAssistantReply(
     'explain the sick leave',
