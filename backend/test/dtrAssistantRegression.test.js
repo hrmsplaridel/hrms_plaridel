@@ -586,6 +586,36 @@ test('DTR assistant regression: replies use friendly dates and day counts', () =
   assert.doesNotMatch(dtrReply, /8\.00/);
 });
 
+test('DTR assistant regression: current shift reply is direct and friendly', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'what is my current shift?',
+    {
+      date_range: {
+        label: 'today',
+        startDate: '2026-06-18',
+        endDate: '2026-06-18',
+      },
+      dtr_calendar_days: [
+        {
+          attendance_date: '2026-06-18',
+          shift_id: 'shift-1',
+          shift_name: 'Morning Shift',
+          start_time: '08:00:00',
+          end_time: '17:00:00',
+          grace_period_minutes: 5,
+          working_days: [1, 2, 3, 4, 5],
+        },
+      ],
+    },
+    'dtr_schedule_context'
+  );
+
+  assert.match(reply, /Your current shift is Morning Shift, 8:00 AM-5:00 PM/);
+  assert.match(reply, /Expected logs: AM in, AM out, PM in, PM out/);
+  assert.doesNotMatch(reply, /schedule\/holiday day/i);
+  assert.doesNotMatch(reply, /08:00:00-17:00:00/);
+});
+
 test('DTR assistant regression: action metadata is generated for next-step work', () => {
   const leaveActions = assistantServiceTest.buildActions(
     'leave_availability_check',

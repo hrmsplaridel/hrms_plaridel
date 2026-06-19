@@ -1771,6 +1771,52 @@ function dtrScheduleContextReply(context, message) {
     if (language === 'tagalog') return `Wala akong nakitang shift schedule sa selected period. ${text}`;
     return text;
   }
+  if (days.length === 1) {
+    const day = days[0];
+    const expected = expectedSlotsForCalendarDay(day);
+    const scheduleRange = fmtScheduleRange(day);
+    const shiftName = day.shift_name || 'scheduled shift';
+    const date = fmtFriendlyDate(day.attendance_date);
+    const details = [
+      `Date: ${date}`,
+      scheduleRange ? `Time: ${scheduleRange}` : null,
+      `Grace period: ${fmtMinutes(day.grace_period_minutes || 0)}`,
+      `Expected logs: ${expected.length > 0 ? expected.join(', ') : 'none'}`,
+      day.holiday_name
+        ? `Holiday: ${day.holiday_name} (${day.holiday_coverage || 'whole_day'})`
+        : null,
+    ];
+
+    if (!isCalendarWorkingDay(day)) {
+      return structuredReply(language, {
+        title: 'Current shift',
+        summary:
+          language === 'bisaya'
+            ? `Wala kay required DTR logs sa ${date} base sa schedule context. ${day.holiday_name ? `${day.holiday_name} ni.` : 'Non-working/rest day ni.'}`
+            : language === 'tagalog'
+              ? `Wala kang required DTR logs noong ${date} base sa schedule context. ${day.holiday_name ? `${day.holiday_name} ito.` : 'Non-working/rest day ito.'}`
+              : `You have no required DTR logs on ${date} based on the schedule context. ${day.holiday_name ? `It is ${day.holiday_name}.` : 'It is a non-working/rest day.'}`,
+        details,
+      });
+    }
+
+    return structuredReply(language, {
+      title: 'Current shift',
+      summary:
+        language === 'bisaya'
+          ? `Ang imong current shift kay ${shiftName}${scheduleRange ? `, ${scheduleRange}` : ''}.`
+          : language === 'tagalog'
+            ? `Ang current shift mo ay ${shiftName}${scheduleRange ? `, ${scheduleRange}` : ''}.`
+            : `Your current shift is ${shiftName}${scheduleRange ? `, ${scheduleRange}` : ''}.`,
+      details,
+      nextStep:
+        language === 'bisaya'
+          ? 'I-check kini kung gusto nimo mahibaloan ang expected logs, late cutoff, or undertime basis.'
+          : language === 'tagalog'
+            ? 'Gamitin ito para ma-check ang expected logs, late cutoff, o undertime basis.'
+            : 'Use this to check expected logs, late cutoff, or undertime basis.',
+    });
+  }
   const lines = limitedRequests(days, 7).map((day) => {
     const expected = expectedSlotsForCalendarDay(day);
     const working = isCalendarWorkingDay(day) ? 'working day' : 'non-working/no required logs';
