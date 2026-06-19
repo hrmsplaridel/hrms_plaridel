@@ -20,6 +20,25 @@ function isLeaveHowToFileQuestion(text) {
   );
 }
 
+function isLeaveGuidelineSectionQuestion(text) {
+  return /\b(general rules?|filing deadlines?|deadlines?|supporting documents?|attachments?|leave credits?|credits and limits?|commutation|monetization|monetisation|terminal leave|guidelines?|guideline sections?|guidelines?.*(?:leave types?|types of leave)|leave types?.*guidelines?|types of leave.*guidelines?|explain.*guidelines?|explain.*deadlines?|explain.*credits?|explain.*documents?)\b/.test(
+    text
+  );
+}
+
+function isLeaveTypeExplanationQuestion(text) {
+  const hasExplainWord =
+    /\b(explain|describe|details?|detail|tell me about|what is|what are|meaning|pasabot|ibig sabihin|i-explain|explain daw|explain na)\b/.test(
+      text
+    );
+  if (!hasExplainWord) return false;
+  if (/\b(dtr|attendance|locator|pass slip|wfh|official business|ob)\b/.test(text)) return false;
+  return (
+    LEAVE_TOPIC_PATTERN.test(text) ||
+    /\b(leave types?|types of leave|all leaves?|available leaves?)\b/.test(text)
+  );
+}
+
 function normalizeIntent(value) {
   const intent = String(value || '').trim().toLowerCase();
   return [
@@ -407,10 +426,9 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
   }
 
   if (
-    /\b(general rules|filing deadline|filing deadlines|supporting documents|leave credits|credits and limits|commutation|monetization|monetisation|terminal leave|guideline|guidelines)\b/.test(
-      text
-    ) &&
-    LEAVE_TOPIC_PATTERN.test(text)
+    isLeaveTypeExplanationQuestion(text) ||
+    isLeaveGuidelineSectionQuestion(text) &&
+    (LEAVE_TOPIC_PATTERN.test(text) || !/\b(dtr|attendance|locator|pass slip|wfh|official business|ob)\b/.test(text))
   ) {
     return 'leave_guideline_section';
   }

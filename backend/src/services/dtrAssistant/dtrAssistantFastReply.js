@@ -139,12 +139,13 @@ function isTagalogOrBisaya(message) {
 
 function languageOf(message) {
   const text = lower(message);
-  if (/\b(ngano|unsa|unsay|unsa'y|karon|pila|kabuok|naa|akong|nako|nabilin|gamay|kuwang|imong|nimo|gikan|mahimong|adlaw|kinahanglan|ug|kay|aning|bulana|adtong|adtung|atong|niadtong|niadtung|ana|adto|ato|duty)\b/.test(text)) {
+  if (/\b(bisayaa?|binisayaa?|cebuano|ngano|unsa|unsay|unsa'y|karon|pila|kabuok|naa|akong|nako|nabilin|gamay|kuwang|imong|nimo|gikan|mahimong|adlaw|kinahanglan|ug|kay|aning|bulana|adtong|adtung|atong|niadtong|niadtung|ana|adto|ato|duty)\b/.test(text)) {
     return 'bisaya';
   }
-  if (/\b(ano|ngayon|ako|ko|ba|may|wala|ilan|bakit|maliit|natira|kailangan|pasok|noong|nung)\b/.test(text)) {
+  if (/\b(tagalog|filipino|ano|ngayon|ako|ko|ba|may|wala|ilan|bakit|maliit|natira|kailangan|pasok|noong|nung)\b/.test(text)) {
     return 'tagalog';
   }
+  if (/\b(english|ingles)\b/.test(text)) return 'english';
   return 'english';
 }
 
@@ -178,7 +179,7 @@ function localizeTitle(title, language) {
     return value
       .replace(/^Leave balance$/i, 'Leave balance nimo')
       .replace(/^Leave requirements$/i, 'Leave requirements')
-      .replace(/^Attachment requirement$/i, 'Attachment requirement')
+      .replace(/^Attachment requirement$/i, 'Attachment requirement nimo')
       .replace(/^Pending leave requests$/i, 'Pending leave requests nimo')
       .replace(/^Approved leave requests$/i, 'Approved leave requests nimo')
       .replace(/^Rejected leave requests$/i, 'Rejected leave requests nimo')
@@ -194,7 +195,7 @@ function localizeTitle(title, language) {
     return value
       .replace(/^Leave balance$/i, 'Leave balance mo')
       .replace(/^Leave requirements$/i, 'Leave requirements')
-      .replace(/^Attachment requirement$/i, 'Attachment requirement')
+      .replace(/^Attachment requirement$/i, 'Attachment requirement mo')
       .replace(/^Pending leave requests$/i, 'Pending leave requests mo')
       .replace(/^Approved leave requests$/i, 'Approved leave requests mo')
       .replace(/^Rejected leave requests$/i, 'Rejected leave requests mo')
@@ -596,6 +597,31 @@ function attachmentRuleText(type, days) {
       : `attachment required when filing ${fmtDayCount(threshold)} or more`;
   }
   return type.requires_attachment ? 'attachment required' : 'no attachment required';
+}
+
+function localizedAttachmentRuleText(type, days, language) {
+  const threshold = asNumber(type.requires_attachment_when_over_days);
+  if (threshold != null) {
+    const count = fmtLocalizedDayCount(threshold, language);
+    const requiredNow = days != null && days >= threshold;
+    if (language === 'bisaya') {
+      return requiredNow
+        ? `kinahanglan ug attachment kay niabot sa ${count} ang request`
+        : `kinahanglan ug attachment kung ${count} o labaw ang i-file`;
+    }
+    if (language === 'tagalog') {
+      return requiredNow
+        ? `kailangan ng attachment dahil umabot sa ${count} ang request`
+        : `kailangan ng attachment kapag ${count} o higit pa ang i-file`;
+    }
+  }
+  if (language === 'bisaya') {
+    return type.requires_attachment ? 'kinahanglan ug attachment' : 'walay required attachment';
+  }
+  if (language === 'tagalog') {
+    return type.requires_attachment ? 'kailangan ng attachment' : 'walang required attachment';
+  }
+  return attachmentRuleText(type, days);
 }
 
 function workflowStatusText(status) {
@@ -2340,9 +2366,10 @@ function leaveAttachmentRequirementReply(context, message) {
     const guideline = guidance?.requirements
       ? ` Guideline: ${trimTrailingSentencePunctuation(guidance.requirements)}.`
       : '';
-    return `${labelLeaveType(type.display_name || type.name)}: ${attachmentRuleText(
+    return `${labelLeaveType(type.display_name || type.name)}: ${localizedAttachmentRuleText(
       type,
-      days
+      days,
+      language
     )}.${guideline}`;
   });
 
@@ -2493,11 +2520,108 @@ function leaveDtrImpactReply(context, message) {
   });
 }
 
+function isLeaveTypeGuidelineOverviewQuestion(message) {
+  const text = lower(message);
+  return /\b(guidelines?|guide|rules?|policy|policies|explain|describe|details?|detail|tell me about|what are|pasabot|meaning|i-explain)\b/.test(text) &&
+    /\b(leave types?|types of leave|all leave|available leave)\b/.test(text);
+}
+
+function leaveTypeGuidelineOverviewReply(context, message) {
+  const language = languageOf(message);
+  const typeGuidelines = (context.leave_types || [])
+    .filter((type) => type.employee_can_file !== false)
+    .map((type) => {
+      const guidance = getLeaveGuidanceForType(type);
+      if (!guidance) return null;
+      const pieces = [
+        guidance.description,
+        guidance.requirements ? `Requirements: ${guidance.requirements}` : null,
+        guidance.limits ? `Limit: ${guidance.limits}` : null,
+        guidance.advanceFiling ? `Filing: ${guidance.advanceFiling}` : null,
+        guidance.notes ? `Note: ${guidance.notes}` : null,
+      ].filter(Boolean);
+      return `${labelLeaveType(type.display_name || type.name)}: ${pieces.join(' ')}`;
+    })
+    .filter(Boolean);
+
+  const fallbackGuidelines = (context.leave_guidelines || []).map((guidance) => {
+    const pieces = [
+      guidance.description,
+      guidance.requirements ? `Requirements: ${guidance.requirements}` : null,
+      guidance.limits ? `Limit: ${guidance.limits}` : null,
+      guidance.advanceFiling ? `Filing: ${guidance.advanceFiling}` : null,
+      guidance.notes ? `Note: ${guidance.notes}` : null,
+    ].filter(Boolean);
+    return `${labelLeaveType(guidance.leave_type)}: ${pieces.join(' ')}`;
+  });
+
+  const lines = typeGuidelines.length > 0 ? typeGuidelines : fallbackGuidelines;
+  if (lines.length === 0) {
+    if (language === 'bisaya') return 'Wala koy nakitang leave type guidelines sa system records.';
+    if (language === 'tagalog') return 'Wala akong nakitang leave type guidelines sa system records.';
+    return 'I found no leave type guidelines in the system records.';
+  }
+
+  return structuredReply(language, {
+    title: 'Leave Type Guidelines',
+    summary:
+      language === 'bisaya'
+        ? 'Mao ni ang guideline summary sa leave types nga naa sa HRMS.'
+        : language === 'tagalog'
+          ? 'Ito ang guideline summary ng leave types na nasa HRMS.'
+          : 'Here is the guideline summary for the HRMS leave types.',
+    details: lines,
+    nextStep:
+      language === 'bisaya'
+        ? 'Pwede ka mangutana ug specific leave type, example: "unsay requirements sa sick leave?"'
+        : language === 'tagalog'
+          ? 'Pwede kang magtanong ng specific leave type, example: "requirements sa sick leave?"'
+          : 'Ask for a specific leave type if you want more detail, for example: "requirements for sick leave".',
+    limit: 8,
+  });
+}
+
+function leaveTypeGuidanceDetailReply(context, message, type, guidance) {
+  const language = languageOf(message);
+  const label = labelLeaveType(type.display_name || type.name);
+  const setupParts = leaveRequirementParts(type);
+  const details = [
+    guidance.description ? `What it is: ${guidance.description}` : null,
+    guidance.requirements ? `Requirements: ${guidance.requirements}` : null,
+    guidance.limits ? `Limit: ${guidance.limits}` : null,
+    guidance.advanceFiling ? `Filing: ${guidance.advanceFiling}` : null,
+    guidance.notes ? `Note: ${guidance.notes}` : null,
+    setupParts.length > 0 ? `HRMS setup: ${setupParts.join(', ')}` : null,
+  ].filter(Boolean);
+
+  return structuredReply(language, {
+    title: `${label} guideline`,
+    summary:
+      language === 'bisaya'
+        ? `Mao ni ang explanation sa ${label} base sa HRMS setup ug leave guidelines.`
+        : language === 'tagalog'
+          ? `Ito ang explanation ng ${label} base sa HRMS setup at leave guidelines.`
+          : `Here is the explanation for ${label} from the HRMS setup and leave guidelines.`,
+    details,
+    nextStep:
+      language === 'bisaya'
+        ? 'Kung gusto ka mag-file, i-check gihapon ang balance, date, attachment, ug HR approval workflow.'
+        : language === 'tagalog'
+          ? 'Kung magfa-file ka, i-check pa rin ang balance, date, attachment, at HR approval workflow.'
+          : 'If you plan to file it, still check balance, dates, attachment, and the HR approval workflow.',
+    limit: 6,
+  });
+}
+
 function leaveGuidelineSectionReply(context, message) {
   const language = languageOf(message);
   const sections = getGuidelineSectionsForMessage(message);
   const type = requestedLeaveTypeRecord(message, context);
   const guidance = type ? getLeaveGuidanceForType(type) : null;
+
+  if (isLeaveTypeGuidelineOverviewQuestion(message)) {
+    return leaveTypeGuidelineOverviewReply(context, message);
+  }
 
   if (guidance && /\b(supporting|document|docs|attachment|requirements?)\b/i.test(message)) {
     const line = `${labelLeaveType(type.display_name || type.name)}: ${trimTrailingSentencePunctuation(
@@ -2517,17 +2641,27 @@ function leaveGuidelineSectionReply(context, message) {
     });
   }
 
+  if (guidance) {
+    return leaveTypeGuidanceDetailReply(context, message, type, guidance);
+  }
+
   if (sections.length === 0) {
     const titles = GUIDELINE_SECTIONS.map((section) => section.title).join(', ');
-    if (language === 'bisaya') return `Pwede nako i-explain ani nga guideline sections: ${titles}.`;
-    if (language === 'tagalog') return `Pwede kong i-explain itong guideline sections: ${titles}.`;
-    return `I can explain these guideline sections: ${titles}.`;
+    if (language === 'bisaya') return `Pwede nako i-explain ang leave guideline sections: ${titles}. Ingna lang ko unsa imong gusto, example: "explain filing deadlines".`;
+    if (language === 'tagalog') return `Pwede kong i-explain ang leave guideline sections: ${titles}. Sabihin mo lang alin ang gusto mo, example: "explain filing deadlines".`;
+    return `I can explain these leave guideline sections: ${titles}. Tell me which one you want, for example: "explain filing deadlines".`;
   }
 
   const lines = sections.map((section) => `${section.title}: ${section.points.join(' ')}`);
+  const sectionNames = sections.map((section) => section.title).join(', ');
   return structuredReply(language, {
-    title: 'Guidelines',
-    summary: `I found ${sections.length} guideline ${plural(sections.length, 'section')}.`,
+    title: sections.length === 1 ? sections[0].title : 'Leave Guidelines',
+    summary:
+      language === 'bisaya'
+        ? `Mao ni ang ${sectionNames} guideline.`
+        : language === 'tagalog'
+          ? `Ito ang ${sectionNames} guideline.`
+          : `Here is the ${sectionNames} guideline${sections.length === 1 ? '' : 's'}.`,
     details: lines,
     limit: 4,
   });

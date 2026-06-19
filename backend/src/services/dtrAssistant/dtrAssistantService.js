@@ -288,6 +288,7 @@ function buildNextAssistantMemory(previous, next) {
     topics[topic] = {
       intent: next.intent || previousTopicState.intent || null,
       topic,
+      text: turn.text || previousTopicState.text || null,
       dateRange: next.dateRange || previousTopicState.dateRange || null,
       leaveType: topic === 'leave' ? leaveType : previousTopicState.leaveType || null,
       locatorType: topic === 'locator' ? locatorType : previousTopicState.locatorType || null,
@@ -940,10 +941,10 @@ function shouldAskAiForToolPlan({ resolvedIntent, dateRange, text, profile }) {
 
 function simpleLanguageOf(text) {
   const value = lower(text);
-  if (/\b(unsa|unsay|ngano|pila|naa|akong|nako|imong|nimo|ug|karon|pwede|adto|ato|ana|bulana|semanaha)\b/.test(value)) {
+  if (/\b(bisayaa?|binisayaa?|cebuano|unsa|unsay|ngano|pila|naa|akong|nako|imong|nimo|ug|karon|pwede|adto|ato|ana|bulana|semanaha)\b/.test(value)) {
     return 'bisaya';
   }
-  if (/\b(ano|bakit|ilan|ngayon|kailangan|puwede|pwede|ako|ko|ba|may|wala)\b/.test(value)) {
+  if (/\b(tagalog|filipino|ano|bakit|ilan|ngayon|kailangan|puwede|pwede|ako|ko|ba|may|wala)\b/.test(value)) {
     return 'tagalog';
   }
   return 'english';
@@ -969,9 +970,54 @@ function isHowToFileInstructionQuestion(text) {
   );
 }
 
+function isLeaveGuidelineSectionQuestion(text) {
+  return /\b(general rules?|filing deadlines?|deadlines?|supporting documents?|attachments?|leave credits?|credits and limits?|commutation|monetization|monetisation|terminal leave|guidelines?|guideline sections?|guidelines?.*(?:leave types?|types of leave)|leave types?.*guidelines?|types of leave.*guidelines?|explain.*guidelines?|explain.*deadlines?|explain.*credits?|explain.*documents?)\b/.test(
+    lower(text)
+  );
+}
+
+function isLeaveTypeExplanationQuestion(text) {
+  const value = lower(text);
+  const hasExplainWord =
+    /\b(explain|describe|details?|detail|tell me about|what is|what are|meaning|pasabot|ibig sabihin|i-explain|explain daw|explain na)\b/.test(
+      value
+    );
+  if (!hasExplainWord) return false;
+  if (/\b(dtr|attendance|locator|pass slip|wfh|official business|ob)\b/.test(value)) return false;
+  return /\b(leave|leaves|sick|vacation|paternity|maternity|adoption|solo parent|vawc|calamity|mandatory|forced|vl|sl|leave types?|types of leave|all leaves?|available leaves?)\b/.test(
+    value
+  );
+}
+
+function isExplainFollowUpQuestion(text) {
+  return /\b(explain|describe|details?|detail|pasabot|meaning|ibig sabihin|daw na sila|na sila|them|those|that|it)\b/.test(
+    lower(text)
+  );
+}
+
+function requestedRestyleLanguage(text) {
+  const value = lower(text);
+  if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(value)) return 'bisaya';
+  if (/\b(tagalog|filipino)\b/.test(value)) return 'tagalog';
+  if (/\b(english|ingles)\b/.test(value)) return 'english';
+  return null;
+}
+
+function isLanguageRestyleRequest(text) {
+  const value = lower(text);
+  if (!requestedRestyleLanguage(value)) return false;
+  if (explicitTopicFromText(value)) return false;
+  const words = value.split(/[^a-z0-9]+/).filter(Boolean);
+  if (words.length <= 6) return true;
+  return /\b(translate|answer|reply|say|again|daw|please|pls|lang|only|in|sa|into|to|make|i)\b/.test(
+    value
+  );
+}
+
 function isAmbiguousFilingQuestion(text) {
   const value = lower(text);
   if (explicitTopicFromText(value)) return false;
+  if (isLeaveGuidelineSectionQuestion(value)) return false;
   const hasFilingIntent =
     /\b(file|filing|apply|submit|avail|can file|can i file|pwede.*file|puwede.*file|pwede ba|puwede ba|allowed|eligible|qualified|mag file|mag-file|i file|i-file)\b/.test(
       value
@@ -1020,7 +1066,7 @@ function fallbackContent() {
 }
 
 function isFollowUpQuestion(text) {
-  return /\b(it|that|this|one|same|about|how about|what about|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|today|tomorrow|yesterday|ugma|gahapon|kagahapon|week|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|ago|from|to|semana|semanaha|bulan|bulana|buwan|buwana|aning|karong|ngayong|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?|remarks?|reason|who|where|asa|kinsa|sino|can|file|pwede|puwede|allowed|eligible)\b/.test(
+  return /\b(it|that|this|one|same|about|how about|what about|translate|answer|reply|say|again|bisayaa?|binisayaa?|cebuano|tagalog|filipino|english|ingles|daw|explain|guidelines?|deadlines?|supporting|documents?|credits?|commutation|monetization|monetisation|terminal leave|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|today|tomorrow|yesterday|ugma|gahapon|kagahapon|week|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|ago|from|to|semana|semanaha|bulan|bulana|buwan|buwana|aning|karong|ngayong|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?|remarks?|reason|who|where|asa|kinsa|sino|can|file|pwede|puwede|allowed|eligible)\b/.test(
     lower(text)
   );
 }
@@ -1090,6 +1136,17 @@ function resolveIntentFromMemory(text, memory) {
   const value = lower(text);
   const memoryTopic = memory.topic || topicForIntent(memory.intent);
   const explicitTopic = explicitTopicFromText(text);
+  if (isLanguageRestyleRequest(value)) {
+    const recent = (memory.history || []).find(
+      (item) => item?.intent && !['clarify_filing_topic', 'clarify_status_topic', 'direct_ai'].includes(item.intent)
+    );
+    return recent?.intent || memory.intent || null;
+  }
+  const guidelineFollowUp =
+    (isLeaveGuidelineSectionQuestion(value) || isLeaveTypeExplanationQuestion(value)) &&
+    (memory.intent === 'leave_guideline_section' ||
+      memoryTopicState(memory, 'leave')?.intent === 'leave_guideline_section');
+  if (guidelineFollowUp) return 'leave_guideline_section';
   if (
     memoryTopic === 'clarify' ||
     memory.intent === 'clarify_filing_topic' ||
@@ -1188,6 +1245,13 @@ function resolveIntentFromMemory(text, memory) {
     }
   }
   if (isLeaveIntent(activeIntent)) {
+    if (
+      isLeaveGuidelineSectionQuestion(value) ||
+      isLeaveTypeExplanationQuestion(value) ||
+      (activeIntent === 'leave_types' && isExplainFollowUpQuestion(value))
+    ) {
+      return 'leave_guideline_section';
+    }
     if (isHowToFileInstructionQuestion(value)) {
       return 'leave_form_guidance';
     }
@@ -1242,6 +1306,9 @@ function resolveIntentFromMemory(text, memory) {
   }
   if (/\b(policy|rule|rules|advance|before|deadline|max|maximum|limit|past date)\b/.test(lower(text))) {
     return 'leave_filing_policy';
+  }
+  if (isLeaveGuidelineSectionQuestion(text) || isLeaveTypeExplanationQuestion(text)) {
+    return 'leave_guideline_section';
   }
   if (/\b(requirement|requirements|needed|need|kinahanglan|kailangan)\b/.test(lower(text))) {
     return 'leave_requirements';
@@ -1361,6 +1428,30 @@ function enrichMessageWithMemory(text, memory, memoryIntent = null) {
   const activeIntent =
     memoryIntent || topicMemory?.intent || (!explicitTopic ? memory?.intent : null);
   const activeMemory = topicMemory || (!explicitTopic ? memory : null);
+  const restyleSourceText =
+    activeMemory?.text ||
+    (memory?.history || []).find((item) => item?.intent === activeIntent)?.text ||
+    memory?.lastUserMessage;
+  if (
+    isLanguageRestyleRequest(enriched) &&
+    restyleSourceText &&
+    lower(restyleSourceText) !== lower(enriched)
+  ) {
+    enriched = `${restyleSourceText} (${enriched})`;
+  }
+  if (
+    memoryIntent === 'leave_guideline_section' &&
+    activeMemory?.text &&
+    isExplainFollowUpQuestion(enriched) &&
+    !isLeaveTypeExplanationQuestion(enriched) &&
+    (
+      activeMemory.intent === 'leave_types' ||
+      isLeaveTypeExplanationQuestion(activeMemory.text) ||
+      isLeaveGuidelineSectionQuestion(activeMemory.text)
+    )
+  ) {
+    enriched = `${activeMemory.text} (${enriched})`;
+  }
   const relativeDate = memoryRelativeDate(enriched, activeMemory);
   if (relativeDate) {
     enriched = `${enriched} (${relativeDate})`;
