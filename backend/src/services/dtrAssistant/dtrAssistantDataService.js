@@ -3,7 +3,10 @@ const {
   buildDtrPolicyKnowledge,
   buildLocatorPolicyKnowledge,
 } = require('./attendanceLocatorPolicies');
-const { buildGuidelinesForTypes } = require('./leaveFilingGuidelines');
+const {
+  buildAllLeaveGuidelines,
+  buildGuidelinesForTypes,
+} = require('./leaveFilingGuidelines');
 
 function toNumber(value) {
   if (value == null) return null;
@@ -505,6 +508,7 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
     recent_leave_requests: leaveRequests,
     leave_types: leaveTypes,
     leave_guidelines: buildGuidelinesForTypes(leaveTypes),
+    leave_guideline_catalog: buildAllLeaveGuidelines(),
     recent_locator_slips: locatorSlips,
     locator_types: locatorTypes,
     dtr_policies: buildDtrPolicyKnowledge(),

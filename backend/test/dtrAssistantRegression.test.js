@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   detectEmployeeAssistantIntent,
+  scoreEmployeeAssistantIntent,
 } = require('../src/services/dtrAssistant/dtrAssistantIntentService');
 const {
   buildFastEmployeeAssistantReply,
@@ -19,6 +20,9 @@ const {
 const {
   parseAssistantDateRange,
 } = require('../src/utils/dateRangeParser');
+const {
+  buildAllLeaveGuidelines,
+} = require('../src/services/dtrAssistant/leaveFilingGuidelines');
 
 test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected intents', () => {
   const cases = [
@@ -33,6 +37,10 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['paano mag file ng sick leave?', 'leave_form_guidance'],
     ['unsaon pag file ug sick leave?', 'leave_form_guidance'],
     ['can I file 1 day sick leave tomorrow?', 'leave_availability_check'],
+    ['okay explain filing deadlines', 'leave_guideline_section'],
+    ['can you give me the guidlines of the leave types?', 'leave_guideline_section'],
+    ['explain me the leave types', 'leave_guideline_section'],
+    ['explain the sick leave', 'leave_guideline_section'],
     ['unsay requirements sa maternity leave?', 'leave_requirements'],
     ['need med cert if 5 days sick leave?', 'leave_attachment_requirement'],
     ['kinsa nag hold sa akong leave request?', 'leave_approval_tracker'],
@@ -53,6 +61,30 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
   for (const [message, expected] of cases) {
     assert.equal(detectEmployeeAssistantIntent(message), expected, message);
   }
+});
+
+test('DTR assistant regression: fuzzy intent scoring handles typos and mixed language', () => {
+  const cases = [
+    ['pila akong sik leev balnce?', 'leave_balance'],
+    ['explan sik leev', 'leave_guideline_section'],
+    ['unsa requirements sa matirnity leev?', 'leave_requirements'],
+    ['how many abssents i have this mnth?', 'dtr_absent_summary'],
+    ['naa koy absnt karong bulna?', 'dtr_absent_summary'],
+    ['staus sa akong lokator?', 'locator_status'],
+    ['pwede ko mag lokator ugma?', 'locator_availability_check'],
+  ];
+
+  for (const [message, expected] of cases) {
+    const scored = scoreEmployeeAssistantIntent(message);
+    assert.equal(scored.intent, expected, message);
+    assert.ok(scored.confidence >= 0.62, `${message}: ${scored.confidence}`);
+  }
+});
+
+test('DTR assistant regression: unclear fuzzy intent is marked for AI planning', () => {
+  const scored = scoreEmployeeAssistantIntent('unsa ani karon?');
+  assert.equal(scored.intent, null);
+  assert.equal(scored.needsAiPlan, true);
 });
 
 test('DTR assistant regression: stronger date phrases resolve to useful ranges', () => {
@@ -207,6 +239,230 @@ test('DTR assistant regression: how-to-file leave questions show form guidance',
   assert.doesNotMatch(reply, /balance is not enough/i);
 });
 
+test('DTR assistant regression: leave type list includes short explanations', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'what are the leave types i can file?',
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'maternityLeave',
+          display_name: 'Maternity Leave',
+          employee_can_file: true,
+        },
+      ],
+    },
+    'leave_types'
+  );
+
+  assert.match(reply, /Leave types you can file/);
+  assert.match(reply, /Sick Leave: Granted when an employee is unable to report/i);
+  assert.match(reply, /Maternity Leave: Granted to female employees/i);
+  assert.doesNotMatch(reply, /^These are the leave types you can file: Sick Leave, Maternity Leave\.$/);
+});
+
+test('DTR assistant regression: leave guideline follow-ups stay in guideline context', () => {
+  const memory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_guideline_section',
+    text: 'what i mean is the leave guidelines',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-18',
+      endDate: '2026-06-18',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('okay explain filing deadlines', memory),
+    'leave_guideline_section'
+  );
+  assert.equal(
+    assistantServiceTest.clarificationIntentForMessage(
+      'okay explain filing deadlines',
+      null,
+      'leave_guideline_section'
+    ),
+    null
+  );
+
+  const reply = buildFastEmployeeAssistantReply(
+    'okay explain filing deadlines',
+    {},
+    'leave_guideline_section'
+  );
+
+  assert.match(reply, /Filing Deadlines/);
+  assert.match(reply, /Vacation leave is normally filed in advance/i);
+  assert.doesNotMatch(reply, /Which one do you want to file/i);
+});
+
+test('DTR assistant regression: leave type guideline overview is supported', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'explain me the leave types',
+    {
+      leave_types: [
+        {
+          name: 'tenDayVawcLeave',
+          display_name: '10-Day VAWC leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'adoptionLeave',
+          display_name: 'Adoption leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'vacationLeave',
+          display_name: 'Vacation Leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'maternityLeave',
+          display_name: 'Maternity Leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'others',
+          display_name: 'Others',
+          employee_can_file: true,
+        },
+        {
+          name: 'paternityLeave',
+          display_name: 'Paternity leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'rehabilitationPrivilege',
+          display_name: 'Rehabilitation Privilege',
+          employee_can_file: true,
+        },
+        {
+          name: 'soloParentLeave',
+          display_name: 'Solo Parent leave',
+          employee_can_file: true,
+        },
+      ],
+    },
+    'leave_guideline_section'
+  );
+
+  assert.match(reply, /Leave Type Guidelines/);
+  assert.match(reply, /10-Day VAWC leave:/);
+  assert.match(reply, /Adoption leave:/);
+  assert.match(reply, /Vacation Leave: Granted to employees for personal recreation/i);
+  assert.match(reply, /Sick Leave: Granted when an employee is unable to report/i);
+  assert.match(reply, /Maternity Leave: Granted to female employees/i);
+  assert.match(reply, /Others:/);
+  assert.match(reply, /Paternity leave:/);
+  assert.match(reply, /Rehabilitation Privilege:/);
+  assert.match(reply, /Solo Parent leave:/);
+  assert.doesNotMatch(reply, /Tell me which one you want/i);
+  assert.doesNotMatch(reply, /These are the leave types you can file/i);
+  assert.doesNotMatch(reply, /Plus \d+ more/);
+  assert.ok(reply.length < 2200, `reply length: ${reply.length}`);
+});
+
+test('DTR assistant regression: leave guideline catalog fills missing DB leave types', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'what are the guidelines of the leave types?',
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+        },
+      ],
+      leave_guideline_catalog: buildAllLeaveGuidelines(),
+    },
+    'leave_guideline_section'
+  );
+
+  assert.match(reply, /Vacation Leave: Granted to employees for personal recreation/i);
+  assert.match(reply, /Sick Leave: Granted when an employee is unable to report/i);
+  assert.doesNotMatch(reply, /Plus \d+ more/);
+});
+
+test('DTR assistant regression: Bisaya leave type guideline replies localize standard descriptions', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'what are the guidelines of the leave types? bisayaa daw na',
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+        },
+      ],
+      leave_guideline_catalog: buildAllLeaveGuidelines(),
+    },
+    'leave_guideline_section'
+  );
+
+  assert.match(reply, /Leave Type Guidelines/);
+  assert.match(reply, /Mao ni ang guideline summary/i);
+  assert.match(reply, /Vacation Leave: Para sa personal nga pahuway/i);
+  assert.match(reply, /Sick Leave: Para kung dili ka makareport/i);
+  assert.doesNotMatch(reply, /Granted to employees for personal recreation/i);
+  assert.doesNotMatch(reply, /Granted when an employee is unable to report/i);
+});
+
+test('DTR assistant regression: Bisaya specific leave explanation localizes details', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'explain ang sick leave sa bisaya',
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+          requires_attachment: false,
+          requires_attachment_when_over_days: 5,
+        },
+      ],
+    },
+    'leave_guideline_section'
+  );
+
+  assert.match(reply, /Sick Leave guideline/i);
+  assert.match(reply, /Pasabot: Para kung dili ka makareport/i);
+  assert.match(reply, /Medical certificate kasagaran kinahanglan/i);
+  assert.doesNotMatch(reply, /unable to report due to personal illness/i);
+});
+
+test('DTR assistant regression: specific leave explain questions show guideline details', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'explain the sick leave',
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+          requires_attachment: false,
+          requires_attachment_when_over_days: 5,
+        },
+      ],
+    },
+    'leave_guideline_section'
+  );
+
+  assert.match(reply, /Sick Leave guideline/i);
+  assert.match(reply, /unable to report due to personal illness/i);
+  assert.match(reply, /Medical certificate required/i);
+  assert.doesNotMatch(reply, /Leave balance/i);
+});
+
 test('DTR assistant regression: conversation memory keeps topic and entity follow-ups', () => {
   let memory = assistantServiceTest.buildNextAssistantMemory(null, {
     intent: 'locator_types',
@@ -307,6 +563,134 @@ test('DTR assistant regression: conversation memory keeps topic and entity follo
     ),
     'dtr_range_summary'
   );
+});
+
+test('DTR assistant regression: explain follow-up after leave type list expands the list', () => {
+  for (const previousIntent of ['leave_types', 'leave_guideline_section']) {
+    const memory = assistantServiceTest.buildNextAssistantMemory(null, {
+      intent: previousIntent,
+      text: 'explain me the leave types',
+      dateRange: {
+        label: 'today',
+        startDate: '2026-06-15',
+        endDate: '2026-06-15',
+      },
+      modelProfile: 'tools_ollama',
+    });
+
+    assert.equal(
+      assistantServiceTest.resolveIntentFromMemory('eh explain daw na sila', memory),
+      'leave_guideline_section',
+      previousIntent
+    );
+
+    const enriched = assistantServiceTest.enrichMessageWithMemory(
+      'eh explain daw na sila',
+      memory,
+      'leave_guideline_section'
+    );
+
+    assert.match(enriched, /leave types/i, previousIntent);
+    assert.match(enriched, /eh explain daw na sila/i, previousIntent);
+  }
+
+  const reply = buildFastEmployeeAssistantReply(
+    'explain me the leave types (eh explain daw na sila)',
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'maternityLeave',
+          display_name: 'Maternity Leave',
+          employee_can_file: true,
+        },
+      ],
+    },
+    'leave_guideline_section'
+  );
+
+  assert.match(reply, /Leave Type Guidelines/);
+  assert.match(reply, /Sick Leave: Granted when an employee is unable to report/i);
+  assert.doesNotMatch(reply, /These are the leave types you can file/i);
+});
+
+test('DTR assistant regression: all leave types follow-up keeps guideline context', () => {
+  const memory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_guideline_section',
+    text: 'what are the guidelines of the leave types?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('all leave types', memory),
+    'leave_guideline_section'
+  );
+
+  const enriched = assistantServiceTest.enrichMessageWithMemory(
+    'all leave types',
+    memory,
+    'leave_guideline_section'
+  );
+
+  assert.match(enriched, /guidelines of the leave types/i);
+  assert.match(enriched, /all leave types/i);
+});
+
+test('DTR assistant regression: language restyle follow-ups keep previous HRMS answer', () => {
+  const memory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_attachment_requirement',
+    text: 'need med cert if 5 days sick leave?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-15',
+      endDate: '2026-06-15',
+    },
+    leaveType: 'sick',
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('bisayaa daw na', memory),
+    'leave_attachment_requirement'
+  );
+
+  const enriched = assistantServiceTest.enrichMessageWithMemory(
+    'bisayaa daw na',
+    memory,
+    'leave_attachment_requirement'
+  );
+
+  assert.match(enriched, /need med cert if 5 days sick leave/i);
+  assert.match(enriched, /bisayaa daw na/i);
+
+  const reply = buildFastEmployeeAssistantReply(
+    enriched,
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+          requires_attachment: false,
+          requires_attachment_when_over_days: 5,
+        },
+      ],
+    },
+    'leave_attachment_requirement'
+  );
+
+  assert.match(reply, /Mao ni ang attachment rule/i);
+  assert.match(reply, /kinahanglan ug attachment/i);
+  assert.doesNotMatch(reply, /Leave balance/i);
 });
 
 test('DTR assistant regression: conversation memory does not leak stale leave type into explicit topic switches', () => {
@@ -584,6 +968,36 @@ test('DTR assistant regression: replies use friendly dates and day counts', () =
   assert.match(dtrReply, /1 ka present\/complete DTR day/);
   assert.match(dtrReply, /Total hours: 8 hr/);
   assert.doesNotMatch(dtrReply, /8\.00/);
+});
+
+test('DTR assistant regression: current shift reply is direct and friendly', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'what is my current shift?',
+    {
+      date_range: {
+        label: 'today',
+        startDate: '2026-06-18',
+        endDate: '2026-06-18',
+      },
+      dtr_calendar_days: [
+        {
+          attendance_date: '2026-06-18',
+          shift_id: 'shift-1',
+          shift_name: 'Morning Shift',
+          start_time: '08:00:00',
+          end_time: '17:00:00',
+          grace_period_minutes: 5,
+          working_days: [1, 2, 3, 4, 5],
+        },
+      ],
+    },
+    'dtr_schedule_context'
+  );
+
+  assert.match(reply, /Your current shift is Morning Shift, 8:00 AM-5:00 PM/);
+  assert.match(reply, /Expected logs: AM in, AM out, PM in, PM out/);
+  assert.doesNotMatch(reply, /schedule\/holiday day/i);
+  assert.doesNotMatch(reply, /08:00:00-17:00:00/);
 });
 
 test('DTR assistant regression: action metadata is generated for next-step work', () => {
