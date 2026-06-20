@@ -61,6 +61,10 @@ function normalizeIntent(value) {
     'dtr_schedule_context',
     'dtr_export_guidance',
     'dtr_policy_guidance',
+    // Calculated intents
+    'dtr_hours_summary',
+    'leave_balance_projection',
+    // Leave intents
     'leave_balance',
     'pending_leave_requests',
     'approved_leave_requests',
@@ -125,6 +129,41 @@ const FUZZY_INTENT_PROFILES = [
       'walay log',
       'wala log',
       'do i have missing logs',
+    ],
+  },
+  {
+    intent: 'dtr_missing_log_reason',
+    phrases: [
+      'why are my dtr logs missing',
+      'why my dtr logs missing',
+      'why is my dtr incomplete',
+      'reason missing dtr logs',
+      'explain missing dtr logs',
+      'ngano wala logs dtr',
+      'ngano wala ang logs sa akong dtr',
+      'bakit kulang dtr logs',
+    ],
+  },
+  {
+    intent: 'dtr_correction_guidance',
+    phrases: [
+      'how do i fix my missing logs',
+      'fix missing logs',
+      'correct missing logs',
+      'dtr correction',
+      'how to correct dtr',
+      'paano i correct dtr',
+      'unsaon pag correct dtr',
+    ],
+  },
+  {
+    intent: 'today_dtr',
+    phrases: [
+      'did i time in today',
+      'did i time out today',
+      'have i timed in today',
+      'did i clock in today',
+      'did i log in today',
     ],
   },
   {
@@ -242,6 +281,18 @@ const FUZZY_INTENT_PROFILES = [
     phrases: ['who is holding leave', 'kinsa nag hold leave', 'where is my leave', 'pending with leave'],
   },
   {
+    intent: 'pending_leave_requests',
+    phrases: [
+      'show my pending leave requests',
+      'pending leave requests',
+      'my pending leave',
+      'leave requests pending',
+      'pending leave',
+      'naa pending leave',
+      'may pending leave',
+    ],
+  },
+  {
     intent: 'leave_rejection_reason',
     phrases: ['why rejected leave', 'ngano gi reject leave', 'bakit rejected leave', 'leave rejection reason'],
   },
@@ -275,7 +326,48 @@ const FUZZY_INTENT_PROFILES = [
   },
   {
     intent: 'locator_approval_tracker',
-    phrases: ['who is holding locator', 'kinsa nag hold locator', 'pending with locator', 'where is locator request'],
+    phrases: [
+      'who is holding locator',
+      'kinsa nag hold locator',
+      'pending with locator',
+      'where is locator request',
+      'nasaan locator request',
+      'nasaan na locator request',
+      'asa na locator request',
+    ],
+  },
+  // Calculated intents
+  {
+    intent: 'dtr_hours_summary',
+    phrases: [
+      'how many hours did i work',
+      'total hours worked',
+      'hours this month',
+      'pila ka oras nagtrabaho',
+      'pila oras this month',
+      'total oras nako',
+      'working hours this month',
+      'how much hours did i render',
+      'hours rendered',
+      'ilan oras nagtrabaho',
+      'total hours this week',
+      'pila oras this week',
+    ],
+  },
+  {
+    intent: 'leave_balance_projection',
+    phrases: [
+      'if i take 1 day what remains',
+      'if i file leave how much left',
+      'balance after taking days',
+      'remaining balance if i file',
+      'pila mabilin kung mag file',
+      'pila matira kung mag leave',
+      'how much leave will i have left',
+      'if i take sick leave how many days left',
+      'after filing how much remains',
+      'magkano mabilin kung mag file ug',
+    ],
   },
 ];
 
@@ -357,6 +449,76 @@ function scoreFuzzyIntents(message) {
   };
 }
 
+function intentDomain(intent) {
+  if (!intent) return null;
+  if (
+    intent.startsWith('dtr_') ||
+    intent === 'today_dtr' ||
+    intent === 'missing_logs'
+  ) {
+    return 'dtr';
+  }
+  if (
+    intent.startsWith('leave_') ||
+    intent === 'pending_leave_requests' ||
+    intent === 'approved_leave_requests' ||
+    intent === 'rejected_leave_requests' ||
+    intent === 'latest_leave_request'
+  ) {
+    return 'leave';
+  }
+  if (intent.startsWith('locator_') || intent === 'latest_locator_request') {
+    return 'locator';
+  }
+  return null;
+}
+
+function hasIntentDomainSignal(message, intent) {
+  const domain = intentDomain(intent);
+  if (!domain) return true;
+  const text = lower(normalizeAssistantMessageForRules(message));
+  if (domain === 'dtr') {
+    return /\b(dtr|attendance|daily time|log|logs|time[\s-]?in|time[\s-]?out|clock[\s-]?in|clock[\s-]?out|late|undertime|overtime|absent|absent[s]?|absence|absences|absnt|absnts|abssent|abssents|incomplete|present|duty|pasok|sched|schedule|shift|holiday|missing|kulang|kuwang|oras|hours)\b/.test(
+      text
+    );
+  }
+  if (domain === 'leave') {
+    return /\b(leave|leaves|vl|sl|sick|vacation|paternity|maternity|adoption|solo parent|vawc|calamity|mandatory|forced|special privilege|credits?|balance|medical certificate|med cert)\b/.test(
+      text
+    );
+  }
+  if (domain === 'locator') {
+    return /\b(locator|locator slip|pass slip|wfh|work from home|official business|ob request|ob|on field|field work|fieldwork|out of office|outside office|travel order)\b/.test(
+      text
+    );
+  }
+  return true;
+}
+
+function shouldAllowFuzzyOverride(ruleIntent, fuzzyIntent, message) {
+  if (!ruleIntent || !fuzzyIntent || ruleIntent === fuzzyIntent) return false;
+  if (!hasIntentDomainSignal(message, fuzzyIntent)) return false;
+
+  const protectedRuleIntents = new Set([
+    'dtr_missing_log_reason',
+    'dtr_correction_guidance',
+    'pending_leave_requests',
+    'leave_approval_tracker',
+    'leave_rejection_reason',
+    'locator_approval_tracker',
+    'locator_rejection_reason',
+  ]);
+  if (protectedRuleIntents.has(ruleIntent)) return false;
+
+  if (ruleIntent === 'today_dtr' && fuzzyIntent === 'dtr_daily_record') return false;
+  if (ruleIntent === 'pending_leave_requests' && fuzzyIntent === 'leave_history') return false;
+  if (ruleIntent === 'locator_approval_tracker' && fuzzyIntent === 'latest_locator_request') return false;
+  if (ruleIntent === 'dtr_missing_log_reason' && fuzzyIntent === 'dtr_missing_logs') return false;
+  if (ruleIntent === 'dtr_correction_guidance' && fuzzyIntent === 'dtr_missing_logs') return false;
+
+  return true;
+}
+
 function scoreEmployeeAssistantIntent(message, explicitIntent) {
   const forcedIntent = normalizeIntent(explicitIntent);
   if (forcedIntent) {
@@ -380,6 +542,7 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
     if (
       top &&
       top.intent !== ruleIntent &&
+      shouldAllowFuzzyOverride(ruleIntent, top.intent, message) &&
       top.confidence >= 0.72 &&
       top.confidence - ruleScore >= 0.16
     ) {
@@ -405,7 +568,12 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
   }
 
   const margin = top && runnerUp ? top.confidence - runnerUp.confidence : top?.confidence || 0;
-  if (top && top.confidence >= 0.62 && margin >= 0.08) {
+  if (
+    top &&
+    top.confidence >= 0.62 &&
+    margin >= 0.08 &&
+    hasIntentDomainSignal(message, top.intent)
+  ) {
     return {
       intent: top.intent,
       confidence: top.confidence,
@@ -463,7 +631,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
       return 'locator_rejection_reason';
     }
     if (
-      /\b(who|kinsa|sino|where|asa|kanino|holding|hold|pending with|waiting|awaiting|naa.*kinsa|nasa.*kanino)\b/.test(text)
+      /\b(who|kinsa|sino|where|asa|asa na|nasaan|nasan|saan|kanino|holding|hold|pending with|waiting|awaiting|naa.*kinsa|nasa.*kanino|nasa.*saan)\b/.test(text)
     ) {
       return 'locator_approval_tracker';
     }
@@ -498,6 +666,23 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     return 'dtr_export_guidance';
   }
 
+  // --- Calculated intents ---
+
+  if (
+    /\b(how many hours|total hours|hours worked|hours rendered|ilan oras|pila.*oras|pila ka oras|oras nako|working hours|hours this)\b/.test(text) &&
+    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(text))
+  ) {
+    return 'dtr_hours_summary';
+  }
+
+  if (
+    /\b(if i (take|file|avail)|if i mag|kung mag file|kung mag take|kung kumuha|if i use|magkano mabilin|pila mabilin|pila matira|balance.*after|after.*filing|remaining.*if|what.*remain.*if|what.*left.*if|how much.*left.*if|balance projection|project.*leave|calculate.*leave)\b/.test(text) &&
+    /\b(\d+|one|two|three|four|five|usa|duha|tulo|upat|lima|isa|dalawa|tatlo|apat)\b/.test(text) &&
+    /\b(leave|sick|vacation|sl|vl|day|days|adlaw)\b/.test(text)
+  ) {
+    return 'leave_balance_projection';
+  }
+
   if (
     /\b(policy|policies|rule|rules|guideline|guidelines|requirements?|requirement|how.*dtr.*work|attendance.*policy|attendance.*rules)\b/.test(text) &&
     (hasDtrTopic || /\b(dtr|attendance|daily time)\b/.test(text))
@@ -513,7 +698,18 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(why|ngano|bakit|what.*missing|unsa.*kulang|kulang|kuwang|incomplete|missing)\b/.test(text) &&
+    /\b(fix|correct|correction|adjust|manual|buhaton|unsa buhaton|ano gagawin|how to fix|resolve)\b/.test(
+      text
+    ) &&
+    /\b(dtr|attendance|log|logs|missing|incomplete|time[\s-]?in|time[\s-]?out|late|undertime)\b/.test(
+      text
+    )
+  ) {
+    return 'dtr_correction_guidance';
+  }
+
+  if (
+    /\b(why|ngano|bakit|reason|explain|what.*missing|what.*kulang|unsa.*missing|unsa.*kulang|ngano.*wala|bakit.*wala)\b/.test(text) &&
     /\b(am in|am out|pm in|pm out|time[\s-]?in|time[\s-]?out|log|logs|dtr)\b/.test(text)
   ) {
     return 'dtr_missing_log_reason';
@@ -603,7 +799,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(why|ngano|bakit|what.*missing|unsa.*kulang|kulang|kuwang|incomplete|missing.*log|missing.*logs)\b/.test(
+    /\b(why|ngano|bakit|reason|explain|what.*missing|what.*kulang|unsa.*missing|unsa.*kulang|ngano.*wala|bakit.*wala)\b/.test(
       text
     ) &&
     /\b(dtr|attendance|log|logs|time[\s-]?in|time[\s-]?out|am in|am out|pm in|pm out|incomplete|missing)\b/.test(text)
@@ -662,6 +858,16 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     )
   ) {
     return 'dtr_range_summary';
+  }
+
+  if (
+    /\b(did i|have i|did my|have my)\b/.test(text) &&
+    /\b(time[\s-]?in|time[\s-]?out|clock[\s-]?in|clock[\s-]?out|log[\s-]?in|log[\s-]?out)\b/.test(
+      text
+    ) &&
+    /\b(today|karon|ngayon|karong adlawa|this day)\b/.test(text)
+  ) {
+    return 'today_dtr';
   }
 
   if (
@@ -750,6 +956,15 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     LEAVE_TOPIC_PATTERN.test(text)
   ) {
     return 'leave_type_compare';
+  }
+
+  if (
+    /\b(attachment|attachments|document|documents|docs|proof|medical certificate|med cert|need.*attach|required.*attach|what.*attach|which.*attach|kinahanglan.*attach|kailangan.*attach)\b/.test(
+      text
+    ) &&
+    (LEAVE_TOPIC_PATTERN.test(text) || !/\b(dtr|attendance|locator|pass slip|wfh|official business|ob)\b/.test(text))
+  ) {
+    return 'leave_attachment_requirement';
   }
 
   if (
@@ -968,6 +1183,20 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     )
   ) {
     return 'today_dtr';
+  }
+
+  // Catch-all for calculated intents that may appear in broader phrasing
+  if (
+    /\b(how many hours|total hours|hours worked|hours rendered|pila.*oras|ilan oras|working hours)\b/.test(text)
+  ) {
+    return 'dtr_hours_summary';
+  }
+
+  if (
+    /\b(if i (take|file|avail|use)|kung mag file|kung mag take|pila mabilin|pila matira|balance after|remaining if|left if|magkano mabilin)\b/.test(text) &&
+    /\b(leave|sick|vacation|sl|vl|day|days|adlaw|\d+)\b/.test(text)
+  ) {
+    return 'leave_balance_projection';
   }
 
   return null;

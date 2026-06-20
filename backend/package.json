@@ -10,7 +10,9 @@
     "leave:accrual": "node scripts/run-leave-monthly-accrual.js",
     "leave:accrual:dry": "node scripts/run-leave-monthly-accrual.js --dry-run",
     "llm:smoke": "node scripts/test-llm.js",
-    "test:dtr-assistant": "node --test test/dtrAssistantRegression.test.js"
+    "test:dtr-assistant": "node --test test/dtrAssistantRegression.test.js",
+    "eval:intents": "node scripts/eval-intents.js",
+    "eval:export-feedback": "node scripts/export-feedback.js"
   },
   "keywords": [],
   "author": "",

@@ -48,6 +48,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     ),
   ];
   final _feedbackByMessageId = <String, String>{};
+  final _promptByMessageId = <String, String>{};
   final _autoExecutedActionKeys = <String>{};
   List<DtrAssistantModelProfile> _modelProfiles = const [
     DtrAssistantModelProfile(
@@ -125,7 +126,13 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         cancelToken: _cancelToken,
       );
       if (!mounted) return;
-      setState(() => _messages.add(reply));
+      setState(() {
+        _messages.add(reply);
+        final replyId = reply.id;
+        if (replyId != null && replyId.isNotEmpty) {
+          _promptByMessageId[replyId] = text;
+        }
+      });
       _runAutoAction(reply);
     } on DioException catch (e) {
       if (!mounted) return;
@@ -175,6 +182,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   ) async {
     final id = message.id;
     if (id == null || id.isEmpty) return;
+    final comment = rating == 'down' ? await _showWrongFeedbackDialog() : null;
+    if (rating == 'down' && comment == null) return;
     final previous = _feedbackByMessageId[id];
     setState(() => _feedbackByMessageId[id] = rating);
     try {
@@ -182,11 +191,15 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         message: message,
         rating: rating,
         modelProfile: _selectedModelProfile,
+        promptPreview: _promptByMessageId[id],
+        comment: comment,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(rating == 'up' ? 'Marked correct.' : 'Marked wrong.'),
+          content: Text(
+            rating == 'up' ? 'Marked correct.' : 'Marked wrong with note.',
+          ),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -205,6 +218,92 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ),
       );
     }
+  }
+
+  Future<String?> _showWrongFeedbackDialog() async {
+    final detailsController = TextEditingController();
+    String selectedReason = 'Wrong answer';
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final reasons = const [
+              'Wrong answer',
+              'Wrong language',
+              'Wrong date',
+              'Missing data',
+              'Wrong intent',
+            ];
+
+            return AlertDialog(
+              title: const Text('What went wrong?'),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'This helps improve the assistant for similar prompts.',
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: reasons.map((reason) {
+                        return ChoiceChip(
+                          label: Text(reason),
+                          selected: selectedReason == reason,
+                          onSelected: (_) =>
+                              setDialogState(() => selectedReason = reason),
+                          visualDensity: VisualDensity.compact,
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: detailsController,
+                      minLines: 2,
+                      maxLines: 4,
+                      textInputAction: TextInputAction.newline,
+                      decoration: const InputDecoration(
+                        labelText: 'Optional details',
+                        hintText:
+                            'Example: I asked in Bisaya but it replied in English.',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final details = detailsController.text.trim();
+                    final comment = details.isEmpty
+                        ? selectedReason
+                        : '$selectedReason: $details';
+                    Navigator.of(dialogContext).pop(comment);
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    detailsController.dispose();
+    return result;
   }
 
   Future<List<int>> _downloadAttachment(
@@ -485,6 +584,16 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
                                   setState(() {
                                     final index = _messages.indexOf(message);
                                     if (index != -1) {
+                                      final removed = _messages.sublist(index);
+                                      for (final removedMessage in removed) {
+                                        final removedId = removedMessage.id;
+                                        if (removedId != null) {
+                                          _feedbackByMessageId.remove(
+                                            removedId,
+                                          );
+                                          _promptByMessageId.remove(removedId);
+                                        }
+                                      }
                                       _messages.removeRange(
                                         index,
                                         _messages.length,

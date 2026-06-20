@@ -348,6 +348,20 @@ function inferLeaveTypeFromContext(text, context) {
 }
 
 function buildSuggestions(intent) {
+  if (intent === 'dtr_hours_summary') {
+    return [
+      { text: 'Show my late days this month', intent: 'dtr_late_summary' },
+      { text: 'Show undertime this month', intent: 'dtr_undertime_summary' },
+      { text: 'Show missing logs this week', intent: 'dtr_missing_logs' },
+    ];
+  }
+  if (intent === 'leave_balance_projection') {
+    return [
+      { text: 'What is my leave balance?', intent: 'leave_balance' },
+      { text: 'Can I file sick leave tomorrow?', intent: 'leave_availability_check' },
+      { text: 'Show leave requirements', intent: 'leave_requirements' },
+    ];
+  }
   if (intent === 'clarify_filing_topic') {
     return [
       { text: 'File a leave request', intent: 'leave_guided_filing' },
@@ -843,8 +857,28 @@ function directOpenCommandForMessage(text) {
   return null;
 }
 
-function buildAssistantResult({ content, provider, model, mode, context, intent, attachments, text, actions }) {
+function numericConfidence(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : null;
+}
+
+function buildAssistantResult({
+  content,
+  provider,
+  model,
+  modelProfile,
+  mode,
+  context,
+  intent,
+  intentConfidence,
+  intentSource,
+  attachments,
+  text,
+  actions,
+}) {
   const safeAttachments = attachments || [];
+  const safeIntentConfidence = numericConfidence(intentConfidence);
   return {
     message: {
       id: crypto.randomUUID(),
@@ -852,16 +886,23 @@ function buildAssistantResult({ content, provider, model, mode, context, intent,
       content: compactAssistantContent(content),
       createdAt: new Date().toISOString(),
       intent: intent || null,
+      intentConfidence: safeIntentConfidence,
+      intentSource: intentSource || null,
       provider: provider || null,
       model: model || null,
+      modelProfile: modelProfile || null,
+      promptPreview: text || null,
       suggestions: buildSuggestions(intent),
       attachments: safeAttachments,
       actions: actions || buildActions(intent, context, text || '', safeAttachments),
     },
     provider,
     model,
+    modelProfile: modelProfile || null,
     mode,
     intent: intent || null,
+    intentConfidence: safeIntentConfidence,
+    intentSource: intentSource || null,
     sources: buildSources(context),
   };
 }
@@ -952,6 +993,8 @@ function intentUsuallyNeedsDateRange(intent) {
     'dtr_holiday_check',
     'dtr_schedule_context',
     'dtr_export_guidance',
+    // Calculated intents that need a date range
+    'dtr_hours_summary',
     'leave_history',
     'leave_availability_check',
     'leave_overlap_check',
@@ -996,7 +1039,9 @@ function shouldAskAiForToolPlan({
 
 function simpleLanguageOf(text) {
   const value = lower(text);
-  if (/\b(bisayaa?|binisayaa?|cebuano|unsa|unsay|ngano|pila|naa|akong|nako|imong|nimo|ug|karon|pwede|adto|ato|ana|bulana|semanaha)\b/.test(value)) {
+  if (/\b(tagaloga?|tagalog|filipino)\b/.test(value)) return 'tagalog';
+  if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(value)) return 'bisaya';
+  if (/\b(unsa|unsaon|unsay|ngano|pila|naa|akong|nako|imong|nimo|ug|karon|pwede|adto|ato|ana|bulana|semanaha)\b/.test(value)) {
     return 'bisaya';
   }
   if (/\b(tagalog|filipino|ano|bakit|ilan|ngayon|kailangan|puwede|pwede|ako|ko|ba|may|wala)\b/.test(value)) {
@@ -1059,7 +1104,7 @@ function isAllLeaveTypesFollowUpQuestion(text) {
 function requestedRestyleLanguage(text) {
   const value = lower(text);
   if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(value)) return 'bisaya';
-  if (/\b(tagalog|filipino)\b/.test(value)) return 'tagalog';
+  if (/\b(tagaloga?|tagalog|filipino)\b/.test(value)) return 'tagalog';
   if (/\b(english|ingles)\b/.test(value)) return 'english';
   return null;
 }
@@ -1122,8 +1167,15 @@ function clarificationContent(intent, text) {
   return 'Which status do you want to check: DTR, leave request, or locator slip?';
 }
 
-function fallbackContent() {
-  return 'I can help only with your DTR, missing logs, late/undertime/overtime, absences, DTR correction guidance, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave eligibility, leave form guidance, leave DTR impact, approval tracking, leave summaries, leave types, locator slip status, locator summaries, locator requirements, locator filing checks, locator rejection reasons, locator approval tracking, and locator DTR coverage.';
+function gracefulFallbackContent(text) {
+  const language = simpleLanguageOf(text);
+  if (language === 'bisaya') {
+    return 'Pasensya, wala nako masabti imong question. Mao ang akong mahimong tabangon:\n\n- DTR status ug attendance logs\n- Missing o incomplete logs\n- Late, undertime, overtime summary\n- Total hours worked this month\n- DTR correction guidance\n- Leave balance ug projections (e.g. "If I take 3 days, how many left?")\n- Leave requests, history, ug approval\n- Leave eligibility, requirements, ug form guidance\n- Locator slip status ug summary\n\nPwede ka magtanong ug ingon ani, o pili sa mga suggestions sa ubos.';
+  }
+  if (language === 'tagalog') {
+    return 'Pasensya, hindi ko naintindihan ang iyong tanong. Narito ang mga maitutulong ko:\n\n- DTR status at attendance logs\n- Missing o incomplete logs\n- Late, undertime, overtime summary\n- Kabuuang oras na nagtrabaho ngayong buwan\n- DTR correction guidance\n- Leave balance at projections (e.g. "If I take 3 days, how many left?")\n- Leave requests, history, at approval\n- Leave eligibility, requirements, at form guidance\n- Locator slip status at summary\n\nPwede kang magtanong ng ganito, o pumili sa mga suggestions sa ibaba.';
+  }
+  return "I'm not sure what you're asking about. Here is what I can help you with:\n\n- DTR status and attendance logs\n- Missing or incomplete logs\n- Late, undertime, and overtime summary\n- Total hours worked this month\n- DTR correction guidance\n- Leave balances and projections (e.g. \"If I take 3 days, how many days are left?\")\n- Leave requests, history, and approval tracking\n- Leave eligibility, requirements, and form guidance\n- Locator slip status and summary\n\nTry asking one of the above, or tap a suggestion below.";
 }
 
 function isFollowUpQuestion(text) {
@@ -1658,9 +1710,15 @@ function buildToolData(intent, context) {
       locatorPolicies: context.locator_policies || [],
     };
   }
-  if (intent === 'leave_balance') {
+  if (intent === 'leave_balance' || intent === 'leave_balance_projection') {
     return {
       balances: context.leave_balances || [],
+    };
+  }
+  if (intent === 'dtr_hours_summary') {
+    return {
+      dateRange: context.date_range,
+      records: context.dtr_records || [],
     };
   }
   if (
@@ -1904,9 +1962,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       content: clarificationContent(clarificationIntent, normalizedTextForRules),
       provider: 'hrms',
       model: 'hrms-clarification-rules',
+      modelProfile: profile.id,
       mode: scope.mode,
       context: clarificationContext,
       intent: clarificationIntent,
+      intentConfidence: 1,
+      intentSource: 'clarification_rules',
       attachments: [],
       text: normalizedTextForRules,
     });
@@ -1931,9 +1992,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       content: directOpenCommand.content,
       provider: 'hrms',
       model: 'hrms-action-rules',
+      modelProfile: profile.id,
       mode: scope.mode,
       context: actionContext,
       intent: directOpenCommand.intent,
+      intentConfidence: 1,
+      intentSource: 'direct_open_command',
       attachments: [],
       text: normalizedTextForRules,
       actions: directOpenCommand.actions,
@@ -1952,6 +2016,11 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   let intentNeedsAiPlan = scoredIntent.intent
     ? scoredIntent.needsAiPlan
     : !fallbackMemoryIntent;
+  let intentSource = scoredIntent.intent
+    ? scoredIntent.source
+    : fallbackMemoryIntent
+      ? 'memory'
+      : 'unclear';
   let model = 'hrms-intent-rules';
   let provider = 'hrms';
   let plannedDateRange = parseAssistantDateRange(effectiveText);
@@ -1970,6 +2039,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       if (!resolvedIntent || intentNeedsAiPlan || intentConfidence < 0.72) {
         resolvedIntent = planned.intent;
         intentConfidence = 0.82;
+        intentSource = 'llm_planner';
         intentNeedsAiPlan = false;
       }
       provider = planned.provider || provider;
@@ -1994,6 +2064,10 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   if (!resolvedIntent) {
     const classified = await classifyIntentWithLocalAi(plannedText, profile);
     resolvedIntent = classified.intent;
+    if (resolvedIntent) {
+      intentConfidence = 0.76;
+      intentSource = 'llm_classifier';
+    }
     provider = classified.provider || provider;
     model = classified.model || model;
   }
@@ -2021,9 +2095,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       content: direct.content,
       provider: direct.provider,
       model: direct.model,
+      modelProfile: profile.id,
       mode: scope.mode,
       context,
       intent: 'direct_ai',
+      intentConfidence: 1,
+      intentSource: 'direct_ai',
       attachments: [],
       text: plannedText,
     });
@@ -2061,9 +2138,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       content: compactAssistantContent(refined?.content || fastReply),
       provider: refined?.provider || 'hrms',
       model: refined?.model || model,
+      modelProfile: profile.id,
       mode: scope.mode,
       context,
       intent: resolvedIntent,
+      intentConfidence,
+      intentSource,
       attachments,
       text: plannedText,
     });
@@ -2071,12 +2151,15 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
 
   const fallbackAttachments = buildAttachments(resolvedIntent, context, scope.userId);
   return buildAssistantResult({
-    content: fallbackContent(),
-    provider,
-    model,
+    content: gracefulFallbackContent(normalizedTextForRules),
+    provider: 'hrms',
+    model: 'hrms-graceful-fallback',
+    modelProfile: profile.id,
     mode: scope.mode,
     context,
     intent: resolvedIntent,
+    intentConfidence,
+    intentSource,
     attachments: fallbackAttachments,
     text: plannedText,
   });
