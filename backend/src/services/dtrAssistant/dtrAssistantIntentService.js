@@ -959,6 +959,15 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
+    /\b(attachment|attachments|document|documents|docs|proof|medical certificate|med cert|need.*attach|required.*attach|what.*attach|which.*attach|kinahanglan.*attach|kailangan.*attach)\b/.test(
+      text
+    ) &&
+    (LEAVE_TOPIC_PATTERN.test(text) || !/\b(dtr|attendance|locator|pass slip|wfh|official business|ob)\b/.test(text))
+  ) {
+    return 'leave_attachment_requirement';
+  }
+
+  if (
     isLeaveTypeExplanationQuestion(text) ||
     isLeaveGuidelineSectionQuestion(text) &&
     (LEAVE_TOPIC_PATTERN.test(text) || !/\b(dtr|attendance|locator|pass slip|wfh|official business|ob)\b/.test(text))

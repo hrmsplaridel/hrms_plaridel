@@ -58,6 +58,7 @@ const GOLDEN = [
 
   // ---- DTR: status / holiday / schedule -------------------------------------
   ['unsay status sa akong dtr adtung niaging miyerkules?', 'dtr_status_explanation', 'bisaya'],
+  ['unsa akong dtr status adtun first week sa june?', 'dtr_status_explanation', 'bisaya'],
   ['why is my dtr incomplete', 'dtr_missing_log_reason', 'en'],
   ['is today a holiday?', 'dtr_holiday_check', 'en'],
   ['holiday ba karon?', 'dtr_holiday_check', 'bisaya'],
@@ -85,9 +86,11 @@ const GOLDEN = [
   ['how can i file sick leave?', 'leave_form_guidance', 'en'],
   ['paano mag file ng sick leave?', 'leave_form_guidance', 'tl'],
   ['unsaon pag file ug sick leave?', 'leave_form_guidance', 'bisaya'],
+  ['unsaon pag file mandatory leave?', 'leave_form_guidance', 'bisaya'],
   ['unsay requirements sa maternity leave?', 'leave_requirements', 'bisaya'],
   ['ano requirements sa maternity leave?', 'leave_requirements', 'tl'],
   ['need med cert if 5 days sick leave?', 'leave_attachment_requirement', 'en'],
+  ['what attachment do i need?', 'leave_attachment_requirement', 'en'],
   ['can i file 1 day sick leave tomorrow?', 'leave_availability_check', 'en'],
   ['pwede akong mag file ug leave ugma?', 'leave_availability_check', 'bisaya'],
 

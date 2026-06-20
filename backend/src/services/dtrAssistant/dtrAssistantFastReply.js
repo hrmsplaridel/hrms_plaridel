@@ -316,13 +316,15 @@ function isTagalogOrBisaya(message) {
 
 function languageOf(message) {
   const text = lower(message);
-  if (/\b(bisayaa?|binisayaa?|cebuano|ngano|unsa|unsay|unsa'y|karon|pila|kabuok|naa|akong|nako|nabilin|gamay|kuwang|imong|nimo|gikan|mahimong|adlaw|kinahanglan|ug|kay|aning|bulana|adtong|adtung|atong|niadtong|niadtung|ana|adto|ato|duty)\b/.test(text)) {
+  if (/\b(tagaloga?|tagalog|filipino)\b/.test(text)) return 'tagalog';
+  if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(text)) return 'bisaya';
+  if (/\b(english|ingles)\b/.test(text)) return 'english';
+  if (/\b(ngano|unsa|unsaon|unsay|unsa'y|karon|pila|kabuok|naa|akong|nako|nabilin|gamay|kuwang|imong|nimo|gikan|mahimong|adlaw|kinahanglan|ug|kay|aning|bulana|adtong|adtung|adtun|atong|niadtong|niadtung|ana|adto|ato|duty)\b/.test(text)) {
     return 'bisaya';
   }
   if (/\b(tagalog|filipino|ano|ngayon|ako|ko|ba|may|wala|ilan|bakit|maliit|natira|kailangan|pasok|noong|nung)\b/.test(text)) {
     return 'tagalog';
   }
-  if (/\b(english|ingles)\b/.test(text)) return 'english';
   return 'english';
 }
 
@@ -357,6 +359,7 @@ function localizeTitle(title, language) {
       .replace(/^Leave balance$/i, 'Leave balance nimo')
       .replace(/^Leave requirements$/i, 'Leave requirements')
       .replace(/^Attachment requirement$/i, 'Attachment requirement nimo')
+      .replace(/^Leave form guide$/i, 'Giya sa pag-file ug leave')
       .replace(/^Leave types you can file$/i, 'Leave types nga pwede nimo ma-file')
       .replace(/^Pending leave requests$/i, 'Pending leave requests nimo')
       .replace(/^Approved leave requests$/i, 'Approved leave requests nimo')
@@ -374,6 +377,7 @@ function localizeTitle(title, language) {
       .replace(/^Leave balance$/i, 'Leave balance mo')
       .replace(/^Leave requirements$/i, 'Leave requirements')
       .replace(/^Attachment requirement$/i, 'Attachment requirement mo')
+      .replace(/^Leave form guide$/i, 'Gabay sa pag-file ng leave')
       .replace(/^Leave types you can file$/i, 'Leave types na puwede mong i-file')
       .replace(/^Pending leave requests$/i, 'Pending leave requests mo')
       .replace(/^Approved leave requests$/i, 'Approved leave requests mo')
@@ -784,10 +788,10 @@ function localizedLeaveFormGuideLine(type, language, days) {
   const label = labelLeaveType(type.display_name || type.name);
   const requirement = localizedAttachmentRuleText(type, days, language);
   if (language === 'bisaya') {
-    return `${label}: Pilia ang ${label}, ibutang ang covered dates ug number of days, butangi ug klaro nga reason/location, ug i-attach ang document kung required. Requirement: ${requirement}.`;
+    return `${label}: Pilia ang ${label}. Ibutang ang covered dates ug pila ka adlaw, dayon isulat ang klarong reason. Attachment: ${requirement}.`;
   }
   if (language === 'tagalog') {
-    return `${label}: Piliin ang ${label}, ilagay ang covered dates at number of days, lagyan ng malinaw na reason/location, at i-attach ang document kung required. Requirement: ${requirement}.`;
+    return `${label}: Piliin ang ${label}. Ilagay ang covered dates at bilang ng araw, tapos isulat ang malinaw na reason. Attachment: ${requirement}.`;
   }
 
   const form = getFormGuidanceForType(type);
@@ -1703,9 +1707,12 @@ function firstMatchingCoverageText(context, record, missingSlots = []) {
 
 function dtrStatusExplanationReply(context, message) {
   const language = languageOf(message);
+  const range = context.date_range || {};
+  if (range.startDate && range.endDate && range.startDate !== range.endDate) {
+    return dtrRangeSummaryReply(context, message);
+  }
   const record = dtrRecords(context)[0];
   if (!record) {
-    const range = context.date_range || {};
     const day = range.startDate ? calendarDayForDate(context, range.startDate) : null;
     const dateText = range.startDate
       ? fmtLocalizedDateRange(range.startDate, range.endDate, language)
@@ -2648,6 +2655,9 @@ function matchingLeaveTypes(context, message) {
 function leaveAttachmentRequirementReply(context, message) {
   const language = languageOf(message);
   const types = matchingLeaveTypes(context, message);
+  const hasSpecificType =
+    Boolean(requestedLeaveType(message)) ||
+    Boolean(requestedLeaveTypeRecord(message, context));
   const days = requestedDaysOrRangeDays(message, context);
   if (types.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang attachment rule para ana nga leave type.';
@@ -2655,7 +2665,8 @@ function leaveAttachmentRequirementReply(context, message) {
     return 'I found no attachment rule for that leave type.';
   }
 
-  const lines = types.slice(0, 4).map((type) => {
+  const visibleTypes = hasSpecificType ? types.slice(0, 4) : types;
+  const lines = visibleTypes.map((type) => {
     const guidance = getLeaveGuidanceForType(type);
     const guideline = guidance?.requirements
       ? ` Guideline: ${trimTrailingSentencePunctuation(
@@ -2678,7 +2689,7 @@ function leaveAttachmentRequirementReply(context, message) {
           ? 'Ito ang attachment rule base sa HRMS setup.'
           : 'Here is what the HRMS setup says about attachments.',
     details: lines.map(trimTrailingSentencePunctuation),
-    limit: 4,
+    limit: lines.length,
   });
 }
 
@@ -2735,7 +2746,12 @@ function leaveFormGuidanceReply(context, message) {
 
   return structuredReply(language, {
     title: 'Leave form guide',
-    summary: 'Use these details when filling out the leave form.',
+    summary:
+      language === 'bisaya'
+        ? 'Mao ni gamita kung mag-fill out ka sa leave form.'
+        : language === 'tagalog'
+          ? 'Ito ang gamitin mo kapag nag-fill out ka ng leave form.'
+          : 'Use these details when filling out the leave form.',
     details: lines.map(trimTrailingSentencePunctuation),
     limit: 3,
   });

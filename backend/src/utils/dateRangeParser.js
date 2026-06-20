@@ -204,6 +204,34 @@ function ordinalWeekdayOfMonth(year, month, weekday, ordinal) {
   return Number(date.slice(5, 7)) === month ? date : null;
 }
 
+function ordinalWeekOfMonth(year, month, ordinal) {
+  const lastDay = daysInMonth(year, month);
+  if (ordinal === 'last') {
+    const startDay = Math.max(1, lastDay - 6);
+    return {
+      startDate: dateFromParts(year, month, startDay),
+      endDate: dateFromParts(year, month, lastDay),
+    };
+  }
+  const ordinalNumber = {
+    first: 1,
+    '1st': 1,
+    second: 2,
+    '2nd': 2,
+    third: 3,
+    '3rd': 3,
+    fourth: 4,
+    '4th': 4,
+  }[ordinal];
+  if (!ordinalNumber) return null;
+  const startDay = (ordinalNumber - 1) * 7 + 1;
+  if (startDay > lastDay) return null;
+  return {
+    startDate: dateFromParts(year, month, startDay),
+    endDate: dateFromParts(year, month, Math.min(startDay + 6, lastDay)),
+  };
+}
+
 function weekdayDate(today, targetWeekday, mode = 'next') {
   const current = dayOfWeekMondayIndex(today);
   let offset = targetWeekday - current;
@@ -300,6 +328,24 @@ function parseAssistantDateRange(message, options = {}) {
         label: `${ordinalWeekday[1]} ${ordinalWeekday[2]} of ${ordinalWeekday[3]}`,
         startDate: date,
         endDate: date,
+      };
+    }
+  }
+
+  const ordinalWeek = text.match(
+    new RegExp(
+      `\\b(first|1st|second|2nd|third|3rd|fourth|4th|last)\\s+(?:week|semana|semanaha|linggo)\\s+(?:of|in|sa|ng|nga|for)\\s+(${monthNames})(?:,?\\s*(20\\d{2}))?\\b`
+    )
+  );
+  if (ordinalWeek) {
+    const currentYear = Number(today.slice(0, 4));
+    const year = Number(ordinalWeek[3] || currentYear);
+    const period = ordinalWeekOfMonth(year, MONTHS[ordinalWeek[2]], ordinalWeek[1]);
+    if (period) {
+      return {
+        label: `${ordinalWeek[1]} week of ${ordinalWeek[2]}`,
+        startDate: period.startDate,
+        endDate: period.endDate,
       };
     }
   }

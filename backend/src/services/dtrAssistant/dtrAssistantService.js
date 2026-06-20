@@ -1039,7 +1039,9 @@ function shouldAskAiForToolPlan({
 
 function simpleLanguageOf(text) {
   const value = lower(text);
-  if (/\b(bisayaa?|binisayaa?|cebuano|unsa|unsay|ngano|pila|naa|akong|nako|imong|nimo|ug|karon|pwede|adto|ato|ana|bulana|semanaha)\b/.test(value)) {
+  if (/\b(tagaloga?|tagalog|filipino)\b/.test(value)) return 'tagalog';
+  if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(value)) return 'bisaya';
+  if (/\b(unsa|unsaon|unsay|ngano|pila|naa|akong|nako|imong|nimo|ug|karon|pwede|adto|ato|ana|bulana|semanaha)\b/.test(value)) {
     return 'bisaya';
   }
   if (/\b(tagalog|filipino|ano|bakit|ilan|ngayon|kailangan|puwede|pwede|ako|ko|ba|may|wala)\b/.test(value)) {
@@ -1102,7 +1104,7 @@ function isAllLeaveTypesFollowUpQuestion(text) {
 function requestedRestyleLanguage(text) {
   const value = lower(text);
   if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(value)) return 'bisaya';
-  if (/\b(tagalog|filipino)\b/.test(value)) return 'tagalog';
+  if (/\b(tagaloga?|tagalog|filipino)\b/.test(value)) return 'tagalog';
   if (/\b(english|ingles)\b/.test(value)) return 'english';
   return null;
 }

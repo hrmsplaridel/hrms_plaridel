@@ -30,6 +30,7 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['pila kabuok absent nako aning bulana?', 'dtr_absent_summary'],
     ['how many absents i have for this month?', 'dtr_absent_summary'],
     ['unsay status sa akong dtr adtung niaging miyerkules?', 'dtr_status_explanation'],
+    ['unsa akong dtr status adtun first week sa june?', 'dtr_status_explanation'],
     ['naa koy absent gahapon?', 'dtr_absent_summary'],
     ['pila akong balance sa sick leave?', 'leave_balance'],
     ['ngano gamay nalang akong vacation leave?', 'leave_balance'],
@@ -37,6 +38,7 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['how can I file sick leave?', 'leave_form_guidance'],
     ['paano mag file ng sick leave?', 'leave_form_guidance'],
     ['unsaon pag file ug sick leave?', 'leave_form_guidance'],
+    ['unsaon pag file mandatory leave?', 'leave_form_guidance'],
     ['can I file 1 day sick leave tomorrow?', 'leave_availability_check'],
     ['okay explain filing deadlines', 'leave_guideline_section'],
     ['can you give me the guidlines of the leave types?', 'leave_guideline_section'],
@@ -44,6 +46,7 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['explain the sick leave', 'leave_guideline_section'],
     ['unsay requirements sa maternity leave?', 'leave_requirements'],
     ['need med cert if 5 days sick leave?', 'leave_attachment_requirement'],
+    ['what attachment do I need?', 'leave_attachment_requirement'],
     ['kinsa nag hold sa akong leave request?', 'leave_approval_tracker'],
     ['ngano gi reject akong leave?', 'leave_rejection_reason'],
     ['pwede ba ko mag file ug pass slip ugma?', 'locator_availability_check'],
@@ -110,6 +113,14 @@ test('DTR assistant regression: stronger date phrases resolve to useful ranges',
     startDate: '2026-06-01',
     endDate: '2026-06-01',
   });
+  assert.deepEqual(
+    parseAssistantDateRange('unsa akong dtr status adtun first week sa june?', { today }),
+    {
+      label: 'first week of june',
+      startDate: '2026-06-01',
+      endDate: '2026-06-07',
+    }
+  );
   assert.deepEqual(parseAssistantDateRange('show DTR from Monday to Friday', { today }), {
     label: 'monday to friday',
     startDate: '2026-06-15',
@@ -240,6 +251,30 @@ test('DTR assistant regression: how-to-file leave questions show form guidance',
   assert.doesNotMatch(reply, /balance is not enough/i);
 });
 
+test('DTR assistant regression: Bisaya leave form guidance stays in Bisaya', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'unsaon pag file mandatory leave?',
+    {
+      leave_types: [
+        {
+          name: 'mandatoryForcedLeave',
+          display_name: 'Mandatory/Forced leave',
+          employee_can_file: true,
+          requires_attachment: false,
+        },
+      ],
+    },
+    'leave_form_guidance'
+  );
+
+  assert.match(reply, /Giya sa pag-file ug leave/);
+  assert.match(reply, /Mao ni gamita/i);
+  assert.match(reply, /Pilia ang Mandatory\/Forced leave/i);
+  assert.match(reply, /Attachment: walay required attachment/i);
+  assert.doesNotMatch(reply, /Use these details/i);
+  assert.doesNotMatch(reply, /Requirement:/i);
+});
+
 test('DTR assistant regression: leave type list includes short explanations', () => {
   const reply = buildFastEmployeeAssistantReply(
     'what are the leave types i can file?',
@@ -264,6 +299,62 @@ test('DTR assistant regression: leave type list includes short explanations', ()
   assert.match(reply, /Sick Leave: Granted when an employee is unable to report/i);
   assert.match(reply, /Maternity Leave: Granted to female employees/i);
   assert.doesNotMatch(reply, /^These are the leave types you can file: Sick Leave, Maternity Leave\.$/);
+});
+
+test('DTR assistant regression: broad attachment questions show all matching leave types', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'What attachment do I need?',
+    {
+      leave_types: [
+        {
+          name: 'tenDayVawcLeave',
+          display_name: '10-Day VAWC leave',
+          employee_can_file: true,
+          requires_attachment: true,
+        },
+        {
+          name: 'adoptionLeave',
+          display_name: 'Adoption leave',
+          employee_can_file: true,
+          requires_attachment: true,
+        },
+        {
+          name: 'maternityLeave',
+          display_name: 'Maternity leave',
+          employee_can_file: true,
+          requires_attachment: true,
+        },
+        {
+          name: 'mandatoryForcedLeave',
+          display_name: 'Mandatory/Forced leave',
+          employee_can_file: true,
+          requires_attachment: false,
+        },
+        {
+          name: 'paternityLeave',
+          display_name: 'Paternity leave',
+          employee_can_file: true,
+          requires_attachment: true,
+        },
+        {
+          name: 'sickLeave',
+          display_name: 'Sick leave',
+          employee_can_file: true,
+          requires_attachment: false,
+          requires_attachment_when_over_days: 5,
+        },
+      ],
+    },
+    'leave_attachment_requirement'
+  );
+
+  assert.match(reply, /10-Day VAWC leave:/);
+  assert.match(reply, /Adoption leave:/);
+  assert.match(reply, /Maternity leave:/);
+  assert.match(reply, /Mandatory\/Forced leave:/);
+  assert.match(reply, /Paternity leave:/);
+  assert.match(reply, /Sick leave:/);
+  assert.doesNotMatch(reply, /Plus \d+ more/);
 });
 
 test('DTR assistant regression: leave guideline follow-ups stay in guideline context', () => {
@@ -692,6 +783,40 @@ test('DTR assistant regression: language restyle follow-ups keep previous HRMS a
   assert.match(reply, /Mao ni ang attachment rule/i);
   assert.match(reply, /kinahanglan ug attachment/i);
   assert.doesNotMatch(reply, /Leave balance/i);
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('tagaloga daw na', memory),
+    'leave_attachment_requirement'
+  );
+
+  const tagalogEnriched = assistantServiceTest.enrichMessageWithMemory(
+    'tagaloga daw na',
+    memory,
+    'leave_attachment_requirement'
+  );
+
+  assert.match(tagalogEnriched, /need med cert if 5 days sick leave/i);
+  assert.match(tagalogEnriched, /tagaloga daw na/i);
+
+  const tagalogReply = buildFastEmployeeAssistantReply(
+    tagalogEnriched,
+    {
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+          requires_attachment: false,
+          requires_attachment_when_over_days: 5,
+        },
+      ],
+    },
+    'leave_attachment_requirement'
+  );
+
+  assert.match(tagalogReply, /Ito ang attachment rule/i);
+  assert.match(tagalogReply, /kailangan ng attachment/i);
+  assert.doesNotMatch(tagalogReply, /Mao ni ang attachment rule/i);
 });
 
 test('DTR assistant regression: conversation memory does not leak stale leave type into explicit topic switches', () => {
@@ -974,6 +1099,44 @@ test('DTR assistant regression: replies use friendly dates and day counts', () =
   assert.match(dtrReply, /1 ka present\/complete DTR day/);
   assert.match(dtrReply, /Total hours: 8 hr/);
   assert.doesNotMatch(dtrReply, /8\.00/);
+});
+
+test('DTR assistant regression: range DTR status questions summarize the full range', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'unsa akong dtr status adtun first week sa june?',
+    {
+      date_range: {
+        label: 'first week of june',
+        startDate: '2026-06-01',
+        endDate: '2026-06-07',
+      },
+      dtr_records: [
+        {
+          attendance_date: '2026-06-02',
+          status: 'absent',
+          total_hours: 0,
+          late_minutes: 0,
+          undertime_minutes: 480,
+        },
+        {
+          attendance_date: '2026-06-03',
+          status: 'present',
+          total_hours: 8,
+          late_minutes: 0,
+          undertime_minutes: 0,
+        },
+      ],
+      dtr_calendar_days: [],
+    },
+    'dtr_status_explanation'
+  );
+
+  assert.match(reply, /DTR summary/i);
+  assert.match(reply, /first week of june/i);
+  assert.match(reply, /Saved DTR rows: 2/i);
+  assert.match(reply, /Present\/complete days: 1/i);
+  assert.match(reply, /Absent\/no-record days: 1/i);
+  assert.doesNotMatch(reply, /DTR explanation for June 2, 2026/i);
 });
 
 test('DTR assistant regression: current shift reply is direct and friendly', () => {
