@@ -48,6 +48,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     ),
   ];
   final _feedbackByMessageId = <String, String>{};
+  final _promptByMessageId = <String, String>{};
   final _autoExecutedActionKeys = <String>{};
   List<DtrAssistantModelProfile> _modelProfiles = const [
     DtrAssistantModelProfile(
@@ -125,7 +126,13 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         cancelToken: _cancelToken,
       );
       if (!mounted) return;
-      setState(() => _messages.add(reply));
+      setState(() {
+        _messages.add(reply);
+        final replyId = reply.id;
+        if (replyId != null && replyId.isNotEmpty) {
+          _promptByMessageId[replyId] = text;
+        }
+      });
       _runAutoAction(reply);
     } on DioException catch (e) {
       if (!mounted) return;
@@ -182,6 +189,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         message: message,
         rating: rating,
         modelProfile: _selectedModelProfile,
+        promptPreview: _promptByMessageId[id],
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -485,6 +493,16 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
                                   setState(() {
                                     final index = _messages.indexOf(message);
                                     if (index != -1) {
+                                      final removed = _messages.sublist(index);
+                                      for (final removedMessage in removed) {
+                                        final removedId = removedMessage.id;
+                                        if (removedId != null) {
+                                          _feedbackByMessageId.remove(
+                                            removedId,
+                                          );
+                                          _promptByMessageId.remove(removedId);
+                                        }
+                                      }
                                       _messages.removeRange(
                                         index,
                                         _messages.length,

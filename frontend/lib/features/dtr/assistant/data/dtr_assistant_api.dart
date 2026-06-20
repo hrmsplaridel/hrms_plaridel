@@ -88,6 +88,7 @@ class DtrAssistantApi {
     required DtrAssistantMessage message,
     required String rating,
     required String modelProfile,
+    String? promptPreview,
   }) async {
     final id = message.id;
     if (id == null || id.isEmpty) return;
@@ -99,7 +100,10 @@ class DtrAssistantApi {
         'intent': message.intent,
         'provider': message.provider,
         'model': message.model,
-        'modelProfile': modelProfile,
+        'modelProfile': message.modelProfile ?? modelProfile,
+        'promptPreview': promptPreview ?? message.promptPreview,
+        'intentConfidence': message.intentConfidence,
+        'intentSource': message.intentSource,
         'contentPreview': message.content,
       },
     );

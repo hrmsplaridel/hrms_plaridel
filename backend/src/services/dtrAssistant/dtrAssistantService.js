@@ -857,8 +857,28 @@ function directOpenCommandForMessage(text) {
   return null;
 }
 
-function buildAssistantResult({ content, provider, model, mode, context, intent, attachments, text, actions }) {
+function numericConfidence(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : null;
+}
+
+function buildAssistantResult({
+  content,
+  provider,
+  model,
+  modelProfile,
+  mode,
+  context,
+  intent,
+  intentConfidence,
+  intentSource,
+  attachments,
+  text,
+  actions,
+}) {
   const safeAttachments = attachments || [];
+  const safeIntentConfidence = numericConfidence(intentConfidence);
   return {
     message: {
       id: crypto.randomUUID(),
@@ -866,16 +886,23 @@ function buildAssistantResult({ content, provider, model, mode, context, intent,
       content: compactAssistantContent(content),
       createdAt: new Date().toISOString(),
       intent: intent || null,
+      intentConfidence: safeIntentConfidence,
+      intentSource: intentSource || null,
       provider: provider || null,
       model: model || null,
+      modelProfile: modelProfile || null,
+      promptPreview: text || null,
       suggestions: buildSuggestions(intent),
       attachments: safeAttachments,
       actions: actions || buildActions(intent, context, text || '', safeAttachments),
     },
     provider,
     model,
+    modelProfile: modelProfile || null,
     mode,
     intent: intent || null,
+    intentConfidence: safeIntentConfidence,
+    intentSource: intentSource || null,
     sources: buildSources(context),
   };
 }
@@ -1933,9 +1960,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       content: clarificationContent(clarificationIntent, normalizedTextForRules),
       provider: 'hrms',
       model: 'hrms-clarification-rules',
+      modelProfile: profile.id,
       mode: scope.mode,
       context: clarificationContext,
       intent: clarificationIntent,
+      intentConfidence: 1,
+      intentSource: 'clarification_rules',
       attachments: [],
       text: normalizedTextForRules,
     });
@@ -1960,9 +1990,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       content: directOpenCommand.content,
       provider: 'hrms',
       model: 'hrms-action-rules',
+      modelProfile: profile.id,
       mode: scope.mode,
       context: actionContext,
       intent: directOpenCommand.intent,
+      intentConfidence: 1,
+      intentSource: 'direct_open_command',
       attachments: [],
       text: normalizedTextForRules,
       actions: directOpenCommand.actions,
@@ -1981,6 +2014,11 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   let intentNeedsAiPlan = scoredIntent.intent
     ? scoredIntent.needsAiPlan
     : !fallbackMemoryIntent;
+  let intentSource = scoredIntent.intent
+    ? scoredIntent.source
+    : fallbackMemoryIntent
+      ? 'memory'
+      : 'unclear';
   let model = 'hrms-intent-rules';
   let provider = 'hrms';
   let plannedDateRange = parseAssistantDateRange(effectiveText);
@@ -1999,6 +2037,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       if (!resolvedIntent || intentNeedsAiPlan || intentConfidence < 0.72) {
         resolvedIntent = planned.intent;
         intentConfidence = 0.82;
+        intentSource = 'llm_planner';
         intentNeedsAiPlan = false;
       }
       provider = planned.provider || provider;
@@ -2023,6 +2062,10 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   if (!resolvedIntent) {
     const classified = await classifyIntentWithLocalAi(plannedText, profile);
     resolvedIntent = classified.intent;
+    if (resolvedIntent) {
+      intentConfidence = 0.76;
+      intentSource = 'llm_classifier';
+    }
     provider = classified.provider || provider;
     model = classified.model || model;
   }
@@ -2050,9 +2093,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       content: direct.content,
       provider: direct.provider,
       model: direct.model,
+      modelProfile: profile.id,
       mode: scope.mode,
       context,
       intent: 'direct_ai',
+      intentConfidence: 1,
+      intentSource: 'direct_ai',
       attachments: [],
       text: plannedText,
     });
@@ -2090,9 +2136,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       content: compactAssistantContent(refined?.content || fastReply),
       provider: refined?.provider || 'hrms',
       model: refined?.model || model,
+      modelProfile: profile.id,
       mode: scope.mode,
       context,
       intent: resolvedIntent,
+      intentConfidence,
+      intentSource,
       attachments,
       text: plannedText,
     });
@@ -2103,9 +2152,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     content: gracefulFallbackContent(normalizedTextForRules),
     provider: 'hrms',
     model: 'hrms-graceful-fallback',
+    modelProfile: profile.id,
     mode: scope.mode,
     context,
     intent: resolvedIntent,
+    intentConfidence,
+    intentSource,
     attachments: fallbackAttachments,
     text: plannedText,
   });

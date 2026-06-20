@@ -2,12 +2,9 @@
  * Export thumbs-down DTR assistant feedback so it can be promoted into the
  * golden set (scripts/eval-intents.data.js).
  *
- * IMPORTANT LIMITATION: the dtr_assistant_feedback table does NOT store the
- * original user message — only the assistant's reply (content_preview), the
- * classified intent, and the user's comment. So this script cannot produce
- * ready-to-use golden entries automatically. Instead it prints each thumbs-down
- * row with everything a human needs to reconstruct the user's phrasing and add
- * a [message, expectedIntent, language] entry by hand.
+ * New feedback rows store prompt_preview and prompt_hash. Older rows may only
+ * have the assistant's reply (content_preview), the classified intent, and the
+ * user's comment, so those still need a human to reconstruct the prompt.
  *
  * Recommended workflow:
  *   1. Run:  npm run eval:export-feedback
@@ -42,6 +39,10 @@ async function main() {
         provider,
         model,
         model_profile,
+        prompt_preview,
+        prompt_hash,
+        intent_confidence,
+        intent_source,
         content_preview,
         comment,
         created_at
@@ -71,7 +72,17 @@ async function main() {
   for (const row of res.rows) {
     console.log(`• ${row.created_at?.toISOString?.() || row.created_at}`);
     console.log(`  classified intent : ${row.intent || '(none)'}`);
+    console.log(`  decision          : ${row.intent_source || '(unknown)'}${row.intent_confidence == null ? '' : ` @ ${Number(row.intent_confidence).toFixed(2)}`}`);
     console.log(`  model             : ${row.model || '(none)'}  [${row.provider || '-'} / ${row.model_profile || '-'}]`);
+    if (row.prompt_preview) {
+      console.log(`  user asked        :`);
+      const prompt = String(row.prompt_preview || '').slice(0, 400);
+      for (const line of prompt.split('\n')) {
+        console.log(`      ${line}`);
+      }
+    } else if (row.prompt_hash) {
+      console.log(`  user prompt hash  : ${row.prompt_hash}`);
+    }
     if (row.comment) {
       console.log(`  user comment      : ${row.comment}`);
     }
@@ -84,9 +95,9 @@ async function main() {
   }
 
   console.log('='.repeat(70));
-  console.log('Next step: for each row above, reconstruct the original user');
-  console.log('phrasing and append an entry to scripts/eval-intents.data.js,');
-  console.log('then run:  npm run eval:intents');
+  console.log('Next step: append failed user prompts to scripts/eval-intents.data.js');
+  console.log('with the correct expected intent, then run:');
+  console.log('  npm run eval:intents');
   console.log('');
 
   await pool.end();

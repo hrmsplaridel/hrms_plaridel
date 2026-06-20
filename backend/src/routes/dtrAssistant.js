@@ -74,6 +74,9 @@ router.post('/feedback', protect, async (req, res) => {
       provider: req.body?.provider,
       model: req.body?.model,
       modelProfile: req.body?.modelProfile,
+      promptPreview: req.body?.promptPreview,
+      intentConfidence: req.body?.intentConfidence,
+      intentSource: req.body?.intentSource,
       contentPreview: req.body?.contentPreview,
       comment: req.body?.comment,
     });

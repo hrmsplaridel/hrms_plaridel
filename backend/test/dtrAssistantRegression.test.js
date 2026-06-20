@@ -13,6 +13,7 @@ const {
 } = require('../src/services/dtrAssistant/dtrAssistantExportService');
 const {
   normalizeRating,
+  __test: feedbackServiceTest,
 } = require('../src/services/dtrAssistant/dtrAssistantFeedbackService');
 const {
   __test: assistantServiceTest,
@@ -899,6 +900,11 @@ test('DTR assistant regression: feedback rating aliases normalize safely', () =>
   assert.equal(normalizeRating('correct'), 'up');
   assert.equal(normalizeRating('wrong'), 'down');
   assert.equal(normalizeRating('maybe'), null);
+  assert.equal(feedbackServiceTest.normalizeConfidence('0.82'), 0.82);
+  assert.equal(feedbackServiceTest.normalizeConfidence('2'), 1);
+  assert.equal(feedbackServiceTest.normalizeConfidence('-1'), 0);
+  assert.equal(feedbackServiceTest.normalizeConfidence('bad'), null);
+  assert.match(feedbackServiceTest.hashText('pila akong absent?'), /^[a-f0-9]{64}$/);
 });
 
 test('DTR assistant regression: replies use friendly dates and day counts', () => {

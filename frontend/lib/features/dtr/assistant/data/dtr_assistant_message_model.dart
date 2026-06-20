@@ -5,8 +5,12 @@ class DtrAssistantMessage {
     required this.content,
     required this.createdAt,
     this.intent,
+    this.intentConfidence,
+    this.intentSource,
     this.provider,
     this.model,
+    this.modelProfile,
+    this.promptPreview,
     this.suggestions = const <DtrAssistantSuggestion>[],
     this.attachments = const <DtrAssistantAttachment>[],
     this.actions = const <DtrAssistantAction>[],
@@ -17,8 +21,12 @@ class DtrAssistantMessage {
   final String content;
   final DateTime createdAt;
   final String? intent;
+  final double? intentConfidence;
+  final String? intentSource;
   final String? provider;
   final String? model;
+  final String? modelProfile;
+  final String? promptPreview;
   final List<DtrAssistantSuggestion> suggestions;
   final List<DtrAssistantAttachment> attachments;
   final List<DtrAssistantAction> actions;
@@ -49,8 +57,12 @@ class DtrAssistantMessage {
           DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
       intent: json['intent']?.toString(),
+      intentConfidence: _doubleOrNull(json['intentConfidence']),
+      intentSource: json['intentSource']?.toString(),
       provider: json['provider']?.toString(),
       model: json['model']?.toString(),
+      modelProfile: json['modelProfile']?.toString(),
+      promptPreview: json['promptPreview']?.toString(),
       suggestions: rawSuggestions is List
           ? rawSuggestions
                 .whereType<Map>()
@@ -91,6 +103,12 @@ class DtrAssistantMessage {
           : const <DtrAssistantAction>[],
     );
   }
+}
+
+double? _doubleOrNull(Object? value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+  return double.tryParse(value.toString());
 }
 
 class DtrAssistantAction {

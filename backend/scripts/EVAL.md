@@ -49,14 +49,14 @@ npm run eval:export-feedback -- --limit 100
 npm run eval:export-feedback -- --rating up
 ```
 
-This prints each thumbs-down with the classified intent, the assistant's reply,
-and the user's comment. **Limitation:** the `dtr_assistant_feedback` table does
-not store the original user message, so each row needs a human to reconstruct
-the phrasing before adding it to the golden set.
+This prints each thumbs-down with the prompt preview, prompt hash, classified
+intent, decision source/confidence, assistant reply, and the user's comment.
+Older feedback rows may not have `prompt_preview`; those still need a human to
+reconstruct the phrasing before adding it to the golden set.
 
 Workflow:
 1. `npm run eval:export-feedback`
-2. For each row, reconstruct the user's original phrasing and append a
+2. For each row, copy or reconstruct the user's original phrasing and append a
    `[message, expectedIntent, language]` entry to `eval-intents.data.js`.
 3. `npm run eval:intents` — watch the number move.
 

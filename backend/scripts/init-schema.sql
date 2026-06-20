@@ -728,6 +728,10 @@ CREATE TABLE IF NOT EXISTS dtr_assistant_feedback (
   provider TEXT,
   model TEXT,
   model_profile TEXT,
+  prompt_preview TEXT,
+  prompt_hash TEXT,
+  intent_confidence NUMERIC(5,4),
+  intent_source TEXT,
   content_preview TEXT,
   comment TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -740,6 +744,13 @@ CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_user_created
 
 CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_rating_created
   ON dtr_assistant_feedback(rating, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_prompt_hash
+  ON dtr_assistant_feedback(prompt_hash)
+  WHERE prompt_hash IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_intent_source_created
+  ON dtr_assistant_feedback(intent, intent_source, created_at DESC);
 
 -- =========================================
 -- BIOMETRIC ATTENDANCE LOGS (raw import from .dat files)
