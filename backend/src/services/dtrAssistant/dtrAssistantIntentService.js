@@ -61,6 +61,10 @@ function normalizeIntent(value) {
     'dtr_schedule_context',
     'dtr_export_guidance',
     'dtr_policy_guidance',
+    // Calculated intents
+    'dtr_hours_summary',
+    'leave_balance_projection',
+    // Leave intents
     'leave_balance',
     'pending_leave_requests',
     'approved_leave_requests',
@@ -276,6 +280,39 @@ const FUZZY_INTENT_PROFILES = [
   {
     intent: 'locator_approval_tracker',
     phrases: ['who is holding locator', 'kinsa nag hold locator', 'pending with locator', 'where is locator request'],
+  },
+  // Calculated intents
+  {
+    intent: 'dtr_hours_summary',
+    phrases: [
+      'how many hours did i work',
+      'total hours worked',
+      'hours this month',
+      'pila ka oras nagtrabaho',
+      'pila oras this month',
+      'total oras nako',
+      'working hours this month',
+      'how much hours did i render',
+      'hours rendered',
+      'ilan oras nagtrabaho',
+      'total hours this week',
+      'pila oras this week',
+    ],
+  },
+  {
+    intent: 'leave_balance_projection',
+    phrases: [
+      'if i take 1 day what remains',
+      'if i file leave how much left',
+      'balance after taking days',
+      'remaining balance if i file',
+      'pila mabilin kung mag file',
+      'pila matira kung mag leave',
+      'how much leave will i have left',
+      'if i take sick leave how many days left',
+      'after filing how much remains',
+      'magkano mabilin kung mag file ug',
+    ],
   },
 ];
 
@@ -496,6 +533,23 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     /\b(dtr|attendance|daily time)\b/.test(text)
   ) {
     return 'dtr_export_guidance';
+  }
+
+  // --- Calculated intents ---
+
+  if (
+    /\b(how many hours|total hours|hours worked|hours rendered|ilan oras|pila.*oras|pila ka oras|oras nako|working hours|hours this)\b/.test(text) &&
+    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(text))
+  ) {
+    return 'dtr_hours_summary';
+  }
+
+  if (
+    /\b(if i (take|file|avail)|if i mag|kung mag file|kung mag take|kung kumuha|if i use|magkano mabilin|pila mabilin|pila matira|balance.*after|after.*filing|remaining.*if|what.*remain.*if|what.*left.*if|how much.*left.*if|balance projection|project.*leave|calculate.*leave)\b/.test(text) &&
+    /\b(\d+|one|two|three|four|five|usa|duha|tulo|upat|lima|isa|dalawa|tatlo|apat)\b/.test(text) &&
+    /\b(leave|sick|vacation|sl|vl|day|days|adlaw)\b/.test(text)
+  ) {
+    return 'leave_balance_projection';
   }
 
   if (
@@ -968,6 +1022,20 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     )
   ) {
     return 'today_dtr';
+  }
+
+  // Catch-all for calculated intents that may appear in broader phrasing
+  if (
+    /\b(how many hours|total hours|hours worked|hours rendered|pila.*oras|ilan oras|working hours)\b/.test(text)
+  ) {
+    return 'dtr_hours_summary';
+  }
+
+  if (
+    /\b(if i (take|file|avail|use)|kung mag file|kung mag take|pila mabilin|pila matira|balance after|remaining if|left if|magkano mabilin)\b/.test(text) &&
+    /\b(leave|sick|vacation|sl|vl|day|days|adlaw|\d+)\b/.test(text)
+  ) {
+    return 'leave_balance_projection';
   }
 
   return null;

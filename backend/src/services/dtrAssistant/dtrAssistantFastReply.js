@@ -4184,7 +4184,176 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
     }
   }
 
+  // Calculated intents
+  if (intent === 'dtr_hours_summary') {
+    return dtrHoursSummaryReply(context, message);
+  }
+  if (intent === 'leave_balance_projection') {
+    return leaveBalanceProjectionReply(context, message);
+  }
+
   return null;
+}
+
+// ─── DTR Hours Summary ────────────────────────────────────────────────────────
+// Answers: "How many total hours did I work this month?"
+function dtrHoursSummaryReply(context, message) {
+  const language = languageOf(message);
+  const records = context.dtr_records || [];
+  const range = context.date_range;
+  const period = displayPeriodLabel(range && range.label, language);
+
+  if (records.length === 0) {
+    if (language === 'bisaya') {
+      return `Wala akong nakitang DTR records para sa ${period}.`;
+    }
+    if (language === 'tagalog') {
+      return `Wala akong nakitang DTR records para sa ${period}.`;
+    }
+    return `I found no DTR records for ${period}, so I cannot calculate your total hours.`;
+  }
+
+  const workedRecords = records.filter(function(r) {
+    const s = lower(r.status || '');
+    return (
+      r.total_hours != null &&
+      Number.isFinite(Number(r.total_hours)) &&
+      Number(r.total_hours) > 0 &&
+      s !== 'absent' &&
+      s !== 'on_leave' &&
+      s !== 'holiday' &&
+      s !== 'no_record'
+    );
+  });
+
+  const totalHours = workedRecords.reduce(function(sum, r) { return sum + (Number(r.total_hours) || 0); }, 0);
+  const daysWorked = workedRecords.length;
+  const totalDays = records.length;
+  const lateRecords = records.filter(function(r) { return (r.late_minutes || 0) > 0; });
+  const totalLateMinutes = records.reduce(function(sum, r) { return sum + (r.late_minutes || 0); }, 0);
+  const undertimeRecords = records.filter(function(r) { return (r.undertime_minutes || 0) > 0; });
+  const totalUndertimeMinutes = records.reduce(function(sum, r) { return sum + (r.undertime_minutes || 0); }, 0);
+
+  const hoursStr = Number.isInteger(totalHours) ? String(totalHours) : totalHours.toFixed(2);
+  const lateNote = lateRecords.length > 0
+    ? (language === 'bisaya'
+        ? `Late: ${lateRecords.length} ka adlaw (${totalLateMinutes} min total).`
+        : language === 'tagalog'
+          ? `Late: ${lateRecords.length} araw (${totalLateMinutes} min kabuuan).`
+          : `Late: ${lateRecords.length} day(s) (${totalLateMinutes} min total).`)
+    : null;
+  const undertimeNote = undertimeRecords.length > 0
+    ? (language === 'bisaya'
+        ? `Undertime: ${undertimeRecords.length} ka adlaw (${totalUndertimeMinutes} min total).`
+        : language === 'tagalog'
+          ? `Undertime: ${undertimeRecords.length} araw (${totalUndertimeMinutes} min kabuuan).`
+          : `Undertime: ${undertimeRecords.length} day(s) (${totalUndertimeMinutes} min total).`)
+    : null;
+  const notes = [lateNote, undertimeNote].filter(Boolean).join(' ');
+
+  if (language === 'bisaya') {
+    return `DTR Hours Summary\n\n${daysWorked} sa ${totalDays} ka adlaw ang nagtrabaho ka sa ${period}.\nTotal rendered hours: ${hoursStr} hours.${notes ? '\n' + notes : ''}`;
+  }
+  if (language === 'tagalog') {
+    return `DTR Hours Summary\n\n${daysWorked} sa ${totalDays} araw nagtrabaho ka sa ${period}.\nKabuuang oras na rendered: ${hoursStr} oras.${notes ? '\n' + notes : ''}`;
+  }
+  return `DTR Hours Summary\n\nYou worked ${daysWorked} out of ${totalDays} day(s) in ${period}.\nTotal hours rendered: ${hoursStr} hours.${notes ? '\n' + notes : ''}`;
+}
+
+// ─── Leave Balance Projection ─────────────────────────────────────────────────
+// Answers: "If I take N days of sick/vacation leave, how many days will be left?"
+function parseRequestedDaysFromProjection(message) {
+  const text = lower(message);
+  const wordToNum = { one: 1, isa: 1, uno: 1, two: 2, duha: 2, dos: 2, three: 3, tulo: 3, tres: 3, four: 4, upat: 4, kwatro: 4, apat: 4, five: 5, lima: 5, singko: 5 };
+  const patterns = [
+    /\b(\d+(?:\.\d+)?)\s*(?:day|days|adlaw|ka\s*adlaw)\b/,
+    /\btake\s+(\d+(?:\.\d+)?)/,
+    /\bfile\s+ug?\s+(\d+(?:\.\d+)?)/,
+    /\bfile\s+(\d+(?:\.\d+)?)\s*(?:day|days|adlaw)/,
+    /\buse\s+(\d+(?:\.\d+)?)/,
+    /\bavail\s+(?:ug\s+)?(\d+(?:\.\d+)?)/,
+    /\bmag\s*-?file\s+(?:ug\s+)?(\d+(?:\.\d+)?)/,
+  ];
+  for (var i = 0; i < patterns.length; i++) {
+    var m = text.match(patterns[i]);
+    if (m && m[1]) {
+      var val = parseFloat(m[1]);
+      if (Number.isFinite(val) && val > 0 && val <= 365) return val;
+    }
+  }
+  // Try word numbers
+  for (var word in wordToNum) {
+    if (new RegExp('\\b' + word + '\\b').test(text)) return wordToNum[word];
+  }
+  return null;
+}
+
+function leaveBalanceProjectionReply(context, message) {
+  const language = languageOf(message);
+  const balances = context.leave_balances || [];
+  const requestedDays = parseRequestedDaysFromProjection(message);
+  const leaveTypeStr = requestedLeaveType(message);
+
+  if (balances.length === 0) {
+    if (language === 'bisaya') return 'Wala akong nakitang leave balance records para sa imong account.';
+    if (language === 'tagalog') return 'Wala akong nakitang leave balance records para sa account mo.';
+    return 'I found no leave balance records for your account.';
+  }
+
+  if (!requestedDays) {
+    const balanceLines = balances.map(function(b) {
+      return b.leave_type + ': ' + fmtDays(Number(b.available_days || 0)) + ' available';
+    });
+    if (language === 'bisaya') {
+      return 'Pila ka adlaw ang imong gusto i-file? Mao ni ang imong current leave balance:\n\n' +
+        balanceLines.map(function(l) { return '- ' + l; }).join('\n') +
+        '\n\nSulti lang ug pila ka adlaw, e.g. "If I take 3 days vacation leave, how many left?"';
+    }
+    if (language === 'tagalog') {
+      return 'Ilang araw ang gusto mong i-file? Ito ang iyong kasalukuyang leave balance:\n\n' +
+        balanceLines.map(function(l) { return '- ' + l; }).join('\n') +
+        '\n\nSabihin lang ang bilang, e.g. "If I take 3 days vacation leave, how many will be left?"';
+    }
+    return 'How many days do you want to take? Here is your current leave balance:\n\n' +
+      balanceLines.map(function(l) { return '- ' + l; }).join('\n') +
+      '\n\nTell me the number, e.g. "If I take 3 days vacation leave, how many days will I have left?"';
+  }
+
+  var targetBalances = leaveTypeStr
+    ? balances.filter(function(b) { return leaveTypeMatches(b, leaveTypeStr); })
+    : balances;
+  if (targetBalances.length === 0) targetBalances = balances;
+
+  const lines = targetBalances.map(function(b) {
+    const avail = Number(b.available_days || 0);
+    const remaining = avail - requestedDays;
+    const enough = remaining >= 0;
+    const label = b.leave_type;
+    if (language === 'bisaya') {
+      return enough
+        ? label + ': ' + fmtDays(avail) + ' available - ' + fmtDays(requestedDays) + ' = ' + fmtDays(remaining) + ' ka adlaw ang mabilin'
+        : label + ': ' + fmtDays(avail) + ' available - ' + fmtDays(requestedDays) + ' = kulang ug ' + fmtDays(Math.abs(remaining)) + ' ka adlaw';
+    }
+    if (language === 'tagalog') {
+      return enough
+        ? label + ': ' + fmtDays(avail) + ' available - ' + fmtDays(requestedDays) + ' = ' + fmtDays(remaining) + ' araw ang matitira'
+        : label + ': ' + fmtDays(avail) + ' available - ' + fmtDays(requestedDays) + ' = kulang ng ' + fmtDays(Math.abs(remaining)) + ' araw';
+    }
+    return enough
+      ? label + ': ' + fmtDays(avail) + ' available - ' + fmtDays(requestedDays) + ' = ' + fmtDays(remaining) + ' days remaining'
+      : label + ': ' + fmtDays(avail) + ' available - ' + fmtDays(requestedDays) + ' = short by ' + fmtDays(Math.abs(remaining)) + ' day(s)';
+  });
+
+  if (language === 'bisaya') {
+    return 'Leave Balance Projection\n\nKung mag-file ka ug ' + fmtDays(requestedDays) + ' ka adlaw nga leave:\n\n' +
+      lines.map(function(l) { return '- ' + l; }).join('\n');
+  }
+  if (language === 'tagalog') {
+    return 'Leave Balance Projection\n\nKung mag-file ka ng ' + fmtDays(requestedDays) + ' araw na leave:\n\n' +
+      lines.map(function(l) { return '- ' + l; }).join('\n');
+  }
+  return 'Leave Balance Projection\n\nIf you take ' + fmtDays(requestedDays) + ' day(s) of leave:\n\n' +
+    lines.map(function(l) { return '- ' + l; }).join('\n');
 }
 
 module.exports = {
@@ -4192,3 +4361,4 @@ module.exports = {
   requestedLeaveType,
   requestedLocatorType,
 };
+

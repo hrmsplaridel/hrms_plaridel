@@ -348,6 +348,20 @@ function inferLeaveTypeFromContext(text, context) {
 }
 
 function buildSuggestions(intent) {
+  if (intent === 'dtr_hours_summary') {
+    return [
+      { text: 'Show my late days this month', intent: 'dtr_late_summary' },
+      { text: 'Show undertime this month', intent: 'dtr_undertime_summary' },
+      { text: 'Show missing logs this week', intent: 'dtr_missing_logs' },
+    ];
+  }
+  if (intent === 'leave_balance_projection') {
+    return [
+      { text: 'What is my leave balance?', intent: 'leave_balance' },
+      { text: 'Can I file sick leave tomorrow?', intent: 'leave_availability_check' },
+      { text: 'Show leave requirements', intent: 'leave_requirements' },
+    ];
+  }
   if (intent === 'clarify_filing_topic') {
     return [
       { text: 'File a leave request', intent: 'leave_guided_filing' },
@@ -952,6 +966,8 @@ function intentUsuallyNeedsDateRange(intent) {
     'dtr_holiday_check',
     'dtr_schedule_context',
     'dtr_export_guidance',
+    // Calculated intents that need a date range
+    'dtr_hours_summary',
     'leave_history',
     'leave_availability_check',
     'leave_overlap_check',
@@ -1122,8 +1138,15 @@ function clarificationContent(intent, text) {
   return 'Which status do you want to check: DTR, leave request, or locator slip?';
 }
 
-function fallbackContent() {
-  return 'I can help only with your DTR, missing logs, late/undertime/overtime, absences, DTR correction guidance, leave balances, leave requests/history, leave availability checks, leave filing rules, leave attachments, leave overlaps, leave eligibility, leave form guidance, leave DTR impact, approval tracking, leave summaries, leave types, locator slip status, locator summaries, locator requirements, locator filing checks, locator rejection reasons, locator approval tracking, and locator DTR coverage.';
+function gracefulFallbackContent(text) {
+  const language = simpleLanguageOf(text);
+  if (language === 'bisaya') {
+    return 'Pasensya, wala nako masabti imong question. Mao ang akong mahimong tabangon:\n\n- DTR status ug attendance logs\n- Missing o incomplete logs\n- Late, undertime, overtime summary\n- Total hours worked this month\n- DTR correction guidance\n- Leave balance ug projections (e.g. "If I take 3 days, how many left?")\n- Leave requests, history, ug approval\n- Leave eligibility, requirements, ug form guidance\n- Locator slip status ug summary\n\nPwede ka magtanong ug ingon ani, o pili sa mga suggestions sa ubos.';
+  }
+  if (language === 'tagalog') {
+    return 'Pasensya, hindi ko naintindihan ang iyong tanong. Narito ang mga maitutulong ko:\n\n- DTR status at attendance logs\n- Missing o incomplete logs\n- Late, undertime, overtime summary\n- Kabuuang oras na nagtrabaho ngayong buwan\n- DTR correction guidance\n- Leave balance at projections (e.g. "If I take 3 days, how many left?")\n- Leave requests, history, at approval\n- Leave eligibility, requirements, at form guidance\n- Locator slip status at summary\n\nPwede kang magtanong ng ganito, o pumili sa mga suggestions sa ibaba.';
+  }
+  return "I'm not sure what you're asking about. Here is what I can help you with:\n\n- DTR status and attendance logs\n- Missing or incomplete logs\n- Late, undertime, and overtime summary\n- Total hours worked this month\n- DTR correction guidance\n- Leave balances and projections (e.g. \"If I take 3 days, how many days are left?\")\n- Leave requests, history, and approval tracking\n- Leave eligibility, requirements, and form guidance\n- Locator slip status and summary\n\nTry asking one of the above, or tap a suggestion below.";
 }
 
 function isFollowUpQuestion(text) {
@@ -1658,9 +1681,15 @@ function buildToolData(intent, context) {
       locatorPolicies: context.locator_policies || [],
     };
   }
-  if (intent === 'leave_balance') {
+  if (intent === 'leave_balance' || intent === 'leave_balance_projection') {
     return {
       balances: context.leave_balances || [],
+    };
+  }
+  if (intent === 'dtr_hours_summary') {
+    return {
+      dateRange: context.date_range,
+      records: context.dtr_records || [],
     };
   }
   if (
@@ -2071,9 +2100,9 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
 
   const fallbackAttachments = buildAttachments(resolvedIntent, context, scope.userId);
   return buildAssistantResult({
-    content: fallbackContent(),
-    provider,
-    model,
+    content: gracefulFallbackContent(normalizedTextForRules),
+    provider: 'hrms',
+    model: 'hrms-graceful-fallback',
     mode: scope.mode,
     context,
     intent: resolvedIntent,
