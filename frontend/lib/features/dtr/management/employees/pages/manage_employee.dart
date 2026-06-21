@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -93,15 +93,37 @@ class _EmployeeProfile {
   }
 }
 
-/// Default initial passwords for new accounts (Create Account / import).
+/// Default initial passwords for legacy import / recruitment helper dialogs.
 const String kDefaultAdminPassword = kDefaultAdminAccountPassword;
 const String kDefaultEmployeePassword = kDefaultEmployeeAccountPassword;
 
-String defaultPasswordForPrivilege(String? privilege) =>
-    privilege == 'Admin' ? kDefaultAdminPassword : kDefaultEmployeePassword;
-
 String defaultPasswordForRoleKey(String role) =>
     role == 'admin' ? kDefaultAdminPassword : kDefaultEmployeePassword;
+
+String generateTemporaryAccountPassword({int length = 12}) {
+  final random = Random.secure();
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const numbers = '23456789';
+  const symbols = '!@#%';
+  const all = '$lower$upper$numbers$symbols';
+  final chars = <String>[
+    lower[random.nextInt(lower.length)],
+    upper[random.nextInt(upper.length)],
+    numbers[random.nextInt(numbers.length)],
+    symbols[random.nextInt(symbols.length)],
+  ];
+  while (chars.length < length) {
+    chars.add(all[random.nextInt(all.length)]);
+  }
+  for (var i = chars.length - 1; i > 0; i--) {
+    final j = random.nextInt(i + 1);
+    final tmp = chars[i];
+    chars[i] = chars[j];
+    chars[j] = tmp;
+  }
+  return chars.join();
+}
 
 /// Create Account form. Use inline in Dashboard. Single place for adding employees.
 class AddEmployeeForm extends StatefulWidget {
@@ -118,7 +140,6 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _repeatPasswordController = TextEditingController();
   final _firstNameController = TextEditingController();
   final _middleNameController = TextEditingController();
   final _lastNameController = TextEditingController();
@@ -129,7 +150,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   final _salaryGradeController = TextEditingController();
   final _biometricIdController = TextEditingController();
 
-  /// No role until HR picks one — password fields appear after selection.
+  /// No role until HR picks one.
   String? _privilege;
   String? _suffix;
   String? _sex;
@@ -137,21 +158,27 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   String? _employmentType;
   String _employmentStatus = 'active';
   DateTime? _dateHired;
-  bool _obscurePassword = true;
-  bool _obscureRepeatPassword = true;
   Uint8List? _selectedImageBytes;
   bool _saving = false;
   int? _lastAppliedPrefillStamp;
 
-  void _applyDefaultPasswords() {
-    if (_privilege == null) {
-      _passwordController.clear();
-      _repeatPasswordController.clear();
-      return;
+  void _ensureTemporaryPassword() {
+    if (_passwordController.text.trim().isEmpty) {
+      _passwordController.text = generateTemporaryAccountPassword();
     }
-    final pwd = defaultPasswordForPrivilege(_privilege);
-    _passwordController.text = pwd;
-    _repeatPasswordController.text = pwd;
+  }
+
+  void _regenerateTemporaryPassword() {
+    setState(() {
+      _passwordController.text = generateTemporaryAccountPassword();
+    });
+  }
+
+  Future<void> _copyTemporaryPassword() async {
+    final password = _passwordController.text.trim();
+    if (password.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: password));
+    _showSnackBar('Temporary password copied.');
   }
 
   @override
@@ -197,7 +224,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     }
     setState(() {
       _privilege = 'Employee';
-      _applyDefaultPasswords();
+      _ensureTemporaryPassword();
     });
   }
 
@@ -205,7 +232,6 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _repeatPasswordController.dispose();
     _firstNameController.dispose();
     _middleNameController.dispose();
     _lastNameController.dispose();
@@ -330,7 +356,6 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       _dateHired = null;
       _selectedImageBytes = null;
       _passwordController.clear();
-      _repeatPasswordController.clear();
     });
   }
 
@@ -338,7 +363,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final email = _emailController.text.trim();
-    final password = _passwordController.text;
+    _ensureTemporaryPassword();
+    final password = _passwordController.text.trim();
     final firstName = _firstNameController.text.trim();
     final middleName = _middleNameController.text.trim();
     final lastName = _lastNameController.text.trim();
@@ -402,7 +428,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           hire.recordCreatedCredentials(
             applicationId: hire.applicationId!,
             loginEmail: email,
-            password: password,
+            password: data['temporary_password']?.toString() ?? password,
           );
           hire.clear();
           _lastAppliedPrefillStamp = null;
@@ -433,12 +459,22 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         dtr.invalidateCachedDtrData(includeReferenceData: true);
         dtr.loadEmployees(forceRefresh: true);
       } catch (_) {}
+      final emailConfigured = data['account_email_configured'] == true;
+      final emailSent = data['account_email_sent'] == true;
+      final temporaryPassword = data['temporary_password']?.toString() ?? '';
+      if (!emailSent && temporaryPassword.isNotEmpty) {
+        await _showTemporaryPasswordDialog(
+          email: email,
+          password: temporaryPassword,
+          emailConfigured: emailConfigured,
+          emailError: data['account_email_error']?.toString(),
+        );
+      }
+      if (!mounted) return;
       _clearForm();
       if (widget.onAccountCreated != null) {
         widget.onAccountCreated!();
       } else {
-        final emailConfigured = data['account_email_configured'] == true;
-        final emailSent = data['account_email_sent'] == true;
         final emailStatus = emailSent
             ? ' Credentials were emailed to the employee.'
             : emailConfigured
@@ -470,6 +506,56 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   void _showSnackBar(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _showTemporaryPasswordDialog({
+    required String email,
+    required String password,
+    required bool emailConfigured,
+    String? emailError,
+  }) async {
+    if (!mounted) return;
+    final reason = emailConfigured
+        ? 'The account email could not be sent.'
+        : 'SMTP email is not configured.';
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Temporary password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$reason Share these login details manually.'),
+            if (emailError != null && emailError.trim().isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                emailError,
+                style: TextStyle(color: Theme.of(ctx).colorScheme.error),
+              ),
+            ],
+            const SizedBox(height: 16),
+            SelectableText('Email: $email\nTemporary password: $password'),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(
+                ClipboardData(text: 'Email: $email\nPassword: $password'),
+              );
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            icon: const Icon(Icons.copy_rounded, size: 18),
+            label: const Text('Copy and close'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -691,7 +777,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           ],
           onChanged: (v) => setState(() {
             _privilege = v;
-            _applyDefaultPasswords();
+            _ensureTemporaryPassword();
           }),
           validator: (v) => v == null ? 'Select a role first' : null,
         ),
@@ -699,48 +785,29 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           const SizedBox(height: 18),
           TextFormField(
             controller: _passwordController,
-            decoration: _fieldDecoration('Password').copyWith(
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscurePassword
-                      ? Icons.visibility_rounded
-                      : Icons.visibility_off_rounded,
-                  size: 20,
-                  color: AppTheme.textSecondary,
-                ),
-                onPressed: () =>
-                    setState(() => _obscurePassword = !_obscurePassword),
+            readOnly: true,
+            decoration: _fieldDecoration('Temporary password').copyWith(
+              helperText:
+                  'Generated automatically. Copy it only if SMTP email fails.',
+              helperMaxLines: 2,
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Copy password',
+                    icon: const Icon(Icons.copy_rounded, size: 20),
+                    onPressed: _copyTemporaryPassword,
+                  ),
+                  IconButton(
+                    tooltip: 'Generate new password',
+                    icon: const Icon(Icons.refresh_rounded, size: 20),
+                    onPressed: _regenerateTemporaryPassword,
+                  ),
+                ],
               ),
             ),
-            obscureText: _obscurePassword,
             validator: (v) =>
                 (v == null || v.trim().isEmpty) ? 'Required' : null,
-          ),
-          const SizedBox(height: 18),
-          TextFormField(
-            controller: _repeatPasswordController,
-            decoration: _fieldDecoration('Repeat password').copyWith(
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscureRepeatPassword
-                      ? Icons.visibility_rounded
-                      : Icons.visibility_off_rounded,
-                  size: 20,
-                  color: AppTheme.textSecondary,
-                ),
-                onPressed: () => setState(
-                  () => _obscureRepeatPassword = !_obscureRepeatPassword,
-                ),
-              ),
-            ),
-            obscureText: _obscureRepeatPassword,
-            validator: (v) {
-              if (v == null || v.isEmpty) return 'Required';
-              if (v != _passwordController.text) {
-                return 'Passwords do not match';
-              }
-              return null;
-            },
           ),
         ],
         if (_privilege == 'Admin') ...[
@@ -812,7 +879,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Passwords are encrypted. The new user signs in with email and password.',
+                  'Temporary passwords are emailed through SMTP and encrypted after creation. The user can change it from their profile.',
                   style: TextStyle(
                     fontSize: 12,
                     height: 1.35,

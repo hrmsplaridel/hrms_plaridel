@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
@@ -26,6 +27,28 @@ function employeeAccountEmailText({ name, email, password, role }) {
     'Human Resources\n' +
     'LGU Plaridel'
   );
+}
+
+function generateTemporaryPassword(length = 12) {
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const numbers = '23456789';
+  const symbols = '!@#$%';
+  const all = lower + upper + numbers + symbols;
+  const chars = [
+    lower[crypto.randomInt(lower.length)],
+    upper[crypto.randomInt(upper.length)],
+    numbers[crypto.randomInt(numbers.length)],
+    symbols[crypto.randomInt(symbols.length)],
+  ];
+  while (chars.length < length) {
+    chars.push(all[crypto.randomInt(all.length)]);
+  }
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
 }
 
 function randomEmployeeNumber() {
@@ -477,14 +500,18 @@ router.post('/', protect, requireAdmin, async (req, res) => {
   try {
     await ensureEmployeeProfileColumns();
     const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
     }
     if (!['admin', 'employee'].includes(role)) {
       return res.status(400).json({ error: 'Role must be admin or employee' });
     }
 
-    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    const temporaryPassword =
+      typeof password === 'string' && password.trim()
+        ? password.trim()
+        : generateTemporaryPassword();
+    const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
     const empNo = await allocateEmployeeNumber();
 
     const result = await pool.query(
@@ -553,7 +580,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
           text: employeeAccountEmailText({
             name: createdEmployee.full_name,
             email: employeeEmail,
-            password,
+            password: temporaryPassword,
             role: createdEmployee.role,
           }),
         });
@@ -570,6 +597,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       ...createdEmployee,
       account_email_sent: accountEmailSent,
       account_email_configured: isSmtpConfigured(),
+      temporary_password: temporaryPassword,
       ...(accountEmailError ? { account_email_error: accountEmailError } : {}),
     });
   } catch (err) {

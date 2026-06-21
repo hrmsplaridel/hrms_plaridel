@@ -97,6 +97,8 @@ const GOLDEN = [
   // ---- Leave: guidelines / explanation --------------------------------------
   ['explain me the leave types', 'leave_guideline_section', 'en'],
   ['explain the sick leave', 'leave_guideline_section', 'en'],
+  ['eh explain daw ang maternity leave', 'leave_guideline_section', 'bisaya'],
+  ['eh explain daw ang mga leave types apil ila guidelines', 'leave_guideline_section', 'bisaya'],
   ['okay explain filing deadlines', 'leave_guideline_section', 'en'],
   ['can you give me the guidlines of the leave types?', 'leave_guideline_section', 'en'],
   ['unsay pasabot sa vacation leave?', 'leave_guideline_section', 'bisaya'],
@@ -115,12 +117,14 @@ const GOLDEN = [
   ['unsa ang wfh?', 'locator_types', 'bisaya'],
   ['locator requirements', 'locator_requirements', 'en'],
   ['how to file a pass slip', 'locator_requirements', 'en'],
+  ['unsaon pag file loacator slip?', 'locator_requirements', 'bisaya'],
   ['pwede ba ko mag file ug pass slip ugma?', 'locator_availability_check', 'bisaya'],
   ['can i file a wfh tomorrow?', 'locator_availability_check', 'en'],
   ['ngano gi reject akong locator?', 'locator_rejection_reason', 'bisaya'],
   ['asa na akong official business request?', 'locator_approval_tracker', 'bisaya'],
   ['nasaan na ang locator request ko?', 'locator_approval_tracker', 'tl'],
   ['what is my locator status', 'locator_status', 'en'],
+  ['pila accepted locator karon nga month?', 'locator_summary', 'mix'],
   ['covered ba sa locator akong PM out?', 'dtr_locator_coverage_check', 'mix'],
 ];
 

@@ -306,7 +306,7 @@ const FUZZY_INTENT_PROFILES = [
   },
   {
     intent: 'locator_status',
-    phrases: ['locator status', 'locator approved', 'na approve locator', 'latest locator', 'where is locator'],
+    phrases: ['locator status', 'locator approved', 'locator accepted', 'na approve locator', 'latest locator', 'where is locator'],
   },
   {
     intent: 'locator_requirements',
@@ -318,7 +318,7 @@ const FUZZY_INTENT_PROFILES = [
   },
   {
     intent: 'locator_summary',
-    phrases: ['locator history', 'locator summary', 'how many locator', 'list locator requests'],
+    phrases: ['locator history', 'locator summary', 'how many locator', 'list locator requests', 'accepted locator count', 'approved locator count', 'pila accepted locator'],
   },
   {
     intent: 'locator_rejection_reason',
@@ -615,7 +615,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   if (hasLocatorTopic) {
     if (
       /\b(types?|kinds?|options?|available.*locator|locator.*available|what.*locator.*file|which.*locator.*file|what.*type|which.*type|what is.*(wfh|work from home|pass slip|official business|ob|fieldwork)|unsa.*(wfh|work from home|pass slip|official business|ob|fieldwork)|ano.*(wfh|work from home|pass slip|official business|ob|fieldwork)|unsa.*type|unsay.*type|ano.*type|list.*locator|how about|what about)\b/.test(text) &&
-      !/\b(status|approve|approved|pending|rejected|returned|cancelled|canceled|latest|last|recent|remarks|reason|who|where|asa|kinsa|sino|holding|waiting)\b/.test(text)
+      !/\b(status|approve|approved|accepted|pending|rejected|returned|cancelled|canceled|latest|last|recent|remarks|reason|who|where|asa|kinsa|sino|holding|waiting)\b/.test(text)
     ) {
       return 'locator_types';
     }
@@ -646,12 +646,12 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
       return 'locator_requirements';
     }
     if (
-      /\b(summary|summarize|summarise|overview|recap|total|count|counts|pila|kabuok|ilan|how many|history|list|show|records|requests|rejected|approved|pending|cancelled|canceled|this month|this week|month|week|bulan|bulana|semana|semanaha)\b/.test(text)
+      /\b(summary|summarize|summarise|overview|recap|total|count|counts|pila|kabuok|ilan|how many|history|list|show|records|requests|rejected|approved|accepted|pending|cancelled|canceled|this month|this week|month|week|bulan|bulana|semana|semanaha)\b/.test(text)
     ) {
       return 'locator_summary';
     }
     if (
-      /\b(status|approve|approved|na-approve|pending|rejected|returned|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|latest|last|recent|remarks|reason)\b/.test(text) ||
+      /\b(status|approve|approved|accepted|na-approve|pending|rejected|returned|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|latest|last|recent|remarks|reason)\b/.test(text) ||
       hasDateTopic
     ) {
       return 'locator_status';
@@ -1162,14 +1162,14 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(locator|locator slip|pass slip|wfh|work from home|official business|ob request|ob|on field|field work|fieldwork|out of office|outside office|travel order|na-approve|approved.*locator|status.*locator)\b/.test(text) &&
-    /\b(status|approve|approved|pending|rejected|returned|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|latest|last|recent|today|tomorrow|yesterday|ugma|gahapon|kagahapon|date|january|february|march|april|may|june|july|august|september|october|november|december|\d{4}-\d{2}-\d{2})\b/.test(text)
+    /\b(locator|locator slip|pass slip|wfh|work from home|official business|ob request|ob|on field|field work|fieldwork|out of office|outside office|travel order|na-approve|approved.*locator|accepted.*locator|status.*locator)\b/.test(text) &&
+    /\b(status|approve|approved|accepted|pending|rejected|returned|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|latest|last|recent|today|tomorrow|yesterday|ugma|gahapon|kagahapon|date|january|february|march|april|may|june|july|august|september|october|november|december|\d{4}-\d{2}-\d{2})\b/.test(text)
   ) {
     return 'locator_status';
   }
 
   if (
-    /\b(locator|pass slip|locator slip|wfh|work from home|official business|ob request|on field|field work|fieldwork|out of office|outside office|travel order|na-approve|approved.*locator|status.*locator)\b/.test(
+    /\b(locator|pass slip|locator slip|wfh|work from home|official business|ob request|on field|field work|fieldwork|out of office|outside office|travel order|na-approve|approved.*locator|accepted.*locator|status.*locator)\b/.test(
       text
     )
   ) {

@@ -43,7 +43,7 @@ import 'package:hrms_plaridel/shared/widgets/collapsible_dashboard_sidebar.dart'
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
 
 /// Employee dashboard reference: dark blue sidebar (HR branding), nav items,
-/// welcome + Clock In, Attendance, Leave Balance, Payslip cards,
+/// welcome + Biometric Attendance, Attendance, Leave Balance, Payslip cards,
 /// Upcoming Leave, Attendance Overview.
 class EmployeeDashboardDesktopPage extends StatefulWidget {
   const EmployeeDashboardDesktopPage({super.key});
@@ -464,10 +464,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
 
 /// Reusable employee attendance overview container.
 ///
-/// Employee mode: welcome line + Clock In, Attendance, Leave summary cards,
+/// Employee mode: welcome line + Biometric Attendance, Attendance, Leave summary cards,
 /// monthly overview, and upcoming leave.
 ///
-/// Admin portal mode ([adminPortal]: true): Clock In only (no Attendance /
+/// Admin portal mode ([adminPortal]: true): Biometric Attendance only (no Attendance /
 /// Leave Balance cards), no upcoming leave, monthly overview, then the full
 /// **My Attendance** table on the same scroll — admin-only layout.
 class EmployeeAttendanceOverviewSection extends StatelessWidget {
@@ -568,7 +568,7 @@ class EmployeeAttendanceOverviewSection extends StatelessWidget {
   }
 }
 
-/// Clock In card only — used for admin My Attendance overview (no Attendance /
+/// Biometric Attendance card only — used for admin My Attendance overview (no Attendance /
 /// Leave Balance strip).
 class _EmployeeClockInOnlySummary extends StatelessWidget {
   const _EmployeeClockInOnlySummary();
@@ -577,9 +577,9 @@ class _EmployeeClockInOnlySummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
     final singleColumn = w < 500;
-    final clockIn = _ClockInCard();
-    if (singleColumn) return clockIn;
-    return Row(children: [Expanded(child: clockIn)]);
+    final biometricAttendance = _BiometricAttendanceCard();
+    if (singleColumn) return biometricAttendance;
+    return Row(children: [Expanded(child: biometricAttendance)]);
   }
 }
 
@@ -913,7 +913,7 @@ class _EmployeeSidebar extends StatelessWidget {
   }
 }
 
-/// Main content: welcome, 4 cards (Clock In, Attendance, Leave Balance, My Payslip), Upcoming Leave, Attendance Overview.
+/// Main content: welcome, 4 cards (Biometric Attendance, Attendance, Leave Balance, My Payslip), Upcoming Leave, Attendance Overview.
 class _EmployeeDashboardContent extends StatefulWidget {
   const _EmployeeDashboardContent({
     required this.displayName,
@@ -1028,7 +1028,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
   final bool isNarrow;
   final VoidCallback? onViewAttendance;
 
-  /// Summary row: Clock In, Attendance, Leave balance. [_PayslipCard] omitted for now.
+  /// Summary row: Biometric Attendance, Attendance, Leave balance. [_PayslipCard] omitted for now.
 
   @override
   Widget build(BuildContext context) {
@@ -1037,7 +1037,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
     final twoRows = w < 800 && !singleColumn;
     final cardGap = w < 600 ? 12.0 : 16.0;
 
-    Widget clockIn = _ClockInCard(compact: w < 600);
+    Widget biometricAttendance = _BiometricAttendanceCard(compact: w < 600);
     Widget attendance = _AttendanceCard(
       onViewAttendance: onViewAttendance,
       compact: w < 600,
@@ -1045,7 +1045,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
     Widget leaveBalance = _LeaveBalanceCard(compact: w < 600);
     if (w < 600) {
       return EmployeeSummaryMobileLayout(
-        clockIn: clockIn,
+        clockIn: biometricAttendance,
         attendance: attendance,
         leaveBalance: leaveBalance,
         gap: cardGap,
@@ -1054,7 +1054,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
     if (singleColumn) {
       return Column(
         children: [
-          clockIn,
+          biometricAttendance,
           SizedBox(height: cardGap),
           attendance,
           SizedBox(height: cardGap),
@@ -1067,7 +1067,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(child: clockIn),
+              Expanded(child: biometricAttendance),
               SizedBox(width: cardGap),
               Expanded(child: attendance),
             ],
@@ -1079,7 +1079,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
     }
     return Row(
       children: [
-        Expanded(child: clockIn),
+        Expanded(child: biometricAttendance),
         SizedBox(width: cardGap),
         Expanded(child: attendance),
         SizedBox(width: cardGap),
@@ -1099,10 +1099,9 @@ String _formatTime(DateTime? dt) {
   return '$h12:${m.toString().padLeft(2, '0')} $ampm';
 }
 
-class _ClockInCard extends StatelessWidget {
-  const _ClockInCard({this.compact = false});
+class _BiometricAttendanceCard extends StatelessWidget {
+  const _BiometricAttendanceCard({this.compact = false});
 
-  static const int _noonHour = 12;
   final bool compact;
 
   @override
@@ -1113,8 +1112,6 @@ class _ClockInCard extends StatelessWidget {
         final isHoliday =
             record != null &&
             (record.status == 'holiday' || record.holidayId != null);
-        final now = DateTime.now();
-        final isMorning = now.hour < _noonHour;
         final hasAmIn = record != null && record.timeIn != null;
         final hasAmOut = record != null && record.breakOut != null;
         final hasPmIn = record != null && record.breakIn != null;
@@ -1123,58 +1120,30 @@ class _ClockInCard extends StatelessWidget {
         final isComplete =
             (hasAmIn && hasAmOut && hasPmIn && hasPmOut) ||
             (isAfternoonOnly && hasPmOut);
-
-        String label = 'Clock In';
-        String? nextAction;
-        Future<bool> Function()? onTap;
-        if (isHoliday) {
-          label = 'Holiday';
-          nextAction = null;
-          onTap = null;
-        } else if (record == null) {
-          if (isMorning) {
-            label = 'AM In';
-            nextAction = 'AM In';
-            onTap = () => dtr.clockIn();
-          } else {
-            label = 'PM In';
-            nextAction = 'PM In';
-            onTap = () => dtr.clockPmInAsFirst();
-          }
-        } else if (!hasAmIn) {
-          if (!hasPmIn) {
-            label = 'PM In';
-            nextAction = 'PM In';
-            onTap = () => dtr.clockPmInAsFirst();
-          } else if (!hasPmOut) {
-            label = 'PM Out';
-            nextAction = 'PM Out';
-            onTap = () => dtr.clockOut();
-          } else {
-            label = 'Clocked Out';
-            nextAction = null;
-            onTap = null;
-          }
-        } else if (!hasAmOut) {
-          label = 'AM Out';
-          nextAction = 'AM Out';
-          onTap = () => dtr.clockAmOut();
-        } else if (!hasPmIn) {
-          label = 'PM In';
-          nextAction = 'PM In';
-          onTap = () => dtr.clockPmIn();
-        } else if (!hasPmOut) {
-          label = 'PM Out';
-          nextAction = 'PM Out';
-          onTap = () => dtr.clockOut();
-        } else {
-          label = 'Clocked Out';
-          nextAction = null;
-          onTap = null;
-        }
-
-        // Block ALL clock actions when outside shift window (before start or after end)
-        final isShiftDisabled = onTap != null && dtr.isOutsideShiftWindow;
+        final latestPunch =
+            record?.timeOut ??
+            record?.breakIn ??
+            record?.breakOut ??
+            record?.timeIn;
+        final label = isHoliday
+            ? 'Holiday'
+            : isComplete
+            ? 'Attendance Complete'
+            : record == null
+            ? 'Biometric Attendance'
+            : 'Biometric Attendance';
+        final primaryValue = isHoliday
+            ? 'No log required'
+            : latestPunch == null
+            ? 'No punch yet'
+            : _formatTime(latestPunch);
+        final statusText = isHoliday
+            ? 'No attendance log required for today.'
+            : record == null
+            ? 'Waiting for biometric device log.'
+            : isComplete
+            ? 'All expected punches are recorded.'
+            : 'Biometric log received; remaining punches will appear after device sync.';
 
         final narrow = MediaQuery.sizeOf(context).width < 600;
         final compactLayout = compact || narrow;
@@ -1196,29 +1165,22 @@ class _ClockInCard extends StatelessWidget {
                 label.toUpperCase(),
                 style: EmployeeDashUi.metricLabel(context),
               ),
-              if (isHoliday)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'No clock in/out required',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
               SizedBox(height: compactLayout ? 8 : 12),
               Text(
-                _formatTime(
-                  record?.timeOut ??
-                      record?.breakIn ??
-                      record?.breakOut ??
-                      record?.timeIn,
-                ),
+                primaryValue,
                 style: TextStyle(
                   color: AppTheme.dashTextPrimaryOf(context),
                   fontSize: compactLayout ? 22 : 26,
                   fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                statusText,
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: compactLayout ? 11 : 12,
+                  height: 1.35,
                 ),
               ),
               if (record != null &&
@@ -1251,7 +1213,7 @@ class _ClockInCard extends StatelessWidget {
                 ),
               ],
               SizedBox(height: compactLayout ? 10 : 16),
-              if (isShiftDisabled &&
+              if (!isHoliday &&
                   dtr.isBeforeShiftStart &&
                   dtr.myShiftStartFormatted != null)
                 Padding(
@@ -1265,7 +1227,7 @@ class _ClockInCard extends StatelessWidget {
                     ),
                   ),
                 ),
-              if (isShiftDisabled &&
+              if (!isHoliday &&
                   dtr.isPastShiftEnd &&
                   dtr.myShiftEndFormatted != null)
                 Padding(
@@ -1279,77 +1241,48 @@ class _ClockInCard extends StatelessWidget {
                     ),
                   ),
                 ),
-              SizedBox(
+              Container(
                 width: double.infinity,
-                child: FilledButton(
-                  onPressed: dtr.loading || onTap == null || isShiftDisabled
-                      ? null
-                      : () async {
-                          final ok = await onTap!();
-                          if (context.mounted) {
-                            if (dtr.error != null) {
-                              final err = dtr.error!;
-                              final isShiftEndError =
-                                  err.toLowerCase().contains('shift') &&
-                                  (err.toLowerCase().contains('end') ||
-                                      err.toLowerCase().contains('ended'));
-                              if (isShiftEndError) {
-                                showDialog(
-                                  context: context,
-                                  builder: (ctx) => AlertDialog(
-                                    title: const Text('Shift has ended'),
-                                    content: Text(err),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(ctx),
-                                        child: const Text('OK'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              } else {
-                                ScaffoldMessenger.of(
-                                  context,
-                                ).showSnackBar(SnackBar(content: Text(err)));
-                              }
-                            } else if (ok) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    '$nextAction recorded successfully.',
-                                  ),
-                                ),
-                              );
-                            }
-                          }
-                        },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryNavy,
-                    foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(
-                      vertical: compactLayout ? 10 : 12,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 0,
+                padding: EdgeInsets.symmetric(
+                  horizontal: compactLayout ? 12 : 14,
+                  vertical: compactLayout ? 10 : 12,
+                ),
+                decoration: BoxDecoration(
+                  color: isComplete
+                      ? Colors.green.withValues(alpha: 0.08)
+                      : AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isComplete
+                        ? Colors.green.withValues(alpha: 0.22)
+                        : AppTheme.primaryNavy.withValues(alpha: 0.18),
                   ),
-                  child: dtr.loading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Text(
-                          isHoliday
-                              ? 'Holiday'
-                              : isComplete
-                              ? 'Clocked Out'
-                              : (nextAction ?? '—'),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isComplete
+                          ? Icons.check_circle_rounded
+                          : Icons.fingerprint_rounded,
+                      size: compactLayout ? 17 : 18,
+                      color: isComplete
+                          ? Colors.green.shade700
+                          : AppTheme.primaryNavy,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        isComplete
+                            ? 'Synced from biometric device'
+                            : 'Biometric device records punches',
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontSize: compactLayout ? 11 : 12,
+                          fontWeight: FontWeight.w700,
                         ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
