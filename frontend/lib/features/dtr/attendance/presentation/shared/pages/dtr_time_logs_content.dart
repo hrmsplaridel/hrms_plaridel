@@ -957,6 +957,58 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ),
                         child: const Text('RESET'),
                       ),
+                      PopupMenuButton<String>(
+                        tooltip: 'Time log actions',
+                        icon: Icon(
+                          Icons.more_vert_rounded,
+                          color: AppTheme.dashTextSecondaryOf(context),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        color: AppTheme.dashPanelOf(context),
+                        onSelected: (value) {
+                          switch (value) {
+                            case 'add':
+                              _showAddDialog(context, dtr);
+                              break;
+                            case 'import':
+                              _showImportBiometricLogsDialog();
+                              break;
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          PopupMenuItem<String>(
+                            value: 'add',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.add_rounded,
+                                  size: 20,
+                                  color: AppTheme.primaryNavy,
+                                ),
+                                const SizedBox(width: 12),
+                                const Text('Add manual entry'),
+                              ],
+                            ),
+                          ),
+                          if (isAdmin)
+                            PopupMenuItem<String>(
+                              value: 'import',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.file_upload_rounded,
+                                    size: 20,
+                                    color: AppTheme.primaryNavy,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  const Text('Import biometric logs'),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
                 );
@@ -964,40 +1016,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
             ),
           ),
           const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            alignment: WrapAlignment.start,
-            children: [
-              if (isAdmin)
-                FilledButton.icon(
-                  onPressed: _showImportBiometricLogsDialog,
-                  icon: const Icon(Icons.file_upload_rounded, size: 18),
-                  label: const Text('Import Biometric Logs'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryNavy,
-                    foregroundColor: AppTheme.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-              FilledButton.icon(
-                onPressed: () => _showAddDialog(context, dtr),
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add manual entry'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy,
-                  foregroundColor: AppTheme.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
           if (isHardcodedPreview && !dtr.tableMissing) ...[
             const SizedBox(height: 8),
             Container(
