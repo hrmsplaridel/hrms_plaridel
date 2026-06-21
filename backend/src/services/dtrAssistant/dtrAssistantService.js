@@ -237,6 +237,24 @@ function strictMemoryTopicState(memory, topic) {
   return memory.topics?.[topic] || (memory.topic === topic ? memory : null);
 }
 
+function requestedSpecificLocatorTypeForMemory(text) {
+  const type = requestedLocatorType(text);
+  if (type !== 'locator') return type;
+  return /\b(official business|official|business|ob|on field|field|fieldwork|field work|out of office|outside office|travel order)\b/i.test(
+    text
+  )
+    ? 'locator'
+    : null;
+}
+
+function isBroadLocatorSummaryRequest(intent, text) {
+  if (intent !== 'locator_summary') return false;
+  if (requestedSpecificLocatorTypeForMemory(text)) return false;
+  return /\b(summary|total|count|counts|pila|kabuok|ilan|how many|history|list|show|accepted|approved|pending|rejected)\b/i.test(
+    text
+  );
+}
+
 function memoryLeaveTypeForIntent(intent, effectiveText, context, memory) {
   if (!isLeaveIntent(intent)) return null;
   const leaveMemory = memoryTopicState(memory, 'leave');
@@ -252,8 +270,10 @@ function memoryLeaveTypeForIntent(intent, effectiveText, context, memory) {
 function memoryLocatorTypeForIntent(intent, effectiveText, memory) {
   if (!isLocatorIntent(intent)) return null;
   const locatorMemory = memoryTopicState(memory, 'locator');
+  const requestedType = requestedSpecificLocatorTypeForMemory(effectiveText);
+  if (requestedType) return requestedType;
+  if (isBroadLocatorSummaryRequest(intent, effectiveText)) return null;
   return (
-    requestedLocatorType(effectiveText) ||
     locatorMemory?.locatorType ||
     memory?.locatorType ||
     null
@@ -263,10 +283,15 @@ function memoryLocatorTypeForIntent(intent, effectiveText, memory) {
 function buildNextAssistantMemory(previous, next) {
   const topic = topicForIntent(next.intent);
   const previousTopicState = strictMemoryTopicState(previous, topic) || {};
+  const shouldCarryPreviousLocatorType =
+    topic === 'locator' && !isBroadLocatorSummaryRequest(next.intent, next.text);
   const leaveType =
     next.leaveType || (topic === 'leave' ? previousTopicState.leaveType : previous?.leaveType) || null;
   const locatorType =
-    next.locatorType || (topic === 'locator' ? previousTopicState.locatorType : previous?.locatorType) || null;
+    next.locatorType ||
+    (shouldCarryPreviousLocatorType ? previousTopicState.locatorType : null) ||
+    (topic !== 'locator' ? previous?.locatorType : null) ||
+    null;
   const turn = {
     intent: next.intent || null,
     topic,
@@ -1041,7 +1066,7 @@ function simpleLanguageOf(text) {
   const value = lower(text);
   if (/\b(tagaloga?|tagalog|filipino)\b/.test(value)) return 'tagalog';
   if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(value)) return 'bisaya';
-  if (/\b(unsa|unsaon|unsay|ngano|pila|naa|akong|nako|imong|nimo|ug|karon|pwede|adto|ato|ana|bulana|semanaha)\b/.test(value)) {
+  if (/\b(unsa|unsaon|unsay|ngano|pila|naa|akong|nako|imong|nimo|ug|karon|pwede|adto|ato|ana|bulana|semanaha|daw|apil|ila|nga)\b/.test(value)) {
     return 'bisaya';
   }
   if (/\b(tagalog|filipino|ano|bakit|ilan|ngayon|kailangan|puwede|pwede|ako|ko|ba|may|wala)\b/.test(value)) {
@@ -1135,7 +1160,7 @@ function isAmbiguousFilingQuestion(text) {
 function isAmbiguousStatusQuestion(text) {
   const value = lower(text);
   if (explicitTopicFromText(value)) return false;
-  return /\b(status|approved|approve|na-approve|pending|rejected|returned|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|remarks|reason|approved na|na approve)\b/.test(
+  return /\b(status|approved|approve|accepted|na-approve|pending|rejected|returned|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|remarks|reason|approved na|na approve)\b/.test(
     value
   );
 }
@@ -1179,7 +1204,7 @@ function gracefulFallbackContent(text) {
 }
 
 function isFollowUpQuestion(text) {
-  return /\b(it|that|this|one|same|about|how about|what about|translate|answer|reply|say|again|bisayaa?|binisayaa?|cebuano|tagalog|filipino|english|ingles|daw|explain|guidelines?|deadlines?|supporting|documents?|credits?|commutation|monetization|monetisation|terminal leave|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|today|tomorrow|yesterday|ugma|gahapon|kagahapon|week|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|ago|from|to|semana|semanaha|bulan|bulana|buwan|buwana|aning|karong|ngayong|ngano|why|bakit|pila|unsa|ano|how many|status|approved|pending|rejected|requirements?|remarks?|reason|who|where|asa|kinsa|sino|can|file|pwede|puwede|allowed|eligible)\b/.test(
+  return /\b(it|that|this|one|same|about|how about|what about|translate|answer|reply|say|again|bisayaa?|binisayaa?|cebuano|tagalog|filipino|english|ingles|daw|explain|guidelines?|deadlines?|supporting|documents?|credits?|commutation|monetization|monetisation|terminal leave|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|today|tomorrow|yesterday|ugma|gahapon|kagahapon|week|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|ago|from|to|semana|semanaha|bulan|bulana|buwan|buwana|aning|karong|ngayong|ngano|why|bakit|pila|unsa|ano|how many|status|approved|accepted|pending|rejected|requirements?|remarks?|reason|who|where|asa|kinsa|sino|can|file|pwede|puwede|allowed|eligible)\b/.test(
     lower(text)
   );
 }
@@ -1307,7 +1332,7 @@ function resolveIntentFromMemory(text, memory) {
     }
     if (
       locatorTypeFollowUp &&
-      !/\b(status|approved|approve|pending|rejected|returned|cancelled|canceled|latest|last|recent|remarks|reason|who|where|asa|kinsa|sino|holding|waiting)\b/.test(value)
+      !/\b(status|approved|approve|accepted|pending|rejected|returned|cancelled|canceled|latest|last|recent|remarks|reason|who|where|asa|kinsa|sino|holding|waiting)\b/.test(value)
     ) {
       return 'locator_types';
     }
@@ -1326,7 +1351,7 @@ function resolveIntentFromMemory(text, memory) {
     if (/\b(types?|kinds?|options?|available.*locator|locator.*available)\b/.test(value)) {
       return 'locator_types';
     }
-    if (/\b(status|approved|approve|pending|rejected|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|remarks|reason|ngano|bakit|why)\b/.test(value)) {
+    if (/\b(status|approved|approve|accepted|pending|rejected|cancelled|canceled|where|asa|kinsa|sino|who|holding|waiting|remarks|reason|ngano|bakit|why)\b/.test(value)) {
       return 'locator_status';
     }
     return activeIntent;
@@ -1629,8 +1654,15 @@ function enrichMessageWithMemory(text, memory, memoryIntent = null) {
   }
 
   if (isLocatorIntent(activeIntent) || /\b(locator|pass slip|wfh|work from home|official business|ob)\b/i.test(enriched)) {
+    const broadLocatorSummaryFollowUp =
+      activeIntent === 'locator_summary' &&
+      /\b(summary|total|count|counts|pila|ilan|how many|history|list|show|accepted|approved|pending|rejected)\b/i.test(
+        enriched
+      ) &&
+      !/\b(same type|same locator|same one|that type|ana|ato|adto)\b/i.test(enriched);
     const canUseRememberedLocatorType =
-      isFollowUpQuestion(text) || isLocatorIntent(activeIntent);
+      !broadLocatorSummaryFollowUp &&
+      (isFollowUpQuestion(text) || isLocatorIntent(activeIntent));
     const locatorType =
       requestedLocatorType(enriched) ||
       (canUseRememberedLocatorType
@@ -1639,7 +1671,7 @@ function enrichMessageWithMemory(text, memory, memoryIntent = null) {
     if (locatorType && !requestedLocatorType(enriched)) {
       const locatorTypeLabel = locatorType.replace(/_/g, ' ');
       if (
-        /locator_|locator\b|requirements?|attachment|types?|status|summary|approved|pending|rejected|how about|what about|can|file|pwede|puwede/i.test(
+        /locator_|locator\b|requirements?|attachment|types?|status|summary|approved|accepted|pending|rejected|how about|what about|can|file|pwede|puwede/i.test(
           activeIntent || enriched
         )
       ) {

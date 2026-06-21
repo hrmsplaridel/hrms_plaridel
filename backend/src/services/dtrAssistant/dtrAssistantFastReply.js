@@ -309,7 +309,7 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
 
 function isTagalogOrBisaya(message) {
   const text = lower(message);
-  return /\b(ano|ba|ko|akong|ngano|unsa|unsay|karon|ngayon|kumusta|pila|kabuok|naa|wala|pasok|na-approve|adtong|adtung|atong|niadtong|niadtung|ana|adto|ato)\b/.test(
+  return /\b(ano|ba|ko|akong|ngano|unsa|unsay|karon|ngayon|kumusta|pila|kabuok|naa|wala|pasok|na-approve|adtong|adtung|atong|niadtong|niadtung|ana|adto|ato|daw|apil|ila)\b/.test(
     text
   );
 }
@@ -319,7 +319,7 @@ function languageOf(message) {
   if (/\b(tagaloga?|tagalog|filipino)\b/.test(text)) return 'tagalog';
   if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(text)) return 'bisaya';
   if (/\b(english|ingles)\b/.test(text)) return 'english';
-  if (/\b(ngano|unsa|unsaon|unsay|unsa'y|karon|pila|kabuok|naa|akong|nako|nabilin|gamay|kuwang|imong|nimo|gikan|mahimong|adlaw|kinahanglan|ug|kay|aning|bulana|adtong|adtung|adtun|atong|niadtong|niadtung|ana|adto|ato|duty)\b/.test(text)) {
+  if (/\b(ngano|unsa|unsaon|unsay|unsa'y|karon|pila|kabuok|naa|akong|nako|nabilin|gamay|kuwang|imong|nimo|gikan|mahimong|adlaw|kinahanglan|ug|kay|aning|bulana|adtong|adtung|adtun|atong|niadtong|niadtung|ana|adto|ato|duty|daw|apil|ila|nga)\b/.test(text)) {
     return 'bisaya';
   }
   if (/\b(tagalog|filipino|ano|ngayon|ako|ko|ba|may|wala|ilan|bakit|maliit|natira|kailangan|pasok|noong|nung)\b/.test(text)) {
@@ -365,7 +365,7 @@ function localizeTitle(title, language) {
       .replace(/^Approved leave requests$/i, 'Approved leave requests nimo')
       .replace(/^Rejected leave requests$/i, 'Rejected leave requests nimo')
       .replace(/^Locator types you can file$/i, 'Locator types nga pwede nimo ma-file')
-      .replace(/^Locator filing requirements$/i, 'Locator filing requirements')
+      .replace(/^Locator filing requirements$/i, 'Giya sa pag-file ug locator')
       .replace(/^Locator filing check$/i, 'Locator filing check')
       .replace(/^Absence check/i, 'Absence check')
       .replace(/^Missing logs/i, 'Missing logs')
@@ -383,7 +383,7 @@ function localizeTitle(title, language) {
       .replace(/^Approved leave requests$/i, 'Approved leave requests mo')
       .replace(/^Rejected leave requests$/i, 'Rejected leave requests mo')
       .replace(/^Locator types you can file$/i, 'Locator types na puwede mong i-file')
-      .replace(/^Locator filing requirements$/i, 'Locator filing requirements')
+      .replace(/^Locator filing requirements$/i, 'Gabay sa pag-file ng locator')
       .replace(/^Locator filing check$/i, 'Locator filing check')
       .replace(/^Absence check/i, 'Absence check')
       .replace(/^Missing logs/i, 'Missing logs')
@@ -3559,10 +3559,34 @@ function locatorTypeMatches(item, requestedType) {
 function requestedLocatorStatus(message) {
   const text = lower(message);
   if (/\b(pending|waiting|awaiting|hold|holding|asa|where|kinsa|sino)\b/.test(text)) return 'pending';
-  if (/\b(approved|approve|na-approve)\b/.test(text)) return 'approved';
+  if (/\b(approved|approve|na-approve|accepted|accept)\b/.test(text)) return 'approved';
   if (/\b(rejected|reject|declined|denied|gi reject|gireject|not approved|wala.*approve|dili.*approved|hindi.*approved)\b/.test(text)) return 'rejected';
   if (/\b(cancelled|canceled|cancel)\b/.test(text)) return 'cancelled';
   return null;
+}
+
+function localizedLocatorStatusName(status, language) {
+  if (status === 'approved') {
+    if (language === 'bisaya') return 'approved/accepted';
+    if (language === 'tagalog') return 'approved/accepted';
+    return 'approved';
+  }
+  if (status === 'pending') {
+    if (language === 'bisaya') return 'pending';
+    if (language === 'tagalog') return 'pending';
+    return 'pending';
+  }
+  if (status === 'rejected') {
+    if (language === 'bisaya') return 'rejected';
+    if (language === 'tagalog') return 'rejected';
+    return 'rejected';
+  }
+  if (status === 'cancelled') {
+    if (language === 'bisaya') return 'cancelled';
+    if (language === 'tagalog') return 'cancelled';
+    return 'cancelled';
+  }
+  return '';
 }
 
 function locatorStatusMatches(status, requested) {
@@ -3578,7 +3602,7 @@ function locatorStatusMatches(status, requested) {
 function locatorSlipsForMessage(context, message) {
   const range = context.date_range || {};
   const useRange = hasDateRangeHint(message);
-  const requestedType = requestedLocatorType(message);
+  const requestedType = requestedSpecificLocatorType(message);
   const requestedStatus = requestedLocatorStatus(message);
   return (context.recent_locator_slips || []).filter((slip) => {
     if (useRange && range.startDate && range.endDate) {
@@ -3613,30 +3637,83 @@ function locatorCoverageModeText(type, language) {
     if (language === 'tagalog') return 'WFH coverage sa DTR';
     return 'WFH coverage in DTR';
   }
-  if (language === 'bisaya') return 'manual AM/PM slot selection';
-  if (language === 'tagalog') return 'manual AM/PM slot selection';
+  if (language === 'bisaya') return 'pili-a ang sakop nga AM/PM DTR slots';
+  if (language === 'tagalog') return 'piliin ang sakop na AM/PM DTR slots';
   return 'manual AM/PM slot selection';
 }
 
 function locatorAttachmentText(type, language) {
   if (type?.requires_attachment) {
-    if (language === 'bisaya') return 'attachment required';
-    if (language === 'tagalog') return 'attachment required';
+    if (language === 'bisaya') return 'kinahanglan ug attachment';
+    if (language === 'tagalog') return 'kailangan ng attachment';
     return 'attachment required';
   }
-  if (language === 'bisaya') return 'walay attachment required by this type';
-  if (language === 'tagalog') return 'walang attachment required by this type';
+  if (language === 'bisaya') return 'walay required attachment ani nga type';
+  if (language === 'tagalog') return 'walang required attachment sa type na ito';
   return 'no attachment required by this type';
+}
+
+function locatorLocationText(type, language) {
+  if (!type?.location_label) return null;
+  const hint = type.location_hint ? String(type.location_hint) : '';
+  if (language === 'bisaya') {
+    const hintText = hint
+      .replace(/^Enter office or destination$/i, 'ibutang ang office o destination')
+      .replace(/^Enter destination or location$/i, 'ibutang ang destination o location')
+      .replace(/^Enter work location$/i, 'ibutang ang work location');
+    return hintText ? `${type.location_label}: ${hintText}` : type.location_label;
+  }
+  if (language === 'tagalog') {
+    const hintText = hint
+      .replace(/^Enter office or destination$/i, 'ilagay ang office o destination')
+      .replace(/^Enter destination or location$/i, 'ilagay ang destination o location')
+      .replace(/^Enter work location$/i, 'ilagay ang work location');
+    return hintText ? `${type.location_label}: ${hintText}` : type.location_label;
+  }
+  return `${type.location_label}${hint ? `: ${hint}` : ''}`;
+}
+
+function locatorDtrLabelText(type, language) {
+  if (!type?.dtr_slot_label) return null;
+  if (language === 'bisaya') return `DTR label nga gamiton: ${type.dtr_slot_label}`;
+  if (language === 'tagalog') return `DTR label na gagamitin: ${type.dtr_slot_label}`;
+  return `DTR label: ${type.dtr_slot_label}`;
 }
 
 function fmtLocatorTypeRule(type, language) {
   const parts = [
     locatorCoverageModeText(type, language),
     locatorAttachmentText(type, language),
-    type?.location_label ? `${type.location_label}${type.location_hint ? `: ${type.location_hint}` : ''}` : null,
-    type?.dtr_slot_label ? `DTR label: ${type.dtr_slot_label}` : null,
+    locatorLocationText(type, language),
+    locatorDtrLabelText(type, language),
   ].filter(Boolean);
   return `${locatorTypeName(type)}: ${parts.join('; ')}`;
+}
+
+function locatorRequirementPolicyLines(language) {
+  if (language === 'bisaya') {
+    return [
+      'Locator filing: Kinahanglan ug slip date, locator type, covered DTR slot/s, destination/location, ug reason.',
+      'DTR coverage: Makatabang lang sa DTR ang locator kung approved na ug sakto ang covered slot/s.',
+      'Approval workflow: Muagi gihapon ni sa normal approval workflow; dili pa ni final kung pending pa.',
+    ];
+  }
+  if (language === 'tagalog') {
+    return [
+      'Locator filing: Kailangan ng slip date, locator type, covered DTR slot/s, destination/location, at reason.',
+      'DTR coverage: Makakatulong lang sa DTR ang locator kapag approved na at tama ang covered slot/s.',
+      'Approval workflow: Dadaan pa rin ito sa normal approval workflow; hindi pa final kung pending pa.',
+    ];
+  }
+  return policyPointLines(getLocatorPolicySectionsForMessage('', {
+    fallbackKeys: [
+      'filing_requirements',
+      'dtr_coverage',
+      'approval_workflow',
+    ],
+  }), {
+    maxPointsPerSection: 2,
+  });
 }
 
 function locatorTypesReply(context, message) {
@@ -3748,10 +3825,16 @@ function locatorSummaryReply(context, message) {
   const language = languageOf(message);
   const slips = locatorSlipsForMessage(context, message);
   const label = hasDateRangeHint(message) ? context.date_range?.label || 'selected period' : 'recent records';
+  const requestedStatus = requestedLocatorStatus(message);
+  const statusText = localizedLocatorStatusName(requestedStatus, language);
   if (slips.length === 0) {
-    if (language === 'bisaya') return `Wala koy nakitang locator slip para sa ${label}.`;
-    if (language === 'tagalog') return `Wala akong nakitang locator slip para sa ${label}.`;
-    return `I found no locator slips for ${label}.`;
+    if (language === 'bisaya') {
+      return `Wala koy nakitang ${statusText ? `${statusText} ` : ''}locator slip para sa ${displayPeriodLabel(label, language)}.`;
+    }
+    if (language === 'tagalog') {
+      return `Wala akong nakitang ${statusText ? `${statusText} ` : ''}locator slip para sa ${displayPeriodLabel(label, language)}.`;
+    }
+    return `I found no ${statusText ? `${statusText} ` : ''}locator slips for ${label}.`;
   }
   const counts = slips.reduce(
     (acc, slip) => {
@@ -3768,10 +3851,10 @@ function locatorSummaryReply(context, message) {
   const lines = limitedRequests(slips, 6).map(fmtLocatorSlip);
   const summary =
     language === 'bisaya'
-      ? `Nakita nako ang ${slips.length} ka locator slip para sa ${label}.`
+      ? `Nakita nako ang ${slips.length} ka ${statusText ? `${statusText} ` : ''}locator slip para sa ${displayPeriodLabel(label, language)}.`
       : language === 'tagalog'
-        ? `May nakita akong ${slips.length} locator slip para sa ${label}.`
-        : `I found ${slips.length} locator ${plural(slips.length, 'slip')} for ${label}.`;
+        ? `May nakita akong ${slips.length} ${statusText ? `${statusText} ` : ''}locator slip para sa ${displayPeriodLabel(label, language)}.`
+        : `I found ${slips.length} ${statusText ? `${statusText} ` : ''}locator ${plural(slips.length, 'slip')} for ${label}.`;
   return structuredReply(language, {
     title: `Locator summary (${label})`,
     summary,
@@ -3797,7 +3880,7 @@ function locatorRequirementsReply(context, message) {
   const lines = visible.map((type) => fmtLocatorTypeRule(type, language));
   const summary =
     language === 'bisaya'
-      ? 'Base sa locator type setup, mao ni ang filing rules.'
+      ? 'Base sa locator type setup, mao ni ang rules sa pag-file.'
       : language === 'tagalog'
         ? 'Base sa locator type setup, ito ang filing rules.'
         : 'Based on the locator type setup, these are the filing rules.';
@@ -3806,18 +3889,22 @@ function locatorRequirementsReply(context, message) {
     summary,
     details: [
       ...lines,
-      ...policyPointLines(getLocatorPolicySectionsForMessage('', {
-        fallbackKeys: [
-          'filing_requirements',
-          'dtr_coverage',
-          'approval_workflow',
-        ],
-      }), {
-        maxPointsPerSection: 2,
-      }),
-      'You need a valid working-day schedule for the slip date.',
-      'Choose at least one covered slot: AM in, AM out, PM in, or PM out.',
-      'Office/destination and reason are required.',
+      ...locatorRequirementPolicyLines(language),
+      language === 'bisaya'
+        ? 'Kinahanglan valid working-day schedule ang slip date.'
+        : language === 'tagalog'
+          ? 'Kailangan valid working-day schedule ang slip date.'
+          : 'You need a valid working-day schedule for the slip date.',
+      language === 'bisaya'
+        ? 'Pili ug bisan usa ka covered slot: AM in, AM out, PM in, o PM out.'
+        : language === 'tagalog'
+          ? 'Pumili ng kahit isang covered slot: AM in, AM out, PM in, o PM out.'
+          : 'Choose at least one covered slot: AM in, AM out, PM in, or PM out.',
+      language === 'bisaya'
+        ? 'Kinahanglan ang office/destination ug klarong reason.'
+        : language === 'tagalog'
+          ? 'Kailangan ang office/destination at malinaw na reason.'
+          : 'Office/destination and reason are required.',
     ],
     nextStep:
       language === 'bisaya'

@@ -44,6 +44,8 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['can you give me the guidlines of the leave types?', 'leave_guideline_section'],
     ['explain me the leave types', 'leave_guideline_section'],
     ['explain the sick leave', 'leave_guideline_section'],
+    ['eh explain daw ang maternity leave', 'leave_guideline_section'],
+    ['eh explain daw ang mga leave types apil ila guidelines', 'leave_guideline_section'],
     ['unsay requirements sa maternity leave?', 'leave_requirements'],
     ['need med cert if 5 days sick leave?', 'leave_attachment_requirement'],
     ['what attachment do I need?', 'leave_attachment_requirement'],
@@ -56,6 +58,8 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['what are the locator types i can file?', 'locator_types'],
     ['how about the wfh?', 'locator_types'],
     ['unsa ang wfh?', 'locator_types'],
+    ['unsaon pag file loacator slip?', 'locator_requirements'],
+    ['pila accepted locator karon nga month?', 'locator_summary'],
     ['export my dtr this month', 'dtr_export_guidance'],
     ['what are the dtr rules?', 'dtr_policy_guidance'],
     ['how many absent last pay period?', 'dtr_absent_summary'],
@@ -76,6 +80,8 @@ test('DTR assistant regression: fuzzy intent scoring handles typos and mixed lan
     ['naa koy absnt karong bulna?', 'dtr_absent_summary'],
     ['staus sa akong lokator?', 'locator_status'],
     ['pwede ko mag lokator ugma?', 'locator_availability_check'],
+    ['unsaon pag file loacator slip?', 'locator_requirements'],
+    ['pila accpeted locator?', 'locator_summary'],
   ];
 
   for (const [message, expected] of cases) {
@@ -227,6 +233,46 @@ test('DTR assistant regression: DTR and locator policy knowledge appears in repl
   assert.match(locatorReply, /Locator filing requirements/);
   assert.match(locatorReply, /A locator slip needs a slip date/i);
   assert.match(locatorReply, /A locator slip helps DTR only after approval/i);
+});
+
+test('DTR assistant regression: Bisaya locator filing prompts stay friendly and localized', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'unsaon pag file loacator slip?',
+    {
+      locator_types: [
+        {
+          code: 'locator',
+          label: 'Locator / Official Business',
+          short_label: 'Locator',
+          location_label: 'Office / Destination',
+          location_hint: 'Enter office or destination',
+          dtr_slot_label: 'On Field',
+          requires_attachment: false,
+          coverage_mode: 'manual',
+        },
+        {
+          code: 'pass_slip',
+          label: 'Pass Slip',
+          short_label: 'Pass Slip',
+          location_label: 'Destination / Location',
+          location_hint: 'Enter destination or location',
+          dtr_slot_label: 'Pass Slip',
+          requires_attachment: false,
+          coverage_mode: 'manual',
+        },
+      ],
+    },
+    'locator_requirements'
+  );
+
+  assert.match(reply, /Giya sa pag-file ug locator/);
+  assert.match(reply, /Base sa locator type setup/i);
+  assert.match(reply, /pili-a ang sakop nga AM\/PM DTR slots/i);
+  assert.match(reply, /walay required attachment ani nga type/i);
+  assert.match(reply, /ibutang ang office o destination/i);
+  assert.match(reply, /DTR label nga gamiton/i);
+  assert.doesNotMatch(reply, /manual AM\/PM slot selection/i);
+  assert.doesNotMatch(reply, /Enter office or destination/i);
 });
 
 test('DTR assistant regression: how-to-file leave questions show form guidance', () => {
@@ -532,6 +578,54 @@ test('DTR assistant regression: Bisaya specific leave explanation localizes deta
   assert.doesNotMatch(reply, /unable to report due to personal illness/i);
 });
 
+test('DTR assistant regression: feedback Bisaya leave explanation phrases stay Bisaya', () => {
+  const maternityReply = buildFastEmployeeAssistantReply(
+    'eh explain daw ang maternity leave',
+    {
+      leave_types: [
+        {
+          name: 'maternityLeave',
+          display_name: 'Maternity leave',
+          employee_can_file: true,
+          requires_attachment: true,
+        },
+      ],
+    },
+    'leave_guideline_section'
+  );
+
+  assert.match(maternityReply, /Pasabot: Para sa female employees tungod sa childbirth/i);
+  assert.match(maternityReply, /Medical certificate o birth\/delivery record/i);
+  assert.doesNotMatch(maternityReply, /Here is the explanation/i);
+  assert.doesNotMatch(maternityReply, /Granted to female employees/i);
+
+  const allTypesReply = buildFastEmployeeAssistantReply(
+    'eh explain daw ang mga leave types apil ila guidelines',
+    {
+      leave_types: [
+        {
+          name: 'vacationLeave',
+          display_name: 'Vacation Leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+        },
+      ],
+      leave_guideline_catalog: buildAllLeaveGuidelines(),
+    },
+    'leave_guideline_section'
+  );
+
+  assert.match(allTypesReply, /Mao ni ang guideline summary/i);
+  assert.match(allTypesReply, /Vacation Leave: Para sa personal nga pahuway/i);
+  assert.match(allTypesReply, /Sick Leave: Para kung dili ka makareport/i);
+  assert.doesNotMatch(allTypesReply, /Granted to employees for personal recreation/i);
+  assert.doesNotMatch(allTypesReply, /Granted when an employee is unable to report/i);
+});
+
 test('DTR assistant regression: specific leave explain questions show guideline details', () => {
   const reply = buildFastEmployeeAssistantReply(
     'explain the sick leave',
@@ -586,6 +680,66 @@ test('DTR assistant regression: conversation memory keeps topic and entity follo
   );
 
   memory = assistantServiceTest.buildNextAssistantMemory(memory, {
+    intent: 'locator_summary',
+    text: 'pila ang accepted nga locator karon nga month?',
+    dateRange: {
+      label: 'this month',
+      startDate: '2026-06-01',
+      endDate: '2026-06-30',
+    },
+    modelProfile: 'tools_ollama',
+  });
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory('ang accepted pila?', memory),
+    'locator_summary'
+  );
+
+  const acceptedLocatorFollowUp = assistantServiceTest.enrichMessageWithMemory(
+    'ang accepted pila?',
+    memory,
+    'locator_summary'
+  );
+
+  assert.match(acceptedLocatorFollowUp, /2026-06-01 to 2026-06-30/);
+
+  const acceptedLocatorReply = buildFastEmployeeAssistantReply(
+    acceptedLocatorFollowUp,
+    {
+      date_range: {
+        label: 'this month',
+        startDate: '2026-06-01',
+        endDate: '2026-06-30',
+      },
+      recent_locator_slips: [
+        {
+          slip_date: '2026-06-05',
+          status: 'approved',
+          request_type_label: 'Work From Home',
+          coverage: { am_in: true, am_out: true },
+        },
+        {
+          slip_date: '2026-06-12',
+          status: 'approved',
+          request_type_label: 'Locator / Official Business',
+          coverage: { pm_in: true, pm_out: true },
+        },
+        {
+          slip_date: '2026-06-18',
+          status: 'pending',
+          request_type_label: 'Pass Slip',
+          coverage: { pm_out: true },
+        },
+      ],
+    },
+    'locator_summary'
+  );
+
+  assert.match(acceptedLocatorReply, /2 ka approved\/accepted locator slip para sa aning bulana/i);
+  assert.match(acceptedLocatorReply, /Approved: 2/i);
+  assert.doesNotMatch(acceptedLocatorReply, /June 21, 2026/i);
+
+  memory = assistantServiceTest.buildNextAssistantMemory(memory, {
     intent: 'dtr_status_explanation',
     text: 'unsay status sa akong dtr adtung niaging miyerkules?',
     dateRange: {
@@ -608,8 +762,8 @@ test('DTR assistant regression: conversation memory keeps topic and entity follo
     ),
     /2026-06-10/
   );
-  assert.equal(memory.history.length, 2);
-  assert.equal(memory.topics.locator.locatorType, 'work_from_home');
+  assert.equal(memory.history.length, 3);
+  assert.equal(memory.topics.locator.locatorType, null);
 
   const mistakenDtrMemory = assistantServiceTest.buildNextAssistantMemory(null, {
     intent: 'dtr_status_explanation',
@@ -706,7 +860,7 @@ test('DTR assistant regression: explain follow-up after leave type list expands 
   );
 
   assert.match(reply, /Leave Type Guidelines/);
-  assert.match(reply, /Sick Leave: Granted when an employee is unable to report/i);
+  assert.match(reply, /Sick leave: Para kung dili ka makareport/i);
   assert.doesNotMatch(reply, /These are the leave types you can file/i);
 });
 
