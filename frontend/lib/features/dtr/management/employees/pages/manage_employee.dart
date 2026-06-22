@@ -24,7 +24,7 @@ class _EmployeeProfile {
   const _EmployeeProfile({
     required this.id,
     required this.fullName,
-    required this.role,
+    required this.role, 
     this.employeeNumber,
     this.email,
     this.isActive = true,

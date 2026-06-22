@@ -582,13 +582,6 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
     const totalWidth = 88.0;
     const rankWidth = 80.0;
     const actionWidth = 52.0;
-    final tableWidth =
-        candidateWidth +
-        _scoreKeys.length * scoreWidth +
-        totalWidth +
-        rankWidth +
-        actionWidth +
-        32;
 
     TextStyle headerStyle(Color color) => TextStyle(
       color: color,
@@ -631,15 +624,16 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
         borderRadius: BorderRadius.circular(13),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: tableWidth,
+          child: IntrinsicWidth(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
                   height: 58,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   color: AppTheme.primaryNavy,
                   child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(
                         width: candidateWidth,
@@ -666,6 +660,7 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
                     ),
                     color: AppTheme.white,
                     child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         SizedBox(

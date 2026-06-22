@@ -19,7 +19,7 @@ class AdminWelcomeStatusCard extends StatefulWidget {
 class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
   late Timer _clockTimer;
   late DateTime _now;
-  bool _use12Hour = false;
+  bool _use12Hour = true;
   bool _weatherLoading = true;
   LocalWeatherSnapshot? _weather;
 
@@ -54,7 +54,7 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() => _use12Hour = prefs.getBool(_kClock12hrKey) ?? false);
+    setState(() => _use12Hour = prefs.getBool(_kClock12hrKey) ?? true);
   }
 
   Future<void> _loadWeather({bool force = false}) async {
@@ -97,16 +97,28 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
 
   String get _timeLabel {
     final m = _now.minute.toString().padLeft(2, '0');
-    final s = _now.second.toString().padLeft(2, '0');
     if (_use12Hour) {
       final h = _now.hour == 0
           ? 12
           : (_now.hour > 12 ? _now.hour - 12 : _now.hour);
       final ampm = _now.hour < 12 ? 'AM' : 'PM';
-      return '${h.toString().padLeft(2, '0')}:$m:$s $ampm';
+      return '${h.toString().padLeft(2, '0')}:$m $ampm';
     }
     final h = _now.hour.toString().padLeft(2, '0');
-    return '$h:$m:$s';
+    return '$h:$m';
+  }
+
+  String get _compactTimeLabel {
+    final m = _now.minute.toString().padLeft(2, '0');
+    if (_use12Hour) {
+      final h = _now.hour == 0
+          ? 12
+          : (_now.hour > 12 ? _now.hour - 12 : _now.hour);
+      final ampm = _now.hour < 12 ? 'AM' : 'PM';
+      return '${h.toString().padLeft(2, '0')}:$m $ampm';
+    }
+    final h = _now.hour.toString().padLeft(2, '0');
+    return '$h:$m';
   }
 
   String get _dateLabel {
@@ -120,14 +132,76 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final primary = AppTheme.dashTextPrimaryOf(context);
 
+    Widget timeBlock({required bool compact}) {
+      return Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 7 : 8,
+          vertical: compact ? 6 : 7,
+        ),
+        decoration: BoxDecoration(
+          color: dark
+              ? Colors.white.withValues(alpha: 0.05)
+              : AppTheme.primaryNavy.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.schedule_rounded,
+                  size: compact ? 12 : 13,
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.9),
+                ),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      compact ? _compactTimeLabel : _timeLabel,
+                      style: TextStyle(
+                        fontSize: compact ? 17 : 22,
+                        fontWeight: FontWeight.w800,
+                        color: primary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                        height: 1.0,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 3),
+            Text(
+              _dateLabel,
+              style: TextStyle(
+                fontSize: compact ? 9.5 : 10.5,
+                fontWeight: FontWeight.w600,
+                color: secondary,
+                height: 1.2,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
-      constraints: const BoxConstraints(maxWidth: 300),
+      constraints: const BoxConstraints(maxWidth: 320),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: dark
-            ? AppTheme.dashPanelOf(context)
-            : Colors.white.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: dark
+              ? [AppTheme.dashPanelOf(context), const Color(0xFF222A38)]
+              : [Colors.white, const Color(0xFFFFFAF5)],
+        ),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: AppTheme.primaryNavy.withValues(alpha: dark ? 0.22 : 0.14),
         ),
@@ -139,96 +213,86 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
           ),
         ],
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 250;
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.schedule_rounded,
-                      size: 13,
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.9),
+                    Expanded(child: timeBlock(compact: true)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _buildWeatherBlock(context, secondary, primary, dark, compact: true),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    _WelcomeActionButton(
+                      icon: _use12Hour
+                          ? Icons.schedule_rounded
+                          : Icons.access_time_rounded,
+                      tooltip: 'Toggle time format',
+                      onTap: _toggleClockFormat,
                     ),
-                    const SizedBox(width: 5),
-                    Text(
-                      _timeLabel,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: primary,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                        height: 1.1,
-                      ),
+                    const SizedBox(width: 4),
+                    _WelcomeActionButton(
+                      icon: Icons.refresh_rounded,
+                      tooltip: 'Refresh weather',
+                      onTap: _weatherLoading ? null : () => _loadWeather(force: true),
+                      loading: _weatherLoading,
                     ),
                   ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  _dateLabel,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: secondary,
-                    height: 1.2,
-                  ),
-                ),
               ],
-            ),
-          ),
-          Container(
-            width: 1,
-            height: 34,
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            color: AppTheme.dashHairlineOf(context),
-          ),
-          Expanded(
-            child: _buildWeatherBlock(context, secondary, primary),
-          ),
-          const SizedBox(width: 2),
-          Column(
+            );
+          }
+          return Row(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              InkWell(
-                onTap: _toggleClockFormat,
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: const EdgeInsets.all(3),
-                  child: Icon(
-                    _use12Hour
+              Expanded(child: timeBlock(compact: false)),
+              Container(
+                width: 1,
+                height: 42,
+                margin: const EdgeInsets.symmetric(horizontal: 10),
+                color: AppTheme.dashHairlineOf(context),
+              ),
+              Expanded(
+                child: _buildWeatherBlock(
+                  context,
+                  secondary,
+                  primary,
+                  dark,
+                  compact: false,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _WelcomeActionButton(
+                    icon: _use12Hour
                         ? Icons.schedule_rounded
                         : Icons.access_time_rounded,
-                    size: 14,
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                    tooltip: 'Toggle time format',
+                    onTap: _toggleClockFormat,
                   ),
-                ),
-              ),
-              InkWell(
-                onTap: _weatherLoading ? null : () => _loadWeather(force: true),
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: const EdgeInsets.all(3),
-                  child: _weatherLoading
-                      ? const SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(strokeWidth: 1.5),
-                        )
-                      : Icon(
-                          Icons.refresh_rounded,
-                          size: 14,
-                          color: AppTheme.primaryNavy.withValues(alpha: 0.85),
-                        ),
-                ),
+                  _WelcomeActionButton(
+                    icon: Icons.refresh_rounded,
+                    tooltip: 'Refresh weather',
+                    onTap: _weatherLoading ? null : () => _loadWeather(force: true),
+                    loading: _weatherLoading,
+                  ),
+                ],
               ),
             ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -237,11 +301,13 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
     BuildContext context,
     Color secondary,
     Color primary,
+    bool dark,
+    {required bool compact}
   ) {
     if (_weatherLoading && _weather == null) {
       return Text(
         'Loading weather…',
-        style: TextStyle(fontSize: 10, color: secondary),
+        style: TextStyle(fontSize: compact ? 10 : 10.5, color: secondary),
       );
     }
 
@@ -249,52 +315,84 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
     if (weather == null) {
       return Text(
         'Weather unavailable',
-        style: TextStyle(fontSize: 10, color: secondary),
+        style: TextStyle(fontSize: compact ? 10 : 10.5, color: secondary),
       );
     }
 
+    final isDefaultLocation =
+        weather.locationSource == WeatherLocationSource.municipalityDefault;
     final locationHint = switch (weather.locationSource) {
       WeatherLocationSource.manual =>
         '${weather.locationLabel}\nTap to change your saved location.',
       WeatherLocationSource.device =>
         '${weather.locationLabel}\nUsing your device GPS. Tap to change.',
       WeatherLocationSource.municipalityDefault =>
-        '${weather.locationLabel}\nTap to set your location.',
+        'No custom location set.\nTap to choose your location.',
     };
 
-    return Column(
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      decoration: BoxDecoration(
+        color: dark
+            ? Colors.white.withValues(alpha: 0.05)
+            : AppTheme.primaryNavy.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
           children: [
-            Icon(weather.icon, size: 13, color: const Color(0xFF1565C0)),
+            Icon(weather.icon, size: 14, color: const Color(0xFF1565C0)),
             const SizedBox(width: 4),
             Text(
               weather.temperatureLabel,
               style: TextStyle(
-                fontSize: 14,
+                fontSize: compact ? 17 : 20,
                 fontWeight: FontWeight.w800,
                 color: primary,
-                height: 1.1,
+                height: 1.0,
               ),
             ),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                weather.condition,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: secondary,
+            if (!compact) ...[
+              const SizedBox(width: 4),
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    weather.condition,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: compact ? 9.5 : 10,
+                      fontWeight: FontWeight.w700,
+                      color: secondary,
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         ),
-        const SizedBox(height: 2),
+        if (compact) ...[
+          const SizedBox(height: 2),
+          Text(
+            weather.condition,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: secondary,
+            ),
+          ),
+        ],
+        const SizedBox(height: 3),
         Tooltip(
           message: locationHint,
           child: InkWell(
@@ -305,18 +403,20 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
               child: Row(
                 children: [
                   Icon(
-                    Icons.location_on_outlined,
-                    size: 11,
+                    isDefaultLocation
+                        ? Icons.add_location_alt_outlined
+                        : Icons.location_on_outlined,
+                    size: 12,
                     color: AppTheme.primaryNavy.withValues(alpha: 0.8),
                   ),
                   const SizedBox(width: 3),
                   Flexible(
                     child: Text(
-                      weather.locationLabel,
-                      maxLines: 1,
+                      isDefaultLocation ? 'Set location' : weather.locationLabel,
+                      maxLines: compact ? 2 : 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: compact ? 10 : 10.5,
                         fontWeight: FontWeight.w600,
                         color: secondary,
                         decoration: TextDecoration.underline,
@@ -324,18 +424,72 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 2),
-                  Icon(
-                    Icons.edit_location_alt_outlined,
-                    size: 11,
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.7),
-                  ),
+                  if (!compact) ...[
+                    const SizedBox(width: 2),
+                    Icon(
+                      Icons.edit_location_alt_outlined,
+                      size: 12,
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
         ),
       ],
+    ));
+  }
+}
+
+class _WelcomeActionButton extends StatelessWidget {
+  const _WelcomeActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.loading = false,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: loading ? null : onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: dark
+                ? Colors.white.withValues(alpha: 0.07)
+                : AppTheme.primaryNavy.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: dark
+                  ? Colors.white.withValues(alpha: 0.12)
+                  : AppTheme.primaryNavy.withValues(alpha: 0.14),
+            ),
+          ),
+          child: loading
+              ? const SizedBox(
+                  width: 13,
+                  height: 13,
+                  child: CircularProgressIndicator(strokeWidth: 1.6),
+                )
+              : Icon(
+                  icon,
+                  size: 14,
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.88),
+                ),
+        ),
+      ),
     );
   }
 }
