@@ -29,7 +29,6 @@ class RspApplicationStatusTimeline extends StatelessWidget {
 
   bool get _hasExamResult => examResult != null;
   bool get _passed => examResult?.passed ?? false;
-  double get _score => examResult?.scorePercent ?? 0.0;
   bool get _beiGradingPending =>
       examResult != null && !examResult!.beiGradingComplete;
   bool get _examPassedInferred =>
@@ -501,7 +500,9 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if (!application.finalRequirementsApproved) {
       return _TimelineStepStatus.pending;
     }
-    if (application.orientationAttended == true) return _TimelineStepStatus.done;
+    if (application.orientationAttended == true) {
+      return _TimelineStepStatus.done;
+    }
     if (application.orientationAttended == false) {
       return _TimelineStepStatus.failed;
     }
