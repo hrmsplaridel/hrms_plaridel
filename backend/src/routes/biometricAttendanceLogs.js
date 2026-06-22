@@ -5,6 +5,7 @@ const { requireAdmin } = require('../middleware/rbac');
 const {
   processBiometricLogsToSummary,
   evaluateBiometricDayGate,
+  isPunchAfterShiftEnd,
   getManilaDateStr,
 } = require('../services/biometricProcessing');
 
@@ -29,6 +30,37 @@ function toIsoDate(val) {
   const d = val instanceof Date ? val : new Date(val);
   if (isNaN(d.getTime())) return null;
   return d.toISOString().slice(0, 10);
+}
+
+async function hasStoredBiometricPunchForDay(userId, dateStr, cache) {
+  const key = `${userId}|${dateStr}`;
+  if (cache.has(key)) return cache.get(key);
+  const tz = process.env.HRMS_TIMEZONE || 'Asia/Manila';
+  const res = await pool.query(
+    `SELECT 1
+     FROM biometric_attendance_logs
+     WHERE user_id = $1::uuid
+       AND (logged_at AT TIME ZONE $2)::date = $3::date
+     LIMIT 1`,
+    [userId, tz, dateStr]
+  );
+  const hasPunch = res.rowCount > 0;
+  cache.set(key, hasPunch);
+  return hasPunch;
+}
+
+function markStoredBiometricPunchForDay(userId, dateStr, cache) {
+  cache.set(`${userId}|${dateStr}`, true);
+}
+
+function sortByLoggedAtAsc(items, getLoggedAt) {
+  return [...items].sort((a, b) => {
+    const at = Date.parse(getLoggedAt(a));
+    const bt = Date.parse(getLoggedAt(b));
+    const av = Number.isFinite(at) ? at : Number.MAX_SAFE_INTEGER;
+    const bv = Number.isFinite(bt) ? bt : Number.MAX_SAFE_INTEGER;
+    return av - bv;
+  });
 }
 
 /**
@@ -72,6 +104,7 @@ router.post('/push', pushAuth, async (req, res) => {
         skipped_no_schedule: 0,
         skipped_holiday: 0,
         skipped_leave: 0,
+        skipped_after_shift_first_punch: 0,
         skipped_invalid_timestamp: 0,
         duplicates_skipped: 0,
       });
@@ -94,11 +127,13 @@ router.post('/push', pushAuth, async (req, res) => {
     let skippedNoSchedule = 0;
     let skippedHoliday = 0;
     let skippedLeave = 0;
+    let skippedAfterShiftFirstPunch = 0;
     let skippedInvalidTimestamp = 0;
     const userIds = new Set();
     const biometricGateCache = new Map();
+    const existingDayPunchCache = new Map();
 
-    for (const p of punches) {
+    for (const p of sortByLoggedAtAsc(punches, (item) => item?.logged_at)) {
       const biometricUserId = String(p.biometric_user_id || '').trim();
       let loggedAt = p.logged_at;
       if (!biometricUserId) continue;
@@ -133,6 +168,23 @@ router.post('/push', pushAuth, async (req, res) => {
         continue;
       }
 
+      const hasExistingPunchForDay = await hasStoredBiometricPunchForDay(
+        userId,
+        manilaDate,
+        existingDayPunchCache
+      );
+      if (!hasExistingPunchForDay && isPunchAfterShiftEnd(loggedAt, gate.shiftInfo)) {
+        skippedAfterShiftFirstPunch++;
+        console.warn('[biometric-attendance-logs push] Skipped first punch after shift end', {
+          biometric_user_id: biometricUserId,
+          user_id: userId,
+          logged_at: loggedAt,
+          attendance_date: manilaDate,
+          shift_end_minutes: gate.shiftInfo?.endMinutes,
+        });
+        continue;
+      }
+
       const rawLine = `${biometricUserId}\t${loggedAt}`;
 
       const result = await pool.query(
@@ -147,8 +199,10 @@ router.post('/push', pushAuth, async (req, res) => {
       if (result.rowCount > 0) {
         inserted++;
         userIds.add(userId);
+        markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
       } else {
         duplicatesSkipped++;
+        markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
       }
     }
 
@@ -179,6 +233,7 @@ router.post('/push', pushAuth, async (req, res) => {
       skipped_no_schedule: skippedNoSchedule,
       skipped_holiday: skippedHoliday,
       skipped_leave: skippedLeave,
+      skipped_after_shift_first_punch: skippedAfterShiftFirstPunch,
       skipped_invalid_timestamp: skippedInvalidTimestamp,
       duplicates_skipped: duplicatesSkipped,
       summaries_inserted: summariesInserted,
@@ -211,6 +266,7 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         skipped_no_schedule: 0,
         skipped_holiday: 0,
         skipped_leave: 0,
+        skipped_after_shift_first_punch: 0,
         skipped_invalid_timestamp: 0,
         summaries_inserted: 0,
         summaries_updated: 0,
@@ -222,13 +278,15 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
     let skippedNoSchedule = 0;
     let skippedHoliday = 0;
     let skippedLeave = 0;
+    let skippedAfterShiftFirstPunch = 0;
     let skippedInvalidTimestamp = 0;
     const userIds = new Set();
     let dateMin = null;
     let dateMax = null;
     const biometricGateCache = new Map();
+    const existingDayPunchCache = new Map();
 
-    for (const row of rows) {
+    for (const row of sortByLoggedAtAsc(rows, (item) => item?.logged_at)) {
       const userId = row.user_id;
       const biometricUserId = row.biometric_user_id;
       const loggedAt = row.logged_at;
@@ -256,6 +314,23 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         continue;
       }
 
+      const hasExistingPunchForDay = await hasStoredBiometricPunchForDay(
+        userId,
+        manilaDate,
+        existingDayPunchCache
+      );
+      if (!hasExistingPunchForDay && isPunchAfterShiftEnd(loggedAt, gate.shiftInfo)) {
+        skippedAfterShiftFirstPunch++;
+        console.warn('[biometric-attendance-logs import] Skipped first punch after shift end', {
+          biometric_user_id: biometricUserId,
+          user_id: userId,
+          logged_at: loggedAt,
+          attendance_date: manilaDate,
+          shift_end_minutes: gate.shiftInfo?.endMinutes,
+        });
+        continue;
+      }
+
       const verifyCode = row.verify_code?.trim() || null;
       const punchCode = row.punch_code?.trim() || null;
       const workCode = row.work_code?.trim() || null;
@@ -271,8 +346,10 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
 
       if (result.rowCount > 0) {
         inserted++;
+        markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
       } else {
         duplicatesSkipped++;
+        markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
       }
 
       userIds.add(userId);
@@ -317,6 +394,7 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
       skipped_no_schedule: skippedNoSchedule,
       skipped_holiday: skippedHoliday,
       skipped_leave: skippedLeave,
+      skipped_after_shift_first_punch: skippedAfterShiftFirstPunch,
       skipped_invalid_timestamp: skippedInvalidTimestamp,
       summaries_inserted: summariesInserted,
       summaries_updated: summariesUpdated,

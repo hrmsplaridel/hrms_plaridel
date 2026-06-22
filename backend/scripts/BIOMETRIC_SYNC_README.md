@@ -95,7 +95,7 @@ Polling is now a fallback path. If realtime mode is unavailable for a device, **
 - **Device connection failed**: Retries on the next poll. Check IP, port, and network.
 - **Push failed**: Logged; next poll will resend the same records (server dedup handles it).
 - **Unmatched biometric_user_id**: Punch is skipped. Ensure `users.biometric_user_id` matches the device.
-- **Policy skips**: Server may skip insert when there is no shift, a **whole-day holiday**, or **blocking approved leave**; see push response `skipped_no_schedule`, `skipped_holiday`, `skipped_leave`.
+- **Policy skips**: Server may skip insert when there is no shift, a **whole-day holiday**, **blocking approved leave**, or the employee's first punch for the day is already after shift end; see push response `skipped_no_schedule`, `skipped_holiday`, `skipped_leave`, `skipped_after_shift_first_punch`.
 
 ## Diagnostics
 

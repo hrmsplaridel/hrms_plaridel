@@ -282,6 +282,30 @@ function minutesFromMidnightInTimeZone(val, timeZone = HRMS_TIMEZONE) {
   return hh * 60 + mm;
 }
 
+function isPunchAfterShiftEnd(punchAt, shiftInfo, timeZone = HRMS_TIMEZONE) {
+  if (!punchAt || !shiftInfo || shiftInfo.endMinutes == null) return false;
+  const startMinutes = shiftInfo.startMinutes;
+  const endMinutes = shiftInfo.endMinutes;
+  if (
+    startMinutes != null &&
+    endMinutes <= startMinutes
+  ) {
+    // Overnight shifts need a different cross-date rule; do not reject them here.
+    return false;
+  }
+  const punchMinutes = minutesFromMidnightInTimeZone(punchAt, timeZone);
+  if (punchMinutes == null) return false;
+  return punchMinutes > endMinutes;
+}
+
+function isFirstPunchAfterShiftEnd(punchList, shiftInfo, timeZone = HRMS_TIMEZONE) {
+  return (
+    Array.isArray(punchList) &&
+    punchList.length > 0 &&
+    isPunchAfterShiftEnd(punchList[0], shiftInfo, timeZone)
+  );
+}
+
 function holidayDateToStr(v) {
   if (v == null) return null;
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.split('T')[0];
@@ -587,6 +611,35 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
     const shiftInfo = gate.shiftInfo;
     const shiftType = getShiftType(shiftInfo);
 
+    if (isFirstPunchAfterShiftEnd(punchList, shiftInfo, HRMS_TIMEZONE)) {
+      console.warn('[biometricProcessing] SKIP: first punch after shift end', {
+        user_id,
+        attendance_date: attendanceDateStr,
+        punch: punchList[0] instanceof Date ? punchList[0].toISOString() : String(punchList[0]),
+        shift_end_minutes: shiftInfo.endMinutes,
+      });
+      try {
+        const delRes = await pool.query(
+          `DELETE FROM dtr_daily_summary
+           WHERE employee_id = $1::uuid AND attendance_date = $2::date AND source = 'system'
+           RETURNING id`,
+          [user_id, attendanceDateStr]
+        );
+        if (delRes.rowCount > 0) {
+          removed += delRes.rowCount;
+          affected.push({
+            action: 'biometric_removed',
+            userId: String(user_id),
+            date: attendanceDateStr,
+          });
+        }
+      } catch (err) {
+        console.error('[biometricProcessing] DELETE system DTR after shift-end skip failed:', err);
+      }
+      skipped++;
+      continue;
+    }
+
     console.log('[biometricProcessing] Processing day:', {
       user_id,
       attendance_date: attendanceDateStr,
@@ -820,5 +873,8 @@ module.exports = {
   interpretPunchesForDay,
   computeTotalHours,
   evaluateBiometricDayGate,
+  isPunchAfterShiftEnd,
+  isFirstPunchAfterShiftEnd,
+  minutesFromMidnightInTimeZone,
   getManilaDateStr,
 };
