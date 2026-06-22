@@ -89,6 +89,7 @@ def result_has_activity(result):
         "skipped_no_schedule",
         "skipped_holiday",
         "skipped_leave",
+        "skipped_after_shift_first_punch",
         "skipped_invalid_timestamp",
     )
     return any(result.get(k, 0) for k in keys)
@@ -104,6 +105,7 @@ def log_push_result(prefix, result):
         f"no_schedule: {result.get('skipped_no_schedule', 0)}, "
         f"holiday: {result.get('skipped_holiday', 0)}, "
         f"leave: {result.get('skipped_leave', 0)}, "
+        f"after_shift_first_punch: {result.get('skipped_after_shift_first_punch', 0)}, "
         f"invalid_ts: {result.get('skipped_invalid_timestamp', 0)}"
     )
 

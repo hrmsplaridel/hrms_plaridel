@@ -1504,9 +1504,8 @@ router.post('/', protect, async (req, res) => {
     if (break_in && !holiday) {
       const shiftInfo = await getAssignmentShiftForDate(targetId, date);
       if (shiftInfo && shiftInfo.endMinutes != null) {
-        const breakInDate = new Date(break_in);
-        const breakInMins = breakInDate.getHours() * 60 + breakInDate.getMinutes();
-        if (breakInMins > shiftInfo.endMinutes) {
+        const breakInMins = minutesFromMidnightInTimeZone(break_in);
+        if (breakInMins != null && breakInMins > shiftInfo.endMinutes) {
           return res.status(400).json({
             error: `PM clock-in time is after shift end. Shift ends at ${minutesToTimeStr(shiftInfo.endMinutes)}. Clock-in not allowed.`,
           });
@@ -1612,9 +1611,8 @@ router.put('/:id', protect, async (req, res) => {
     if (break_in !== undefined && break_in != null && existing.holiday_id == null) {
       const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
       if (shiftInfo && shiftInfo.endMinutes != null) {
-        const breakInDate = new Date(break_in);
-        const breakInMins = breakInDate.getHours() * 60 + breakInDate.getMinutes();
-        if (breakInMins > shiftInfo.endMinutes) {
+        const breakInMins = minutesFromMidnightInTimeZone(break_in);
+        if (breakInMins != null && breakInMins > shiftInfo.endMinutes) {
           return res.status(400).json({
             error: `PM clock-in time is after shift end. Shift ends at ${minutesToTimeStr(shiftInfo.endMinutes)}.`,
           });
@@ -1634,9 +1632,14 @@ router.put('/:id', protect, async (req, res) => {
     const bo = break_out !== undefined ? break_out : existing.break_out;
     const bi = break_in !== undefined ? break_in : existing.break_in;
     const to = time_out !== undefined ? time_out : existing.time_out;
-    const computedTotal = total_hours === undefined ? computeTotalHours(ti, bo, bi, to) : null;
-    if (total_hours !== undefined) { updates.push(`total_hours = $${i++}::numeric`); values.push(parseFloat(total_hours)); }
-    else if (computedTotal !== null && (time_in !== undefined || break_out !== undefined || break_in !== undefined || time_out !== undefined)) {
+    const anyTimeChanged = time_in !== undefined || break_out !== undefined || break_in !== undefined || time_out !== undefined;
+    const computedTotal = computeTotalHours(ti, bo, bi, to);
+    if (total_hours !== undefined) {
+      updates.push(`total_hours = $${i++}::numeric`);
+      const parsedTotal = total_hours === null || total_hours === '' ? null : parseFloat(total_hours);
+      values.push(Number.isFinite(parsedTotal) ? parsedTotal : computedTotal);
+    }
+    else if (anyTimeChanged) {
       updates.push(`total_hours = $${i++}::numeric`);
       values.push(computedTotal);
     }
@@ -1658,7 +1661,6 @@ router.put('/:id', protect, async (req, res) => {
     if (resolvedPmStatus !== undefined) { updates.push(`pm_status = $${i++}`); values.push(resolvedPmStatus); }
     if (remarks !== undefined) { updates.push(`remarks = $${i++}`); values.push(remarks); }
 
-    const anyTimeChanged = time_in !== undefined || break_out !== undefined || break_in !== undefined || time_out !== undefined;
     const finalStatus = resolvedStatus !== undefined ? resolvedStatus : existing.status;
     const isHolidayOrLeave = existing.holiday_id != null || finalStatus === 'holiday' || finalStatus === 'on_leave';
     const isPartialSuspension = isHolidayOrLeave && (existingCoverage === 'am_only' || existingCoverage === 'pm_only');
