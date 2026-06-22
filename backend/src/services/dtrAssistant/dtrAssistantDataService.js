@@ -1,5 +1,12 @@
 const { parseAssistantDateRange } = require('../../utils/dateRangeParser');
-const { buildGuidelinesForTypes } = require('./leaveFilingGuidelines');
+const {
+  buildDtrPolicyKnowledge,
+  buildLocatorPolicyKnowledge,
+} = require('./attendanceLocatorPolicies');
+const {
+  buildAllLeaveGuidelines,
+  buildGuidelinesForTypes,
+} = require('./leaveFilingGuidelines');
 
 function toNumber(value) {
   if (value == null) return null;
@@ -370,11 +377,23 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
             ls.hr_remarks,
             ls.dept_head_reviewed_at,
             ls.hr_reviewed_at,
+            ls.attachment_name,
+            ls.attachment_path,
             ls.created_at,
             ls.updated_at,
+            dept_head.full_name AS dept_head_reviewer_name,
+            hr.full_name AS hr_reviewer_name,
             lrt.label AS request_type_label,
-            lrt.dtr_slot_label AS dtr_slot_label
+            lrt.short_label AS request_type_short_label,
+            lrt.location_label AS request_type_location_label,
+            lrt.location_hint AS request_type_location_hint,
+            lrt.dtr_slot_label AS dtr_slot_label,
+            lrt.dtr_print_label AS dtr_print_label,
+            lrt.requires_attachment AS request_type_requires_attachment,
+            lrt.coverage_mode AS request_type_coverage_mode
      FROM locator_slips ls
+     LEFT JOIN users dept_head ON dept_head.id = ls.dept_head_reviewer_id
+     LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
      LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
      WHERE ls.employee_id = $1::uuid
      ORDER BY
@@ -393,9 +412,17 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
     slip_date: row.slip_date,
     request_type: row.request_type,
     request_type_label: row.request_type_label,
+    request_type_short_label: row.request_type_short_label,
+    request_type_location_label: row.request_type_location_label,
+    request_type_location_hint: row.request_type_location_hint,
     dtr_slot_label: row.dtr_slot_label,
+    dtr_print_label: row.dtr_print_label,
+    request_type_requires_attachment: row.request_type_requires_attachment === true,
+    request_type_coverage_mode: row.request_type_coverage_mode,
     office: compactText(row.office),
     reason: compactText(row.reason),
+    has_attachment: !!row.attachment_path,
+    attachment_name: compactText(row.attachment_name, 120),
     coverage: {
       am_in: row.am_in,
       am_out: row.am_out,
@@ -405,10 +432,46 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
     status: row.status,
     dept_head_remarks: compactText(row.dept_head_remarks),
     hr_remarks: compactText(row.hr_remarks),
+    dept_head_reviewer_name: row.dept_head_reviewer_name,
+    hr_reviewer_name: row.hr_reviewer_name,
     dept_head_reviewed_at: toIso(row.dept_head_reviewed_at),
     hr_reviewed_at: toIso(row.hr_reviewed_at),
     created_at: toIso(row.created_at),
     updated_at: toIso(row.updated_at),
+  }));
+}
+
+async function loadLocatorTypes(pool) {
+  const result = await pool.query(
+    `SELECT code,
+            label,
+            short_label,
+            location_label,
+            location_hint,
+            dtr_slot_label,
+            dtr_print_label,
+            requires_attachment,
+            coverage_mode,
+            is_active,
+            sort_order
+     FROM locator_request_types
+     WHERE is_active IS NULL OR is_active = true
+     ORDER BY sort_order ASC, label ASC
+     LIMIT 40`
+  );
+
+  return result.rows.map((row) => ({
+    code: row.code,
+    label: row.label,
+    short_label: row.short_label,
+    location_label: row.location_label,
+    location_hint: row.location_hint,
+    dtr_slot_label: row.dtr_slot_label,
+    dtr_print_label: row.dtr_print_label,
+    requires_attachment: row.requires_attachment === true,
+    coverage_mode: row.coverage_mode,
+    is_active: row.is_active !== false,
+    sort_order: row.sort_order,
   }));
 }
 
@@ -422,6 +485,7 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
     leaveRequests,
     leaveTypes,
     locatorSlips,
+    locatorTypes,
   ] =
     await Promise.all([
       loadEmployeeProfile(pool, userId),
@@ -431,6 +495,7 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
       loadRecentLeaveRequests(pool, userId, dateRange),
       loadLeaveTypes(pool),
       loadRecentLocatorSlips(pool, userId, dateRange),
+      loadLocatorTypes(pool),
     ]);
 
   return {
@@ -443,7 +508,11 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
     recent_leave_requests: leaveRequests,
     leave_types: leaveTypes,
     leave_guidelines: buildGuidelinesForTypes(leaveTypes),
+    leave_guideline_catalog: buildAllLeaveGuidelines(),
     recent_locator_slips: locatorSlips,
+    locator_types: locatorTypes,
+    dtr_policies: buildDtrPolicyKnowledge(),
+    locator_policies: buildLocatorPolicyKnowledge(),
   };
 }
 

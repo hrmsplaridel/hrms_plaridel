@@ -205,6 +205,45 @@ class _RemarksChip extends StatelessWidget {
   }
 }
 
+class _TimeEntryInfoChip extends StatelessWidget {
+  const _TimeEntryInfoChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 260),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: AppTheme.sectionAltOf(context),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: AppTheme.dashTextSecondaryOf(context)),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Admin Time Logs: list, filters, add/edit/delete.
 class DtrTimeLogsContent extends StatefulWidget {
   const DtrTimeLogsContent({super.key});
@@ -918,6 +957,58 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ),
                         child: const Text('RESET'),
                       ),
+                      PopupMenuButton<String>(
+                        tooltip: 'Time log actions',
+                        icon: Icon(
+                          Icons.more_vert_rounded,
+                          color: AppTheme.dashTextSecondaryOf(context),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        color: AppTheme.dashPanelOf(context),
+                        onSelected: (value) {
+                          switch (value) {
+                            case 'add':
+                              _showAddDialog(context, dtr);
+                              break;
+                            case 'import':
+                              _showImportBiometricLogsDialog();
+                              break;
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          PopupMenuItem<String>(
+                            value: 'add',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.add_rounded,
+                                  size: 20,
+                                  color: AppTheme.primaryNavy,
+                                ),
+                                const SizedBox(width: 12),
+                                const Text('Add manual entry'),
+                              ],
+                            ),
+                          ),
+                          if (isAdmin)
+                            PopupMenuItem<String>(
+                              value: 'import',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.file_upload_rounded,
+                                    size: 20,
+                                    color: AppTheme.primaryNavy,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  const Text('Import biometric logs'),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
                 );
@@ -925,40 +1016,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
             ),
           ),
           const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            alignment: WrapAlignment.start,
-            children: [
-              if (isAdmin)
-                FilledButton.icon(
-                  onPressed: _showImportBiometricLogsDialog,
-                  icon: const Icon(Icons.file_upload_rounded, size: 18),
-                  label: const Text('Import Biometric Logs'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryNavy,
-                    foregroundColor: AppTheme.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-              FilledButton.icon(
-                onPressed: () => _showAddDialog(context, dtr),
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add manual entry'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy,
-                  foregroundColor: AppTheme.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
           if (isHardcodedPreview && !dtr.tableMissing) ...[
             const SizedBox(height: 8),
             Container(
@@ -1459,6 +1516,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     required TimeOfDay? value,
     required VoidCallback onTap,
     required IconData icon,
+    VoidCallback? onClear,
   }) {
     return Material(
       color: AppTheme.sectionAltOf(context),
@@ -1506,13 +1564,27 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   ],
                 ),
               ),
-              Icon(
-                Icons.schedule_rounded,
-                size: 20,
-                color: AppTheme.dashTextSecondaryOf(
-                  context,
-                ).withValues(alpha: 0.65),
-              ),
+              if (value != null && onClear != null) ...[
+                IconButton(
+                  tooltip: 'Clear $label',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onClear,
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: AppTheme.dashTextSecondaryOf(
+                      context,
+                    ).withValues(alpha: 0.75),
+                  ),
+                ),
+              ] else
+                Icon(
+                  Icons.schedule_rounded,
+                  size: 20,
+                  color: AppTheme.dashTextSecondaryOf(
+                    context,
+                  ).withValues(alpha: 0.65),
+                ),
             ],
           ),
         ),
@@ -2077,106 +2149,447 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         ? TimeOfDay(hour: timeOutLocal.hour, minute: timeOutLocal.minute)
         : null;
     DateTime recordDate = r.recordDate;
+    final originalRecordDate = recordDate;
+    final originalTimeIn = timeIn;
+    final originalBreakOut = breakOut;
+    final originalBreakIn = breakIn;
+    final originalTimeOut = timeOut;
 
     final updated = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          title: const Text('Edit time entry'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Employee: ${r.employeeName ?? r.userId}'),
-                const SizedBox(height: 16),
-                ListTile(
-                  title: const Text('Date'),
-                  subtitle: Text(_formatDate(recordDate)),
-                  onTap: () async {
-                    final d = await showDatePicker(
-                      context: ctx,
-                      initialDate: recordDate,
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2030),
-                    );
-                    if (d != null) setState(() => recordDate = d);
-                  },
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setState) {
+            int? minutes(TimeOfDay? t) =>
+                t == null ? null : (t.hour * 60) + t.minute;
+
+            Future<void> pickTime(
+              TimeOfDay? current,
+              void Function(TimeOfDay value) assign,
+            ) async {
+              final t = await showTimePicker(
+                context: ctx,
+                initialTime: current ?? TimeOfDay.now(),
+              );
+              if (t != null) setState(() => assign(t));
+            }
+
+            final amInM = minutes(timeIn);
+            final amOutM = minutes(breakOut);
+            final pmInM = minutes(breakIn);
+            final pmOutM = minutes(timeOut);
+            String? validationMessage;
+            if (amInM != null && amOutM != null && amOutM <= amInM) {
+              validationMessage = 'AM Out must be later than AM In.';
+            } else if (pmInM != null && pmOutM != null && pmOutM <= pmInM) {
+              validationMessage = 'PM Out must be later than PM In.';
+            } else if (amOutM != null && pmInM != null && pmInM < amOutM) {
+              validationMessage = 'PM In should not be earlier than AM Out.';
+            }
+
+            var workedMinutes = 0;
+            if (validationMessage == null) {
+              if (amInM != null && amOutM != null) {
+                workedMinutes += amOutM - amInM;
+              }
+              if (pmInM != null && pmOutM != null) {
+                workedMinutes += pmOutM - pmInM;
+              }
+              if (workedMinutes == 0 && amInM != null && pmOutM != null) {
+                workedMinutes = pmOutM - amInM;
+              }
+            }
+            final hasAnyTime =
+                timeIn != null ||
+                breakOut != null ||
+                breakIn != null ||
+                timeOut != null;
+            final canSave = validationMessage == null;
+            final screenH = MediaQuery.sizeOf(ctx).height;
+
+            return Dialog(
+              backgroundColor: AppTheme.dashPanelOf(ctx),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: AppTheme.dashHairlineOf(ctx)),
+              ),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 24,
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 520,
+                  maxHeight: screenH * 0.92,
                 ),
-                ListTile(
-                  title: const Text('AM In'),
-                  subtitle: Text(
-                    timeIn != null
-                        ? '${timeIn!.hour.toString().padLeft(2, '0')}:${timeIn!.minute.toString().padLeft(2, '0')}'
-                        : 'Select',
-                  ),
-                  onTap: () async {
-                    final t = await showTimePicker(
-                      context: ctx,
-                      initialTime: timeIn ?? TimeOfDay.now(),
-                    );
-                    if (t != null) setState(() => timeIn = t);
-                  },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.12,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.edit_calendar_rounded,
+                              color: AppTheme.primaryNavy,
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Edit time entry',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.dashTextPrimaryOf(ctx),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  r.employeeName ?? r.userId,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    height: 1.35,
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      ctx,
+                                    ).withValues(alpha: 0.95),
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            onPressed: () => Navigator.pop(ctx, false),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                _TimeEntryInfoChip(
+                                  icon: Icons.badge_outlined,
+                                  label: r.employeeName ?? r.userId,
+                                ),
+                                _TimeEntryInfoChip(
+                                  icon: Icons.calendar_today_rounded,
+                                  label: _formatDateWithWeekday(recordDate),
+                                ),
+                                if (r.source != null && r.source!.isNotEmpty)
+                                  AttendanceSourceBadge(
+                                    source: r.source,
+                                    compact: true,
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            Material(
+                              color: AppTheme.dashInputFillOf(ctx),
+                              borderRadius: BorderRadius.circular(12),
+                              child: InkWell(
+                                onTap: () async {
+                                  final d = await showDatePicker(
+                                    context: ctx,
+                                    initialDate: recordDate,
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime(2030),
+                                  );
+                                  if (d != null) {
+                                    setState(() => recordDate = d);
+                                  }
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 14,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.calendar_today_rounded,
+                                        size: 20,
+                                        color: AppTheme.dashIsDark(ctx)
+                                            ? AppTheme.primaryNavyLight
+                                            : AppTheme.primaryNavy,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Correction date',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                                color:
+                                                    AppTheme.dashTextSecondaryOf(
+                                                      ctx,
+                                                    ),
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              _formatDateWithWeekday(
+                                                recordDate,
+                                              ),
+                                              style: TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w600,
+                                                color:
+                                                    AppTheme.dashTextPrimaryOf(
+                                                      ctx,
+                                                    ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Icon(
+                                        Icons.chevron_right_rounded,
+                                        color: AppTheme.dashTextSecondaryOf(
+                                          ctx,
+                                        ).withValues(alpha: 0.7),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: AppTheme.sectionAltOf(ctx),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: AppTheme.dashHairlineOf(ctx),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.timer_outlined,
+                                    size: 20,
+                                    color: AppTheme.dashTextSecondaryOf(ctx),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      workedMinutes > 0
+                                          ? 'Estimated worked time: ${(workedMinutes / 60).toStringAsFixed(2)} hours'
+                                          : 'Set only the punches that should appear. Empty slots stay blank.',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.dashTextSecondaryOf(
+                                          ctx,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (validationMessage != null) ...[
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.orange.withValues(
+                                      alpha: 0.25,
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      Icons.warning_amber_rounded,
+                                      size: 20,
+                                      color: Colors.orange.shade800,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        validationMessage,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.orange.shade900,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 18),
+                            Text(
+                              'Morning',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.4,
+                                color: AppTheme.dashTextSecondaryOf(
+                                  ctx,
+                                ).withValues(alpha: 0.9),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            _manualEntryPunchTile(
+                              ctx,
+                              label: 'AM In (time in)',
+                              value: timeIn,
+                              icon: Icons.wb_sunny_outlined,
+                              onTap: () =>
+                                  pickTime(timeIn, (value) => timeIn = value),
+                              onClear: () => setState(() => timeIn = null),
+                            ),
+                            const SizedBox(height: 8),
+                            _manualEntryPunchTile(
+                              ctx,
+                              label: 'AM Out (break out)',
+                              value: breakOut,
+                              icon: Icons.restaurant_outlined,
+                              onTap: () => pickTime(
+                                breakOut,
+                                (value) => breakOut = value,
+                              ),
+                              onClear: () => setState(() => breakOut = null),
+                            ),
+                            const SizedBox(height: 18),
+                            Text(
+                              'Afternoon',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.4,
+                                color: AppTheme.dashTextSecondaryOf(
+                                  ctx,
+                                ).withValues(alpha: 0.9),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            _manualEntryPunchTile(
+                              ctx,
+                              label: 'PM In (break in)',
+                              value: breakIn,
+                              icon: Icons.nightlight_outlined,
+                              onTap: () =>
+                                  pickTime(breakIn, (value) => breakIn = value),
+                              onClear: () => setState(() => breakIn = null),
+                            ),
+                            const SizedBox(height: 8),
+                            _manualEntryPunchTile(
+                              ctx,
+                              label: 'PM Out (time out)',
+                              value: timeOut,
+                              icon: Icons.logout_rounded,
+                              onTap: () =>
+                                  pickTime(timeOut, (value) => timeOut = value),
+                              onClear: () => setState(() => timeOut = null),
+                            ),
+                            if (hasAnyTime) ...[
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton.icon(
+                                  onPressed: () => setState(() {
+                                    timeIn = null;
+                                    breakOut = null;
+                                    breakIn = null;
+                                    timeOut = null;
+                                  }),
+                                  icon: const Icon(
+                                    Icons.cleaning_services_rounded,
+                                    size: 18,
+                                  ),
+                                  label: const Text('Clear all times'),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    Divider(height: 1, color: AppTheme.dashHairlineOf(ctx)),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                      child: Row(
+                        children: [
+                          TextButton(
+                            onPressed: () => setState(() {
+                              recordDate = originalRecordDate;
+                              timeIn = originalTimeIn;
+                              breakOut = originalBreakOut;
+                              breakIn = originalBreakIn;
+                              timeOut = originalTimeOut;
+                            }),
+                            child: const Text('Reset'),
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton.icon(
+                            onPressed: canSave
+                                ? () => Navigator.pop(ctx, true)
+                                : null,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppTheme.primaryNavy,
+                              foregroundColor: AppTheme.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 12,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            icon: const Icon(Icons.save_rounded, size: 18),
+                            label: const Text('Save changes'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                ListTile(
-                  title: const Text('AM Out'),
-                  subtitle: Text(
-                    breakOut != null
-                        ? '${breakOut!.hour.toString().padLeft(2, '0')}:${breakOut!.minute.toString().padLeft(2, '0')}'
-                        : 'Select',
-                  ),
-                  onTap: () async {
-                    final t = await showTimePicker(
-                      context: ctx,
-                      initialTime: breakOut ?? TimeOfDay.now(),
-                    );
-                    if (t != null) setState(() => breakOut = t);
-                  },
-                ),
-                ListTile(
-                  title: const Text('PM In'),
-                  subtitle: Text(
-                    breakIn != null
-                        ? '${breakIn!.hour.toString().padLeft(2, '0')}:${breakIn!.minute.toString().padLeft(2, '0')}'
-                        : 'Select',
-                  ),
-                  onTap: () async {
-                    final t = await showTimePicker(
-                      context: ctx,
-                      initialTime: breakIn ?? TimeOfDay.now(),
-                    );
-                    if (t != null) setState(() => breakIn = t);
-                  },
-                ),
-                ListTile(
-                  title: const Text('PM Out'),
-                  subtitle: Text(
-                    timeOut != null
-                        ? '${timeOut!.hour.toString().padLeft(2, '0')}:${timeOut!.minute.toString().padLeft(2, '0')}'
-                        : 'Select',
-                  ),
-                  onTap: () async {
-                    final t = await showTimePicker(
-                      context: ctx,
-                      initialTime: timeOut ?? TimeOfDay.now(),
-                    );
-                    if (t != null) setState(() => timeOut = t);
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
+              ),
+            );
+          },
+        );
+      },
     );
 
     if (updated == true) {
@@ -2229,24 +2642,60 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       } else if (tin != null && tout != null) {
         hours = tout.difference(tin).inMinutes / 60.0;
       }
-      final updatedRec = r.copyWith(
+      final hasAnyTime =
+          tin != null || bo != null || bi != null || tout != null;
+      if (r.id != null && !hasAnyTime) {
+        final removed = await dtr.deleteEntry(r.id!);
+        if (!context.mounted) return;
+        _showTimeLogSnack(
+          context,
+          removed
+              ? 'Time entry removed.'
+              : (dtr.error ?? 'Unable to remove this time entry.'),
+        );
+        if (removed) await _applyFilters(forceRefresh: true);
+        return;
+      }
+      final updatedRec = TimeRecord(
+        id: r.id,
+        userId: r.userId,
         recordDate: date,
         timeIn: tin,
         breakOut: bo,
         breakIn: bi,
         timeOut: tout,
         totalHours: hours,
+        lateMinutes: r.lateMinutes,
+        undertimeMinutes: r.undertimeMinutes,
+        status: r.status,
+        pmStatus: r.pmStatus,
+        remarks: r.remarks,
+        holidayId: r.holidayId,
+        leaveRequestId: r.leaveRequestId,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        employeeName: r.employeeName,
+        holidayName: r.holidayName,
+        coverage: r.coverage,
+        attendanceRemark: r.attendanceRemark,
+        leaveTypeName: r.leaveTypeName,
+        source: r.source,
+        locatorSlipId: r.locatorSlipId,
+        locatorSlipRequestType: r.locatorSlipRequestType,
+        locatorSlipSegments: r.locatorSlipSegments,
       );
-      if (r.id != null) {
-        await dtr.updateEntry(updatedRec);
-      } else {
-        await dtr.addManualEntry(updatedRec);
-      }
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Time entry updated.')));
-      }
+      final saved = r.id != null
+          ? await dtr.updateEntry(updatedRec)
+          : await dtr.addManualEntry(updatedRec);
+      if (!context.mounted) return;
+      _showTimeLogSnack(
+        context,
+        saved
+            ? 'Time entry updated.'
+            : (dtr.error ?? 'Unable to update this time entry.'),
+      );
+      if (!saved) return;
+      await _applyFilters(forceRefresh: true);
     }
   }
 
@@ -2278,24 +2727,20 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     if (ok == true && r.id != null) {
       final deleted = await dtr.deleteEntry(r.id!);
       if (!context.mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(deleted ? 'Time entry deleted' : 'Delete failed'),
-          content: Text(
-            deleted
-                ? 'The time log was deleted successfully.'
-                : (dtr.error ??
-                      'Unable to delete this time log. Please try again.'),
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
+      _showTimeLogSnack(
+        context,
+        deleted
+            ? 'Time entry deleted.'
+            : (dtr.error ??
+                  'Unable to delete this time log. Please try again.'),
       );
+      if (deleted) await _applyFilters(forceRefresh: true);
     }
+  }
+
+  void _showTimeLogSnack(BuildContext context, String message) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 }

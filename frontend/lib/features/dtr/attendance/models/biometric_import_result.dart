@@ -8,6 +8,7 @@ class BiometricImportResult {
     required this.skippedNoSchedule,
     required this.skippedHoliday,
     required this.skippedLeave,
+    required this.skippedAfterShiftFirstPunch,
     required this.skippedInvalidTimestamp,
     required this.unmatchedRows,
     required this.invalidRows,
@@ -22,6 +23,7 @@ class BiometricImportResult {
   final int skippedNoSchedule;
   final int skippedHoliday;
   final int skippedLeave;
+  final int skippedAfterShiftFirstPunch;
   final int skippedInvalidTimestamp;
   final int unmatchedRows;
   final int invalidRows;
@@ -38,6 +40,8 @@ class BiometricImportResult {
       skippedNoSchedule: (json['skipped_no_schedule'] as num?)?.toInt() ?? 0,
       skippedHoliday: (json['skipped_holiday'] as num?)?.toInt() ?? 0,
       skippedLeave: (json['skipped_leave'] as num?)?.toInt() ?? 0,
+      skippedAfterShiftFirstPunch:
+          (json['skipped_after_shift_first_punch'] as num?)?.toInt() ?? 0,
       skippedInvalidTimestamp:
           (json['skipped_invalid_timestamp'] as num?)?.toInt() ?? 0,
       unmatchedRows: (json['unmatched_rows'] as num?)?.toInt() ?? 0,

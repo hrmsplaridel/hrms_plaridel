@@ -5,12 +5,29 @@ const {
   chatWithDtrAssistant,
   getDtrAssistantModelProfiles,
 } = require('../services/dtrAssistant/dtrAssistantService');
+const { getDtrExport } = require('../services/dtrAssistant/dtrAssistantExportService');
+const {
+  submitDtrAssistantFeedback,
+} = require('../services/dtrAssistant/dtrAssistantFeedbackService');
 
 const router = express.Router();
 const protect = [authMiddleware];
 
 router.get('/models', protect, async (_req, res) => {
   res.json(getDtrAssistantModelProfiles());
+});
+
+router.get('/exports/:token', protect, async (req, res) => {
+  const file = getDtrExport(req.params.token, req.user.id);
+  if (!file) {
+    return res.status(404).json({ error: 'Export expired or not found.' });
+  }
+  res.setHeader('Content-Type', file.mimeType);
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${file.filename.replace(/"/g, '')}"`
+  );
+  res.send(file.buffer);
 });
 
 router.post('/chat', protect, async (req, res) => {
@@ -43,6 +60,34 @@ router.post('/chat', protect, async (req, res) => {
         err.message ||
         'Failed to generate DTR assistant response',
       code: err.code || null,
+    });
+  }
+});
+
+router.post('/feedback', protect, async (req, res) => {
+  try {
+    const saved = await submitDtrAssistantFeedback(pool, {
+      userId: req.user.id,
+      messageId: req.body?.messageId,
+      rating: req.body?.rating,
+      intent: req.body?.intent,
+      provider: req.body?.provider,
+      model: req.body?.model,
+      modelProfile: req.body?.modelProfile,
+      promptPreview: req.body?.promptPreview,
+      intentConfidence: req.body?.intentConfidence,
+      intentSource: req.body?.intentSource,
+      contentPreview: req.body?.contentPreview,
+      comment: req.body?.comment,
+    });
+    res.json({ ok: true, feedback: saved });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) {
+      console.error('[dtr-assistant POST /feedback]', err);
+    }
+    res.status(status).json({
+      error: err.message || 'Failed to save assistant feedback',
     });
   }
 });

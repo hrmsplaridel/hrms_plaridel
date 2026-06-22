@@ -292,6 +292,7 @@ class _ImportBiometricAttendanceLogsDialogState
         skippedNoSchedule: apiResponse.skippedNoSchedule,
         skippedHoliday: apiResponse.skippedHoliday,
         skippedLeave: apiResponse.skippedLeave,
+        skippedAfterShiftFirstPunch: apiResponse.skippedAfterShiftFirstPunch,
         skippedInvalidTimestamp: apiResponse.skippedInvalidTimestamp,
         unmatchedRows: unmatchedRowCount,
         invalidRows: preview.invalidRows,
@@ -373,6 +374,11 @@ class _ImportBiometricAttendanceLogsDialogState
               _PreviewRow(
                 label: 'Skipped: approved leave',
                 value: '${result.skippedLeave}',
+              ),
+              const SizedBox(height: 6),
+              _PreviewRow(
+                label: 'Skipped: first punch after shift',
+                value: '${result.skippedAfterShiftFirstPunch}',
               ),
               const SizedBox(height: 6),
               _PreviewRow(

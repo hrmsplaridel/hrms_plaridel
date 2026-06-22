@@ -108,6 +108,23 @@ const GUIDELINES = {
   },
 };
 
+const GUIDELINE_DISPLAY_NAMES = {
+  vacationLeave: 'Vacation Leave',
+  mandatoryForcedLeave: 'Mandatory/Forced Leave',
+  sickLeave: 'Sick Leave',
+  maternityLeave: 'Maternity Leave',
+  paternityLeave: 'Paternity Leave',
+  specialPrivilegeLeave: 'Special Privilege Leave',
+  soloParentLeave: 'Solo Parent Leave',
+  studyLeave: 'Study Leave',
+  tenDayVawcLeave: '10-Day VAWC Leave',
+  rehabilitationPrivilege: 'Rehabilitation Privilege',
+  specialLeaveBenefitsForWomen: 'Special Leave Benefits for Women',
+  specialEmergencyCalamityLeave: 'Special Emergency/Calamity Leave',
+  adoptionLeave: 'Adoption Leave',
+  others: 'Others',
+};
+
 const ALIASES = {
   vacationleave: 'vacationLeave',
   vacation: 'vacationLeave',
@@ -346,7 +363,20 @@ function buildGuidelinesForTypes(typeRecords = []) {
     .filter(Boolean);
 }
 
+function buildAllLeaveGuidelines() {
+  return Object.entries(GUIDELINES).map(([key, guidance]) => ({
+    leave_type: GUIDELINE_DISPLAY_NAMES[key] || key,
+    key,
+    description: guidance.description,
+    requirements: guidance.requirements,
+    limits: guidance.limits || null,
+    advanceFiling: guidance.advanceFiling || null,
+    notes: guidance.notes || null,
+  }));
+}
+
 module.exports = {
+  buildAllLeaveGuidelines,
   buildGuidelinesForTypes,
   getFormGuidanceForType,
   getLeaveGuidanceForType,

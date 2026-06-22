@@ -17,7 +17,12 @@ python scripts/zkteco-sync-py.py
 | -------------------- | --------------------- | ------------------------------------------------------------------ |
 | `HRMS_API_URL`       | http://localhost:3000 | Backend base URL                                                   |
 | `BIO_SYNC_API_KEY`   | (required)            | API key for push and `/devices` endpoints                          |
-| `ZK_POLL_INTERVAL`   | 10                    | Poll interval in seconds                                           |
+| `ZK_REALTIME`        | 1                     | Enables live capture mode. Set `0` to use polling only             |
+| `ZK_POLL_INTERVAL`   | 10                    | Poll interval in seconds when realtime is off or live is unavailable |
+| `ZK_DISCOVERY_INTERVAL` | 30                 | How often realtime mode refreshes the active device list           |
+| `ZK_LIVE_CAPTURE_TIMEOUT` | 10              | Socket timeout for live capture; also controls stop responsiveness |
+| `ZK_LIVE_RECONNECT_DELAY` | 5               | Delay before reconnecting after a live listener error              |
+| `ZK_FALLBACK_INTERVAL` | 300                 | Backfill interval in realtime mode, used to recover missed punches |
 | `ZK_TIMEZONE_OFFSET` | +08:00                | Device local time offset (Philippines: +08:00)                     |
 | `ZK_SYNC_STATE_FILE` | (internal)            | State is stored in `backend/.zkteco-sync-state.json` per device IP |
 
@@ -58,13 +63,27 @@ Run in the background (e.g. via `pm2`, `systemd`, or `nohup`):
 nohup python scripts/zkteco-sync-py.py > zkteco-sync.log 2>&1 &
 ```
 
+## Realtime Mode
+
+Realtime mode is enabled by default (`ZK_REALTIME=1`). The service starts one live listener per active device. When the device reports a new attendance event, the listener immediately pushes it to the backend; the backend then processes the log and broadcasts a WebSocket refresh to the Flutter UI.
+
+Expected display time in Time Logs is usually **1-3 seconds** after a successful face/fingerprint punch, depending on network/device response time.
+
+The service still runs a periodic backfill every `ZK_FALLBACK_INTERVAL` seconds. This protects against missed live events during reconnects, device restarts, or short network drops. Duplicate rows remain safe because the backend ignores repeated `(biometric_user_id, logged_at)` pairs.
+
+To disable realtime mode and return to the old poller:
+
+```bash
+ZK_REALTIME=0 python scripts/zkteco-sync-py.py
+```
+
 ## Dependencies
 
 - **Python 3** with **pyzk** and **requests** — see `scripts/requirements-zkteco.txt`.
 
 ## Poll Interval
 
-**Recommended: 10 seconds.** This balances real-time updates, device load, and network use. Use 30–60 seconds if the device has very large log counts or a slow link.
+Polling is now a fallback path. If realtime mode is unavailable for a device, **10 seconds** is the default poll interval. Use 30–60 seconds if the device has very large log counts or a slow link.
 
 ## Duplicate Prevention
 
@@ -76,7 +95,7 @@ nohup python scripts/zkteco-sync-py.py > zkteco-sync.log 2>&1 &
 - **Device connection failed**: Retries on the next poll. Check IP, port, and network.
 - **Push failed**: Logged; next poll will resend the same records (server dedup handles it).
 - **Unmatched biometric_user_id**: Punch is skipped. Ensure `users.biometric_user_id` matches the device.
-- **Policy skips**: Server may skip insert when there is no shift, a **whole-day holiday**, or **blocking approved leave**; see push response `skipped_no_schedule`, `skipped_holiday`, `skipped_leave`.
+- **Policy skips**: Server may skip insert when there is no shift, a **whole-day holiday**, **blocking approved leave**, or the employee's first punch for the day is already after shift end; see push response `skipped_no_schedule`, `skipped_holiday`, `skipped_leave`, `skipped_after_shift_first_punch`.
 
 ## Diagnostics
 
@@ -92,6 +111,6 @@ See `scripts/ZK_DIAGNOSTIC_REPORT.md` for more.
 | Limitation         | Notes                                                                                     |
 | ------------------ | ----------------------------------------------------------------------------------------- |
 | **Full log fetch** | Fetches attendance from the device; first run can be slow if the device has many records. |
-| **Multi-device**   | One process polls every IP returned by `/devices`.                                        |
+| **Multi-device**   | One process starts one realtime worker for each IP returned by `/devices`.                |
 | **TCP**            | Typical ZKTeco port 4370.                                                                 |
-| **Polling**        | Not a persistent real-time stream from the device.                                        |
+| **Live capture**   | Depends on pyzk/device support for `live_capture`; unsupported devices fall back to polling. |

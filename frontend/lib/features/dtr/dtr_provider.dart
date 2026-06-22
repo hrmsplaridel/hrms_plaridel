@@ -6,6 +6,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/config.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/api_leave_repository.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_repository.dart';
@@ -1008,7 +1009,7 @@ class DtrProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
       return false;
@@ -1042,7 +1043,7 @@ class DtrProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
       return false;
@@ -1085,7 +1086,7 @@ class DtrProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
       return false;
@@ -1130,7 +1131,7 @@ class DtrProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
       return false;
@@ -1182,7 +1183,7 @@ class DtrProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
       return false;
@@ -1209,7 +1210,7 @@ class DtrProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
       return false;
@@ -1237,7 +1238,7 @@ class DtrProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
       return false;
