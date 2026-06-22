@@ -2642,24 +2642,60 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       } else if (tin != null && tout != null) {
         hours = tout.difference(tin).inMinutes / 60.0;
       }
-      final updatedRec = r.copyWith(
+      final hasAnyTime =
+          tin != null || bo != null || bi != null || tout != null;
+      if (r.id != null && !hasAnyTime) {
+        final removed = await dtr.deleteEntry(r.id!);
+        if (!context.mounted) return;
+        _showTimeLogSnack(
+          context,
+          removed
+              ? 'Time entry removed.'
+              : (dtr.error ?? 'Unable to remove this time entry.'),
+        );
+        if (removed) await _applyFilters(forceRefresh: true);
+        return;
+      }
+      final updatedRec = TimeRecord(
+        id: r.id,
+        userId: r.userId,
         recordDate: date,
         timeIn: tin,
         breakOut: bo,
         breakIn: bi,
         timeOut: tout,
         totalHours: hours,
+        lateMinutes: r.lateMinutes,
+        undertimeMinutes: r.undertimeMinutes,
+        status: r.status,
+        pmStatus: r.pmStatus,
+        remarks: r.remarks,
+        holidayId: r.holidayId,
+        leaveRequestId: r.leaveRequestId,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        employeeName: r.employeeName,
+        holidayName: r.holidayName,
+        coverage: r.coverage,
+        attendanceRemark: r.attendanceRemark,
+        leaveTypeName: r.leaveTypeName,
+        source: r.source,
+        locatorSlipId: r.locatorSlipId,
+        locatorSlipRequestType: r.locatorSlipRequestType,
+        locatorSlipSegments: r.locatorSlipSegments,
       );
-      if (r.id != null) {
-        await dtr.updateEntry(updatedRec);
-      } else {
-        await dtr.addManualEntry(updatedRec);
-      }
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Time entry updated.')));
-      }
+      final saved = r.id != null
+          ? await dtr.updateEntry(updatedRec)
+          : await dtr.addManualEntry(updatedRec);
+      if (!context.mounted) return;
+      _showTimeLogSnack(
+        context,
+        saved
+            ? 'Time entry updated.'
+            : (dtr.error ?? 'Unable to update this time entry.'),
+      );
+      if (!saved) return;
+      await _applyFilters(forceRefresh: true);
     }
   }
 
@@ -2691,24 +2727,20 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     if (ok == true && r.id != null) {
       final deleted = await dtr.deleteEntry(r.id!);
       if (!context.mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(deleted ? 'Time entry deleted' : 'Delete failed'),
-          content: Text(
-            deleted
-                ? 'The time log was deleted successfully.'
-                : (dtr.error ??
-                      'Unable to delete this time log. Please try again.'),
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
+      _showTimeLogSnack(
+        context,
+        deleted
+            ? 'Time entry deleted.'
+            : (dtr.error ??
+                  'Unable to delete this time log. Please try again.'),
       );
+      if (deleted) await _applyFilters(forceRefresh: true);
     }
+  }
+
+  void _showTimeLogSnack(BuildContext context, String message) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 }
