@@ -27,16 +27,6 @@ class RecruitmentHubAnalyticsPanel extends StatelessWidget {
   static const _hiredColor = Color(0xFF2E7D32);
   static const _closedColor = Color(0xFF6A1B9A);
 
-  int get _thisMonthCount {
-    final now = DateTime.now();
-    return applications.where((a) {
-      final dt = a.createdAt?.toLocal();
-      return dt != null && dt.year == now.year && dt.month == now.month;
-    }).length;
-  }
-
-  double get _hireRate => total == 0 ? 0 : (hired / total) * 100;
-
   List<({String label, int count})> get _monthlySubmissions {
     final now = DateTime.now();
     final months = <DateTime>[];
@@ -197,34 +187,6 @@ class RecruitmentHubAnalyticsPanel extends StatelessWidget {
                 label: 'Total Applicants',
                 value: '$total',
                 icon: Icons.groups_rounded,
-                color: _closedColor,
-              ),
-              const SizedBox(width: 10),
-              _InsightChip(
-                label: 'Hire rate',
-                value: '${_hireRate.toStringAsFixed(0)}%',
-                icon: Icons.trending_up_rounded,
-                color: _hiredColor,
-              ),
-              const SizedBox(width: 10),
-              _InsightChip(
-                label: 'This month',
-                value: '$_thisMonthCount',
-                icon: Icons.calendar_month_rounded,
-                color: _pendingColor,
-              ),
-              const SizedBox(width: 10),
-              _InsightChip(
-                label: 'In pipeline',
-                value: '${pending + inProgress}',
-                icon: Icons.sync_rounded,
-                color: _progressColor,
-              ),
-              const SizedBox(width: 10),
-              _InsightChip(
-                label: 'Closed out',
-                value: '$closed',
-                icon: Icons.archive_outlined,
                 color: _closedColor,
               ),
             ],

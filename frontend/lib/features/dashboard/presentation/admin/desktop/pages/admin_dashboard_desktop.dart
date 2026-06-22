@@ -307,7 +307,10 @@ class _AdminWelcomeBanner extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.primaryNavy.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
@@ -1208,11 +1211,7 @@ class _DashboardContent extends StatelessWidget {
     ]);
 
     final anySection =
-        showWelcome ||
-        showSummary ||
-        showDocu ||
-        showDtr ||
-        showRecruitment;
+        showWelcome || showSummary || showDocu || showDtr || showRecruitment;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1752,8 +1751,6 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
     final activePipeline = _activePipeline;
     final pipelinePreview = activePipeline.take(5).toList();
     final stats = _RecruitmentPipelineStats.fromApps(_all);
-    final pendingCount = stats.pending;
-    final inProgressCount = stats.inProgress;
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -2052,69 +2049,6 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
                 return table;
               },
             ),
-          if (!_loading && _error == null) ...[
-            const SizedBox(height: 16),
-            Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
-              border: Border.all(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.18),
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.tips_and_updates_rounded,
-                    size: 18,
-                    color: AppTheme.primaryNavy,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Text(
-                    pendingCount > 0
-                        ? 'You have $pendingCount application(s) waiting for document review. Open Recruitment > RSP to approve or decline documents.'
-                        : inProgressCount > 0
-                        ? 'You have $inProgressCount applicant(s) in the pipeline (exams, interviews, or hiring). Open Recruitment to manage them.'
-                        : 'No active applications right now. New recruitment submissions will appear here automatically.',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 13.5,
-                      height: 1.45,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-            const SizedBox(height: 18),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _openRecruitment,
-                icon: const Icon(Icons.insights_rounded, size: 20),
-                label: const Text('Open Recruitment'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  elevation: 0,
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
