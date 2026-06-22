@@ -9,6 +9,7 @@ const {
   authLoginLimiter,
   authRegisterLimiter,
   authPasswordResetLimiter,
+  authPasswordResetVerifyLimiter,
   authTokenLimiter,
   authPasswordChangeLimiter,
 } = require('../middleware/rateLimiters');
@@ -16,6 +17,10 @@ const {
   buildDeviceInfoPayload,
   enrichSessionRow,
 } = require('../utils/sessionDevice');
+const {
+  normalizePhilippinesMobileNumber,
+  sendPasswordResetOtpSms,
+} = require('../utils/semaphoreSms');
 
 const router = express.Router();
 
@@ -23,6 +28,110 @@ const SALT_ROUNDS = 10;
 // Support JWT_EXPIRATION or legacy JWT_EXPIRY from .env
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION || process.env.JWT_EXPIRY || '15m';
 const JWT_REFRESH_EXPIRATION = process.env.JWT_REFRESH_EXPIRATION || '30d';
+const PASSWORD_RESET_OTP_TTL_MS = parsePositiveInt(
+  process.env.AUTH_PASSWORD_RESET_OTP_TTL_MS,
+  5 * 60 * 1000
+);
+const PASSWORD_RESET_MAX_ATTEMPTS = parsePositiveInt(
+  process.env.AUTH_PASSWORD_RESET_OTP_MAX_ATTEMPTS,
+  5
+);
+const PASSWORD_RESET_MIN_PASSWORD_LENGTH = parsePositiveInt(
+  process.env.AUTH_PASSWORD_RESET_MIN_PASSWORD_LENGTH,
+  8
+);
+const PASSWORD_RESET_OTP_DIGITS = Math.min(
+  8,
+  Math.max(4, parsePositiveInt(process.env.AUTH_PASSWORD_RESET_OTP_DIGITS, 6))
+);
+const PASSWORD_RESET_REQUEST_MESSAGE =
+  'If that email is registered and has a mobile number, an SMS reset code will be sent.';
+const PASSWORD_RESET_INVALID_CODE_MESSAGE = 'Invalid or expired reset code.';
+
+let passwordResetOtpTableReady = false;
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getPasswordResetSecret() {
+  const secret = (
+    process.env.AUTH_PASSWORD_RESET_OTP_SECRET ||
+    process.env.JWT_SECRET ||
+    ''
+  ).trim();
+  if (!secret) {
+    const err = new Error('AUTH_PASSWORD_RESET_OTP_SECRET or JWT_SECRET is required');
+    err.code = 'PASSWORD_RESET_SECRET_MISSING';
+    throw err;
+  }
+  return secret;
+}
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function createOtpCode() {
+  const upperBound = 10 ** PASSWORD_RESET_OTP_DIGITS;
+  return String(crypto.randomInt(0, upperBound)).padStart(
+    PASSWORD_RESET_OTP_DIGITS,
+    '0'
+  );
+}
+
+function hashPasswordResetCode(userId, code) {
+  return crypto
+    .createHmac('sha256', getPasswordResetSecret())
+    .update(`${userId}:${String(code).trim()}`)
+    .digest('hex');
+}
+
+function timingSafeEqualHex(left, right) {
+  const leftBuf = Buffer.from(String(left || ''), 'hex');
+  const rightBuf = Buffer.from(String(right || ''), 'hex');
+  if (leftBuf.length !== rightBuf.length) return false;
+  return crypto.timingSafeEqual(leftBuf, rightBuf);
+}
+
+function passwordResetTtlMinutes() {
+  return Math.max(1, Math.ceil(PASSWORD_RESET_OTP_TTL_MS / 60_000));
+}
+
+function maskPhoneForLog(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (digits.length <= 4) return '****';
+  return `${'*'.repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
+}
+
+async function ensurePasswordResetOtpTable() {
+  if (passwordResetOtpTableReady) return;
+  await pool.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_password_reset_otps (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code_hash TEXT NOT NULL,
+      sent_to TEXT,
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ,
+      failed_attempts INT NOT NULL DEFAULT 0,
+      ip_address INET,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_auth_password_reset_otps_user_active
+     ON auth_password_reset_otps(user_id, expires_at DESC)
+     WHERE consumed_at IS NULL`
+  );
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_auth_password_reset_otps_expires_at
+     ON auth_password_reset_otps(expires_at)`
+  );
+  passwordResetOtpTableReady = true;
+}
 
 async function ensurePersonalInfoColumns() {
   // Safe, idempotent additions so older DBs don't break /auth/me + PATCH /auth/me.
@@ -597,15 +706,190 @@ router.post(
 /**
  * POST /auth/forgot-password
  * Body: { email }
- * Stub: returns 200 with message. Implement email service (nodemailer, SendGrid, etc.) later.
+ *
+ * Starts password recovery by sending a one-time SMS code through Semaphore.
+ * Response intentionally stays generic to avoid account enumeration.
  */
 router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
-  const { email } = req.body;
+  const email = normalizeEmail(req.body?.email);
   if (!email) {
     return res.status(400).json({ error: 'Email is required' });
   }
-  // TODO: Look up user, generate reset token, send email
-  res.json({ message: 'If that email exists, a reset link will be sent' });
+
+  try {
+    await ensurePersonalInfoColumns();
+    await ensurePasswordResetOtpTable();
+
+    const userResult = await pool.query(
+      `SELECT id, email, full_name, contact_number, is_active
+       FROM users
+       WHERE LOWER(email) = $1`,
+      [email]
+    );
+    const user = userResult.rows[0];
+
+    if (user && user.is_active) {
+      const phone = normalizePhilippinesMobileNumber(user.contact_number);
+      if (phone) {
+        const code = createOtpCode();
+        const codeHash = hashPasswordResetCode(user.id, code);
+        const expiresAt = new Date(Date.now() + PASSWORD_RESET_OTP_TTL_MS);
+        const ipForDb = normalizeIpForDb(req.ip || req.socket?.remoteAddress);
+
+        await pool.query(
+          `UPDATE auth_password_reset_otps
+           SET consumed_at = now()
+           WHERE user_id = $1
+             AND consumed_at IS NULL`,
+          [user.id]
+        );
+
+        await pool.query(
+          `INSERT INTO auth_password_reset_otps
+             (user_id, code_hash, sent_to, expires_at, ip_address)
+           VALUES ($1, $2, $3, $4, $5::inet)`,
+          [user.id, codeHash, phone, expiresAt, ipForDb]
+        );
+
+        if (process.env.AUTH_PASSWORD_RESET_LOG_OTP === 'true') {
+          console.warn(`[auth/forgot-password] OTP for ${email}: ${code}`);
+        }
+
+        try {
+          await sendPasswordResetOtpSms({
+            to: phone,
+            code,
+            ttlMinutes: passwordResetTtlMinutes(),
+          });
+        } catch (smsErr) {
+          console.error(
+            `[auth/forgot-password] Semaphore send failed for user ${user.id}:`,
+            smsErr.message
+          );
+        }
+      } else {
+        console.warn(
+          `[auth/forgot-password] User ${user.id} has no valid Philippine mobile number (${maskPhoneForLog(user.contact_number)})`
+        );
+      }
+    }
+
+    return res.json({
+      message: PASSWORD_RESET_REQUEST_MESSAGE,
+      expiresInMs: PASSWORD_RESET_OTP_TTL_MS,
+    });
+  } catch (err) {
+    console.error('[auth/forgot-password]', err);
+    return res.status(500).json({ error: 'Failed to start password reset' });
+  }
+});
+
+/**
+ * POST /auth/reset-password
+ * Body: { email, code, new_password }
+ */
+router.post('/reset-password', authPasswordResetVerifyLimiter, async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const code = String(req.body?.code || '').replace(/\D/g, '');
+  const newPassword = String(req.body?.new_password || req.body?.newPassword || '');
+
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({ error: 'Email, code, and new password are required' });
+  }
+  if (code.length !== PASSWORD_RESET_OTP_DIGITS) {
+    return res.status(400).json({ error: PASSWORD_RESET_INVALID_CODE_MESSAGE });
+  }
+  if (newPassword.length < PASSWORD_RESET_MIN_PASSWORD_LENGTH) {
+    return res.status(400).json({
+      error: `New password must be at least ${PASSWORD_RESET_MIN_PASSWORD_LENGTH} characters`,
+    });
+  }
+
+  let client;
+  try {
+    await ensurePasswordResetOtpTable();
+
+    const userResult = await pool.query(
+      `SELECT id, is_active
+       FROM users
+       WHERE LOWER(email) = $1`,
+      [email]
+    );
+    const user = userResult.rows[0];
+    if (!user || !user.is_active) {
+      return res.status(400).json({ error: PASSWORD_RESET_INVALID_CODE_MESSAGE });
+    }
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const otpResult = await client.query(
+      `SELECT id, code_hash, failed_attempts, expires_at
+       FROM auth_password_reset_otps
+       WHERE user_id = $1
+         AND consumed_at IS NULL
+         AND expires_at > now()
+       ORDER BY created_at DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [user.id]
+    );
+    const otp = otpResult.rows[0];
+    if (!otp) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: PASSWORD_RESET_INVALID_CODE_MESSAGE });
+    }
+
+    const expectedHash = hashPasswordResetCode(user.id, code);
+    const matches = timingSafeEqualHex(otp.code_hash, expectedHash);
+    if (!matches) {
+      const nextAttempts = Number(otp.failed_attempts || 0) + 1;
+      await client.query(
+        `UPDATE auth_password_reset_otps
+         SET failed_attempts = failed_attempts + 1,
+             consumed_at = CASE WHEN $2 >= $3 THEN now() ELSE consumed_at END
+         WHERE id = $1`,
+        [otp.id, nextAttempts, PASSWORD_RESET_MAX_ATTEMPTS]
+      );
+      await client.query('COMMIT');
+      return res.status(400).json({ error: PASSWORD_RESET_INVALID_CODE_MESSAGE });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    await client.query(
+      `UPDATE users
+       SET password_hash = $1,
+           updated_at = now()
+       WHERE id = $2`,
+      [passwordHash, user.id]
+    );
+    await client.query(
+      `UPDATE auth_password_reset_otps
+       SET consumed_at = now()
+       WHERE id = $1`,
+      [otp.id]
+    );
+    await client.query(
+      `UPDATE auth_refresh_tokens
+       SET revoked_at = now()
+       WHERE user_id = $1
+         AND revoked_at IS NULL`,
+      [user.id]
+    );
+
+    await client.query('COMMIT');
+    return res.json({ message: 'Password has been reset' });
+  } catch (err) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+    }
+    console.error('[auth/reset-password]', err);
+    return res.status(500).json({ error: 'Failed to reset password' });
+  } finally {
+    if (client) client.release();
+  }
 });
 
 module.exports = router;

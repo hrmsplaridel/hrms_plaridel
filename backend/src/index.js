@@ -51,6 +51,7 @@ const {
   isEmailJsConfiguredForHireEmail,
   isEmailJsContactConfigured,
 } = require('./utils/emailJsMail');
+const { isSemaphoreConfigured } = require('./utils/semaphoreSms');
 
 const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
 
@@ -166,6 +167,11 @@ const server = app.listen(PORT, HOST, () => {
   }
   if (isEmailJsContactConfigured()) {
     console.log('  EmailJS contact form   - enabled (POST /api/contact)');
+  }
+  if (isSemaphoreConfigured()) {
+    console.log('  Semaphore SMS OTP      - enabled (POST /auth/forgot-password)');
+  } else {
+    console.log('  Semaphore SMS OTP      - off (set SEMAPHORE_API_KEY for forgot-password)');
   }
   if (rspEmailVerificationPublicRoutes.rspEmailOtpEnrollmentActive?.()) {
     console.log(

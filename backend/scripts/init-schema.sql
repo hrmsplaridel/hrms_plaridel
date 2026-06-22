@@ -79,6 +79,21 @@ CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
 );
 
 -- =========================================
+-- AUTH PASSWORD RESET OTPs (SEMAPHORE SMS)
+-- =========================================
+CREATE TABLE IF NOT EXISTS auth_password_reset_otps (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash TEXT NOT NULL,
+  sent_to TEXT,
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  failed_attempts INT NOT NULL DEFAULT 0,
+  ip_address INET,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =========================================
 -- DEPARTMENTS
 -- =========================================
 CREATE TABLE IF NOT EXISTS departments (
@@ -1868,6 +1883,11 @@ CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_user_id ON auth_refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_expires_at ON auth_refresh_tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_revoked_at ON auth_refresh_tokens(revoked_at);
+CREATE INDEX IF NOT EXISTS idx_auth_password_reset_otps_user_active
+  ON auth_password_reset_otps(user_id, expires_at DESC)
+  WHERE consumed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_auth_password_reset_otps_expires_at
+  ON auth_password_reset_otps(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_departments_is_active ON departments(is_active);
 CREATE INDEX IF NOT EXISTS idx_departments_department_number ON departments(department_number);
