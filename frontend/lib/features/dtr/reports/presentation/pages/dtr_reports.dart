@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
@@ -51,8 +51,11 @@ class _DtrReportsState extends State<DtrReports> {
   ).day;
   String? _selectedEmployeeId;
   String? _selectedDepartmentId;
+  final Set<String> _selectedEmployeeIds = <String>{};
   List<TimeRecord> _employeeRecords = [];
   bool _showMinutesFormat = true;
+  bool _bulkExportBusy = false;
+  bool _multiSelectMode = false;
 
   /// Shift working days (ISO 1=Mon..7=Sun) for selected employee in report month. Null = use Mon–Fri.
   List<int>? _shiftWorkingDays;
@@ -84,14 +87,20 @@ class _DtrReportsState extends State<DtrReports> {
     ]);
     if (!mounted) return;
     if (dtr.employees.isNotEmpty) {
-      if (_selectedEmployeeId == null ||
-          !dtr.employees.any((e) => e.id == _selectedEmployeeId)) {
-        setState(() => _selectedEmployeeId = dtr.employees.first.id);
-      }
+      final availableIds = dtr.employees.map((e) => e.id).toSet();
+      setState(() {
+        _selectedEmployeeIds.removeWhere((id) => !availableIds.contains(id));
+        if (_selectedEmployeeId == null ||
+            !availableIds.contains(_selectedEmployeeId)) {
+          _selectedEmployeeId = dtr.employees.first.id;
+        }
+      });
       _loadEmployeeRecords();
     } else {
       setState(() {
         _selectedEmployeeId = null;
+        _selectedEmployeeIds.clear();
+        _multiSelectMode = false;
         _employeeRecords = [];
       });
     }
@@ -171,10 +180,9 @@ class _DtrReportsState extends State<DtrReports> {
     return '${toAmPm(start)}-${toAmPm(end)}';
   }
 
-  /// Fetch assignment for selected employee and set _shiftWorkingDays for report month.
-  Future<void> _loadShiftWorkingDays() async {
-    final employeeId = _selectedEmployeeId;
-    if (employeeId == null) return;
+  Future<_DtrAssignmentInfo> _fetchAssignmentInfoForEmployee(
+    String employeeId,
+  ) async {
     final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
     final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
     try {
@@ -211,62 +219,71 @@ class _DtrReportsState extends State<DtrReports> {
         if (st != null && et != null) {
           officialHours = _formatOfficialHours(st.toString(), et.toString());
         }
-        if (mounted) {
-          setState(() {
-            _shiftWorkingDays = (days != null && days.isNotEmpty) ? days : null;
-            _shiftOfficialHours = officialHours;
-            _assignmentEffectiveFrom = DateTime(
-              from.year,
-              from.month,
-              from.day,
-            );
-            _assignmentEffectiveTo = to != null
-                ? DateTime(to.year, to.month, to.day)
-                : null;
-          });
-          return;
-        }
-      }
-      if (mounted) {
-        setState(() {
-          _shiftWorkingDays = null;
-          _shiftOfficialHours = null;
-          _assignmentEffectiveFrom = null;
-          _assignmentEffectiveTo = null;
-        });
+        return _DtrAssignmentInfo(
+          workingDays: (days != null && days.isNotEmpty) ? days : null,
+          officialHours: officialHours,
+          effectiveFrom: DateTime(from.year, from.month, from.day),
+          effectiveTo: to != null ? DateTime(to.year, to.month, to.day) : null,
+          department: m['department_name']?.toString().trim(),
+          position: m['position_name']?.toString().trim(),
+        );
       }
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _shiftWorkingDays = null;
-          _assignmentEffectiveFrom = null;
-          _assignmentEffectiveTo = null;
-        });
-      }
+      return const _DtrAssignmentInfo();
     }
+    return const _DtrAssignmentInfo();
+  }
+
+  /// Fetch assignment for selected employee and set _shiftWorkingDays for report month.
+  Future<void> _loadShiftWorkingDays() async {
+    final employeeId = _selectedEmployeeId;
+    if (employeeId == null) return;
+    final info = await _fetchAssignmentInfoForEmployee(employeeId);
+    if (!mounted) return;
+    setState(() {
+      _shiftWorkingDays = info.workingDays;
+      _shiftOfficialHours = info.officialHours;
+      _assignmentEffectiveFrom = info.effectiveFrom;
+      _assignmentEffectiveTo = info.effectiveTo;
+    });
+  }
+
+  _DtrAssignmentInfo _currentAssignmentInfo() {
+    return _DtrAssignmentInfo(
+      workingDays: _shiftWorkingDays,
+      officialHours: _shiftOfficialHours,
+      effectiveFrom: _assignmentEffectiveFrom,
+      effectiveTo: _assignmentEffectiveTo,
+    );
   }
 
   /// Shift weekday and within assignment effective dates when loaded.
-  bool _isScheduledWorkDay(DateTime dt) {
-    final shiftWd = _shiftWorkingDays != null && _shiftWorkingDays!.isNotEmpty
-        ? _shiftWorkingDays!.toSet()
+  bool _isScheduledWorkDayFor(DateTime dt, _DtrAssignmentInfo assignment) {
+    final shiftWd =
+        assignment.workingDays != null && assignment.workingDays!.isNotEmpty
+        ? assignment.workingDays!.toSet()
         : {1, 2, 3, 4, 5};
     if (!shiftWd.contains(dt.weekday)) return false;
-    if (_assignmentEffectiveFrom != null) {
-      if (dt.isBefore(_assignmentEffectiveFrom!)) return false;
+    if (assignment.effectiveFrom != null) {
+      if (dt.isBefore(assignment.effectiveFrom!)) return false;
     }
-    if (_assignmentEffectiveTo != null) {
-      if (dt.isAfter(_assignmentEffectiveTo!)) return false;
+    if (assignment.effectiveTo != null) {
+      if (dt.isAfter(assignment.effectiveTo!)) return false;
     }
     return true;
   }
 
+  bool _isScheduledWorkDay(DateTime dt) {
+    return _isScheduledWorkDayFor(dt, _currentAssignmentInfo());
+  }
+
   /// Holiday rows from the API are omitted when they are not meaningful for tardiness:
   /// no assignment overlapping the month, or the date is not a scheduled work day for this employee.
-  Map<DateTime, TimeRecord> _filterRecordsForTardinessReport(
+  Map<DateTime, TimeRecord> _filterRecordsForTardinessReportFor(
     Map<DateTime, TimeRecord> raw,
+    _DtrAssignmentInfo assignment,
   ) {
-    final hasAssignment = _assignmentEffectiveFrom != null;
+    final hasAssignment = assignment.effectiveFrom != null;
     final out = <DateTime, TimeRecord>{};
     for (final e in raw.entries) {
       final dt = e.key;
@@ -274,11 +291,17 @@ class _DtrReportsState extends State<DtrReports> {
       final isHoliday = r.status == 'holiday' || (r.holidayId != null);
       if (isHoliday) {
         if (!hasAssignment) continue;
-        if (!_isScheduledWorkDay(dt)) continue;
+        if (!_isScheduledWorkDayFor(dt, assignment)) continue;
       }
       out[dt] = r;
     }
     return out;
+  }
+
+  Map<DateTime, TimeRecord> _filterRecordsForTardinessReport(
+    Map<DateTime, TimeRecord> raw,
+  ) {
+    return _filterRecordsForTardinessReportFor(raw, _currentAssignmentInfo());
   }
 
   /// Last date in the selected month included in tardiness/absent/late stats. Days after this
@@ -339,6 +362,8 @@ class _DtrReportsState extends State<DtrReports> {
       _rangeStartDay = 1;
       _rangeEndDay = _daysInSelectedMonth();
       _selectedDepartmentId = null;
+      _selectedEmployeeIds.clear();
+      _multiSelectMode = false;
     });
     _load();
   }
@@ -607,6 +632,196 @@ class _DtrReportsState extends State<DtrReports> {
     }
   }
 
+  String? _nonEmpty(String? value) {
+    final trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
+  }
+
+  void _showReportSnack(String message, {Color? backgroundColor}) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: backgroundColor),
+    );
+  }
+
+  void _setEmployeeBulkSelected(String employeeId, bool selected) {
+    setState(() {
+      _multiSelectMode = true;
+      if (selected) {
+        _selectedEmployeeIds.add(employeeId);
+      } else {
+        _selectedEmployeeIds.remove(employeeId);
+      }
+    });
+  }
+
+  void _selectAllFilteredEmployees(List<EmployeeOption> employees) {
+    setState(() {
+      _multiSelectMode = true;
+      _selectedEmployeeIds.addAll(employees.map((e) => e.id));
+    });
+  }
+
+  void _clearSelectedEmployees() {
+    setState(() => _selectedEmployeeIds.clear());
+  }
+
+  void _toggleMultiSelectMode() {
+    setState(() {
+      _multiSelectMode = !_multiSelectMode;
+      if (!_multiSelectMode) _selectedEmployeeIds.clear();
+    });
+  }
+
+  void _exitMultiSelectMode() {
+    if (!_multiSelectMode && _selectedEmployeeIds.isEmpty) return;
+    setState(() {
+      _multiSelectMode = false;
+      _selectedEmployeeIds.clear();
+    });
+  }
+
+  void _toggleEmployeeSelection(EmployeeOption employee) {
+    setState(() {
+      _multiSelectMode = true;
+      if (_selectedEmployeeIds.contains(employee.id)) {
+        _selectedEmployeeIds.remove(employee.id);
+      } else {
+        _selectedEmployeeIds.add(employee.id);
+      }
+    });
+  }
+
+  List<EmployeeOption> _selectedEmployeesForBulk(DtrProvider dtr) {
+    final byId = {for (final e in dtr.employees) e.id: e};
+    return _selectedEmployeeIds
+        .map((id) => byId[id])
+        .whereType<EmployeeOption>()
+        .toList()
+      ..sort((a, b) => a.fullName.compareTo(b.fullName));
+  }
+
+  Future<DtrExportItem> _prepareDtrExportItem(EmployeeOption employee) async {
+    final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
+    final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
+    final records = await TimeRecordRepo.instance.listForAdmin(
+      startDate: monthStart,
+      endDate: monthEnd,
+      userId: employee.id,
+      limit: 500,
+    );
+    final assignment = await _fetchAssignmentInfoForEmployee(employee.id);
+    final rawRecordsByDate = <DateTime, TimeRecord>{};
+    for (final r in records) {
+      rawRecordsByDate[DateTime(
+            r.recordDate.year,
+            r.recordDate.month,
+            r.recordDate.day,
+          )] =
+          r;
+    }
+    final filteredRecords = _filterRecordsForTardinessReportFor(
+      rawRecordsByDate,
+      assignment,
+    );
+    final start = _rangeStartDate();
+    final end = _rangeEndDate();
+    final rangedRecords = Map<DateTime, TimeRecord>.fromEntries(
+      filteredRecords.entries.where(
+        (e) => !e.key.isBefore(start) && !e.key.isAfter(end),
+      ),
+    );
+    return DtrExportItem(
+      employeeName: employee.fullName,
+      recordsByDate: rangedRecords,
+      department: _nonEmpty(assignment.department) ?? employee.departmentName,
+      position: _nonEmpty(assignment.position),
+      officialHours: assignment.officialHours,
+      workingDays: assignment.workingDays,
+      assignmentEffectiveFrom: assignment.effectiveFrom,
+      assignmentEffectiveTo: assignment.effectiveTo,
+    );
+  }
+
+  Future<Uint8List> _buildSelectedDtrPdf(DtrProvider dtr) async {
+    final selected = _selectedEmployeesForBulk(dtr);
+    if (selected.length < 2) {
+      throw StateError('Select at least two employees first.');
+    }
+    final items = <DtrExportItem>[];
+    for (final employee in selected) {
+      items.add(await _prepareDtrExportItem(employee));
+    }
+    return DtrExport.generateBulkPdf(
+      items: items,
+      year: _selectedYear,
+      month: _selectedMonth,
+      start: _rangeStartDate(),
+      end: _rangeEndDate(),
+      reportTitle: 'Daily Time Record Report',
+    );
+  }
+
+  Future<void> _printSelectedDtrs(BuildContext context, DtrProvider dtr) async {
+    if (_bulkExportBusy) return;
+    final selectedCount = _selectedEmployeesForBulk(dtr).length;
+    if (selectedCount < 2) {
+      _showReportSnack('Select at least two employees to bulk print.');
+      return;
+    }
+    setState(() => _bulkExportBusy = true);
+    Uint8List? bytes;
+    try {
+      _showReportSnack('Preparing $selectedCount selected DTRs...');
+      bytes = await _buildSelectedDtrPdf(dtr);
+      if (!context.mounted) return;
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => bytes!,
+        name: 'DTR_Selected_${_months[_selectedMonth - 1]}_$_selectedYear',
+      );
+      if (!context.mounted) return;
+      _showReportSnack('Selected DTRs sent to print.');
+    } catch (e) {
+      if (!context.mounted) return;
+      if (bytes != null) {
+        await shareOrDownloadPdf(
+          bytes,
+          'DTR_Selected_${_months[_selectedMonth - 1]}_$_selectedYear.pdf',
+        );
+        _showReportSnack('Print dialog not available. PDF shared instead.');
+      } else {
+        _showReportSnack('Bulk print failed: $e', backgroundColor: Colors.red);
+      }
+    } finally {
+      if (mounted) setState(() => _bulkExportBusy = false);
+    }
+  }
+
+  Future<void> _exportSelectedDtrs(DtrProvider dtr) async {
+    if (_bulkExportBusy) return;
+    final selectedCount = _selectedEmployeesForBulk(dtr).length;
+    if (selectedCount < 2) {
+      _showReportSnack('Select at least two employees to export.');
+      return;
+    }
+    setState(() => _bulkExportBusy = true);
+    try {
+      _showReportSnack('Exporting $selectedCount selected DTRs...');
+      final bytes = await _buildSelectedDtrPdf(dtr);
+      await shareOrDownloadPdf(
+        bytes,
+        'DTR_Selected_${_months[_selectedMonth - 1]}_$_selectedYear.pdf',
+      );
+      _showReportSnack('Selected DTRs exported as PDF.');
+    } catch (e) {
+      _showReportSnack('Bulk export failed: $e', backgroundColor: Colors.red);
+    } finally {
+      if (mounted) setState(() => _bulkExportBusy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
@@ -703,135 +918,171 @@ class _DtrReportsState extends State<DtrReports> {
     final displayTotalLateMinutes = hasRecords ? totalLateMinutes : 0;
     final displayTotalUndertimeMinutes = hasRecords ? totalUndertimeMinutes : 0;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final w = constraints.maxWidth;
-        final h = constraints.maxHeight;
-        final isMobile = w < 600;
-        final isCompact = w < 1024;
-        // Use bounded height when parent gives unbounded (e.g. inside scroll view)
-        final boundedH = h.isFinite && h > 0 ? h : 1200.0;
-        return ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: boundedH,
-            maxWidth: constraints.maxWidth.isFinite
-                ? constraints.maxWidth
-                : 1200,
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.keyM, control: true, shift: true):
+            _ToggleDtrMultiSelectIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): _ExitDtrMultiSelectIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _ToggleDtrMultiSelectIntent:
+              CallbackAction<_ToggleDtrMultiSelectIntent>(
+                onInvoke: (_) {
+                  _toggleMultiSelectMode();
+                  return null;
+                },
+              ),
+          _ExitDtrMultiSelectIntent: CallbackAction<_ExitDtrMultiSelectIntent>(
+            onInvoke: (_) {
+              _exitMultiSelectMode();
+              return null;
+            },
           ),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Tardiness Report',
-                  style: TextStyle(
-                    color: AppTheme.dashTextPrimaryOf(context),
-                    fontSize: isMobile ? 20 : 24,
-                    fontWeight: FontWeight.w800,
-                  ),
+        },
+        child: Focus(
+          autofocus: true,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final w = constraints.maxWidth;
+              final h = constraints.maxHeight;
+              final isMobile = w < 600;
+              final isCompact = w < 1024;
+              // Use bounded height when parent gives unbounded (e.g. inside scroll view)
+              final boundedH = h.isFinite && h > 0 ? h : 1200.0;
+              return ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: boundedH,
+                  maxWidth: constraints.maxWidth.isFinite
+                      ? constraints.maxWidth
+                      : 1200,
                 ),
-                const SizedBox(height: 16),
-                _buildFilters(context, isMobile),
-                const SizedBox(height: 24),
-                isMobile
-                    ? _buildMobileLayout(
-                        context: context,
-                        employees: employees,
-                        start: start,
-                        end: end,
-                        recordsByDate: rangedRecordsByDate,
-                        sortedDates: sortedDates,
-                        selectedName: selectedName,
-                        workingDays: workingDays,
-                        lateCount: displayLateCount,
-                        absentCount: displayAbsentCount,
-                        tardyCount: tardyCount,
-                        tardinessPct: tardinessPct,
-                        totalLateMinutes: displayTotalLateMinutes,
-                        totalUndertimeMinutes: displayTotalUndertimeMinutes,
-                        hasRecords: hasRecords,
-                        dtr: dtr,
-                      )
-                    : isCompact
-                    ? _buildCompactLayout(
-                        employees: employees,
-                        start: start,
-                        end: end,
-                        recordsByDate: rangedRecordsByDate,
-                        sortedDates: sortedDates,
-                        selectedName: selectedName,
-                        workingDays: workingDays,
-                        lateCount: displayLateCount,
-                        absentCount: displayAbsentCount,
-                        tardyCount: tardyCount,
-                        tardinessPct: tardinessPct,
-                        totalLateMinutes: displayTotalLateMinutes,
-                        totalUndertimeMinutes: displayTotalUndertimeMinutes,
-                        hasRecords: hasRecords,
-                        dtr: dtr,
-                      )
-                    : SizedBox(
-                        height: 520,
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildEmployeeList(context, employees),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: LayoutBuilder(
-                                builder: (context, layoutConstraints) {
-                                  final tableAvailableWidth =
-                                      layoutConstraints.maxWidth - 16 - 200;
-                                  return Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(
-                                        child: _buildDtrTable(
-                                          context,
-                                          end: end,
-                                          recordsByDate: rangedRecordsByDate,
-                                          sortedDates: sortedDates,
-                                          dtr: dtr,
-                                          availableWidth: tableAvailableWidth,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      _buildSummaryCard(
-                                        selectedName: selectedName,
-                                        workingDays: workingDays,
-                                        lateCount: displayLateCount,
-                                        absentCount: displayAbsentCount,
-                                        tardyCount: tardyCount,
-                                        tardinessPct: tardinessPct,
-                                        totalLateMinutes:
-                                            displayTotalLateMinutes,
-                                        totalUndertimeMinutes:
-                                            displayTotalUndertimeMinutes,
-                                        hasRecords: hasRecords,
-                                        recordsByDate: rangedRecordsByDate,
-                                        start: start,
-                                        end: end,
-                                      ),
-                                    ],
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Tardiness Report',
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontSize: isMobile ? 20 : 24,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-              ],
-            ),
+                      const SizedBox(height: 16),
+                      _buildFilters(context, isMobile),
+                      const SizedBox(height: 24),
+                      isMobile
+                          ? _buildMobileLayout(
+                              context: context,
+                              employees: employees,
+                              start: start,
+                              end: end,
+                              recordsByDate: rangedRecordsByDate,
+                              sortedDates: sortedDates,
+                              selectedName: selectedName,
+                              workingDays: workingDays,
+                              lateCount: displayLateCount,
+                              absentCount: displayAbsentCount,
+                              tardyCount: tardyCount,
+                              tardinessPct: tardinessPct,
+                              totalLateMinutes: displayTotalLateMinutes,
+                              totalUndertimeMinutes:
+                                  displayTotalUndertimeMinutes,
+                              hasRecords: hasRecords,
+                              dtr: dtr,
+                            )
+                          : isCompact
+                          ? _buildCompactLayout(
+                              employees: employees,
+                              start: start,
+                              end: end,
+                              recordsByDate: rangedRecordsByDate,
+                              sortedDates: sortedDates,
+                              selectedName: selectedName,
+                              workingDays: workingDays,
+                              lateCount: displayLateCount,
+                              absentCount: displayAbsentCount,
+                              tardyCount: tardyCount,
+                              tardinessPct: tardinessPct,
+                              totalLateMinutes: displayTotalLateMinutes,
+                              totalUndertimeMinutes:
+                                  displayTotalUndertimeMinutes,
+                              hasRecords: hasRecords,
+                              dtr: dtr,
+                            )
+                          : SizedBox(
+                              height: 520,
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _buildEmployeeList(context, employees),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: LayoutBuilder(
+                                      builder: (context, layoutConstraints) {
+                                        final tableAvailableWidth =
+                                            layoutConstraints.maxWidth -
+                                            16 -
+                                            200;
+                                        return Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Expanded(
+                                              child: _buildDtrTable(
+                                                context,
+                                                end: end,
+                                                recordsByDate:
+                                                    rangedRecordsByDate,
+                                                sortedDates: sortedDates,
+                                                dtr: dtr,
+                                                availableWidth:
+                                                    tableAvailableWidth,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 16),
+                                            _buildSummaryCard(
+                                              selectedName: selectedName,
+                                              workingDays: workingDays,
+                                              lateCount: displayLateCount,
+                                              absentCount: displayAbsentCount,
+                                              tardyCount: tardyCount,
+                                              tardinessPct: tardinessPct,
+                                              totalLateMinutes:
+                                                  displayTotalLateMinutes,
+                                              totalUndertimeMinutes:
+                                                  displayTotalUndertimeMinutes,
+                                              hasRecords: hasRecords,
+                                              recordsByDate:
+                                                  rangedRecordsByDate,
+                                              start: start,
+                                              end: end,
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
   Widget _buildFilters(BuildContext context, bool isMobile) {
     final dark = AppTheme.dashIsDark(context);
     final dayItems = List.generate(_daysInSelectedMonth(), (i) => i + 1);
+    final dtr = context.read<DtrProvider>();
+    final selectedCount = _selectedEmployeesForBulk(dtr).length;
     return Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -1167,13 +1418,55 @@ class _DtrReportsState extends State<DtrReports> {
           ),
           child: const Text('RESET'),
         ),
+        if (selectedCount > 1) ...[
+          Text(
+            '$selectedCount selected',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+          ),
+          FilledButton.icon(
+            onPressed: _bulkExportBusy
+                ? null
+                : () => _printSelectedDtrs(context, dtr),
+            icon: _bulkExportBusy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.print_rounded, size: 18),
+            label: Text(_bulkExportBusy ? 'Preparing' : 'Bulk print'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              foregroundColor: AppTheme.white,
+              disabledBackgroundColor: AppTheme.dashMutedSurfaceOf(context),
+              disabledForegroundColor: AppTheme.dashTextSecondaryOf(
+                context,
+              ).withValues(alpha: 0.7),
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: _bulkExportBusy ? null : () => _exportSelectedDtrs(dtr),
+            icon: const Icon(Icons.file_download_rounded, size: 18),
+            label: const Text('Export selected'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.primaryNavy,
+              side: BorderSide(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.5),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
 
   Widget _buildMobileLayout({
     required BuildContext context,
-    required List<dynamic> employees,
+    required List<EmployeeOption> employees,
     required DateTime start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
@@ -1230,6 +1523,10 @@ class _DtrReportsState extends State<DtrReports> {
             ),
           ),
         ),
+        if (_multiSelectMode) ...[
+          const SizedBox(height: 16),
+          _buildEmployeeSelectionToolbar(context, employees, compact: true),
+        ],
         const SizedBox(height: 16),
         SizedBox(
           height: 320,
@@ -1263,33 +1560,100 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
+  Widget _buildEmployeeSelectionToolbar(
+    BuildContext context,
+    List<EmployeeOption> employees, {
+    bool compact = false,
+  }) {
+    final selectedCount = _selectedEmployeeIds.length;
+    final allFilteredSelected =
+        employees.isNotEmpty &&
+        employees.every((e) => _selectedEmployeeIds.contains(e.id));
+    if (!_multiSelectMode) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 12 : 10,
+        vertical: compact ? 10 : 8,
+      ),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        border: Border(
+          bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              selectedCount == 0 ? '' : '$selectedCount selected',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Select all filtered employees',
+            onPressed: employees.isEmpty || allFilteredSelected
+                ? null
+                : () => _selectAllFilteredEmployees(employees),
+            icon: const Icon(Icons.select_all_rounded, size: 18),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+          ),
+          if (selectedCount > 0)
+            IconButton(
+              tooltip: 'Clear selected employees',
+              onPressed: _clearSelectedEmployees,
+              icon: const Icon(Icons.clear_rounded, size: 18),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+            ),
+          IconButton(
+            tooltip: 'Exit multi-select (Esc)',
+            onPressed: _exitMultiSelectMode,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmployeeList(
     BuildContext context,
     List<EmployeeOption> employees,
   ) {
     final dark = AppTheme.dashIsDark(context);
     return Container(
-      width: 220,
-      constraints: const BoxConstraints(maxWidth: 220),
+      width: 260,
+      constraints: const BoxConstraints(maxWidth: 260),
       decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          _buildEmployeeSelectionToolbar(context, employees),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: AppTheme.dashMutedSurfaceOf(context),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(12),
-              ),
               border: Border(
                 bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
               ),
             ),
             child: Row(
               children: [
+                if (_multiSelectMode) const SizedBox(width: 32),
                 SizedBox(
-                  width: 68,
+                  width: 58,
                   child: Text(
                     'No.',
                     style: TextStyle(
@@ -1318,12 +1682,17 @@ class _DtrReportsState extends State<DtrReports> {
               itemBuilder: (ctx, i) {
                 final e = employees[i];
                 final isSelected = e.id == _selectedEmployeeId;
+                final isChecked = _selectedEmployeeIds.contains(e.id);
                 return InkWell(
                   onTap: () {
-                    setState(() {
-                      _selectedEmployeeId = e.id;
-                    });
-                    _loadEmployeeRecords();
+                    if (_multiSelectMode) {
+                      _toggleEmployeeSelection(e);
+                    } else {
+                      setState(() {
+                        _selectedEmployeeId = e.id;
+                      });
+                      _loadEmployeeRecords();
+                    }
                   },
                   child: Container(
                     color: isSelected
@@ -1337,8 +1706,24 @@ class _DtrReportsState extends State<DtrReports> {
                     ),
                     child: Row(
                       children: [
+                        if (_multiSelectMode) ...[
+                          SizedBox(
+                            width: 28,
+                            child: Checkbox(
+                              value: isChecked,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.compact,
+                              onChanged: (value) => _setEmployeeBulkSelected(
+                                e.id,
+                                value ?? false,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                         SizedBox(
-                          width: 68,
+                          width: 58,
                           child: Text(
                             e.displayEmployeeNo,
                             style: TextStyle(
@@ -1867,7 +2252,7 @@ class _DtrReportsState extends State<DtrReports> {
                   recordsByDate: recordsByDate,
                 ),
                 icon: const Icon(Icons.print_rounded, size: 18),
-                label: const Text('PRINT'),
+                label: const Text('PRINT CURRENT'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.primaryNavy,
                   foregroundColor: AppTheme.white,
@@ -2030,7 +2415,7 @@ class _DtrReportsState extends State<DtrReports> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              height: 200,
+              height: 240,
               child: _buildEmployeeListCompact(context, employees),
             ),
             const SizedBox(height: 16),
@@ -2079,21 +2464,20 @@ class _DtrReportsState extends State<DtrReports> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
+          _buildEmployeeSelectionToolbar(context, employees, compact: true),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: AppTheme.dashMutedSurfaceOf(context),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(12),
-              ),
               border: Border(
                 bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
               ),
             ),
             child: Row(
               children: [
+                if (_multiSelectMode) const SizedBox(width: 32),
                 SizedBox(
-                  width: 68,
+                  width: 58,
                   child: Text(
                     'No.',
                     style: TextStyle(
@@ -2122,10 +2506,15 @@ class _DtrReportsState extends State<DtrReports> {
               itemBuilder: (ctx, i) {
                 final e = employees[i];
                 final isSelected = e.id == _selectedEmployeeId;
+                final isChecked = _selectedEmployeeIds.contains(e.id);
                 return InkWell(
                   onTap: () {
-                    setState(() => _selectedEmployeeId = e.id);
-                    _loadEmployeeRecords();
+                    if (_multiSelectMode) {
+                      _toggleEmployeeSelection(e);
+                    } else {
+                      setState(() => _selectedEmployeeId = e.id);
+                      _loadEmployeeRecords();
+                    }
                   },
                   child: Container(
                     color: isSelected
@@ -2139,8 +2528,24 @@ class _DtrReportsState extends State<DtrReports> {
                     ),
                     child: Row(
                       children: [
+                        if (_multiSelectMode) ...[
+                          SizedBox(
+                            width: 28,
+                            child: Checkbox(
+                              value: isChecked,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.compact,
+                              onChanged: (value) => _setEmployeeBulkSelected(
+                                e.id,
+                                value ?? false,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                         SizedBox(
-                          width: 68,
+                          width: 58,
                           child: Text(
                             e.displayEmployeeNo,
                             style: TextStyle(
@@ -2171,6 +2576,32 @@ class _DtrReportsState extends State<DtrReports> {
       ),
     );
   }
+}
+
+class _DtrAssignmentInfo {
+  const _DtrAssignmentInfo({
+    this.workingDays,
+    this.officialHours,
+    this.effectiveFrom,
+    this.effectiveTo,
+    this.department,
+    this.position,
+  });
+
+  final List<int>? workingDays;
+  final String? officialHours;
+  final DateTime? effectiveFrom;
+  final DateTime? effectiveTo;
+  final String? department;
+  final String? position;
+}
+
+class _ToggleDtrMultiSelectIntent extends Intent {
+  const _ToggleDtrMultiSelectIntent();
+}
+
+class _ExitDtrMultiSelectIntent extends Intent {
+  const _ExitDtrMultiSelectIntent();
 }
 
 class _SummaryStat extends StatelessWidget {

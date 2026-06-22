@@ -106,6 +106,28 @@ class DtrExportSignatories {
   );
 }
 
+class DtrExportItem {
+  const DtrExportItem({
+    required this.employeeName,
+    required this.recordsByDate,
+    this.department,
+    this.position,
+    this.officialHours,
+    this.workingDays,
+    this.assignmentEffectiveFrom,
+    this.assignmentEffectiveTo,
+  });
+
+  final String employeeName;
+  final Map<DateTime, TimeRecord> recordsByDate;
+  final String? department;
+  final String? position;
+  final String? officialHours;
+  final List<int>? workingDays;
+  final DateTime? assignmentEffectiveFrom;
+  final DateTime? assignmentEffectiveTo;
+}
+
 /// DTR export to PDF, Excel, and Word (HTML) — single page, matches official form.
 class DtrExport {
   DtrExport._();
@@ -436,6 +458,45 @@ class DtrExport {
     }
   }
 
+  static List<String> _buildNoteLinesForRange({
+    required int year,
+    required int month,
+    required DateTime start,
+    required DateTime end,
+    required Map<DateTime, TimeRecord> recordsByDate,
+  }) {
+    final noteLines = <String>[];
+    final firstDay = start.day.clamp(1, DateTime(year, month + 1, 0).day);
+    final lastDay = end.day.clamp(firstDay, DateTime(year, month + 1, 0).day);
+    for (var d = firstDay; d <= lastDay; d++) {
+      final dt = DateTime(year, month, d);
+      final rec = recordsByDate[_dateOnly(dt)];
+      final remark = rec?.remarks?.trim();
+      if (remark != null && remark.isNotEmpty) {
+        noteLines.add(
+          '${month.toString().padLeft(2, '0')}/${d.toString().padLeft(2, '0')} $remark',
+        );
+      }
+    }
+    return noteLines;
+  }
+
+  static Future<pw.ThemeData> _resolvePdfTheme() async {
+    try {
+      final base = pw.Font.ttf(
+        await rootBundle.load('assets/fonts/NotoSans-Regular.ttf'),
+      );
+      final bold = pw.Font.ttf(
+        await rootBundle.load('assets/fonts/NotoSans-Bold.ttf'),
+      );
+      return pw.ThemeData.withFont(base: base, bold: bold);
+    } catch (_) {
+      final base = await PdfGoogleFonts.openSansRegular();
+      final bold = await PdfGoogleFonts.openSansBold();
+      return pw.ThemeData.withFont(base: base, bold: bold);
+    }
+  }
+
   /// Government-style form footer: certification, verified, signature line, officers, notes.
   static pw.Widget _buildFormFooter(
     _ExportTotals totals,
@@ -539,66 +600,46 @@ class DtrExport {
   }) async {
     final policy = await _loadDefaultAttendancePolicy();
     final exportSignatories = signatories ?? await resolveSignatories();
-    final (formRows, totals) = _buildFormTableRows(
+    final noteLines = _buildNoteLinesForRange(
       year: year,
       month: month,
       start: start,
       end: end,
       recordsByDate: recordsByDate,
-      policy: policy,
-      workingDays: workingDays,
-      assignmentEffectiveFrom: assignmentEffectiveFrom,
-      assignmentEffectiveTo: assignmentEffectiveTo,
     );
-
-    final noteLines = <String>[];
-    for (var d = start.day; d <= end.day; d++) {
-      final dt = DateTime(year, month, d);
-      final rec = recordsByDate[dt];
-      final remark = rec?.remarks?.trim();
-      if (remark != null && remark.isNotEmpty) {
-        noteLines.add(
-          '${month.toString().padLeft(2, '0')}/${d.toString().padLeft(2, '0')} $remark',
-        );
-      }
-    }
-
     final title = reportTitle ?? 'DAILY TIME RECORD';
-    final oneCopy = _buildOneDtrForm(
-      employeeName: employeeName,
-      year: year,
-      month: month,
-      start: start,
-      end: end,
-      tableRows: formRows,
-      totals: totals,
-      policy: policy,
-      reportTitle: title,
-      department: department,
-      position: position,
-      officialHours: officialHours ?? '8:00AM-12:00PM 01:00PM-5:00PM',
-      signatories: exportSignatories,
-      noteLines: noteLines,
-    );
 
-    // Unicode-safe theme so names, remarks, and accents render.
-    // Prefer TTF from assets; fallback to OpenSans from printing package.
-    pw.ThemeData theme;
-    try {
-      final base = pw.Font.ttf(
-        await rootBundle.load('assets/fonts/NotoSans-Regular.ttf'),
+    pw.Widget buildCopy() {
+      final (formRows, totals) = _buildFormTableRows(
+        year: year,
+        month: month,
+        start: start,
+        end: end,
+        recordsByDate: recordsByDate,
+        policy: policy,
+        workingDays: workingDays,
+        assignmentEffectiveFrom: assignmentEffectiveFrom,
+        assignmentEffectiveTo: assignmentEffectiveTo,
       );
-      final bold = pw.Font.ttf(
-        await rootBundle.load('assets/fonts/NotoSans-Bold.ttf'),
+      return _buildOneDtrForm(
+        employeeName: employeeName,
+        year: year,
+        month: month,
+        start: start,
+        end: end,
+        tableRows: formRows,
+        totals: totals,
+        policy: policy,
+        reportTitle: title,
+        department: department,
+        position: position,
+        officialHours: officialHours ?? '8:00AM-12:00PM 01:00PM-5:00PM',
+        signatories: exportSignatories,
+        noteLines: noteLines,
       );
-      theme = pw.ThemeData.withFont(base: base, bold: bold);
-    } catch (_) {
-      final base = await PdfGoogleFonts.openSansRegular();
-      final bold = await PdfGoogleFonts.openSansBold();
-      theme = pw.ThemeData.withFont(base: base, bold: bold);
     }
 
-    final doc = pw.Document(theme: theme);
+    final doc = pw.Document(theme: await _resolvePdfTheme());
     doc.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.legal,
@@ -606,13 +647,93 @@ class DtrExport {
         build: (context) => pw.Row(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Expanded(child: oneCopy),
+            pw.Expanded(child: buildCopy()),
             pw.SizedBox(width: 8),
-            pw.Expanded(child: oneCopy),
+            pw.Expanded(child: buildCopy()),
           ],
         ),
       ),
     );
+    return doc.save();
+  }
+
+  /// Generate one combined PDF with one official DTR page per employee.
+  static Future<Uint8List> generateBulkPdf({
+    required List<DtrExportItem> items,
+    required int year,
+    required int month,
+    required DateTime start,
+    required DateTime end,
+    String? reportTitle,
+    DtrExportSignatories? signatories,
+  }) async {
+    if (items.isEmpty) {
+      throw ArgumentError.value(
+        items,
+        'items',
+        'At least one DTR item is required',
+      );
+    }
+    final policy = await _loadDefaultAttendancePolicy();
+    final exportSignatories = signatories ?? await resolveSignatories();
+    final title = reportTitle ?? 'DAILY TIME RECORD';
+    final doc = pw.Document(theme: await _resolvePdfTheme());
+
+    for (final item in items) {
+      final noteLines = _buildNoteLinesForRange(
+        year: year,
+        month: month,
+        start: start,
+        end: end,
+        recordsByDate: item.recordsByDate,
+      );
+
+      pw.Widget buildCopy() {
+        final (formRows, totals) = _buildFormTableRows(
+          year: year,
+          month: month,
+          start: start,
+          end: end,
+          recordsByDate: item.recordsByDate,
+          policy: policy,
+          workingDays: item.workingDays,
+          assignmentEffectiveFrom: item.assignmentEffectiveFrom,
+          assignmentEffectiveTo: item.assignmentEffectiveTo,
+        );
+        return _buildOneDtrForm(
+          employeeName: item.employeeName,
+          year: year,
+          month: month,
+          start: start,
+          end: end,
+          tableRows: formRows,
+          totals: totals,
+          policy: policy,
+          reportTitle: title,
+          department: item.department,
+          position: item.position,
+          officialHours: item.officialHours ?? '8:00AM-12:00PM 01:00PM-5:00PM',
+          signatories: exportSignatories,
+          noteLines: noteLines,
+        );
+      }
+
+      doc.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.legal,
+          margin: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          build: (context) => pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Expanded(child: buildCopy()),
+              pw.SizedBox(width: 8),
+              pw.Expanded(child: buildCopy()),
+            ],
+          ),
+        ),
+      );
+    }
+
     return doc.save();
   }
 
