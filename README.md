@@ -75,7 +75,7 @@ TRUST_PROXY=1
 HRMS_TIMEZONE=Asia/Manila
 JWT_SECRET=long_random_secret
 JWT_REFRESH_SECRET=another_long_random_secret
-SEMAPHORE_API_KEY=your_semaphore_api_key
+UNISMS_API_SECRET_KEY=your_unisms_api_secret_key
 ```
 
 Initialize a new database:
