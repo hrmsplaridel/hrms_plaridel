@@ -24,7 +24,7 @@ class _EmployeeProfile {
   const _EmployeeProfile({
     required this.id,
     required this.fullName,
-    required this.role, 
+    required this.role,
     this.employeeNumber,
     this.email,
     this.isActive = true,
@@ -1311,6 +1311,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
 
   final Set<String> _selectedBulkIds = {};
   final List<FocusNode> _rowFocusNodes = [];
+  bool _multiSelectMode = false;
   bool _bulkWorking = false;
 
   @override
@@ -1688,6 +1689,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
 
   void _onHeaderSelectAllChanged(bool? v) {
     setState(() {
+      _multiSelectMode = true;
       if (v == true) {
         for (final e in _employees) {
           _selectedBulkIds.add(e.id);
@@ -1700,8 +1702,25 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     });
   }
 
+  void _toggleMultiSelectMode() {
+    setState(() {
+      _multiSelectMode = !_multiSelectMode;
+      if (!_multiSelectMode) _selectedBulkIds.clear();
+    });
+  }
+
+  void _exitMultiSelectMode() {
+    if (!_multiSelectMode && _selectedBulkIds.isEmpty) return;
+    setState(() {
+      _multiSelectMode = false;
+      _selectedBulkIds.clear();
+    });
+  }
+
   KeyEventResult _handleEmployeeRowKey(KeyEvent event, int index) {
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.space) {
+    if (_multiSelectMode &&
+        event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.space) {
       final id = _employees[index].id;
       setState(() {
         if (_selectedBulkIds.contains(id)) {
@@ -2025,13 +2044,26 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     final w = MediaQuery.of(context).size.width;
     final isNarrow = w < 700;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildEmployeesHeader(isNarrow: isNarrow),
-        const SizedBox(height: 20),
-        isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
-      ],
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(
+          LogicalKeyboardKey.keyM,
+          control: true,
+          shift: true,
+        ): _toggleMultiSelectMode,
+        const SingleActivator(LogicalKeyboardKey.escape): _exitMultiSelectMode,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildEmployeesHeader(isNarrow: isNarrow),
+            const SizedBox(height: 20),
+            isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2465,8 +2497,8 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     }
 
     const kTableMinWidth = 768.0;
-    const columnWidths = <int, TableColumnWidth>{
-      0: FixedColumnWidth(44),
+    final columnWidths = <int, TableColumnWidth>{
+      0: FixedColumnWidth(_multiSelectMode ? 44 : 0),
       1: FixedColumnWidth(88),
       2: FlexColumnWidth(1.35),
       3: FlexColumnWidth(1.15),
@@ -2483,19 +2515,21 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         children: [
           TableCell(
             verticalAlignment: TableCellVerticalAlignment.middle,
-            child: Semantics(
-              label: 'Select all employees on this page',
-              child: Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Checkbox(
-                  tristate: true,
-                  value: _headerSelectAllValue(),
-                  onChanged: (_employees.isEmpty || _loading)
-                      ? null
-                      : _onHeaderSelectAllChanged,
-                ),
-              ),
-            ),
+            child: _multiSelectMode
+                ? Semantics(
+                    label: 'Select all employees on this page',
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Checkbox(
+                        tristate: true,
+                        value: _headerSelectAllValue(),
+                        onChanged: (_employees.isEmpty || _loading)
+                            ? null
+                            : _onHeaderSelectAllChanged,
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(),
           ),
           _sortableHeaderCell('No.', 'employee_number'),
           _sortableHeaderCell('Name', 'full_name'),
@@ -2568,25 +2602,27 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               children: [
                 TableCell(
                   verticalAlignment: TableCellVerticalAlignment.middle,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 4),
-                    child: Checkbox(
-                      value: _selectedBulkIds.contains(e.id),
-                      onChanged: (v) {
-                        setState(() {
-                          if (v == true) {
-                            _selectedBulkIds.add(e.id);
-                          } else {
-                            _selectedBulkIds.remove(e.id);
-                          }
-                          _selectedEmployeeId = e.id;
-                        });
-                        if (i >= 0 && i < _rowFocusNodes.length) {
-                          _rowFocusNodes[i].requestFocus();
-                        }
-                      },
-                    ),
-                  ),
+                  child: _multiSelectMode
+                      ? Padding(
+                          padding: const EdgeInsets.only(left: 4),
+                          child: Checkbox(
+                            value: _selectedBulkIds.contains(e.id),
+                            onChanged: (v) {
+                              setState(() {
+                                if (v == true) {
+                                  _selectedBulkIds.add(e.id);
+                                } else {
+                                  _selectedBulkIds.remove(e.id);
+                                }
+                                _selectedEmployeeId = e.id;
+                              });
+                              if (i >= 0 && i < _rowFocusNodes.length) {
+                                _rowFocusNodes[i].requestFocus();
+                              }
+                            },
+                          ),
+                        )
+                      : const SizedBox.shrink(),
                 ),
                 TableCell(
                   verticalAlignment: TableCellVerticalAlignment.middle,
@@ -2748,7 +2784,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         children: [
           _buildEmployeesToolbar(),
           const SizedBox(height: 16),
-          if (_selectedBulkIds.isNotEmpty) ...[
+          if (_multiSelectMode && _selectedBulkIds.isNotEmpty) ...[
             _buildBulkSelectionBar(),
             const SizedBox(height: 12),
           ],
