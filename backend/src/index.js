@@ -51,6 +51,7 @@ const {
   isEmailJsConfiguredForHireEmail,
   isEmailJsContactConfigured,
 } = require('./utils/emailJsMail');
+const { isUniSmsConfigured } = require('./utils/uniSmsSms');
 
 const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
 
@@ -166,6 +167,11 @@ const server = app.listen(PORT, HOST, () => {
   }
   if (isEmailJsContactConfigured()) {
     console.log('  EmailJS contact form   - enabled (POST /api/contact)');
+  }
+  if (isUniSmsConfigured()) {
+    console.log('  UniSMS OTP             - enabled (POST /auth/forgot-password)');
+  } else {
+    console.log('  UniSMS OTP             - off (set UNISMS_API_SECRET_KEY for forgot-password)');
   }
   if (rspEmailVerificationPublicRoutes.rspEmailOtpEnrollmentActive?.()) {
     console.log(

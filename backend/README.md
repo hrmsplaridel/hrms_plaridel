@@ -4,7 +4,7 @@ Node.js + Express + PostgreSQL API for the HRMS Plaridel Flutter app.
 
 Implements the full backend from `docs/BACKEND_MIGRATION_GUIDE.md`:
 
-- **Auth:** JWT, bcrypt, register, login, `/auth/me`, change password, forgot-password (stub)
+- **Auth:** JWT, bcrypt, register, login, `/auth/me`, change password, SMS OTP forgot-password
 - **RBAC:** Middleware for admin-only routes
 - **CRUD:** departments, positions, shifts, assignments, employees
 - **File storage:** Multer (local) for avatar upload; `GET /api/files/avatar/:userId` to serve
@@ -32,6 +32,7 @@ npm install
 - Copy `.env.example` to `.env`
 - Set `DATABASE_URL` (e.g. `postgresql://postgres:password@localhost:5432/hrms_plaridel`)
 - Set `JWT_SECRET` (use a long random string; e.g. `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
+- Set `UNISMS_API_SECRET_KEY` to enable forgot-password SMS OTPs (https://unismsapi.com/).
 
 ### 3. Initialize database
 
@@ -78,7 +79,8 @@ npm run dev
 | GET    | `/auth/me`                        | Current user (requires `Authorization: Bearer <token>`) |
 | PATCH  | `/auth/me`                        | Update profile                                          |
 | POST   | `/auth/change-password`           | Change password                                         |
-| POST   | `/auth/forgot-password`           | Forgot password (stub)                                  |
+| POST   | `/auth/forgot-password`           | Send password reset SMS OTP via UniSMS                    |
+| POST   | `/auth/reset-password`            | Reset password using email + SMS OTP                    |
 | GET    | `/api/departments`                | List departments (?status=Active\|Inactive\|All)        |
 | POST   | `/api/departments`                | Create (admin)                                          |
 | PUT    | `/api/departments/:id`            | Update (admin)                                          |

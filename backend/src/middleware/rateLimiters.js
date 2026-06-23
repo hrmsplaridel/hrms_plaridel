@@ -58,6 +58,15 @@ const authPasswordResetLimiter = createJsonLimiter({
   message: 'Too many password reset attempts. Please wait and try again.',
 });
 
+const authPasswordResetVerifyLimiter = createJsonLimiter({
+  windowMs: parsePositiveInt(
+    process.env.AUTH_PASSWORD_RESET_VERIFY_RATE_LIMIT_WINDOW_MS,
+    FIFTEEN_MINUTES_MS,
+  ),
+  limit: parsePositiveInt(process.env.AUTH_PASSWORD_RESET_VERIFY_RATE_LIMIT_MAX, 10),
+  message: 'Too many password reset verification attempts. Please wait and try again.',
+});
+
 const authTokenLimiter = createJsonLimiter({
   windowMs: parsePositiveInt(
     process.env.AUTH_TOKEN_RATE_LIMIT_WINDOW_MS,
@@ -81,6 +90,7 @@ module.exports = {
   authLoginLimiter,
   authRegisterLimiter,
   authPasswordResetLimiter,
+  authPasswordResetVerifyLimiter,
   authTokenLimiter,
   authPasswordChangeLimiter,
 };

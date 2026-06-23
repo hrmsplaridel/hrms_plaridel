@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -45,8 +46,7 @@ class LoginPage extends StatefulWidget {
   State<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage>
-    with TickerProviderStateMixin {
+class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _passwordFocusNode = FocusNode();
@@ -146,9 +146,7 @@ class _LoginPageState extends State<LoginPage>
         animation: _shakeCtrl,
         builder: (context, child) {
           final t = _shakeCtrl.value;
-          final dx = t == 0
-              ? 0.0
-              : math.sin(t * math.pi * 6) * 8 * (1 - t);
+          final dx = t == 0 ? 0.0 : math.sin(t * math.pi * 6) * 8 * (1 - t);
           return Transform.translate(offset: Offset(dx, 0), child: child);
         },
         child: child,
@@ -326,32 +324,32 @@ class _LoginPageState extends State<LoginPage>
 
   Future<void> _onForgotPassword() async {
     final email = _emailController.text.trim();
-    final result = await showDialog<String>(
+    final reset = await showDialog<bool>(
       context: context,
       builder: (context) => _ForgotPasswordDialog(initialEmail: email),
     );
-    if (result == null || result.isEmpty || !mounted) return;
+    if (reset != true || !mounted) return;
 
-    try {
-      await ApiClient.instance.post(
-        '/auth/forgot-password',
-        data: {'email': result},
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'If that email is registered, a password reset link has been sent.',
-          ),
+    _passwordController.clear();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Password reset. You can now sign in with the new password.',
         ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not send reset link: $e')),
-      );
+      ),
+    );
+  }
+}
+
+String _readApiError(Object error, String fallback) {
+  if (error is DioException) {
+    final data = error.response?.data;
+    if (data is Map && data['error'] is String) return data['error'] as String;
+    if (data is Map && data['message'] is String) {
+      return data['message'] as String;
     }
   }
+  return fallback;
 }
 
 /// Building photo + orange wash + bottom scrim, with a slow Ken Burns zoom.
@@ -374,9 +372,10 @@ class _LoginHeroBackgroundState extends State<_LoginHeroBackground>
       vsync: this,
       duration: const Duration(seconds: 22),
     )..repeat(reverse: true);
-    _zoom = Tween<double>(begin: 1.0, end: 1.08).animate(
-      CurvedAnimation(parent: _zoomCtrl, curve: Curves.easeInOut),
-    );
+    _zoom = Tween<double>(
+      begin: 1.0,
+      end: 1.08,
+    ).animate(CurvedAnimation(parent: _zoomCtrl, curve: Curves.easeInOut));
   }
 
   @override
@@ -1077,12 +1076,7 @@ class _LoginFormContent extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (isCardForm) ...[
-          staggered(
-            0,
-            Center(
-              child: _LoginFormLogoAnimated(compact: compact),
-            ),
-          ),
+          staggered(0, Center(child: _LoginFormLogoAnimated(compact: compact))),
           SizedBox(height: logoGap),
           staggered(1, Center(child: _LoginWebPortalBadge())),
           SizedBox(height: badgeGap),
@@ -1592,11 +1586,7 @@ class _LoginWebPortalBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.verified_rounded,
-            size: 16,
-            color: LoginTheme.bluePrimary,
-          ),
+          Icon(Icons.verified_rounded, size: 16, color: LoginTheme.bluePrimary),
           const SizedBox(width: 8),
           Text(
             'Official HRMS Portal',
@@ -2298,6 +2288,8 @@ class _LoginButtonShinePainter extends CustomPainter {
       oldDelegate.progress != progress;
 }
 
+enum _ForgotPasswordStep { requestCode, resetPassword }
+
 class _ForgotPasswordDialog extends StatefulWidget {
   const _ForgotPasswordDialog({required this.initialEmail});
 
@@ -2309,6 +2301,16 @@ class _ForgotPasswordDialog extends StatefulWidget {
 
 class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
   late final TextEditingController _emailController;
+  final _codeController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+
+  _ForgotPasswordStep _step = _ForgotPasswordStep.requestCode;
+  bool _isLoading = false;
+  bool _obscureNewPassword = true;
+  bool _obscureConfirmPassword = true;
+  String? _errorText;
+  String? _infoText;
 
   @override
   void initState() {
@@ -2319,17 +2321,250 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
   @override
   void dispose() {
     _emailController.dispose();
+    _codeController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _requestCode() async {
     final email = _emailController.text.trim();
-    if (email.isEmpty) return;
-    Navigator.of(context).pop(email);
+    if (email.isEmpty) {
+      setState(() => _errorText = 'Email is required');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorText = null;
+      _infoText = null;
+    });
+
+    try {
+      await ApiClient.instance.post(
+        '/auth/forgot-password',
+        data: {'email': email},
+      );
+      if (!mounted) return;
+      _codeController.clear();
+      setState(() {
+        _step = _ForgotPasswordStep.resetPassword;
+        _infoText =
+            'If the account is registered and has a mobile number, an SMS code has been sent.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorText = _readApiError(e, 'Could not request a reset code');
+      });
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    final email = _emailController.text.trim();
+    final code = _codeController.text.trim();
+    final password = _newPasswordController.text;
+    final confirm = _confirmPasswordController.text;
+
+    if (code.isEmpty || password.isEmpty || confirm.isEmpty) {
+      setState(() => _errorText = 'Code and new password are required');
+      return;
+    }
+    if (password.length < 8) {
+      setState(() => _errorText = 'Password must be at least 8 characters');
+      return;
+    }
+    if (password != confirm) {
+      setState(() => _errorText = 'Passwords do not match');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorText = null;
+    });
+
+    try {
+      await ApiClient.instance.post(
+        '/auth/reset-password',
+        data: {'email': email, 'code': code, 'new_password': password},
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorText = _readApiError(e, 'Could not reset password');
+      });
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  InputDecoration _dialogInputDecoration({
+    required String label,
+    required String hint,
+    required IconData icon,
+    Widget? suffix,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      prefixIcon: Icon(icon),
+      suffixIcon: suffix,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFE2E6EA)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: LoginTheme.bluePrimary, width: 1.5),
+      ),
+    );
+  }
+
+  Widget _statusText() {
+    final error = _errorText;
+    final info = _infoText;
+    if (error == null && info == null) return const SizedBox.shrink();
+
+    final isError = error != null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Text(
+        error ?? info!,
+        style: TextStyle(
+          color: isError ? Colors.red.shade700 : AppTheme.textSecondary,
+          fontSize: 13,
+          height: 1.35,
+          fontWeight: isError ? FontWeight.w600 : FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
+  Widget _requestCodeContent() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Enter your municipal email. If the account has a mobile number, HRMS will send a reset code by SMS.',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 14,
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 18),
+        TextField(
+          controller: _emailController,
+          enabled: !_isLoading,
+          keyboardType: TextInputType.emailAddress,
+          autofillHints: const [AutofillHints.email],
+          decoration: _dialogInputDecoration(
+            label: 'Email',
+            hint: 'name@plaridel.gov.ph',
+            icon: Icons.mail_outline_rounded,
+          ),
+          onSubmitted: (_) {
+            if (!_isLoading) _requestCode();
+          },
+        ),
+        _statusText(),
+      ],
+    );
+  }
+
+  Widget _passwordField({
+    required TextEditingController controller,
+    required String label,
+    required bool obscure,
+    required VoidCallback toggle,
+    VoidCallback? onSubmitted,
+  }) {
+    return TextField(
+      controller: controller,
+      enabled: !_isLoading,
+      obscureText: obscure,
+      autofillHints: const [AutofillHints.newPassword],
+      textInputAction: onSubmitted == null
+          ? TextInputAction.next
+          : TextInputAction.done,
+      decoration: _dialogInputDecoration(
+        label: label,
+        hint: 'Enter new password',
+        icon: Icons.lock_outline_rounded,
+        suffix: IconButton(
+          onPressed: _isLoading ? null : toggle,
+          icon: Icon(
+            obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+          ),
+          tooltip: obscure ? 'Show password' : 'Hide password',
+        ),
+      ),
+      onSubmitted: (_) => onSubmitted?.call(),
+    );
+  }
+
+  Widget _resetPasswordContent() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Enter the SMS code and choose a new password.',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 14,
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 18),
+        TextField(
+          controller: _codeController,
+          enabled: !_isLoading,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.next,
+          autofillHints: const [AutofillHints.oneTimeCode],
+          maxLength: 6,
+          decoration: _dialogInputDecoration(
+            label: 'SMS code',
+            hint: '6-digit code',
+            icon: Icons.sms_outlined,
+          ).copyWith(counterText: ''),
+        ),
+        const SizedBox(height: 14),
+        _passwordField(
+          controller: _newPasswordController,
+          label: 'New password',
+          obscure: _obscureNewPassword,
+          toggle: () => setState(() {
+            _obscureNewPassword = !_obscureNewPassword;
+          }),
+        ),
+        const SizedBox(height: 14),
+        _passwordField(
+          controller: _confirmPasswordController,
+          label: 'Confirm password',
+          obscure: _obscureConfirmPassword,
+          toggle: () => setState(() {
+            _obscureConfirmPassword = !_obscureConfirmPassword;
+          }),
+          onSubmitted: _isLoading ? null : _resetPassword,
+        ),
+        _statusText(),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final isResetStep = _step == _ForgotPasswordStep.resetPassword;
+
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: Row(
@@ -2356,43 +2591,33 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
           ),
         ],
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Enter your municipal email and we\'ll send a secure reset link if '
-            'the account is registered.',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 14,
-              height: 1.45,
-            ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: SingleChildScrollView(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: isResetStep
+                ? _resetPasswordContent()
+                : _requestCodeContent(),
           ),
-          const SizedBox(height: 18),
-          TextField(
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
-            autofillHints: const [AutofillHints.email],
-            decoration: InputDecoration(
-              labelText: 'Email',
-              hintText: 'name@plaridel.gov.ph',
-              prefixIcon: const Icon(Icons.mail_outline_rounded),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onSubmitted: (_) => _submit(),
-          ),
-        ],
+        ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
           child: const Text('Cancel'),
         ),
+        if (isResetStep)
+          TextButton(
+            onPressed: _isLoading ? null : _requestCode,
+            child: const Text('Resend code'),
+          ),
         FilledButton(
-          onPressed: _submit,
+          onPressed: _isLoading
+              ? null
+              : isResetStep
+              ? _resetPassword
+              : _requestCode,
           style: FilledButton.styleFrom(
             backgroundColor: LoginTheme.bluePrimary,
             foregroundColor: Colors.white,
@@ -2400,7 +2625,16 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
               borderRadius: BorderRadius.circular(10),
             ),
           ),
-          child: const Text('Send reset link'),
+          child: _isLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : Text(isResetStep ? 'Reset password' : 'Send SMS code'),
         ),
       ],
     );
