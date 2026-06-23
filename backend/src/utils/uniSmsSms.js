@@ -1,16 +1,16 @@
 const https = require('https');
-const { URL, URLSearchParams } = require('url');
+const { URL } = require('url');
 
-const SEMAPHORE_OTP_URL =
-  process.env.SEMAPHORE_OTP_URL || 'https://api.semaphore.co/api/v4/otp';
+const UNISMS_SEND_URL =
+  process.env.UNISMS_SEND_URL || 'https://unismsapi.com/api/sms';
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function isSemaphoreConfigured() {
-  return Boolean((process.env.SEMAPHORE_API_KEY || '').trim());
+function isUniSmsConfigured() {
+  return Boolean((process.env.UNISMS_API_SECRET_KEY || '').trim());
 }
 
 function normalizePhilippinesMobileNumber(value) {
@@ -29,20 +29,26 @@ function normalizePhilippinesMobileNumber(value) {
   return null;
 }
 
-function buildPasswordResetTemplate(ttlMinutes) {
-  const template =
-    process.env.SEMAPHORE_PASSWORD_RESET_TEMPLATE ||
-    process.env.SEMAPHORE_OTP_TEMPLATE ||
-    'Your HRMS Plaridel password reset code is {otp}. It expires in {minutes} minutes. Do not share this code.';
-
-  return template.replace(/\{minutes\}/g, String(ttlMinutes));
+function toE164PhilippinesNumber(normalizedDigits) {
+  if (!normalizedDigits) return null;
+  return `+${normalizedDigits}`;
 }
 
-function postForm(url, params) {
+function buildPasswordResetMessage(code, ttlMinutes) {
+  const template =
+    process.env.UNISMS_PASSWORD_RESET_TEMPLATE ||
+    'Your HRMS Plaridel password reset code is {otp}. It expires in {minutes} minutes. Do not share this code.';
+
+  return template
+    .replace(/\{otp\}/g, String(code))
+    .replace(/\{minutes\}/g, String(ttlMinutes));
+}
+
+function postJson(url, body, apiSecretKey) {
   return new Promise((resolve, reject) => {
-    const body = new URLSearchParams(params).toString();
-    const bodyBuf = Buffer.from(body, 'utf8');
+    const bodyBuf = Buffer.from(JSON.stringify(body), 'utf8');
     const u = new URL(url);
+    const basicAuth = Buffer.from(`${apiSecretKey}:`).toString('base64');
 
     const req = https.request(
       {
@@ -50,7 +56,9 @@ function postForm(url, params) {
         path: `${u.pathname}${u.search}`,
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Basic ${basicAuth}`,
           'Content-Length': bodyBuf.length,
         },
       },
@@ -69,8 +77,8 @@ function postForm(url, params) {
             return;
           }
 
-          const err = new Error(`Semaphore HTTP ${code}: ${text}`);
-          err.code = 'SEMAPHORE_HTTP_ERROR';
+          const err = new Error(`UniSMS HTTP ${code}: ${text}`);
+          err.code = 'UNISMS_HTTP_ERROR';
           err.httpStatus = code;
           err.responseText = text;
           reject(err);
@@ -79,10 +87,10 @@ function postForm(url, params) {
     );
 
     req.on('error', reject);
-    req.setTimeout(parsePositiveInt(process.env.SEMAPHORE_TIMEOUT_MS, 20_000), () => {
+    req.setTimeout(parsePositiveInt(process.env.UNISMS_TIMEOUT_MS, 20_000), () => {
       req.destroy();
-      const err = new Error('Semaphore request timeout');
-      err.code = 'SEMAPHORE_TIMEOUT';
+      const err = new Error('UniSMS request timeout');
+      err.code = 'UNISMS_TIMEOUT';
       reject(err);
     });
     req.write(bodyBuf);
@@ -91,36 +99,35 @@ function postForm(url, params) {
 }
 
 async function sendPasswordResetOtpSms({ to, code, ttlMinutes }) {
-  const apiKey = (process.env.SEMAPHORE_API_KEY || '').trim();
-  if (!apiKey) {
-    const err = new Error('Semaphore SMS is not configured. Set SEMAPHORE_API_KEY.');
-    err.code = 'SEMAPHORE_NOT_CONFIGURED';
+  const apiSecretKey = (process.env.UNISMS_API_SECRET_KEY || '').trim();
+  if (!apiSecretKey) {
+    const err = new Error('UniSMS is not configured. Set UNISMS_API_SECRET_KEY.');
+    err.code = 'UNISMS_NOT_CONFIGURED';
     throw err;
   }
 
   const number = normalizePhilippinesMobileNumber(to);
-  if (!number) {
+  const recipient = toE164PhilippinesNumber(number);
+  if (!recipient) {
     const err = new Error('Recipient phone number is not a valid Philippine mobile number.');
     err.code = 'INVALID_PH_MOBILE_NUMBER';
     throw err;
   }
 
-  const params = {
-    apikey: apiKey,
-    number,
-    message: buildPasswordResetTemplate(ttlMinutes),
-    code,
+  const payload = {
+    recipient,
+    content: buildPasswordResetMessage(code, ttlMinutes),
   };
 
-  const senderName = (process.env.SEMAPHORE_SENDER_NAME || '').trim();
-  if (senderName) params.sendername = senderName;
+  const senderId = (process.env.UNISMS_SENDER_ID || '').trim().slice(0, 11);
+  if (senderId) payload.sender_id = senderId;
 
-  const response = await postForm(SEMAPHORE_OTP_URL, params);
-  return { provider: 'semaphore', number, response };
+  const response = await postJson(UNISMS_SEND_URL, payload, apiSecretKey);
+  return { provider: 'unisms', number, recipient, response };
 }
 
 module.exports = {
-  isSemaphoreConfigured,
+  isUniSmsConfigured,
   normalizePhilippinesMobileNumber,
   sendPasswordResetOtpSms,
 };

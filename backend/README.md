@@ -32,7 +32,7 @@ npm install
 - Copy `.env.example` to `.env`
 - Set `DATABASE_URL` (e.g. `postgresql://postgres:password@localhost:5432/hrms_plaridel`)
 - Set `JWT_SECRET` (use a long random string; e.g. `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
-- Set `SEMAPHORE_API_KEY` to enable forgot-password SMS OTPs.
+- Set `UNISMS_API_SECRET_KEY` to enable forgot-password SMS OTPs (https://unismsapi.com/).
 
 ### 3. Initialize database
 
@@ -79,7 +79,7 @@ npm run dev
 | GET    | `/auth/me`                        | Current user (requires `Authorization: Bearer <token>`) |
 | PATCH  | `/auth/me`                        | Update profile                                          |
 | POST   | `/auth/change-password`           | Change password                                         |
-| POST   | `/auth/forgot-password`           | Send password reset SMS OTP via Semaphore               |
+| POST   | `/auth/forgot-password`           | Send password reset SMS OTP via UniSMS                    |
 | POST   | `/auth/reset-password`            | Reset password using email + SMS OTP                    |
 | GET    | `/api/departments`                | List departments (?status=Active\|Inactive\|All)        |
 | POST   | `/api/departments`                | Create (admin)                                          |

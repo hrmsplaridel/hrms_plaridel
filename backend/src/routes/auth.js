@@ -20,7 +20,7 @@ const {
 const {
   normalizePhilippinesMobileNumber,
   sendPasswordResetOtpSms,
-} = require('../utils/semaphoreSms');
+} = require('../utils/uniSmsSms');
 
 const router = express.Router();
 
@@ -707,7 +707,7 @@ router.post(
  * POST /auth/forgot-password
  * Body: { email }
  *
- * Starts password recovery by sending a one-time SMS code through Semaphore.
+ * Starts password recovery by sending a one-time SMS code through UniSMS.
  * Response intentionally stays generic to avoid account enumeration.
  */
 router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
@@ -763,7 +763,7 @@ router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
           });
         } catch (smsErr) {
           console.error(
-            `[auth/forgot-password] Semaphore send failed for user ${user.id}:`,
+            `[auth/forgot-password] UniSMS send failed for user ${user.id}:`,
             smsErr.message
           );
         }
