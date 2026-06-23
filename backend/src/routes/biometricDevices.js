@@ -39,7 +39,8 @@ function probeZkTcpPort(ipRaw, timeoutMs = 2500) {
 const router = express.Router();
 const protect = [authMiddleware];
 
-const PUSH_USER_SCRIPT_OPTS = { maxBuffer: 1024 * 1024, timeout: 120000 };
+const ZK_SCRIPT_OPTS = { maxBuffer: 10 * 1024 * 1024, timeout: 120000, windowsHide: true };
+const PUSH_USER_SCRIPT_OPTS = { maxBuffer: 1024 * 1024, timeout: 120000, windowsHide: true };
 
 /** Parse stdout JSON from zk_actions.py; fall back to stderr / generic hint. */
 function pushUserScriptFailure(res, err, stdout, stderr) {
@@ -205,7 +206,7 @@ router.get('/:id/users', protect, requireAdmin, async (req, res) => {
     const pyScript = path.join(__dirname, '../../scripts/zk_actions.py');
     const pythonExec = process.platform === 'win32' ? 'python' : 'python3';
 
-    execFile(pythonExec, [pyScript, '--action', 'get_users', '--ip', ip], (error, stdout, stderr) => {
+    execFile(pythonExec, [pyScript, '--action', 'get_users', '--ip', ip], ZK_SCRIPT_OPTS, (error, stdout, stderr) => {
       if (error) {
         console.error('[biometric-devices GET users] script error:', error, stderr);
         // Try parsing JSON error from stdout if present

@@ -7,9 +7,7 @@ const { pool } = require('../config/db');
 
 const execFileAsync = promisify(execFile);
 
-/** Avoid re-querying the ZKTeco on every paged /search request from the roster UI. */
-const CACHE_TTL_MS = 60 * 1000;
-const cache = new Map();
+const ZK_SCRIPT_OPTS = { maxBuffer: 10 * 1024 * 1024, timeout: 120000, windowsHide: true };
 
 function isUuid(s) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
@@ -17,17 +15,11 @@ function isUuid(s) {
 
 /**
  * PIN / user_id values currently enrolled on the device (for filtering HRMS employees).
- * Results are cached briefly per device id.
+ * Reads the device live so roster changes made directly on the clock reflect immediately.
  */
 async function getDeviceUserBiometricIds(deviceId) {
   if (!isUuid(deviceId)) {
     return { ok: false, statusCode: 400, message: 'Invalid biometric_device_id' };
-  }
-
-  const now = Date.now();
-  const hit = cache.get(deviceId);
-  if (hit && now - hit.at < CACHE_TTL_MS) {
-    return { ok: true, ids: hit.ids };
   }
 
   const result = await pool.query(
@@ -50,7 +42,7 @@ async function getDeviceUserBiometricIds(deviceId) {
     ({ stdout } = await execFileAsync(
       pythonExec,
       [pyScript, '--action', 'get_users', '--ip', String(ip).trim()],
-      { maxBuffer: 10 * 1024 * 1024, timeout: 120000 }
+      ZK_SCRIPT_OPTS
     ));
   } catch (err) {
     return {
@@ -85,7 +77,6 @@ async function getDeviceUserBiometricIds(deviceId) {
     ),
   ];
 
-  cache.set(deviceId, { at: now, ids });
   return { ok: true, ids };
 }
 

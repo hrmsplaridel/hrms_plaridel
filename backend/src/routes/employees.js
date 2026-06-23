@@ -251,7 +251,7 @@ function csvEscape(val) {
 }
 
 // GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid, ?biometric_user_ids=id1,id2,id3)
-// Optional: ?biometric_device_id=<uuid> — admin only; restrict to employees whose biometric_user_id is enrolled on that ZKTeco (reads device; cached ~60s)
+// Optional: ?biometric_device_id=<uuid> — admin only; restrict to employees whose biometric_user_id is enrolled on that ZKTeco (reads device live)
 // Optional: ?biometric_filter=set|has|missing|none — filter by whether biometric_user_id is set (set/has = non-empty; missing/none = empty)
 // Optional: ?q= search; ?sort= & ?order=asc|desc (sort whitelist: full_name, employee_number, role, email, department, position, employment_status, is_active)
 // Optional: ?limit=&offset= — when limit is set, response is { employees, total } instead of a raw array.
