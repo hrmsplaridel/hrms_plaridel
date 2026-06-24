@@ -7,6 +7,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/pages/employee_dtr_assistant_page.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_overlay.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
@@ -252,37 +253,40 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       _selectedNavIndex >= 0 && _selectedNavIndex < _navItems.length;
 
   Widget _buildEmployeeLeaveRequestForm() {
-    return LeaveRequestFormScreen(
-      onSaveDraft: (LeaveRequest request) async {
-        final provider = context.read<LeaveProvider>();
-        if (request.id != null && request.id!.isNotEmpty) {
-          final updated = await provider.updateRequest(request);
-          return updated != null;
-        }
-        final saved = await provider.saveDraft(request);
-        return saved != null;
-      },
-      onSubmitRequest: (LeaveRequest request) async {
-        final provider = context.read<LeaveProvider>();
-        if (request.id != null && request.id!.isNotEmpty) {
-          final updated = await provider.updateRequest(
-            request.copyWith(status: LeaveRequestStatus.pending),
-          );
-          return updated != null;
-        }
-        final saved = await provider.submitRequest(request);
-        return saved != null;
-      },
-      onSubmitRequestWithAttachment:
-          (LeaveRequest request, List<int> fileBytes, String fileName) async {
-            final provider = context.read<LeaveProvider>();
-            final saved = await provider.submitRequestWithAttachment(
-              request: request,
-              fileBytes: fileBytes,
-              fileName: fileName,
+    return EmployeeHrmsAssistantOverlay(
+      initialBottom: 36,
+      child: LeaveRequestFormScreen(
+        onSaveDraft: (LeaveRequest request) async {
+          final provider = context.read<LeaveProvider>();
+          if (request.id != null && request.id!.isNotEmpty) {
+            final updated = await provider.updateRequest(request);
+            return updated != null;
+          }
+          final saved = await provider.saveDraft(request);
+          return saved != null;
+        },
+        onSubmitRequest: (LeaveRequest request) async {
+          final provider = context.read<LeaveProvider>();
+          if (request.id != null && request.id!.isNotEmpty) {
+            final updated = await provider.updateRequest(
+              request.copyWith(status: LeaveRequestStatus.pending),
             );
-            return saved != null;
-          },
+            return updated != null;
+          }
+          final saved = await provider.submitRequest(request);
+          return saved != null;
+        },
+        onSubmitRequestWithAttachment:
+            (LeaveRequest request, List<int> fileBytes, String fileName) async {
+              final provider = context.read<LeaveProvider>();
+              final saved = await provider.submitRequestWithAttachment(
+                request: request,
+                fileBytes: fileBytes,
+                fileName: fileName,
+              );
+              return saved != null;
+            },
+      ),
     );
   }
 

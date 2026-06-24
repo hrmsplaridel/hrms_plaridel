@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_overlay.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -1245,9 +1246,12 @@ class EmployeeLocatorSlipContentState
   ) async {
     final created = await showDialog<_LocatorSlipDraft>(
       context: context,
-      builder: (_) => _LocatorSlipFormDialog(
-        employeeName: employeeName,
-        requestTypes: _locatorTypes,
+      builder: (_) => EmployeeHrmsAssistantOverlay(
+        initialBottom: 92,
+        child: _LocatorSlipFormDialog(
+          employeeName: employeeName,
+          requestTypes: _locatorTypes,
+        ),
       ),
     );
     if (!mounted || created == null) return;
