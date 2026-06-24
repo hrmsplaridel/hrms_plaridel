@@ -1452,6 +1452,9 @@ test('DTR assistant regression: detailed range breakdown includes only useful me
         {
           attendance_date: '2026-06-22',
           status: 'present',
+          time_in: '2026-06-22T00:15:00.000Z',
+          break_in: '2026-06-22T05:00:00.000Z',
+          time_out: '2026-06-22T08:30:00.000Z',
           total_hours: 7.5,
           late_minutes: 15,
           undertime_minutes: 30,
@@ -1529,6 +1532,163 @@ test('DTR assistant regression: full-day absence is not reported as undertime', 
   assert.match(mixed, /June 3, 2026: 30 min/i);
   assert.match(mixed, /Absent\/no-record days are excluded/i);
   assert.doesNotMatch(mixed, /June 1, 2026: 8 hr/i);
+});
+
+test('DTR assistant regression: invalid attendance rows do not inflate DTR metrics', () => {
+  const records = [
+    {
+      attendance_date: '2026-06-01',
+      status: 'absent',
+      late_minutes: 60,
+      undertime_minutes: 480,
+      overtime_minutes: 120,
+    },
+    {
+      attendance_date: '2026-06-02',
+      status: 'no_record',
+      late_minutes: 30,
+      undertime_minutes: 480,
+      overtime_minutes: 60,
+    },
+    {
+      attendance_date: '2026-06-03',
+      status: 'on_leave',
+      leave_type: 'Sick Leave',
+      late_minutes: 15,
+      undertime_minutes: 480,
+      overtime_minutes: 30,
+    },
+    {
+      attendance_date: '2026-06-04',
+      status: 'holiday',
+      holiday_name: 'Local Holiday',
+      time_out: '2026-06-04T09:00:00.000Z',
+      overtime_minutes: 90,
+    },
+    {
+      attendance_date: '2026-06-05',
+      status: 'present',
+      late_minutes: 20,
+      undertime_minutes: 480,
+      overtime_minutes: 120,
+    },
+    {
+      attendance_date: '2026-06-06',
+      status: 'present',
+      time_in: '2026-06-06T00:10:00.000Z',
+      break_in: '2026-06-06T05:00:00.000Z',
+      time_out: '2026-06-06T08:30:00.000Z',
+      total_hours: 7.5,
+      late_minutes: 10,
+      undertime_minutes: 30,
+      overtime_minutes: 45,
+    },
+  ];
+  const context = {
+    date_range: {
+      label: 'this month',
+      startDate: '2026-06-01',
+      endDate: '2026-06-30',
+    },
+    dtr_records: records,
+    dtr_calendar_days: [],
+  };
+
+  const late = buildFastEmployeeAssistantReply(
+    'show my late records this month',
+    context,
+    'dtr_late_summary'
+  );
+  assert.match(late, /1 late record, total 10 min/i);
+  assert.match(late, /June 6, 2026: 10 min/i);
+  assert.doesNotMatch(late, /June 1, 2026/i);
+  assert.doesNotMatch(late, /June 5, 2026/i);
+
+  const undertime = buildFastEmployeeAssistantReply(
+    'show my undertime this month',
+    context,
+    'dtr_undertime_summary'
+  );
+  assert.match(undertime, /1 undertime record, total 30 min/i);
+  assert.match(undertime, /June 6, 2026: 30 min/i);
+  assert.doesNotMatch(undertime, /8 hr/i);
+
+  const overtime = buildFastEmployeeAssistantReply(
+    'show my overtime this month',
+    context,
+    'dtr_overtime_summary'
+  );
+  assert.match(overtime, /1 overtime record, total 45 min/i);
+  assert.match(overtime, /June 6, 2026: 45 min/i);
+  assert.doesNotMatch(overtime, /June 4, 2026/i);
+  assert.doesNotMatch(overtime, /2 hr/i);
+
+  const detailed = buildFastEmployeeAssistantReply(
+    'show a detailed DTR breakdown with late undertime and overtime this month',
+    context,
+    'dtr_range_summary'
+  );
+  assert.match(detailed, /Late: 10 min/i);
+  assert.match(detailed, /Undertime: 30 min/i);
+  assert.match(detailed, /Overtime: 45 min/i);
+  assert.doesNotMatch(detailed, /Late: 2 hr/i);
+  assert.doesNotMatch(detailed, /Undertime: 16 hr/i);
+});
+
+test('DTR assistant regression: daily and hours replies suppress invalid penalty minutes', () => {
+  const absentContext = {
+    date_range: {
+      label: 'June 1, 2026',
+      startDate: '2026-06-01',
+      endDate: '2026-06-01',
+    },
+    dtr_records: [
+      {
+        attendance_date: '2026-06-01',
+        status: 'absent',
+        total_hours: 0,
+        late_minutes: 60,
+        undertime_minutes: 480,
+      },
+    ],
+    dtr_calendar_days: [],
+  };
+  const daily = buildFastEmployeeAssistantReply(
+    'what is my DTR on June 1?',
+    absentContext,
+    'dtr_daily_record'
+  );
+  assert.match(daily, /Status: absent/i);
+  assert.doesNotMatch(daily, /Late: 1 hr/i);
+  assert.doesNotMatch(daily, /Undertime: 8 hr/i);
+
+  const hours = buildFastEmployeeAssistantReply(
+    'how many hours did I work this month?',
+    {
+      date_range: {
+        label: 'this month',
+        startDate: '2026-06-01',
+        endDate: '2026-06-30',
+      },
+      dtr_records: [
+        absentContext.dtr_records[0],
+        {
+          attendance_date: '2026-06-02',
+          status: 'present',
+          time_in: '2026-06-02T00:00:00.000Z',
+          time_out: '2026-06-02T08:00:00.000Z',
+          total_hours: 7.5,
+          late_minutes: 10,
+          undertime_minutes: 30,
+        },
+      ],
+    },
+    'dtr_hours_summary'
+  );
+  assert.match(hours, /Total hours rendered: 7\.50 hours/i);
+  assert.match(hours, /Late: 1 day\(s\) \(10 min total\)/i);
+  assert.match(hours, /Undertime: 1 day\(s\) \(30 min total\)/i);
+  assert.doesNotMatch(hours, /490 min total/i);
 });
 
 test('DTR assistant regression: current shift reply is direct and friendly', () => {

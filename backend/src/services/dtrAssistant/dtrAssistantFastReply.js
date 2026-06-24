@@ -948,9 +948,13 @@ function todayDtrReply(context, localized) {
     `AM out: ${fmtTime(record.break_out)}`,
     `PM in: ${fmtTime(record.break_in)}`,
     `PM out: ${fmtTime(record.time_out)}`,
-    `Late: ${record.late_minutes || 0} min`,
-    `Undertime: ${record.undertime_minutes || 0} min`,
-  ];
+    isValidDtrMetricRecord(record, 'late')
+      ? `Late: ${record.late_minutes || 0} min`
+      : null,
+    isValidDtrMetricRecord(record, 'undertime')
+      ? `Undertime: ${record.undertime_minutes || 0} min`
+      : null,
+  ].filter(Boolean);
   if (record.pm_status) parts.push(`PM status: ${statusLabel(record.pm_status)}`);
   if (record.holiday_name) parts.push(`Holiday: ${record.holiday_name}`);
   if (record.leave_type) parts.push(`Leave: ${record.leave_type}`);
@@ -1054,6 +1058,19 @@ function hasAnyDtrPunch(record) {
       record?.break_in ||
       record?.time_out
   );
+}
+
+function isValidDtrMetricRecord(record, kind) {
+  if (!record || isNonWorkingDtrRecord(record) || isAbsentDtrRecord(record)) {
+    return false;
+  }
+  if (kind === 'late') {
+    return Boolean(record.time_in || record.break_in);
+  }
+  if (kind === 'overtime') {
+    return Boolean(record.time_out);
+  }
+  return hasAnyDtrPunch(record);
 }
 
 function dtrIssueRecords(records, predicate) {
@@ -1241,13 +1258,20 @@ function dtrRecordLine(record, context = null) {
   const schedule = day?.shift_name
     ? `, shift ${day.shift_name} ${day.start_time || ''}-${day.end_time || ''}, grace ${day.grace_period_minutes || 0} min`
     : '';
+  const late = isValidDtrMetricRecord(record, 'late')
+    ? `, late ${record.late_minutes || 0} min`
+    : '';
+  const undertime = isValidDtrMetricRecord(record, 'undertime')
+    ? `, undertime ${record.undertime_minutes || 0} min`
+    : '';
+  const overtime = isValidDtrMetricRecord(record, 'overtime')
+    ? `, overtime ${record.overtime_minutes || 0} min`
+    : '';
   return `${fmtFriendlyDate(record.attendance_date)}: ${statusLabel(record.status)}, AM in ${fmtTime(
     record.time_in
   )}, AM out ${fmtTime(record.break_out)}, PM in ${fmtTime(record.break_in)}, PM out ${fmtTime(
     record.time_out
-  )}, hours ${fmtHours(record.total_hours)}, late ${record.late_minutes || 0} min, undertime ${
-    record.undertime_minutes || 0
-  } min, overtime ${record.overtime_minutes || 0} min${missingText}${leave}${holiday}${schedule}`;
+  )}, hours ${fmtHours(record.total_hours)}${late}${undertime}${overtime}${missingText}${leave}${holiday}${schedule}`;
 }
 
 function dtrDailyRecordReply(context, message) {
@@ -1338,8 +1362,12 @@ function dtrDailyRecordReply(context, message) {
     `PM in: ${fmtTime(record.break_in)}`,
     `PM out: ${fmtTime(record.time_out)}`,
     `Total hours: ${fmtHours(record.total_hours)}`,
-    `Late: ${fmtMinutes(record.late_minutes || 0)}`,
-    `Undertime: ${fmtMinutes(record.undertime_minutes || 0)}`,
+    isValidDtrMetricRecord(record, 'late')
+      ? `Late: ${fmtMinutes(record.late_minutes || 0)}`
+      : null,
+    isValidDtrMetricRecord(record, 'undertime')
+      ? `Undertime: ${fmtMinutes(record.undertime_minutes || 0)}`
+      : null,
     missing.length > 0 ? `Missing: ${missing.join(', ')}` : null,
     day?.shift_name ? `Shift: ${day.shift_name} ${day.start_time || ''}-${day.end_time || ''}` : null,
     record.leave_type ? `Linked leave: ${labelLeaveType(record.leave_type)}` : null,
@@ -1372,9 +1400,15 @@ function dtrRangeSummaryReply(context, message) {
     (acc, record) => {
       const status = lower(record.status);
       acc.hours += asNumber(record.total_hours) || 0;
-      acc.late += Number(record.late_minutes || 0);
-      acc.undertime += Number(record.undertime_minutes || 0);
-      acc.overtime += Number(record.overtime_minutes || 0);
+      if (isValidDtrMetricRecord(record, 'late')) {
+        acc.late += Number(record.late_minutes || 0);
+      }
+      if (isValidDtrMetricRecord(record, 'undertime')) {
+        acc.undertime += Number(record.undertime_minutes || 0);
+      }
+      if (isValidDtrMetricRecord(record, 'overtime')) {
+        acc.overtime += Number(record.overtime_minutes || 0);
+      }
       if (status === 'present' || status === 'complete') acc.present += 1;
       else if (isAbsentDtrRecord(record)) acc.absent += 1;
       else if (isIncompleteDtrRecord(record)) acc.incomplete += 1;
@@ -1564,9 +1598,7 @@ function dtrMinuteSummaryReply(context, message, kind) {
   );
   const issueRecords = rawIssueRecords.filter((record) => {
     if (Number(record[field] || 0) <= 0) return false;
-    if (isNonWorkingDtrRecord(record) || isAbsentDtrRecord(record)) return false;
-    if (kind === 'undertime' && !hasAnyDtrPunch(record)) return false;
-    return true;
+    return isValidDtrMetricRecord(record, kind);
   });
   const excludedRecords =
     kind === 'undertime'
@@ -1617,7 +1649,12 @@ function dtrMinuteSummaryReply(context, message, kind) {
 
 function dtrLateReasonReply(context, message) {
   const language = languageOf(message);
-  const records = dtrIssueRecords(dtrRecords(context), (record) => Number(record.late_minutes || 0) > 0);
+  const records = dtrIssueRecords(
+    dtrRecords(context),
+    (record) =>
+      Number(record.late_minutes || 0) > 0 &&
+      isValidDtrMetricRecord(record, 'late')
+  );
   if (records.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang late minutes sa selected DTR records.';
     if (language === 'tagalog') return 'Wala akong nakitang late minutes sa selected DTR records.';
@@ -5051,10 +5088,21 @@ function dtrHoursSummaryReply(context, message) {
   const totalHours = workedRecords.reduce(function(sum, r) { return sum + (Number(r.total_hours) || 0); }, 0);
   const daysWorked = workedRecords.length;
   const totalDays = records.length;
-  const lateRecords = records.filter(function(r) { return (r.late_minutes || 0) > 0; });
-  const totalLateMinutes = records.reduce(function(sum, r) { return sum + (r.late_minutes || 0); }, 0);
-  const undertimeRecords = records.filter(function(r) { return (r.undertime_minutes || 0) > 0; });
-  const totalUndertimeMinutes = records.reduce(function(sum, r) { return sum + (r.undertime_minutes || 0); }, 0);
+  const lateRecords = records.filter(function(r) {
+    return (r.late_minutes || 0) > 0 && isValidDtrMetricRecord(r, 'late');
+  });
+  const totalLateMinutes = lateRecords.reduce(function(sum, r) {
+    return sum + (r.late_minutes || 0);
+  }, 0);
+  const undertimeRecords = records.filter(function(r) {
+    return (
+      (r.undertime_minutes || 0) > 0 &&
+      isValidDtrMetricRecord(r, 'undertime')
+    );
+  });
+  const totalUndertimeMinutes = undertimeRecords.reduce(function(sum, r) {
+    return sum + (r.undertime_minutes || 0);
+  }, 0);
 
   const hoursStr = Number.isInteger(totalHours) ? String(totalHours) : totalHours.toFixed(2);
   const lateNote = lateRecords.length > 0
