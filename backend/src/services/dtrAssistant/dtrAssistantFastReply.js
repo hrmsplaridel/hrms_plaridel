@@ -7,6 +7,7 @@ const {
 const {
   GUIDELINE_SECTIONS,
   getFormGuidanceForType,
+  getLeaveFormFieldGuidance,
   getLeaveGuidanceForType,
   getGuidelineSectionsForMessage,
 } = require('./leaveFilingGuidelines');
@@ -322,7 +323,7 @@ function languageOf(message) {
   if (/\b(ngano|unsa|unsaon|unsay|unsa'y|karon|pila|kabuok|naa|akong|nako|nabilin|gamay|kuwang|imong|nimo|gikan|mahimong|adlaw|kinahanglan|ug|kay|aning|bulana|adtong|adtung|adtun|atong|niadtong|niadtung|ana|adto|ato|duty|daw|apil|ila|nga)\b/.test(text)) {
     return 'bisaya';
   }
-  if (/\b(tagalog|filipino|ano|ngayon|ako|ko|ba|may|wala|ilan|bakit|maliit|natira|kailangan|pasok|noong|nung)\b/.test(text)) {
+  if (/\b(tagalog|filipino|ano|paano|pano|ngayon|ako|ko|ba|may|wala|ilan|bakit|maliit|natira|kailangan|pasok|noong|nung)\b/.test(text)) {
     return 'tagalog';
   }
   return 'english';
@@ -360,6 +361,7 @@ function localizeTitle(title, language) {
       .replace(/^Leave requirements$/i, 'Leave requirements')
       .replace(/^Attachment requirement$/i, 'Attachment requirement nimo')
       .replace(/^Leave form guide$/i, 'Giya sa pag-file ug leave')
+      .replace(/^Leave filing check$/i, 'Pag-check sa leave request')
       .replace(/^Leave types you can file$/i, 'Leave types nga pwede nimo ma-file')
       .replace(/^Pending leave requests$/i, 'Pending leave requests nimo')
       .replace(/^Approved leave requests$/i, 'Approved leave requests nimo')
@@ -378,6 +380,7 @@ function localizeTitle(title, language) {
       .replace(/^Leave requirements$/i, 'Leave requirements')
       .replace(/^Attachment requirement$/i, 'Attachment requirement mo')
       .replace(/^Leave form guide$/i, 'Gabay sa pag-file ng leave')
+      .replace(/^Leave filing check$/i, 'Pagsusuri ng leave request')
       .replace(/^Leave types you can file$/i, 'Leave types na puwede mong i-file')
       .replace(/^Pending leave requests$/i, 'Pending leave requests mo')
       .replace(/^Approved leave requests$/i, 'Approved leave requests mo')
@@ -880,12 +883,12 @@ function localizedAttachmentRuleText(type, days, language) {
     if (language === 'bisaya') {
       return requiredNow
         ? `kinahanglan ug attachment kay niabot sa ${count} ang request`
-        : `kinahanglan ug attachment kung ${count} o labaw ang i-file`;
+        : `kinahanglan lang ug attachment kung ${count} o labaw ang i-file`;
     }
     if (language === 'tagalog') {
       return requiredNow
         ? `kailangan ng attachment dahil umabot sa ${count} ang request`
-        : `kailangan ng attachment kapag ${count} o higit pa ang i-file`;
+        : `kailangan lang ng attachment kapag ${count} o higit pa ang i-file`;
     }
   }
   if (language === 'bisaya') {
@@ -945,9 +948,13 @@ function todayDtrReply(context, localized) {
     `AM out: ${fmtTime(record.break_out)}`,
     `PM in: ${fmtTime(record.break_in)}`,
     `PM out: ${fmtTime(record.time_out)}`,
-    `Late: ${record.late_minutes || 0} min`,
-    `Undertime: ${record.undertime_minutes || 0} min`,
-  ];
+    isValidDtrMetricRecord(record, 'late')
+      ? `Late: ${record.late_minutes || 0} min`
+      : null,
+    isValidDtrMetricRecord(record, 'undertime')
+      ? `Undertime: ${record.undertime_minutes || 0} min`
+      : null,
+  ].filter(Boolean);
   if (record.pm_status) parts.push(`PM status: ${statusLabel(record.pm_status)}`);
   if (record.holiday_name) parts.push(`Holiday: ${record.holiday_name}`);
   if (record.leave_type) parts.push(`Leave: ${record.leave_type}`);
@@ -1042,6 +1049,28 @@ function isIncompleteDtrRecordForContext(context, record) {
 function isAbsentDtrRecord(record) {
   const status = lower(record?.status);
   return status === 'absent' || status === 'no_record' || status === 'missing';
+}
+
+function hasAnyDtrPunch(record) {
+  return Boolean(
+    record?.time_in ||
+      record?.break_out ||
+      record?.break_in ||
+      record?.time_out
+  );
+}
+
+function isValidDtrMetricRecord(record, kind) {
+  if (!record || isNonWorkingDtrRecord(record) || isAbsentDtrRecord(record)) {
+    return false;
+  }
+  if (kind === 'late') {
+    return Boolean(record.time_in || record.break_in);
+  }
+  if (kind === 'overtime') {
+    return Boolean(record.time_out);
+  }
+  return hasAnyDtrPunch(record);
 }
 
 function dtrIssueRecords(records, predicate) {
@@ -1229,13 +1258,20 @@ function dtrRecordLine(record, context = null) {
   const schedule = day?.shift_name
     ? `, shift ${day.shift_name} ${day.start_time || ''}-${day.end_time || ''}, grace ${day.grace_period_minutes || 0} min`
     : '';
+  const late = isValidDtrMetricRecord(record, 'late')
+    ? `, late ${record.late_minutes || 0} min`
+    : '';
+  const undertime = isValidDtrMetricRecord(record, 'undertime')
+    ? `, undertime ${record.undertime_minutes || 0} min`
+    : '';
+  const overtime = isValidDtrMetricRecord(record, 'overtime')
+    ? `, overtime ${record.overtime_minutes || 0} min`
+    : '';
   return `${fmtFriendlyDate(record.attendance_date)}: ${statusLabel(record.status)}, AM in ${fmtTime(
     record.time_in
   )}, AM out ${fmtTime(record.break_out)}, PM in ${fmtTime(record.break_in)}, PM out ${fmtTime(
     record.time_out
-  )}, hours ${fmtHours(record.total_hours)}, late ${record.late_minutes || 0} min, undertime ${
-    record.undertime_minutes || 0
-  } min, overtime ${record.overtime_minutes || 0} min${missingText}${leave}${holiday}${schedule}`;
+  )}, hours ${fmtHours(record.total_hours)}${late}${undertime}${overtime}${missingText}${leave}${holiday}${schedule}`;
 }
 
 function dtrDailyRecordReply(context, message) {
@@ -1326,8 +1362,12 @@ function dtrDailyRecordReply(context, message) {
     `PM in: ${fmtTime(record.break_in)}`,
     `PM out: ${fmtTime(record.time_out)}`,
     `Total hours: ${fmtHours(record.total_hours)}`,
-    `Late: ${fmtMinutes(record.late_minutes || 0)}`,
-    `Undertime: ${fmtMinutes(record.undertime_minutes || 0)}`,
+    isValidDtrMetricRecord(record, 'late')
+      ? `Late: ${fmtMinutes(record.late_minutes || 0)}`
+      : null,
+    isValidDtrMetricRecord(record, 'undertime')
+      ? `Undertime: ${fmtMinutes(record.undertime_minutes || 0)}`
+      : null,
     missing.length > 0 ? `Missing: ${missing.join(', ')}` : null,
     day?.shift_name ? `Shift: ${day.shift_name} ${day.start_time || ''}-${day.end_time || ''}` : null,
     record.leave_type ? `Linked leave: ${labelLeaveType(record.leave_type)}` : null,
@@ -1360,9 +1400,15 @@ function dtrRangeSummaryReply(context, message) {
     (acc, record) => {
       const status = lower(record.status);
       acc.hours += asNumber(record.total_hours) || 0;
-      acc.late += Number(record.late_minutes || 0);
-      acc.undertime += Number(record.undertime_minutes || 0);
-      acc.overtime += Number(record.overtime_minutes || 0);
+      if (isValidDtrMetricRecord(record, 'late')) {
+        acc.late += Number(record.late_minutes || 0);
+      }
+      if (isValidDtrMetricRecord(record, 'undertime')) {
+        acc.undertime += Number(record.undertime_minutes || 0);
+      }
+      if (isValidDtrMetricRecord(record, 'overtime')) {
+        acc.overtime += Number(record.overtime_minutes || 0);
+      }
       if (status === 'present' || status === 'complete') acc.present += 1;
       else if (isAbsentDtrRecord(record)) acc.absent += 1;
       else if (isIncompleteDtrRecord(record)) acc.incomplete += 1;
@@ -1381,6 +1427,10 @@ function dtrRangeSummaryReply(context, message) {
   const wantsAbsent =
     /\b(absent|absents|absence|absences|pasabot|wala|no record|no-record)\b/.test(lower(message)) &&
     /\b(pila|ilan|how many|count|counts|total)\b/.test(lower(message));
+  const wantsDetailedBreakdown =
+    /\b(full|complete|detailed|details|breakdown|metrics?|hours?|late|undertime|overtime)\b/.test(
+      lower(message)
+    );
   const summary = (() => {
     if (language === 'bisaya') {
       if (wantsPresent) {
@@ -1389,9 +1439,7 @@ function dtrRangeSummaryReply(context, message) {
       if (wantsAbsent) {
         return `Naa koy nakitang ${possibleAbsentOrNoRecord} ka possible absent/no-record workday sa ${label}.`;
       }
-      return issues > 0
-        ? `Nakita nako ang ${issues} ka DTR ${plural(issues, 'item')} nga angay i-review para ani nga period.`
-        : 'Wala koy nakitang klaro nga DTR issue para ani nga period.';
+      return `Para sa ${label}: ${totals.present} ka present/complete, ${totals.incomplete} ka incomplete, ug ${possibleAbsentOrNoRecord} ka possible absent/no-record.`;
     }
     if (language === 'tagalog') {
       if (wantsPresent) {
@@ -1400,9 +1448,7 @@ function dtrRangeSummaryReply(context, message) {
       if (wantsAbsent) {
         return `May nakita akong ${possibleAbsentOrNoRecord} possible absent/no-record workday sa ${label}.`;
       }
-      return issues > 0
-        ? `May nakita akong ${issues} DTR ${plural(issues, 'item')} na kailangang i-review para sa period na ito.`
-        : 'Wala akong nakitang obvious DTR issue para sa period na ito.';
+      return `Para sa ${label}: ${totals.present} present/complete, ${totals.incomplete} incomplete, at ${possibleAbsentOrNoRecord} possible absent/no-record.`;
     }
     if (wantsPresent) {
       return `You have ${totals.present} present/complete DTR ${plural(totals.present, 'day')} for ${label}.`;
@@ -1411,50 +1457,79 @@ function dtrRangeSummaryReply(context, message) {
       return `You have ${possibleAbsentOrNoRecord} possible absent/no-record workday ${plural(possibleAbsentOrNoRecord, 'entry', 'entries')} for ${label}.`;
     }
     return issues > 0
-      ? `I found ${issues} DTR ${plural(issues, 'item')} to review for this period.`
-      : 'I did not find obvious DTR issues for this period.';
+      ? `For ${label}, you have ${totals.present} present/complete ${plural(totals.present, 'day')}, ${totals.incomplete} incomplete ${plural(totals.incomplete, 'day')}, and ${possibleAbsentOrNoRecord} possible absent/no-record ${plural(possibleAbsentOrNoRecord, 'day')}.`
+      : `Your DTR statuses for ${label} have no obvious issues.`;
   })();
-  const absenceTotalLine =
-    noRecords.length > 0 || totals.absent > 0
-      ? `Absent/no-record days: ${possibleAbsentOrNoRecord}`
-      : null;
-  const savedAbsentLine =
-    totals.absent > 0 || noRecords.length > 0
-      ? `Saved absent rows: ${totals.absent}`
-      : null;
-  const noRecordLine =
-    noRecords.length > 0
-      ? `Generated no-record workdays: ${noRecords.length}`
-      : null;
+  const statusLines = [
+    ...records.map((record) => {
+      const date = fmtFriendlyDate(record.attendance_date);
+      const status = lower(record.status);
+      if (status === 'on_leave' || record.leave_type) {
+        return `${date}: On leave${record.leave_type ? ` (${record.leave_type})` : ''}`;
+      }
+      if (status === 'holiday' || record.holiday_name) {
+        return `${date}: Holiday${record.holiday_name ? ` (${record.holiday_name})` : ''}`;
+      }
+      if (isAbsentDtrRecord(record)) return `${date}: Absent`;
+      if (status === 'present' || status === 'complete') return `${date}: Present`;
+      if (isIncompleteDtrRecord(record)) {
+        const missing = missingDtrSlotsForContext(context, record);
+        if (language === 'bisaya') {
+          return `${date}: Incomplete${
+            missing.length > 0 ? ` - kulang ${missing.join(', ')}` : ''
+          }`;
+        }
+        if (language === 'tagalog') {
+          return `${date}: Incomplete${
+            missing.length > 0 ? ` - kulang ang ${missing.join(', ')}` : ''
+          }`;
+        }
+        return `${date}: Incomplete${missing.length > 0 ? ` - missing ${missing.join(', ')}` : ''}`;
+      }
+      return `${date}: ${statusLabel(record.status)}`;
+    }),
+    ...noRecords.map(
+      (day) => {
+        const date = fmtFriendlyDate(day.attendance_date);
+        if (language === 'bisaya') return `${date}: Walay DTR record (possible absent)`;
+        if (language === 'tagalog') return `${date}: Walang DTR record (possible absent)`;
+        return `${date}: No DTR record (possible absence)`;
+      }
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+  const countLines = [
+    totals.present > 0 ? `Present/complete: ${totals.present}` : null,
+    totals.incomplete > 0 ? `Incomplete: ${totals.incomplete}` : null,
+    possibleAbsentOrNoRecord > 0
+      ? `Possible absent/no-record: ${possibleAbsentOrNoRecord}`
+      : null,
+    totals.onLeave > 0 ? `On leave: ${totals.onLeave}` : null,
+    totals.holiday > 0 ? `Holiday: ${totals.holiday}` : null,
+  ];
+  const metricLines = wantsDetailedBreakdown
+    ? [
+        totals.hours > 0 ? `Total hours: ${fmtHours(totals.hours)}` : null,
+        totals.late > 0 ? `Late: ${fmtMinutes(totals.late)}` : null,
+        totals.undertime > 0 ? `Undertime: ${fmtMinutes(totals.undertime)}` : null,
+        totals.overtime > 0 ? `Overtime: ${fmtMinutes(totals.overtime)}` : null,
+      ]
+    : [];
   const issueNextStep =
     issues > 0
-      ? noRecords.length > 0
-        ? language === 'bisaya'
-          ? 'Ang saved absent rows kay kanang naa gyud sa DTR table. Ang generated no-record workdays kay scheduled workdays nga walay punches, mao na sila ang possible absent days.'
-          : language === 'tagalog'
-            ? 'Ang saved absent rows ay yung totoong nasa DTR table. Ang generated no-record workdays ay scheduled workdays na walang punches, kaya sila ang possible absent days.'
-            : 'Saved absent rows are actual DTR rows. Generated no-record workdays are scheduled workdays with no punches, so they are possible absent days.'
-        : 'Check missing logs, leave coverage, or locator coverage for the issue dates.'
+      ? language === 'bisaya'
+        ? 'Pilia ang usa ka issue date kung gusto nimo ma-check ang missing logs, leave, o locator coverage.'
+        : language === 'tagalog'
+          ? 'Pumili ng isang issue date kung gusto mong i-check ang missing logs, leave, o locator coverage.'
+          : 'Choose an issue date if you want me to check its missing logs, leave, or locator coverage.'
       : null;
   return structuredReply(language, {
-    title: `DTR summary for ${label}`,
+    title: `DTR status for ${label}`,
     summary,
-    details: [
-      `Saved DTR rows: ${records.length}`,
-      `Present/complete days: ${totals.present}`,
-      absenceTotalLine,
-      `Incomplete: ${totals.incomplete}`,
-      savedAbsentLine,
-      noRecordLine,
-      `On leave days: ${totals.onLeave}`,
-      `Holiday days: ${totals.holiday}`,
-      `Total hours: ${fmtHours(totals.hours)}`,
-      `Late: ${fmtMinutes(totals.late)}`,
-      `Undertime: ${fmtMinutes(totals.undertime)}`,
-      `Overtime: ${fmtMinutes(totals.overtime)}`,
-    ],
+    details: wantsDetailedBreakdown
+      ? [...countLines, ...statusLines, ...metricLines]
+      : statusLines,
     nextStep: issueNextStep,
-    limit: 13,
+    limit: wantsDetailedBreakdown ? 14 : 10,
   });
 }
 
@@ -1517,16 +1592,44 @@ function dtrMinuteSummaryReply(context, message, kind) {
       : kind === 'undertime'
         ? 'undertime_minutes'
         : 'overtime_minutes';
-  const issueRecords = dtrIssueRecords(records, (record) => Number(record[field] || 0) > 0);
+  const rawIssueRecords = dtrIssueRecords(
+    records,
+    (record) => Number(record[field] || 0) > 0
+  );
+  const issueRecords = rawIssueRecords.filter((record) => {
+    if (Number(record[field] || 0) <= 0) return false;
+    return isValidDtrMetricRecord(record, kind);
+  });
+  const excludedRecords =
+    kind === 'undertime'
+      ? rawIssueRecords.filter((record) => !issueRecords.includes(record))
+      : [];
   const total = issueRecords.reduce((sum, record) => sum + Number(record[field] || 0), 0);
   if (issueRecords.length === 0) {
+    if (kind === 'undertime' && excludedRecords.length > 0) {
+      const dates = excludedRecords
+        .map((record) => fmtFriendlyDate(record.attendance_date))
+        .join(', ');
+      if (language === 'bisaya') {
+        return `Wala koy nakitang actual undertime sa ${label}. Ang ${dates} kay absent/no-record day, busa dili kini i-count isip undertime.`;
+      }
+      if (language === 'tagalog') {
+        return `Wala akong nakitang actual undertime sa ${label}. Ang ${dates} ay absent/no-record day, kaya hindi ito binibilang bilang undertime.`;
+      }
+      return `I found no actual undertime for ${label}. ${dates} is an absent/no-record day, so it is not counted as undertime.`;
+    }
     if (language === 'bisaya') return `Wala koy nakitang ${kind} records sa ${label}.`;
     if (language === 'tagalog') return `Wala akong nakitang ${kind} records sa ${label}.`;
     return `I found no ${kind} records for ${label}.`;
   }
   const lines = issueRecords.map((record) => `${fmtFriendlyDate(record.attendance_date)}: ${fmtMinutes(record[field])}`);
   return structuredReply(language, {
-    title: `${kind} summary for ${label}`,
+    title:
+      language === 'bisaya'
+        ? `${kind} para sa ${label}`
+        : language === 'tagalog'
+          ? `${kind} para sa ${label}`
+          : `${kind} summary for ${label}`,
     summary:
       language === 'bisaya'
         ? `Naa koy nakitang ${issueRecords.length} ka ${kind} record, total ${fmtMinutes(total)}.`
@@ -1534,16 +1637,24 @@ function dtrMinuteSummaryReply(context, message, kind) {
           ? `May nakita akong ${issueRecords.length} ${kind} record, total ${fmtMinutes(total)}.`
           : `I found ${issueRecords.length} ${kind} ${plural(issueRecords.length, 'record')}, total ${fmtMinutes(total)}.`,
     details: lines,
-    nextStep: kind === 'late'
-      ? 'Ask why you were late if you want the schedule/grace-period breakdown.'
-      : null,
+    nextStep:
+      kind === 'late'
+        ? 'Ask why you were late if you want the schedule/grace-period breakdown.'
+        : kind === 'undertime' && excludedRecords.length > 0
+          ? 'Absent/no-record days are excluded from this undertime total.'
+          : null,
     limit: 8,
   });
 }
 
 function dtrLateReasonReply(context, message) {
   const language = languageOf(message);
-  const records = dtrIssueRecords(dtrRecords(context), (record) => Number(record.late_minutes || 0) > 0);
+  const records = dtrIssueRecords(
+    dtrRecords(context),
+    (record) =>
+      Number(record.late_minutes || 0) > 0 &&
+      isValidDtrMetricRecord(record, 'late')
+  );
   if (records.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang late minutes sa selected DTR records.';
     if (language === 'tagalog') return 'Wala akong nakitang late minutes sa selected DTR records.';
@@ -1862,25 +1973,70 @@ function dtrCorrectionGuidanceReply(context, message) {
     ? `${fmtFriendlyDate(target.attendance_date)}${missing.length > 0 ? ` missing ${missing.join(', ')}` : ''}`
     : context.date_range?.label || 'selected date';
   const guidance = coverage
-    ? [
-        `Possible coverage found: ${coverage}`,
-        'Ask HR/Admin if this has already been posted or synced to your DTR.',
-      ]
-    : [
-        'If this was official business or WFH, file/check a locator slip.',
-        'If this was a missed punch, contact HR/Admin for manual correction and prepare proof or remarks.',
-        'If you were on leave, file/check the leave request.',
-      ];
+    ? language === 'bisaya'
+      ? [
+          `Posibleng coverage nga nakita: ${coverage}`,
+          'Pangutan-a ang HR/Admin kung na-post o na-sync na ba kini sa imong DTR.',
+        ]
+      : language === 'tagalog'
+        ? [
+            `Posibleng coverage na nakita: ${coverage}`,
+            'Tanungin ang HR/Admin kung na-post o na-sync na ito sa DTR mo.',
+          ]
+        : [
+            `Possible coverage found: ${coverage}`,
+            'Ask HR/Admin if this has already been posted or synced to your DTR.',
+          ]
+    : language === 'bisaya'
+      ? [
+          'Kung official business o WFH kini, i-file o i-check ang matching locator slip.',
+          'Kung missed punch kini, kontaka ang HR/Admin para sa manual correction ug andama ang proof o remarks.',
+          'Kung naka-leave ka, i-file o i-check ang matching leave request.',
+        ]
+      : language === 'tagalog'
+        ? [
+            'Kung official business o WFH ito, i-file o i-check ang matching locator slip.',
+            'Kung missed punch ito, kontakin ang HR/Admin para sa manual correction at ihanda ang proof o remarks.',
+            'Kung naka-leave ka, i-file o i-check ang matching leave request.',
+          ]
+        : [
+            'If this was official business or WFH, file/check a locator slip.',
+            'If this was a missed punch, contact HR/Admin for manual correction and prepare proof or remarks.',
+            'If you were on leave, file/check the leave request.',
+          ];
+  const policyDetails =
+    language === 'english'
+      ? dtrPolicyLines(message, ['coverage', 'correction'], {
+          maxPointsPerSection: 1,
+        })
+      : [
+          language === 'bisaya'
+            ? 'Andama ang date, exact missing slot, actual work details, ug supporting proof o remarks para sa HR/Admin review.'
+            : 'Ihanda ang date, exact missing slot, actual work details, at supporting proof o remarks para sa HR/Admin review.',
+        ];
   return structuredReply(language, {
-    title: 'How to fix this DTR issue',
-    summary: `Target issue: ${issue}.`,
+    title:
+      language === 'bisaya'
+        ? 'Unsaon pag-correct sa DTR issue'
+        : language === 'tagalog'
+          ? 'Paano ayusin ang DTR issue'
+          : 'How to fix this DTR issue',
+    summary:
+      language === 'bisaya'
+        ? `Issue nga i-check: ${issue}.`
+        : language === 'tagalog'
+          ? `Issue na iche-check: ${issue}.`
+          : `Target issue: ${issue}.`,
     details: [
       ...guidance,
-      ...dtrPolicyLines(message, ['coverage', 'correction'], {
-        maxPointsPerSection: 1,
-      }),
+      ...policyDetails,
     ],
-    nextStep: 'Start with the option that matches what actually happened on that date.',
+    nextStep:
+      language === 'bisaya'
+        ? 'Sugdi sa option nga tinuod nga nahitabo sa maong date.'
+        : language === 'tagalog'
+          ? 'Magsimula sa option na talagang nangyari sa petsang iyon.'
+          : 'Start with the option that matches what actually happened on that date.',
     limit: 7,
   });
 }
@@ -2069,8 +2225,8 @@ function dtrScheduleContextReply(context, message) {
   const days = dtrCalendarDays(context).filter((day) => day.shift_id || day.holiday_id);
   if (days.length === 0) {
     const text = 'I found no assignment/shift schedule for the selected period. HR/Admin should confirm schedule-specific late or undertime rules.';
-    if (language === 'bisaya') return `Wala koy nakitang shift schedule sa selected period. ${text}`;
-    if (language === 'tagalog') return `Wala akong nakitang shift schedule sa selected period. ${text}`;
+    if (language === 'bisaya') return 'Wala koy nakitang assigned shift schedule para sa gipiling period. Ipa-confirm sa HR/Admin ang exact schedule, late cutoff, ug undertime rules.';
+    if (language === 'tagalog') return 'Wala akong nakitang assigned shift schedule para sa napiling period. Ipa-confirm sa HR/Admin ang exact schedule, late cutoff, at undertime rules.';
     return text;
   }
   if (days.length === 1) {
@@ -2168,6 +2324,53 @@ function dtrExportGuidanceReply(context, message) {
 
 function dtrPolicyGuidanceReply(context, message) {
   const language = languageOf(message);
+  if (/\b(grace period|grace minutes|late cutoff)\b/i.test(message)) {
+    const scheduledDay = (context.calendar_days || []).find(
+      (day) => day?.shift_name || day?.shift_start
+    );
+    const graceMinutes = Number(scheduledDay?.grace_minutes || 0);
+    const details = [
+      language === 'bisaya'
+        ? 'Ang grace period idugang sa scheduled time-in. Late na ang punch kung molapas sa scheduled start plus grace period.'
+        : language === 'tagalog'
+          ? 'Idinadagdag ang grace period sa scheduled time-in. Late na ang punch kapag lumampas sa scheduled start plus grace period.'
+          : 'The grace period is added to the scheduled time-in. A punch becomes late only after the scheduled start plus the grace period.',
+      scheduledDay?.shift_name
+        ? `${language === 'bisaya' ? 'Assigned shift' : language === 'tagalog' ? 'Assigned shift' : 'Assigned shift'}: ${scheduledDay.shift_name}${
+            fmtScheduleRange(scheduledDay) ? ` (${fmtScheduleRange(scheduledDay)})` : ''
+          }`
+        : null,
+      scheduledDay
+        ? `${language === 'bisaya' ? 'Configured grace period' : language === 'tagalog' ? 'Configured grace period' : 'Configured grace period'}: ${fmtMinutes(graceMinutes)}`
+        : language === 'bisaya'
+          ? 'Wala na-load ang exact assigned schedule para sa selected date, mao nga dili ko mo-invent ug grace minutes.'
+          : language === 'tagalog'
+            ? 'Hindi naka-load ang exact assigned schedule para sa selected date, kaya hindi ako mag-iimbento ng grace minutes.'
+            : 'The exact assigned schedule is not loaded for the selected date, so I will not invent a grace-period value.',
+    ];
+    return structuredReply(language, {
+      title:
+        language === 'bisaya'
+          ? 'DTR grace period'
+          : language === 'tagalog'
+            ? 'DTR grace period'
+            : 'DTR grace period',
+      summary:
+        language === 'bisaya'
+          ? 'Base ang late computation sa imong assigned shift ug configured grace period.'
+          : language === 'tagalog'
+            ? 'Nakabase ang late computation sa assigned shift at configured grace period mo.'
+            : 'Late computation uses your assigned shift and its configured grace period.',
+      details,
+      nextStep:
+        language === 'bisaya'
+          ? 'Pangutan-a ko sa specific date kung gusto nimo makita ang exact shift ug late cutoff.'
+          : language === 'tagalog'
+            ? 'Magtanong ng specific date kung gusto mong makita ang exact shift at late cutoff.'
+            : 'Ask about a specific date to see the exact shift and late cutoff.',
+      limit: 4,
+    });
+  }
   const sections = getDtrPolicySectionsForMessage('', {
     fallbackKeys: [
       'daily_logs',
@@ -2466,74 +2669,104 @@ function leaveAvailabilityReply(context, message) {
     const details = [
       blockers.length > 0 ? `Issue: ${blockers.join(' | ')}` : null,
       warnings.length > 0 ? `Warning: ${warnings.join(' | ')}` : null,
-      ...notes.map((note) => `Note: ${note}`),
+      ...notes.map((note) => `Attachment: ${note}`),
     ].filter(Boolean);
     if (blockers.length > 0 || enough === false) {
-      const balanceText =
-        enough === false
-          ? `dili igo ang balance: naa kay ${fmtLocalizedDayCount(available, language)} available ${type}, pero ${fmtLocalizedDayCount(days, language)} imong plano`
-          : baseBalanceBisaya;
+      if (enough === false) {
+        const shortage = Math.max(0, days - available);
+        details.unshift(
+          `Available balance: ${fmtLocalizedDayCount(available, language)}`,
+          `Imong gi-request: ${fmtLocalizedDayCount(days, language)}`,
+          `Kulang: ${fmtLocalizedDayCount(shortage, language)}`
+        );
+      }
       return structuredReply(language, {
         title: 'Leave filing check',
-        summary: `Dili pa limpyo ang filing check: ${balanceText}.`,
+        summary:
+          enough === false
+            ? `Dili pa ka maka-file ug ${fmtLocalizedDayCount(days, language)} nga ${type} kay ${fmtLocalizedDayCount(available, language)} ra imong available balance.`
+            : `Dili pa ma-file ang imong ${type} tungod sa filing requirements.`,
         details,
-        nextStep: 'Final approval gihapon ang HR workflow.',
+        nextStep:
+          enough === false
+            ? 'I-adjust ang number of days sulod sa imong available balance, o kontaka ang HR kung kinahanglan gyud nimo ang tibuok leave period.'
+            : 'Ayuhon una ang issue nga nakalista sa taas, dayon i-submit pag-usab.',
       });
     }
     return structuredReply(language, {
       title: 'Leave filing check',
-      summary: `Pwede sa initial filing check: ${baseBalanceBisaya}.`,
+      summary: `Pwede nimo i-file ang ${fmtLocalizedDayCount(days, language)} nga ${type}. ${baseBalanceBisaya}.`,
       details,
-      nextStep: 'Dili pa ni final approval.',
+      nextStep: 'I-review ang dates ug details, dayon i-submit. Pending pa kini hangtod ma-approve.',
     });
   }
   if (language === 'tagalog') {
     const details = [
       blockers.length > 0 ? `Issue: ${blockers.join(' | ')}` : null,
       warnings.length > 0 ? `Warning: ${warnings.join(' | ')}` : null,
-      ...notes.map((note) => `Note: ${note}`),
+      ...notes.map((note) => `Attachment: ${note}`),
     ].filter(Boolean);
     if (blockers.length > 0 || enough === false) {
-      const balanceText =
-        enough === false
-          ? `hindi sapat ang balance: may ${fmtLocalizedDayCount(available, language)} available ${type}, pero ${fmtLocalizedDayCount(days, language)} ang plano mo`
-          : baseBalanceTagalog;
+      if (enough === false) {
+        const shortage = Math.max(0, days - available);
+        details.unshift(
+          `Available balance: ${fmtLocalizedDayCount(available, language)}`,
+          `Request mo: ${fmtLocalizedDayCount(days, language)}`,
+          `Kulang: ${fmtLocalizedDayCount(shortage, language)}`
+        );
+      }
       return structuredReply(language, {
         title: 'Leave filing check',
-        summary: `May issue sa filing check: ${balanceText}.`,
+        summary:
+          enough === false
+            ? `Hindi ka pa makakapag-file ng ${fmtLocalizedDayCount(days, language)} na ${type} dahil ${fmtLocalizedDayCount(available, language)} lang ang available balance mo.`
+            : `Hindi pa ma-file ang ${type} mo dahil may kailangang ayusin sa filing requirements.`,
         details,
-        nextStep: 'Dadaan pa rin ito sa HR approval workflow.',
+        nextStep:
+          enough === false
+            ? 'I-adjust ang bilang ng araw ayon sa available balance mo, o makipag-ugnayan sa HR kung kailangan mo ang buong leave period.'
+            : 'Ayusin muna ang issue sa itaas, pagkatapos ay isumite ulit.',
       });
     }
     return structuredReply(language, {
       title: 'Leave filing check',
-      summary: `Puwede sa initial filing check: ${baseBalanceTagalog}.`,
+      summary: `Puwede mong i-file ang ${fmtLocalizedDayCount(days, language)} na ${type}. ${baseBalanceTagalog}.`,
       details,
-      nextStep: 'Hindi pa ito final approval.',
+      nextStep: 'I-review ang dates at details, pagkatapos ay isumite. Pending pa ito hanggang ma-approve.',
     });
   }
   const details = [
     blockers.length > 0 ? `Issue: ${blockers.join(' | ')}` : null,
     warnings.length > 0 ? `Warning: ${warnings.join(' | ')}` : null,
-    ...notes.map((note) => `Note: ${note}`),
+    ...notes.map((note) => `Attachment: ${note}`),
   ].filter(Boolean);
   if (blockers.length > 0 || enough === false) {
-    const balanceText =
-      enough === false
-        ? `balance is not enough: you have ${fmtLocalizedDayCount(available, language)} available ${type}, but plan to file ${fmtDayCount(days)}`
-        : baseBalanceEnglish;
+    if (enough === false) {
+      const shortage = Math.max(0, days - available);
+      details.unshift(
+        `Available balance: ${fmtDayCount(available)}`,
+        `Requested: ${fmtDayCount(days)}`,
+        `Short by: ${fmtDayCount(shortage)}`
+      );
+    }
     return structuredReply(language, {
       title: 'Leave filing check',
-      summary: `Filing check found an issue: ${balanceText}.`,
+      summary:
+        enough === false
+          ? `You cannot file ${fmtDayCount(days)} of ${type} yet because you only have ${fmtDayCount(available)} available.`
+          : `Your ${type} request cannot be filed yet because a filing requirement needs attention.`,
       details,
-      nextStep: 'This still needs the normal HR approval workflow.',
+      nextStep:
+        enough === false
+          ? 'Reduce the requested days to fit your available balance, or contact HR if you need the full leave period.'
+          : 'Fix the issue listed above, then submit the request again.',
     });
   }
   return structuredReply(language, {
     title: 'Leave filing check',
-    summary: `Initial filing check looks okay: ${baseBalanceEnglish}.`,
+    summary: `You can file ${fmtDayCount(days)} of ${type}. ${baseBalanceEnglish}.`,
     details,
-    nextStep: 'This is not final approval yet.',
+    nextStep: 'Review the dates and details, then submit. The request remains pending until approved.',
   });
 }
 
@@ -2695,6 +2928,51 @@ function leaveAttachmentRequirementReply(context, message) {
 
 function leaveFilingPolicyReply(context, message) {
   const language = languageOf(message);
+  if (
+    /\b(what happens?|what will happen|what happens next|after i submit|after submitting|after submission|human after submit|unsa.*mahitabo|mahitabo.*submit|ano.*mangyayari|mangyayari.*submit)\b/i.test(
+      message
+    )
+  ) {
+    return structuredReply(language, {
+      title:
+        language === 'bisaya'
+          ? 'Human nimo ma-submit ang leave'
+          : language === 'tagalog'
+            ? 'Pagkatapos mong i-submit ang leave'
+            : 'After you submit the leave request',
+      summary:
+        language === 'bisaya'
+          ? 'Ma-record ang request ug moagi sa normal approval workflow. Dili pa dayon na approved.'
+          : language === 'tagalog'
+            ? 'Mare-record ang request at dadaan sa normal approval workflow. Hindi pa ito awtomatikong approved.'
+            : 'The request is recorded and enters the normal approval workflow. Submission does not mean it is already approved.',
+      details:
+        language === 'bisaya'
+          ? [
+              'I-check sa assigned reviewer ang dates, balance, reason, ug attachment.',
+              'Makita nimo sa My Leave kung pending, approved, returned, o rejected ang request.',
+              'Kung returned, basaha ang remarks, i-correct ang form, ug i-submit pag-usab.',
+            ]
+          : language === 'tagalog'
+            ? [
+                'Iche-check ng assigned reviewer ang dates, balance, reason, at attachment.',
+                'Makikita mo sa My Leave kung pending, approved, returned, o rejected ang request.',
+                'Kung returned, basahin ang remarks, ayusin ang form, at i-submit ulit.',
+              ]
+            : [
+                'The assigned reviewer checks the dates, balance, reason, and attachment.',
+                'You can track whether it is pending, approved, returned, or rejected in My Leave.',
+                'If it is returned, read the remarks, correct the form, and submit it again.',
+              ],
+      nextStep:
+        language === 'bisaya'
+          ? 'Ablihi ang My Leave aron ma-track ang status ug reviewer remarks.'
+          : language === 'tagalog'
+            ? 'Buksan ang My Leave para ma-track ang status at reviewer remarks.'
+            : 'Open My Leave to track the status and reviewer remarks.',
+      limit: 4,
+    });
+  }
   const types = matchingLeaveTypes(context, message);
   if (types.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang filing policy para ana nga leave type.';
@@ -2729,6 +3007,61 @@ function leaveFilingPolicyReply(context, message) {
 
 function leaveFormGuidanceReply(context, message) {
   const language = languageOf(message);
+  const requestedType = requestedLeaveType(message);
+  const requestedRecord = requestedLeaveTypeRecord(message, context);
+  const hasSpecificType = Boolean(requestedType || requestedRecord);
+
+  if (!hasSpecificType) {
+    return structuredReply(language, {
+      title:
+        language === 'bisaya'
+          ? 'Unsaon pag-file ug leave'
+          : language === 'tagalog'
+            ? 'Paano mag-file ng leave'
+            : 'How to file a leave request',
+      summary:
+        language === 'bisaya'
+          ? 'Ablihi ang leave form, kompletuha ang required details, dayon i-submit para sa approval.'
+          : language === 'tagalog'
+            ? 'Buksan ang leave form, kumpletuhin ang required details, at i-submit para sa approval.'
+            : 'Open the leave form, complete the required details, and submit it for approval.',
+      details:
+        language === 'bisaya'
+          ? [
+              'Ablihi ang My Leave ug pili-a ang File Leave Request.',
+              'Pilia ang leave type nga sakto sa imong purpose.',
+              'Ibutang ang start ug end date. Ang HRMS maoy mo-compute sa working days.',
+              'Isulat ang mubo ug tinuod nga reason, ug kompletuha ang additional fields kung naa.',
+              'I-upload ang supporting document kung required sa leave type o duration.',
+              'Reviewha ang details, dayon i-submit. Dili pa automatic approved ang request.',
+            ]
+          : language === 'tagalog'
+            ? [
+                'Buksan ang My Leave at piliin ang File Leave Request.',
+                'Piliin ang leave type na tama sa purpose mo.',
+                'Ilagay ang start at end date. HRMS ang magko-compute ng working days.',
+                'Sumulat ng maikli at totoong reason, at kumpletuhin ang additional fields kung mayroon.',
+                'Mag-upload ng supporting document kung required sa leave type o duration.',
+                'I-review ang details at i-submit. Hindi pa awtomatikong approved ang request.',
+              ]
+            : [
+                'Open My Leave and select File Leave Request.',
+                'Choose the leave type that matches your purpose.',
+                'Enter the start and end dates. HRMS calculates the covered working days.',
+                'Write a short, truthful reason and complete any additional fields shown.',
+                'Upload a supporting document when the leave type or duration requires one.',
+                'Review the details and submit. The request is not automatically approved.',
+              ],
+      nextStep:
+        language === 'bisaya'
+          ? 'Pwede nimo i-open ang leave form sa button sa ubos. Kung gusto nimo specific nga tabang, pangutana: "Unsaon pag-file ug sick leave?"'
+          : language === 'tagalog'
+            ? 'Puwede mong buksan ang leave form gamit ang button sa ibaba. Para sa specific na tulong, itanong: "Paano mag-file ng sick leave?"'
+            : 'Use the button below to open the leave form. For specific requirements, ask: "How do I file sick leave?"',
+      limit: 7,
+    });
+  }
+
   const types = matchingLeaveTypes(context, message).slice(0, 3);
   if (types.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang leave type para sa form guidance.';
@@ -2754,6 +3087,254 @@ function leaveFormGuidanceReply(context, message) {
           : 'Use these details when filling out the leave form.',
     details: lines.map(trimTrailingSentencePunctuation),
     limit: 3,
+  });
+}
+
+function localizedLeaveFieldExplanation(field, language) {
+  if (language === 'english') return field.explanation;
+  const bisaya = {
+    leave_type:
+      'Pilia ang leave category nga tinuod nga mo-match sa hinungdan sa imong absence.',
+    custom_leave_type:
+      'Ibutang ang eksaktong official leave name kung wala kini sa standard list.',
+    dates:
+      'Pilia ang unang ug kataposang calendar date nga sakop sa imong leave request.',
+    working_days:
+      'Mao ni ang scheduled working days nga sakop sa imong gipiling dates.',
+    reason:
+      'Pagsulat ug mubo pero tin-aw ug tinuod nga explanation nganong kinahanglan nimo ang leave.',
+    location_option:
+      'Pilia kung ang imong destination naa sulod sa Pilipinas o abroad.',
+    location_details:
+      'Ibutang ang klarong city, municipality, province, o country sa imong leave destination.',
+    sick_nature:
+      'Pilia ang In Hospital kung na-confine ka; piliang Out Patient para sa consultation, treatment, o home recovery.',
+    illness_details:
+      'Isulat sa mubo ang illness, consultation, treatment, o recovery nga related sa imong absence.',
+    expected_delivery_date:
+      'Ibutang ang expected delivery date nga naa sa medical record o gi-hatag sa doctor.',
+    maternity_classification:
+      'Pilia ang Normal Delivery o Caesarean Section base sa medical record.',
+    child_delivery_date:
+      'Ibutang ang actual delivery o miscarriage date nga naa sa supporting record.',
+    accident_date:
+      'Ibutang ang petsa sa work-related accident o injury nga sakop sa rehabilitation request.',
+    calamity_date:
+      'Ibutang ang petsa sa calamity o disaster nga nakaapekto sa imong residence o immediate family.',
+    women_illness_details:
+      'Isulat sa mubo ang gynecological condition o procedure nga related sa request.',
+    study_purpose:
+      'Pilia ang option nga mo-match sa approved study activity.',
+    study_details:
+      'Ibutang ang school, degree, exam, o review program nga related sa request.',
+    attachment:
+      'I-upload ang document nga required sa gipiling leave type ug duration.',
+    commutation:
+      'Kung i-check nimo kini, ma-mark ang leave request nga nangayo usab ug HR/Admin review para sa commutation ubos sa office policy.',
+  };
+  const tagalog = {
+    leave_type:
+      'Piliin ang leave category na talagang tumutugma sa dahilan ng iyong pagliban.',
+    custom_leave_type:
+      'Ilagay ang eksaktong official leave name kung wala ito sa standard list.',
+    dates:
+      'Piliin ang una at huling calendar date na sakop ng leave request.',
+    working_days:
+      'Ito ang scheduled working days na sakop ng napiling dates.',
+    reason:
+      'Sumulat ng maikli, malinaw, at totoong paliwanag kung bakit kailangan ang leave.',
+    location_option:
+      'Piliin kung ang destination ay nasa loob ng Pilipinas o abroad.',
+    location_details:
+      'Ilagay ang malinaw na city, municipality, province, o country ng leave destination.',
+    sick_nature:
+      'Piliin ang In Hospital kung na-confine; piliin ang Out Patient para sa consultation, treatment, o home recovery.',
+    illness_details:
+      'Ilagay nang maikli ang illness, consultation, treatment, o recovery na kaugnay ng absence.',
+    expected_delivery_date:
+      'Ilagay ang expected delivery date mula sa medical record o physician.',
+    maternity_classification:
+      'Piliin ang Normal Delivery o Caesarean Section ayon sa medical record.',
+    child_delivery_date:
+      'Ilagay ang actual delivery o miscarriage date mula sa supporting record.',
+    accident_date:
+      'Ilagay ang petsa ng work-related accident o injury na sakop ng rehabilitation request.',
+    calamity_date:
+      'Ilagay ang petsa ng calamity o disaster na nakaapekto sa residence o immediate family.',
+    women_illness_details:
+      'Ilagay nang maikli ang gynecological condition o procedure na kaugnay ng request.',
+    study_purpose:
+      'Piliin ang option na tumutugma sa approved study activity.',
+    study_details:
+      'Ilagay ang school, degree, exam, o review program na kaugnay ng request.',
+    attachment:
+      'I-upload ang document na required sa napiling leave type at duration.',
+    commutation:
+      'Kapag chineck ito, mamarkahan ang leave request na humihiling din ng HR/Admin review para sa commutation ayon sa office policy.',
+  };
+  return (language === 'bisaya' ? bisaya : tagalog)[field.key] || field.explanation;
+}
+
+function localizedLeaveFieldNote(field, language) {
+  if (language === 'english') return field.note;
+  const bisaya = {
+    reason:
+      'Ayaw pagbutang ug dili kinahanglan nga private medical details. Ayaw kopyaha ang example kung dili kini tinuod.',
+    working_days:
+      'HRMS ang mo-compute ani. Usba ang dates imbis manghula o mag-manual input.',
+    commutation:
+      'Dili niini automatic ma-approve ang leave, ma-convert ang credits ngadto sa cash, o ma-guarantee ang payment. HR/Admin gihapon ang mo-review.',
+  };
+  const tagalog = {
+    reason:
+      'Huwag maglagay ng hindi kailangang private medical details. Huwag kopyahin ang example kung hindi ito totoo.',
+    working_days:
+      'HRMS ang nagko-compute nito. Baguhin ang dates sa halip na hulaan o i-manual input.',
+    commutation:
+      'Hindi nito awtomatikong ina-approve ang leave, kino-convert ang credits sa cash, o ginagarantiya ang payment. HR/Admin pa rin ang magre-review.',
+  };
+  const specific = (language === 'bisaya' ? bisaya : tagalog)[field.key];
+  if (specific) return specific;
+  return language === 'bisaya'
+    ? 'Gamita ang imong tinuod nga details ug siguroa nga mo-match sa supporting records.'
+    : 'Gamitin ang tunay mong details at tiyaking tugma sa supporting records.';
+}
+
+function localizedLeaveFieldExamples(field, language) {
+  if (language === 'english') return field.examples;
+  const translations = {
+    bisaya: {
+      'Medical consultation and recovery due to illness':
+        'Medical consultation ug recovery tungod sa illness',
+      'Rest and recovery as advised after an outpatient consultation':
+        'Rest ug recovery human sa outpatient consultation',
+      'Personal travel and rest in Cebu City':
+        'Personal travel ug rest sa Cebu City',
+      'Family vacation within the Philippines':
+        'Family vacation sulod sa Pilipinas',
+      'Fever and medical consultation':
+        'Hilanat ug medical consultation',
+      'Recovery after an outpatient procedure':
+        'Recovery human sa outpatient procedure',
+      'Leave it unchecked for an ordinary absence request':
+        'Pasagdi nga unchecked para sa ordinary leave absence request',
+      'Leave it unchecked for an ordinary leave absence request':
+        'Pasagdi nga unchecked para sa ordinary leave absence request',
+      'Check it only when HR has instructed you to request commutation':
+        'I-check lang kung gi-instruct ka sa HR nga mag-request ug commutation',
+      'A Monday-to-Tuesday request may show 2 working days if both are scheduled workdays':
+        'Ang Monday hangtod Tuesday mahimong 2 ka working days kung pareho silang scheduled workdays',
+    },
+    tagalog: {
+      'Medical consultation and recovery due to illness':
+        'Medical consultation at recovery dahil sa illness',
+      'Rest and recovery as advised after an outpatient consultation':
+        'Rest at recovery pagkatapos ng outpatient consultation',
+      'Personal travel and rest in Cebu City':
+        'Personal travel at pahinga sa Cebu City',
+      'Family vacation within the Philippines':
+        'Family vacation sa loob ng Pilipinas',
+      'Fever and medical consultation':
+        'Lagnat at medical consultation',
+      'Recovery after an outpatient procedure':
+        'Recovery pagkatapos ng outpatient procedure',
+      'Leave it unchecked for an ordinary absence request':
+        'Iwanang unchecked para sa ordinary leave absence request',
+      'Leave it unchecked for an ordinary leave absence request':
+        'Iwanang unchecked para sa ordinary leave absence request',
+      'Check it only when HR has instructed you to request commutation':
+        'I-check lamang kung inutusan ka ng HR na humiling ng commutation',
+      'A Monday-to-Tuesday request may show 2 working days if both are scheduled workdays':
+        'Ang Monday hanggang Tuesday ay maaaring 2 working days kung parehong scheduled workdays',
+    },
+  };
+  return field.examples.map(
+    (example) => translations[language]?.[example] || example
+  );
+}
+
+function leaveFormFieldHelpReply(context, message) {
+  const language = languageOf(message);
+  const type = requestedLeaveTypeRecord(message, context);
+  const field = getLeaveFormFieldGuidance(message, type);
+  if (!field) {
+    return structuredReply(language, {
+      title: 'Leave form field help',
+      summary:
+        language === 'bisaya'
+          ? 'Unsang field sa leave form ang nakalibog nimo? Isulti ang exact field label.'
+          : language === 'tagalog'
+            ? 'Aling field sa leave form ang nakakalito? Sabihin ang exact field label.'
+            : 'Which leave-form field is confusing? Tell me the exact field label.',
+      details: [
+        'Leave Type',
+        'Start Date / End Date',
+        'Reason / Remarks',
+        'Location or Illness Details',
+        'Attachment',
+        'Requested Commutation',
+      ],
+      nextStep:
+        language === 'bisaya'
+          ? 'Example: "unsa akong ibutang sa reason field sa sick leave?"'
+          : language === 'tagalog'
+            ? 'Example: "ano ang ilalagay sa reason field ng sick leave?"'
+            : 'Example: "What should I put in the sick leave reason field?"',
+      limit: 6,
+    });
+  }
+
+  const typeLabel = type
+    ? labelLeaveType(type.display_name || type.name)
+    : null;
+  const examples = localizedLeaveFieldExamples(field, language);
+  const exampleLabel =
+    language === 'bisaya'
+      ? 'Example input'
+      : language === 'tagalog'
+        ? 'Halimbawang input'
+        : 'Example input';
+  const details = [
+    `${language === 'bisaya' ? 'Unsaon pag-fill' : language === 'tagalog' ? 'Paano sagutan' : 'How to fill it'}: ${localizedLeaveFieldExplanation(
+      field,
+      language
+    )}`,
+    ...examples.map((example) => `${exampleLabel}: ${example}`),
+  ];
+
+  if (field.key === 'attachment' && type) {
+    details.push(
+      `${
+        language === 'bisaya'
+          ? 'Rule para sa leave type'
+          : language === 'tagalog'
+            ? 'Rule para sa leave type'
+            : 'Rule for this leave type'
+      }: ${localizedAttachmentRuleText(type, requestedDaysOrRangeDays(message, context), language)}`
+    );
+  }
+
+  const asksCommutationEffect =
+    field.key === 'commutation' &&
+    /\b(happen|check|checked|checking|tick|ticked|cash|paid|payment|pay|bayad|mabayran|mahitabo|mangyayari)\b/i.test(
+      message
+    );
+  return structuredReply(language, {
+    title: field.title,
+    summary: asksCommutationEffect
+      ? language === 'bisaya'
+        ? 'Dili. Ang pag-check ani dili automatic nga mabayran, ma-convert to cash, o ma-approve ang leave.'
+        : language === 'tagalog'
+          ? 'Hindi. Ang pag-check nito ay hindi awtomatikong payment, cash conversion, o approval ng leave.'
+          : 'No. Checking it does not automatically create a payment, convert leave credits to cash, or approve the leave.'
+      : language === 'bisaya'
+        ? `Mao ni ang tabang para sa ${field.title}${typeLabel ? ` sa ${typeLabel}` : ''}.`
+        : language === 'tagalog'
+          ? `Narito ang tulong para sa ${field.title}${typeLabel ? ` ng ${typeLabel}` : ''}.`
+          : `Here is how to complete ${field.title}${typeLabel ? ` for ${typeLabel}` : ''}.`,
+    details,
+    nextStep: localizedLeaveFieldNote(field, language),
+    limit: 6,
   });
 }
 
@@ -3400,7 +3981,7 @@ function leaveRejectionReasonReply(context, message) {
   const request = requests[0] || (context.recent_leave_requests || []).find((r) => rejectedStatus(r.status) || returnedStatus(r.status));
 
   if (!request) {
-    if (language === 'bisaya') return 'Wala koy nakitang rejected or returned leave request sa recent records mo.';
+    if (language === 'bisaya') return 'Wala koy nakitang rejected o returned leave request sa imong recent records.';
     if (language === 'tagalog') return 'Wala akong nakitang rejected or returned leave request sa recent records mo.';
     return 'I found no rejected or returned leave request in your recent records.';
   }
@@ -3409,16 +3990,34 @@ function leaveRejectionReasonReply(context, message) {
   const base = `${fmtLeaveRequest(request, language)}`;
   if (!reason) {
     return structuredReply(language, {
-      title: 'Leave rejection reason',
+      title:
+        language === 'bisaya'
+          ? 'Rason sa rejected o returned leave'
+          : language === 'tagalog'
+            ? 'Dahilan ng rejected o returned leave'
+            : 'Leave rejection reason',
       summary: base,
-      details: ['No reviewer remarks or reason were found in the record.'],
+      details: [
+        language === 'bisaya'
+          ? 'Walay reviewer remarks o reason nga naka-save sa record.'
+          : language === 'tagalog'
+            ? 'Walang reviewer remarks o dahilan na naka-save sa record.'
+            : 'No reviewer remarks or reason were found in the record.',
+      ],
     });
   }
   const cleanReason = String(reason).replace(/[.\s]+$/, '');
   return structuredReply(language, {
-    title: 'Leave rejection reason',
+    title:
+      language === 'bisaya'
+        ? 'Rason sa rejected o returned leave'
+        : language === 'tagalog'
+          ? 'Dahilan ng rejected o returned leave'
+          : 'Leave rejection reason',
     summary: base,
-    details: [`Remarks: ${cleanReason}`],
+    details: [
+      `${language === 'bisaya' ? 'Reviewer remarks' : language === 'tagalog' ? 'Reviewer remarks' : 'Remarks'}: ${cleanReason}`,
+    ],
   });
 }
 
@@ -3438,24 +4037,38 @@ function leaveApprovalTrackerReply(context, message) {
 
   const status = String(request.status || '').toLowerCase();
   let owner = workflowStatusText(status);
-  if (status === 'pending_department_head') owner = 'currently waiting for department head review';
-  if (status === 'pending_hr' || status === 'pending') owner = 'currently waiting for HR final review';
-  if (status === 'approved') owner = 'already approved';
-  if (status === 'returned') owner = 'returned to you for correction';
-  if (rejectedStatus(status)) owner = 'already rejected';
+  if (language === 'bisaya') {
+    if (status === 'pending_department_head') owner = 'naghulat sa department head review';
+    if (status === 'pending_hr' || status === 'pending') owner = 'naghulat sa final HR review';
+    if (status === 'approved') owner = 'approved na';
+    if (status === 'returned') owner = 'gibalik sa imo para i-correct';
+    if (rejectedStatus(status)) owner = 'rejected na';
+  } else if (language === 'tagalog') {
+    if (status === 'pending_department_head') owner = 'naghihintay ng department head review';
+    if (status === 'pending_hr' || status === 'pending') owner = 'naghihintay ng final HR review';
+    if (status === 'approved') owner = 'approved na';
+    if (status === 'returned') owner = 'ibinalik sa iyo para ayusin';
+    if (rejectedStatus(status)) owner = 'rejected na';
+  } else {
+    if (status === 'pending_department_head') owner = 'currently waiting for department head review';
+    if (status === 'pending_hr' || status === 'pending') owner = 'currently waiting for HR final review';
+    if (status === 'approved') owner = 'already approved';
+    if (status === 'returned') owner = 'returned to you for correction';
+    if (rejectedStatus(status)) owner = 'already rejected';
+  }
 
   const actor = request.reviewer_name || request.approver_name || request.latest_history?.actor_name;
-  const actorText = actor ? ` Last action/reviewer: ${actor}.` : '';
+  const actorText = actor
+    ? ` ${language === 'bisaya' ? 'Last reviewer/action' : language === 'tagalog' ? 'Huling reviewer/action' : 'Last action/reviewer'}: ${actor}.`
+    : '';
   const remarks = firstReviewReason(request);
-  const remarksText = remarks ? ` Remarks: ${remarks}.` : '';
+  const remarksText = remarks ? ` Reviewer remarks: ${remarks}.` : '';
   const content = `${labelLeaveType(request.leave_type)} ${fmtLocalizedDateRange(
     request.start_date,
     request.end_date,
     language
-  )} is ${owner}.${actorText}${remarksText}`;
+  )}${language === 'bisaya' ? ` kay ${owner}` : language === 'tagalog' ? ` ay ${owner}` : ` is ${owner}`}.${actorText}${remarksText}`;
 
-  if (language === 'bisaya') return content;
-  if (language === 'tagalog') return content;
   return content;
 }
 
@@ -3740,36 +4353,100 @@ function locatorTypesReply(context, message) {
         : `These are the ${types.length} locator types you can file in HRMS.`;
 
   return structuredReply(language, {
-    title: singleType ? 'Locator type details' : 'Locator types you can file',
+    title:
+      language === 'bisaya'
+        ? singleType
+          ? 'Detalye sa locator type'
+          : 'Locator types nga pwede nimo ma-file'
+        : language === 'tagalog'
+          ? singleType
+            ? 'Detalye ng locator type'
+            : 'Mga locator type na puwede mong i-file'
+          : singleType
+            ? 'Locator type details'
+            : 'Locator types you can file',
     summary,
     details: [
       ...types.map((type) => fmtLocatorTypeRule(type, language)),
       singleType && types[0]?.coverage_mode === 'wfh'
-        ? 'WFH usually marks covered DTR slots as WFH after approval.'
+        ? language === 'bisaya'
+          ? 'Human ma-approve, ang covered DTR slots kasagarang ma-mark as WFH.'
+          : language === 'tagalog'
+            ? 'Kapag approved na, karaniwang mamamarkahan bilang WFH ang covered DTR slots.'
+            : 'WFH usually marks covered DTR slots as WFH after approval.'
         : null,
-      ...locatorPolicyLines(message, ['types', 'dtr_coverage'], {
-        maxPointsPerSection: 1,
-      }),
-      'You still need a slip date, covered slots, location/destination, and reason.',
-      'Approval is still required before it becomes final DTR coverage.',
+      ...(language === 'english'
+        ? locatorPolicyLines(message, ['types', 'dtr_coverage'], {
+            maxPointsPerSection: 1,
+          })
+        : language === 'bisaya'
+          ? [
+              'Ang available locator types gikan sa active HRMS setup.',
+              'Makatabang lang sa DTR ang locator kung approved na ug sakto ang covered slots.',
+            ]
+          : [
+              'Ang available locator types ay galing sa active HRMS setup.',
+              'Makakatulong lang sa DTR ang locator kapag approved na at tama ang covered slots.',
+            ]),
+      language === 'bisaya'
+        ? 'Kinahanglan gihapon ang slip date, covered slots, location/destination, ug reason.'
+        : language === 'tagalog'
+          ? 'Kailangan pa rin ang slip date, covered slots, location/destination, at reason.'
+          : 'You still need a slip date, covered slots, location/destination, and reason.',
+      language === 'bisaya'
+        ? 'Kinahanglan pa ang approval bago mahimong final DTR coverage.'
+        : language === 'tagalog'
+          ? 'Kailangan pa ng approval bago maging final DTR coverage.'
+          : 'Approval is still required before it becomes final DTR coverage.',
     ],
     nextStep:
       language === 'bisaya'
-        ? 'Kung gusto nimo i-check kung pwede ka mag-file sa specific date, pangutan-a ko: "Can I file WFH tomorrow?"'
+        ? 'Kung gusto nimo i-check ang specific date, pangutan-a ko: "Pwede ba ko mag-WFH ugma?"'
         : language === 'tagalog'
-          ? 'Kung gusto mong i-check ang specific date, itanong: "Can I file WFH tomorrow?"'
+          ? 'Kung gusto mong i-check ang specific date, itanong: "Puwede ba akong mag-WFH bukas?"'
           : 'To check a specific date, ask: "Can I file WFH tomorrow?"',
     limit: 8,
   });
 }
 
-function fmtLocatorSlip(slip) {
+function localizedLocatorStatusText(status, language) {
+  if (language === 'bisaya') {
+    const value = lower(status);
+    if (value === 'pending_department_head') return 'naghulat sa department head review';
+    if (value === 'pending_hr' || value === 'pending') return 'naghulat sa HR review';
+    if (value === 'approved') return 'approved sa HR';
+    if (value === 'rejected_by_department_head') return 'rejected sa department head';
+    if (value === 'rejected_by_hr' || value === 'rejected') return 'rejected sa HR';
+    if (value === 'cancelled' || value === 'canceled') return 'cancelled';
+  }
+  if (language === 'tagalog') {
+    const value = lower(status);
+    if (value === 'pending_department_head') return 'naghihintay ng department head review';
+    if (value === 'pending_hr' || value === 'pending') return 'naghihintay ng HR review';
+    if (value === 'approved') return 'approved ng HR';
+    if (value === 'rejected_by_department_head') return 'rejected ng department head';
+    if (value === 'rejected_by_hr' || value === 'rejected') return 'rejected ng HR';
+    if (value === 'cancelled' || value === 'canceled') return 'cancelled';
+  }
+  return locatorStatusText(status);
+}
+
+function fmtLocatorSlip(slip, language = 'english') {
   const slots = locatorSlots(slip);
   const type = slip.request_type_label || slip.request_type || 'Locator';
   const place = slip.office ? `, ${slip.office}` : '';
-  const attachment = slip.has_attachment ? ', with attachment' : '';
-  return `${type} on ${fmtFriendlyDate(slip.slip_date)} - ${locatorStatusText(slip.status)}${
-    slots.length > 0 ? `, covering ${slots.join(', ')}` : ''
+  const attachment = slip.has_attachment
+    ? language === 'bisaya'
+      ? ', naay attachment'
+      : language === 'tagalog'
+        ? ', may attachment'
+        : ', with attachment'
+    : '';
+  const dateConnector = language === 'bisaya' ? 'sa' : language === 'tagalog' ? 'noong' : 'on';
+  const coverageConnector =
+    language === 'bisaya' ? 'nag-cover sa' : language === 'tagalog' ? 'sakop ang' : 'covering';
+  return `${type} ${dateConnector} ${fmtFriendlyDate(slip.slip_date)} - ${localizedLocatorStatusText(slip.status, language)}${
+    slots.length > 0 ? `, ${coverageConnector} ${slots.join(', ')}` : ''
   }${place}${attachment}`;
 }
 
@@ -3871,6 +4548,71 @@ function locatorSummaryReply(context, message) {
 
 function locatorRequirementsReply(context, message) {
   const language = languageOf(message);
+  const asksDestination =
+    /\b(destination|destination field|location field|office field|where.*(?:put|enter|write|type)|asa.*ibutang|saan.*ilalagay)\b/i.test(
+      message
+    );
+  const asksReason =
+    /\b(reason field|locator reason|what.*(?:put|enter|write|type).*reason|sample reason|example reason|unsa.*ibutang.*reason|ano.*ilalagay.*reason)\b/i.test(
+      message
+    );
+  const asksRequiredFields =
+    /\b(required fields?|fields? required|what fields? (?:are )?required|which fields? (?:are )?required|unsa.*(?:required|kinahanglan).*fields?|ano.*(?:required|kailangan).*fields?)\b/i.test(
+      message
+    );
+
+  if (asksDestination || asksReason || asksRequiredFields) {
+    const details = [];
+    if (asksDestination || asksRequiredFields) {
+      details.push(
+        language === 'bisaya'
+          ? 'Office / Destination: Isulat ang tinuod nga office, agency, client site, o work location. Example: "Municipal Engineering Office, Plaridel" o "Home work location - Poblacion, Plaridel" para sa WFH.'
+          : language === 'tagalog'
+            ? 'Office / Destination: Ilagay ang totoong office, agency, client site, o work location. Halimbawa: "Municipal Engineering Office, Plaridel" o "Home work location - Poblacion, Plaridel" para sa WFH.'
+            : 'Office / Destination: Enter the actual office, agency, client site, or work location. Example: "Municipal Engineering Office, Plaridel" or "Home work location - Poblacion, Plaridel" for WFH.'
+      );
+    }
+    if (asksReason || asksRequiredFields) {
+      details.push(
+        language === 'bisaya'
+          ? 'Reason: Mubo pero klaro nga official purpose. Example: "Submit and follow up payroll documents" o "Attend the scheduled coordination meeting."'
+          : language === 'tagalog'
+            ? 'Reason: Maikli pero malinaw na official purpose. Halimbawa: "Submit and follow up payroll documents" o "Attend the scheduled coordination meeting."'
+            : 'Reason: Give a short, clear official purpose. Example: "Submit and follow up payroll documents" or "Attend the scheduled coordination meeting."'
+      );
+    }
+    if (asksRequiredFields) {
+      details.push(
+        language === 'bisaya'
+          ? 'Kompletuhon ang locator type, slip date, covered DTR slots, office/destination, reason, ug attachment kung required sa selected type.'
+          : language === 'tagalog'
+            ? 'Kumpletuhin ang locator type, slip date, covered DTR slots, office/destination, reason, at attachment kung required sa napiling type.'
+            : 'Complete the locator type, slip date, covered DTR slots, office/destination, reason, and any attachment required by the selected type.'
+      );
+    }
+    return structuredReply(language, {
+      title:
+        language === 'bisaya'
+          ? 'Tabang sa locator form'
+          : language === 'tagalog'
+            ? 'Tulong sa locator form'
+            : 'Locator form help',
+      summary:
+        language === 'bisaya'
+          ? 'Mao ni ang pwede nimo ibutang. Ilisi ang examples sa imong tinuod nga detalye.'
+          : language === 'tagalog'
+            ? 'Ito ang puwede mong ilagay. Palitan ang examples ng totoong detalye mo.'
+            : 'Here is what to enter. Replace the examples with your real details.',
+      details,
+      nextStep:
+        language === 'bisaya'
+          ? 'Pilia usab ang exact AM/PM slots nga kinahanglan ma-cover sa approved locator.'
+          : language === 'tagalog'
+            ? 'Piliin din ang eksaktong AM/PM slots na kailangang ma-cover ng approved locator.'
+            : 'Also select the exact AM/PM slots that the approved locator should cover.',
+      limit: 5,
+    });
+  }
   const visible = locatorTypeRulesForMessage(context, message);
   if (visible.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang locator request type rules sa system.';
@@ -3908,7 +4650,7 @@ function locatorRequirementsReply(context, message) {
     ],
     nextStep:
       language === 'bisaya'
-        ? 'Kung rejected or pending imong locator, ask me about its status or remarks.'
+        ? 'Kung rejected o pending imong locator, pangutan-a ko bahin sa status o reviewer remarks.'
         : language === 'tagalog'
           ? 'Kung rejected or pending ang locator mo, tanungin mo ako tungkol sa status o remarks.'
           : 'If your locator is rejected or pending, ask me about its status or remarks.',
@@ -4022,7 +4764,7 @@ function locatorRejectionReasonReply(context, message) {
     title: 'Locator rejection reason',
     summary,
     details: [
-      fmtLocatorSlip(slip),
+      fmtLocatorSlip(slip, language),
       `Rejected by: ${rejectedBy}`,
       remarks ? `Remarks: ${remarks}` : 'Remarks: no rejection remarks saved in the record.',
       slip.dept_head_reviewer_name ? `Department head reviewer: ${slip.dept_head_reviewer_name}` : null,
@@ -4038,12 +4780,16 @@ function locatorRejectionReasonReply(context, message) {
   });
 }
 
-function locatorApprovalOwner(slip) {
+function locatorApprovalOwner(slip, language = 'english') {
   const status = lower(slip?.status);
   if (status === 'pending_department_head') {
     return slip.dept_head_reviewer_name
       ? `department head (${slip.dept_head_reviewer_name})`
-      : 'department head review';
+      : language === 'bisaya'
+        ? 'department head review'
+        : language === 'tagalog'
+          ? 'department head review'
+          : 'department head review';
   }
   if (status === 'pending_hr' || status === 'pending') {
     return slip.hr_reviewer_name ? `HR (${slip.hr_reviewer_name})` : 'HR review';
@@ -4071,8 +4817,8 @@ function locatorApprovalTrackerReply(context, message) {
     if (language === 'tagalog') return 'Wala akong nakitang locator slip na puwedeng i-track sa account mo.';
     return 'I found no locator slip to track for your account.';
   }
-  const owner = locatorApprovalOwner(slip);
-  const status = locatorStatusText(slip.status);
+  const owner = locatorApprovalOwner(slip, language);
+  const status = localizedLocatorStatusText(slip.status, language);
   const summary =
     pendingStatus(slip.status)
       ? language === 'bisaya'
@@ -4086,15 +4832,22 @@ function locatorApprovalTrackerReply(context, message) {
           ? `Hindi na pending ang locator request mo; status nito ay ${status}.`
           : `Your locator request is no longer pending; its status is ${status}.`;
   return structuredReply(language, {
-    title: 'Locator approval tracker',
+    title:
+      language === 'bisaya'
+        ? 'Pagsubay sa locator approval'
+        : language === 'tagalog'
+          ? 'Pagsubaybay sa locator approval'
+          : 'Locator approval tracker',
     summary,
     details: [
-      fmtLocatorSlip(slip),
-      `Current step: ${owner}`,
-      slip.created_at ? `Filed: ${fmtFriendlyDate(slip.created_at)}` : null,
+      fmtLocatorSlip(slip, language),
+      `${language === 'bisaya' ? 'Current review step' : language === 'tagalog' ? 'Kasalukuyang review step' : 'Current step'}: ${owner}`,
+      slip.created_at
+        ? `${language === 'bisaya' ? 'Gi-file' : language === 'tagalog' ? 'Na-file' : 'Filed'}: ${fmtFriendlyDate(slip.created_at)}`
+        : null,
       slip.dept_head_reviewed_at ? `Department head reviewed: ${fmtFriendlyDate(slip.dept_head_reviewed_at)}` : null,
       slip.hr_reviewed_at ? `HR reviewed: ${fmtFriendlyDate(slip.hr_reviewed_at)}` : null,
-      locatorRemarks(slip) ? `Remarks: ${locatorRemarks(slip)}` : null,
+      locatorRemarks(slip) ? `Reviewer remarks: ${locatorRemarks(slip)}` : null,
     ],
     nextStep:
       pendingStatus(slip.status)
@@ -4226,6 +4979,9 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
   if (intent === 'leave_form_guidance') {
     return leaveFormGuidanceReply(context, message);
   }
+  if (intent === 'leave_form_field_help') {
+    return leaveFormFieldHelpReply(context, message);
+  }
   if (intent === 'leave_eligibility_check') {
     return leaveEligibilityReply(context, message);
   }
@@ -4332,10 +5088,21 @@ function dtrHoursSummaryReply(context, message) {
   const totalHours = workedRecords.reduce(function(sum, r) { return sum + (Number(r.total_hours) || 0); }, 0);
   const daysWorked = workedRecords.length;
   const totalDays = records.length;
-  const lateRecords = records.filter(function(r) { return (r.late_minutes || 0) > 0; });
-  const totalLateMinutes = records.reduce(function(sum, r) { return sum + (r.late_minutes || 0); }, 0);
-  const undertimeRecords = records.filter(function(r) { return (r.undertime_minutes || 0) > 0; });
-  const totalUndertimeMinutes = records.reduce(function(sum, r) { return sum + (r.undertime_minutes || 0); }, 0);
+  const lateRecords = records.filter(function(r) {
+    return (r.late_minutes || 0) > 0 && isValidDtrMetricRecord(r, 'late');
+  });
+  const totalLateMinutes = lateRecords.reduce(function(sum, r) {
+    return sum + (r.late_minutes || 0);
+  }, 0);
+  const undertimeRecords = records.filter(function(r) {
+    return (
+      (r.undertime_minutes || 0) > 0 &&
+      isValidDtrMetricRecord(r, 'undertime')
+    );
+  });
+  const totalUndertimeMinutes = undertimeRecords.reduce(function(sum, r) {
+    return sum + (r.undertime_minutes || 0);
+  }, 0);
 
   const hoursStr = Number.isInteger(totalHours) ? String(totalHours) : totalHours.toFixed(2);
   const lateNote = lateRecords.length > 0

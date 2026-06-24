@@ -52,7 +52,7 @@ class DtrAssistantInputBar extends StatelessWidget {
               textInputAction: TextInputAction.send,
               onSubmitted: (_) => _send(),
               decoration: InputDecoration(
-                hintText: 'Ask about your DTR, leave, or locator records',
+                hintText: 'Ask about your HRMS records and services',
                 filled: true,
                 fillColor: AppTheme.dashMutedSurfaceOf(context),
                 border: OutlineInputBorder(

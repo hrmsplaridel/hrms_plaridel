@@ -1,4 +1,7 @@
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
+const {
+  isLeaveFormFieldHelpQuestion,
+} = require('./leaveFilingGuidelines');
 
 function lower(value) {
   return String(value || '').toLowerCase();
@@ -15,7 +18,7 @@ function isLeaveHowToFileQuestion(text) {
   ) {
     return false;
   }
-  return /\b(how can i file|how do i file|how to file|how can i apply|how do i apply|how to apply|steps? to file|procedure.*file|guide.*file|paano.*file|paano.*apply|unsaon.*file|unsaon.*apply|paunsa.*file|pag file|pag-file)\b/.test(
+  return /\b(how can i file|how do i file|how to file|how do i make.*(?:leave|request)|how can i make.*(?:leave|request)|how can i apply|how do i apply|how to apply|steps? to file|procedure.*file|guide.*file|paano.*file|paano.*apply|unsaon.*file|unsaon.*apply|paunsa.*(?:file|leave|request)|pag file|pag-file)\b/.test(
     text
   );
 }
@@ -78,6 +81,7 @@ function normalizeIntent(value) {
     'leave_request_summary',
     'leave_filing_policy',
     'leave_form_guidance',
+    'leave_form_field_help',
     'leave_eligibility_check',
     'leave_dtr_impact',
     'leave_guideline_section',
@@ -267,6 +271,19 @@ const FUZZY_INTENT_PROFILES = [
   {
     intent: 'leave_form_guidance',
     phrases: ['how to file leave', 'how can i file leave', 'paano mag file leave', 'unsaon pag file leave', 'leave form'],
+  },
+  {
+    intent: 'leave_form_field_help',
+    phrases: [
+      'what should i put in the reason field',
+      'give me an example for the location field',
+      'help me with this leave field',
+      'what do i enter for illness details',
+      'unsa akong ibutang sa reason field',
+      'unsay example sa location field',
+      'ano ilalagay sa reason field',
+      'sample input for leave form',
+    ],
   },
   {
     intent: 'leave_availability_check',
@@ -505,12 +522,38 @@ function shouldAllowFuzzyOverride(ruleIntent, fuzzyIntent, message) {
     'pending_leave_requests',
     'leave_approval_tracker',
     'leave_rejection_reason',
+    'leave_form_field_help',
+    'leave_attachment_requirement',
+    'leave_availability_check',
+    'leave_pending_days_explanation',
+    'leave_filing_policy',
+    'leave_type_compare',
+    'leave_guided_filing',
+    'leave_request_summary',
+    'leave_request_lookup',
+    'leave_approval_history',
+    'rejected_leave_requests',
+    'latest_leave_request',
+    'leave_types',
+    'dtr_leave_coverage_check',
+    'dtr_locator_coverage_check',
     'locator_approval_tracker',
     'locator_rejection_reason',
+    'locator_availability_check',
+    'latest_locator_request',
+    'locator_summary',
   ]);
   if (protectedRuleIntents.has(ruleIntent)) return false;
 
   if (ruleIntent === 'today_dtr' && fuzzyIntent === 'dtr_daily_record') return false;
+  if (
+    ruleIntent === 'dtr_range_summary' &&
+    /\b(present|complete|kompleto|kumpleto)\b/.test(
+      lower(normalizeAssistantMessageForRules(message))
+    )
+  ) {
+    return false;
+  }
   if (ruleIntent === 'pending_leave_requests' && fuzzyIntent === 'leave_history') return false;
   if (ruleIntent === 'locator_approval_tracker' && fuzzyIntent === 'latest_locator_request') return false;
   if (ruleIntent === 'dtr_missing_log_reason' && fuzzyIntent === 'dtr_missing_logs') return false;
@@ -606,15 +649,56 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   const hasDateTopic =
     /\b(date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|ngayon|karong adlawa|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|ana|ato|adto|same day|same date|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/.test(
       text
+    ) ||
+    /\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:days?|weeks?|months?)\s+ago\b/.test(
+      text
     );
   const hasLocatorTopic =
     /\b(locator|locator slip|pass slip|wfh|work from home|official business|ob request|ob|on field|field work|fieldwork|out of office|outside office|travel order)\b/.test(
       text
     );
+  const hasExplicitLocatorTopicForFieldHelp =
+    /\b(locator|locator slip|pass slip|wfh|work from home|official business|ob request|field work|fieldwork|out of office|outside office|travel order)\b/.test(
+      text
+    );
+
+  if (
+    isLeaveFormFieldHelpQuestion(text) &&
+    !hasDtrTopic &&
+    !hasExplicitLocatorTopicForFieldHelp
+  ) {
+    return 'leave_form_field_help';
+  }
 
   if (hasLocatorTopic) {
     if (
-      /\b(types?|kinds?|options?|available.*locator|locator.*available|what.*locator.*file|which.*locator.*file|what.*type|which.*type|what is.*(wfh|work from home|pass slip|official business|ob|fieldwork)|unsa.*(wfh|work from home|pass slip|official business|ob|fieldwork)|ano.*(wfh|work from home|pass slip|official business|ob|fieldwork)|unsa.*type|unsay.*type|ano.*type|list.*locator|how about|what about)\b/.test(text) &&
+      /\b(latest|last|most recent|recent)\b/.test(text) &&
+      /\b(show|what|which|my|request|status|wfh|locator|official business|pass slip)\b/.test(
+        text
+      ) &&
+      !/\b(cutoff|cut-off|cut off|pay period|payroll period|week|month|semana|semanaha|bulan|bulana|buwan|buwana)\b/.test(
+        text
+      )
+    ) {
+      return 'latest_locator_request';
+    }
+    if (
+      /\b(summary|total|count|counts|pila|kabuok|ilan|how many)\b/.test(text) &&
+      /\b(rejected|approved|accepted|pending|cancelled|canceled|locator|wfh|pass slip|official business)\b/.test(
+        text
+      )
+    ) {
+      return 'locator_summary';
+    }
+    if (
+      /\b(what (?:do|should|can) i (?:put|enter|write|select|type)|what to (?:put|enter|write|select|type)|where (?:do|should|can) i (?:put|enter|write|select|type)|how (?:do|can|should) i fill|unsa.*ibutang|unsay.*ibutang|ano.*ilalagay|sample|example|example input|required fields?|fields? required|destination field|location field|reason field)\b/.test(
+        text
+      )
+    ) {
+      return 'locator_requirements';
+    }
+    if (
+      /\b(types?|kinds?|options?|available.*locator|locator.*available|what.*locator.*file|which.*locator.*file|what.*type|which.*type|what is.*(wfh|work from home|pass slip|official business|ob|fieldwork)|tell me about.*(wfh|work from home|pass slip|official business|ob|fieldwork)|unsa.*(wfh|work from home|pass slip|official business|ob|fieldwork)|ano.*(wfh|work from home|pass slip|official business|ob|fieldwork)|unsa.*type|unsay.*type|ano.*type|list.*locator|how about|what about)\b/.test(text) &&
       !/\b(status|approve|approved|accepted|pending|rejected|returned|cancelled|canceled|latest|last|recent|remarks|reason|who|where|asa|kinsa|sino|holding|waiting)\b/.test(text)
     ) {
       return 'locator_types';
@@ -626,7 +710,9 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
       return 'dtr_locator_coverage_check';
     }
     if (
-      /\b(why|ngano|bakit|reason|remarks|comment|rejected|reject|declined|denied|gi reject|gireject|not approved)\b/.test(text)
+      /\b(rejected|reject|declined|denied|gi reject|gireject|not approved|why.*(?:reject|declin|deni|not approved)|ngano.*(?:reject|declin|deni|not approved)|bakit.*(?:reject|declin|deni|not approved)|(?:reason|remarks|comment).*(?:reject|declin|deni|returned|not approved))\b/.test(
+        text
+      )
     ) {
       return 'locator_rejection_reason';
     }
@@ -636,7 +722,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
       return 'locator_approval_tracker';
     }
     if (
-      /\b(can i file|can file|pwede.*file|puwede.*file|pwede ba|puwede ba|allowed|eligible|eligibility|qualified|available.*file|file.*tomorrow|file.*today|file.*ugma|file.*karon)\b/.test(text)
+      /\b(can i file|can file|can i submit|can submit|pwede.*(?:file|submit)|puwede.*(?:file|submit)|pwede ba|puwede ba|allowed|eligible|eligibility|qualified|available.*file|file.*tomorrow|file.*today|file.*ugma|file.*karon|submit.*tomorrow|submit.*today|submit.*ugma|submit.*karon)\b/.test(text)
     ) {
       return 'locator_availability_check';
     }
@@ -647,6 +733,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     }
     if (
       /\b(summary|summarize|summarise|overview|recap|total|count|counts|pila|kabuok|ilan|how many|history|list|show|records|requests|rejected|approved|accepted|pending|cancelled|canceled|this month|this week|month|week|bulan|bulana|semana|semanaha)\b/.test(text)
+      && !/\bstatus\b/.test(text)
     ) {
       return 'locator_summary';
     }
@@ -670,7 +757,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
 
   if (
     /\b(how many hours|total hours|hours worked|hours rendered|ilan oras|pila.*oras|pila ka oras|oras nako|working hours|hours this)\b/.test(text) &&
-    (hasDtrTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(text))
+    (hasDtrTopic || hasDateTopic || /\b(month|week|semana|semanaha|bulan|bulana|buwan|buwana|aning bulana|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:days?|weeks?|months?)\s+ago\b/.test(text))
   ) {
     return 'dtr_hours_summary';
   }
@@ -681,6 +768,15 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     /\b(leave|sick|vacation|sl|vl|day|days|adlaw)\b/.test(text)
   ) {
     return 'leave_balance_projection';
+  }
+
+  if (
+    /\b(grace period|grace minutes|late cutoff|attendance cutoff|dtr cutoff|how.*late.*calculated|how.*undertime.*calculated)\b/.test(
+      text
+    ) &&
+    (hasDtrTopic || /\b(attendance|dtr|late|undertime)\b/.test(text))
+  ) {
+    return 'dtr_policy_guidance';
   }
 
   if (
@@ -698,10 +794,10 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(fix|correct|correction|adjust|manual|buhaton|unsa buhaton|ano gagawin|how to fix|resolve)\b/.test(
+    /\b(fix|correct|correction|adjust|manual|ayusin|iayos|buhaton|unsa buhaton|ano gagawin|how to fix|resolve)\b/.test(
       text
     ) &&
-    /\b(dtr|attendance|log|logs|missing|incomplete|time[\s-]?in|time[\s-]?out|late|undertime)\b/.test(
+    /\b(dtr|attendance|log|logs|missing|incomplete|time[\s-]?in|time[\s-]?out|am in|am out|pm in|pm out|late|undertime)\b/.test(
       text
     )
   ) {
@@ -709,7 +805,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(why|ngano|bakit|reason|explain|what.*missing|what.*kulang|unsa.*missing|unsa.*kulang|ngano.*wala|bakit.*wala)\b/.test(text) &&
+    /\b(why|ngano|bakit|reason|explain|ngano.*wala|bakit.*wala)\b/.test(text) &&
     /\b(am in|am out|pm in|pm out|time[\s-]?in|time[\s-]?out|log|logs|dtr)\b/.test(text)
   ) {
     return 'dtr_missing_log_reason';
@@ -741,9 +837,9 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(covered|cover|covers|why|ngano|bakit|on leave)\b/.test(text) &&
+    /\b(covered|cover|covers|covering|sakop|why|ngano|bakit|on leave)\b/.test(text) &&
     /\b(leave|vl|sl)\b/.test(text) &&
-    /\b(dtr|attendance|absent|missing|incomplete|on leave|date)\b/.test(text)
+    /\b(dtr|attendance|absent|absence|missing|incomplete|on leave|date)\b/.test(text)
   ) {
     return 'dtr_leave_coverage_check';
   }
@@ -768,6 +864,16 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     /\b(late)\b/.test(text)
   ) {
     return 'dtr_late_reason';
+  }
+
+  if (
+    /\b(late|tardy)\b/.test(text) &&
+    /\b(ba|did|was|am i|ako|ko|nako)\b/.test(text) &&
+    /\b(today|yesterday|kagahapon|gahapon|adtong|adtung|atong|niadtong|niadtung|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2})\b/.test(
+      text
+    )
+  ) {
+    return 'dtr_status_explanation';
   }
 
   if (
@@ -799,7 +905,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(why|ngano|bakit|reason|explain|what.*missing|what.*kulang|unsa.*missing|unsa.*kulang|ngano.*wala|bakit.*wala)\b/.test(
+    /\b(why|ngano|bakit|reason|explain|ngano.*wala|bakit.*wala)\b/.test(
       text
     ) &&
     /\b(dtr|attendance|log|logs|time[\s-]?in|time[\s-]?out|am in|am out|pm in|pm out|incomplete|missing)\b/.test(text)
@@ -843,8 +949,19 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
+    /\b(record|attendance record|dtr record)\b/.test(text) &&
+    /\b(first|1st|second|2nd|third|3rd|fourth|4th|last)\b/.test(text) &&
+    /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo)\b/.test(
+      text
+    ) &&
+    !LEAVE_TOPIC_PATTERN.test(text)
+  ) {
+    return 'dtr_daily_record';
+  }
+
+  if (
     hasDtrTopic &&
-    /\b(week|semana|semanaha|month|bulan|bulana|buwan|buwana|last week|this week|next week|last month|this month|next month|aning bulana|karong semana|karong semanaha|karong bulan|karong bulana|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b/.test(
+    /\b(week|semana|semanaha|month|bulan|bulana|buwan|buwana|last week|this week|next week|last month|this month|next month|aning bulana|karong semana|karong semanaha|karong bulan|karong bulana|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b|\b(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:days?|weeks?|months?)\s+ago\b/.test(
       text
     )
   ) {
@@ -891,10 +1008,35 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
+    /\b(latest|last|most recent|recent)\b/.test(text) &&
+    /\b(leave request|leave status|leave)\b/.test(text)
+  ) {
+    return 'latest_leave_request';
+  }
+
+  if (
+    /\b(pending days|days.*pending|pending balance|balance.*pending|pending leave days|asa.*pending|where.*pending|why.*pending|ngano.*pending|bakit.*pending)\b/.test(
+      text
+    ) &&
+    /\b(leave|balance|days|pending)\b/.test(text)
+  ) {
+    return 'leave_pending_days_explanation';
+  }
+
+  if (
     /\b(summary|summarize|summarise|overview|recap|total|count|counts)\b/.test(text) &&
     /\b(leave|leaves|request|requests)\b/.test(text)
   ) {
     return 'leave_request_summary';
+  }
+
+  if (
+    /\b(timeline|who approved|who reviewed|kinsa.*approve|kinsa.*review|sino.*approve|sino.*review|approval history|review history|action history)\b/.test(
+      text
+    ) &&
+    /\b(leave|request|approval|approved|review|timeline)\b/.test(text)
+  ) {
+    return 'leave_approval_history';
   }
 
   if (
@@ -904,15 +1046,6 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     /\b(leave|request|approval|approve|pending|status)\b/.test(text)
   ) {
     return 'leave_approval_tracker';
-  }
-
-  if (
-    /\b(history|timeline|steps|who approved|who reviewed|kinsa.*approve|kinsa.*review|approval history|review history|action history)\b/.test(
-      text
-    ) &&
-    /\b(leave|request|approval|approved|review|timeline)\b/.test(text)
-  ) {
-    return 'leave_approval_history';
   }
 
   if (
@@ -927,12 +1060,30 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(why|ngano|bakit|reason|remarks|comment|returned|rejected|declined|denied|gi reject|gibalik|binalik)\b/.test(
+    /\b(why|ngano|bakit).*\b(reject(?:ed)?|return(?:ed)?|declin(?:ed)?|deni(?:ed)?|gibalik|binalik)\b/.test(
+      text
+    ) &&
+    /\b(leave|request)\b/.test(text)
+  ) {
+    return 'leave_rejection_reason';
+  }
+
+  if (
+    /\b(why.*(?:reject|return|declin|deni)|ngano.*(?:reject|return|declin|deni)|bakit.*(?:reject|return|declin|deni)|(?:reason|remarks|comment).*(?:reject|return|declin|deni)|(?:reject|return|declin|deni).*(?:reason|remarks|comment))\b/.test(
       text
     ) &&
     /\b(leave|request|rejected|returned|declined|denied)\b/.test(text)
   ) {
     return 'leave_rejection_reason';
+  }
+
+  if (
+    /\b(find|lookup|locate|show)\b/.test(text) &&
+    /\b(leave request|leave)\b/.test(text) &&
+    hasDateTopic &&
+    !/\b(pwede|puwede|can i|can we|allowed|eligible|qualified)\b/.test(text)
+  ) {
+    return 'leave_request_lookup';
   }
 
   if (
@@ -944,7 +1095,8 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     ) &&
     /\b(on|sa|adtung|adtong|atong|niadtong|niadtung|that|to|date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|sunod|miaging|niaging|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|april|may|june|july|august|september|october|november|december|january|february|march|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/.test(
       text
-    )
+    ) &&
+    !/\b(pwede|puwede|can i|can we|allowed|eligible|qualified)\b/.test(text)
   ) {
     return 'leave_request_lookup';
   }
@@ -956,6 +1108,23 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     LEAVE_TOPIC_PATTERN.test(text)
   ) {
     return 'leave_type_compare';
+  }
+
+  if (
+    isLeaveGuidelineSectionQuestion(text) &&
+    /\b(guideline|guidelines|section|explain)\b/.test(text) &&
+    !/\b(commutation|monetization|monetisation)\b/.test(text)
+  ) {
+    return 'leave_guideline_section';
+  }
+
+  if (
+    /\b(policy|rule|rules|advance|before|deadline|how many days before|pila.*days.*before|kanus-a|when.*file|max|maximum|limit|allowed|pwede.*past|past date|late filing)\b/.test(
+      text
+    ) &&
+    LEAVE_TOPIC_PATTERN.test(text)
+  ) {
+    return 'leave_filing_policy';
   }
 
   if (
@@ -995,6 +1164,15 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
+    /\b(help me file|guide me file|assist me file|tabangi.*file|tabangi ko|mag file ko|mag-file ko|i want to file|gusto ko mag file|gusto nako mag file)\b/.test(
+      text
+    ) &&
+    LEAVE_TOPIC_PATTERN.test(text)
+  ) {
+    return 'leave_guided_filing';
+  }
+
+  if (
     isLeaveHowToFileQuestion(text) &&
     LEAVE_TOPIC_PATTERN.test(text)
   ) {
@@ -1008,15 +1186,6 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     LEAVE_TOPIC_PATTERN.test(text)
   ) {
     return 'leave_form_guidance';
-  }
-
-  if (
-    /\b(help me file|guide me file|assist me file|tabangi.*file|tabangi ko|mag file ko|mag-file ko|i want to file|gusto ko mag file|gusto nako mag file)\b/.test(
-      text
-    ) &&
-    LEAVE_TOPIC_PATTERN.test(text)
-  ) {
-    return 'leave_guided_filing';
   }
 
   if (
@@ -1067,6 +1236,15 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
+    /\b(what happens?|what will happen|what happens next|after i submit|after submitting|after submission|human after submit|unsa.*mahitabo|mahitabo.*submit|ano.*mangyayari|mangyayari.*submit)\b/.test(
+      text
+    ) &&
+    /\b(leave|request|form|submit|submission)\b/.test(text)
+  ) {
+    return 'leave_filing_policy';
+  }
+
+  if (
     /\b(requirements?|requirement|attachment|document|docs|needed|need|kinahanglan|unsa.*kinahanglan|ano.*kailangan|file.*request|pag file|pag-file)\b/.test(
       text
     ) &&
@@ -1076,7 +1254,15 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(enough|sapat|kaya|pwede|can i file|can file|file.*leave|leave.*file|available.*for)\b/.test(
+    /\b(unsa|unsay|ano|what|which).*\b(mga\s+)?leave\b.*\b(pwede|puwede|can|available|options?|types?|file)\b/.test(
+      text
+    )
+  ) {
+    return 'leave_types';
+  }
+
+  if (
+    /\b(enough|sapat|kaya|pwede|can i file|can file|can i submit|can submit|submit.*leave|file.*leave|leave.*file|available.*for)\b/.test(
       text
     ) &&
     (LEAVE_TOPIC_PATTERN.test(text) || /\b\d+\b/.test(text))
@@ -1085,9 +1271,10 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(leave types|types of leave|available leave types|unsa.*leave type|ano.*leave type|what leave types)\b/.test(
+    /\b(leave types|types of leave|available leave types|leave options|options.*leave|unsa.*leave type|ano.*leave type|what leave types)\b/.test(
       text
-    )
+    ) &&
+    !/\b(pwede|puwede|can i|can we|allowed|eligible|qualified)\b/.test(text)
   ) {
     return 'leave_types';
   }
@@ -1101,7 +1288,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(leave request|latest leave|last leave|leave status|status.*leave|ano status.*leave|na-approve.*leave|approved na ba.*leave)\b/.test(
+    /\b(latest leave|last leave|leave status|status.*leave|ano status.*leave|na-approve.*leave|approved na ba.*leave)\b/.test(
       text
     )
   ) {

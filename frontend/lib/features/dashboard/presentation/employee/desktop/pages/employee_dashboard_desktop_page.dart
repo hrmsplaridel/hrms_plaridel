@@ -7,6 +7,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/pages/employee_dtr_assistant_page.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_overlay.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
@@ -242,50 +243,50 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     showLeaveFormSuccessSnackBar(context, result);
   }
 
-  void _openDtrAssistant() {
+  void _openHrmsAssistant() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const EmployeeDtrAssistantPage()),
     );
   }
 
-  bool get _showDtrAssistantFab =>
-      _selectedNavIndex == 0 ||
-      _selectedNavIndex == 1 ||
-      _selectedNavIndex == 2 ||
-      _selectedNavIndex == 3;
+  bool get _showHrmsAssistantFab =>
+      _selectedNavIndex >= 0 && _selectedNavIndex < _navItems.length;
 
   Widget _buildEmployeeLeaveRequestForm() {
-    return LeaveRequestFormScreen(
-      onSaveDraft: (LeaveRequest request) async {
-        final provider = context.read<LeaveProvider>();
-        if (request.id != null && request.id!.isNotEmpty) {
-          final updated = await provider.updateRequest(request);
-          return updated != null;
-        }
-        final saved = await provider.saveDraft(request);
-        return saved != null;
-      },
-      onSubmitRequest: (LeaveRequest request) async {
-        final provider = context.read<LeaveProvider>();
-        if (request.id != null && request.id!.isNotEmpty) {
-          final updated = await provider.updateRequest(
-            request.copyWith(status: LeaveRequestStatus.pending),
-          );
-          return updated != null;
-        }
-        final saved = await provider.submitRequest(request);
-        return saved != null;
-      },
-      onSubmitRequestWithAttachment:
-          (LeaveRequest request, List<int> fileBytes, String fileName) async {
-            final provider = context.read<LeaveProvider>();
-            final saved = await provider.submitRequestWithAttachment(
-              request: request,
-              fileBytes: fileBytes,
-              fileName: fileName,
+    return EmployeeHrmsAssistantOverlay(
+      initialBottom: 36,
+      child: LeaveRequestFormScreen(
+        onSaveDraft: (LeaveRequest request) async {
+          final provider = context.read<LeaveProvider>();
+          if (request.id != null && request.id!.isNotEmpty) {
+            final updated = await provider.updateRequest(request);
+            return updated != null;
+          }
+          final saved = await provider.saveDraft(request);
+          return saved != null;
+        },
+        onSubmitRequest: (LeaveRequest request) async {
+          final provider = context.read<LeaveProvider>();
+          if (request.id != null && request.id!.isNotEmpty) {
+            final updated = await provider.updateRequest(
+              request.copyWith(status: LeaveRequestStatus.pending),
             );
-            return saved != null;
-          },
+            return updated != null;
+          }
+          final saved = await provider.submitRequest(request);
+          return saved != null;
+        },
+        onSubmitRequestWithAttachment:
+            (LeaveRequest request, List<int> fileBytes, String fileName) async {
+              final provider = context.read<LeaveProvider>();
+              final saved = await provider.submitRequestWithAttachment(
+                request: request,
+                fileBytes: fileBytes,
+                fileName: fileName,
+              );
+              return saved != null;
+            },
+      ),
     );
   }
 
@@ -369,7 +370,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         onNotificationTap: _applyNotificationTapResult,
         onFileLeave: _openEmployeeLeaveRequestForm,
         onFileLocator: _openEmployeeLocatorRequestForm,
-        onDtrAssistant: _openDtrAssistant,
+        onHrmsAssistant: _openHrmsAssistant,
       );
     }
 
@@ -450,9 +451,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
               ],
             ),
           ),
-          if (_showDtrAssistantFab)
+          if (_showHrmsAssistantFab)
             DraggableDtrAssistantLauncher(
-              onPressed: _openDtrAssistant,
+              onPressed: _openHrmsAssistant,
               initialRight: 24,
               initialBottom: 24,
             ),
@@ -1129,9 +1130,7 @@ class _BiometricAttendanceCard extends StatelessWidget {
             ? 'Holiday'
             : isComplete
             ? 'Attendance Complete'
-            : record == null
-            ? 'Biometric Attendance'
-            : 'Biometric Attendance';
+            : 'Today\'s Attendance';
         final primaryValue = isHoliday
             ? 'No log required'
             : latestPunch == null
@@ -1140,10 +1139,10 @@ class _BiometricAttendanceCard extends StatelessWidget {
         final statusText = isHoliday
             ? 'No attendance log required for today.'
             : record == null
-            ? 'Waiting for biometric device log.'
+            ? 'Your biometric punches will appear here.'
             : isComplete
-            ? 'All expected punches are recorded.'
-            : 'Biometric log received; remaining punches will appear after device sync.';
+            ? 'Your attendance for today is complete.'
+            : 'Your latest punch has been recorded. Your next punch will appear here automatically.';
 
         final narrow = MediaQuery.sizeOf(context).width < 600;
         final compactLayout = compact || narrow;
@@ -1273,8 +1272,10 @@ class _BiometricAttendanceCard extends StatelessWidget {
                     Expanded(
                       child: Text(
                         isComplete
-                            ? 'Synced from biometric device'
-                            : 'Biometric device records punches',
+                            ? 'Today\'s attendance is complete'
+                            : latestPunch == null
+                            ? 'Use the biometric device to record attendance'
+                            : 'Recorded through the biometric device',
                         style: TextStyle(
                           color: AppTheme.dashTextPrimaryOf(context),
                           fontSize: compactLayout ? 11 : 12,

@@ -287,6 +287,303 @@ const FORM_FIELD_GUIDANCE = {
   ],
 };
 
+const LEAVE_FORM_FIELDS = {
+  leave_type: {
+    title: 'Leave Type',
+    aliases: [
+      'leave type',
+      'type of leave',
+      'select leave',
+      'which leave',
+      'unsa nga leave',
+      'unsang leave',
+      'anong leave',
+    ],
+    explanation:
+      'Choose the leave category that matches the real purpose of your absence.',
+    examples: ['Vacation Leave for planned personal travel', 'Sick Leave for illness or a medical appointment'],
+    note: 'Do not choose a different type only because it has more available credits.',
+  },
+  custom_leave_type: {
+    title: 'Specify Other Leave Type',
+    aliases: [
+      'custom leave type',
+      'other leave type',
+      'specify other',
+      'others field',
+      'other type',
+    ],
+    explanation:
+      'Enter the exact authorized leave name when the correct category is not in the standard list.',
+    examples: ['Other authorized leave - [name stated in the office memorandum]'],
+    note: 'Use the official name from the applicable memo or ask HR before submitting.',
+  },
+  dates: {
+    title: 'Start Date and End Date',
+    aliases: [
+      'start date',
+      'end date',
+      'date field',
+      'dates field',
+      'dates of leave',
+      'covered dates',
+      'leave dates',
+      'petsa',
+      'date sa leave',
+    ],
+    explanation:
+      'Select the first and last calendar dates covered by your leave request.',
+    examples: ['Start Date: July 6, 2026; End Date: July 7, 2026'],
+    note: 'Use your actual intended dates. The system calculates applicable working days from the selected range.',
+  },
+  working_days: {
+    title: 'Number of Working Days Applied For',
+    aliases: [
+      'working days',
+      'number of days',
+      'days applied',
+      'pila ka adlaw',
+      'ilang araw',
+      'day count',
+    ],
+    explanation:
+      'This is the number of scheduled working days covered by the selected dates.',
+    examples: ['A Monday-to-Tuesday request may show 2 working days if both are scheduled workdays'],
+    note: 'This field is computed by HRMS. Change the dates instead of manually guessing the value.',
+  },
+  reason: {
+    title: 'General Reason / Remarks',
+    aliases: [
+      'reason field',
+      'remarks field',
+      'general reason',
+      'reason or remarks',
+      'what reason',
+      'sample reason',
+      'example reason',
+      'unsa ibutang sa reason',
+      'unsay ibutang sa reason',
+      'ano ilalagay sa reason',
+      'rason',
+    ],
+    explanation:
+      'Write a short, truthful explanation that helps the reviewer understand why the leave is needed.',
+    examples: [],
+    note: 'Avoid unnecessary private medical details. Never copy an example if it is not true for your request.',
+  },
+  location_option: {
+    title: 'Location Option',
+    aliases: [
+      'location option',
+      'within philippines',
+      'abroad option',
+      'country option',
+      'local or abroad',
+    ],
+    explanation:
+      'Choose whether the leave destination is within the Philippines or abroad.',
+    examples: ['Within Philippines for Cebu City', 'Abroad for Tokyo, Japan'],
+    note: 'Choose the option that matches your actual destination.',
+  },
+  location_details: {
+    title: 'Specify Location',
+    aliases: [
+      'location field',
+      'location details',
+      'specify location',
+      'location sa leave form',
+      'location ng leave form',
+      'sample location',
+      'example location',
+      'destination field',
+      'place field',
+      'asa nga lugar',
+      'unsay ibutang sa location',
+      'ano ilalagay sa location',
+    ],
+    explanation:
+      'Enter a clear city, municipality, province, or country for the planned leave.',
+    examples: ['Cebu City, Cebu', 'Tokyo, Japan'],
+    note: 'Use the actual destination; a complete home address is usually unnecessary unless HR specifically requires it.',
+  },
+  sick_nature: {
+    title: 'Nature of Illness',
+    aliases: [
+      'nature of illness',
+      'in hospital',
+      'out patient',
+      'outpatient',
+      'sick nature',
+      'illness option',
+    ],
+    explanation:
+      'Choose In Hospital only for hospital confinement; otherwise choose Out Patient for consultation, treatment, or home recovery.',
+    examples: ['Out Patient for a clinic consultation', 'In Hospital for admitted confinement'],
+    note: 'Choose the option that matches what actually happened.',
+  },
+  illness_details: {
+    title: 'Specify Illness Details',
+    aliases: [
+      'illness details',
+      'illness field',
+      'sickness details',
+      'medical details',
+      'diagnosis field',
+      'unsa ibutang sa illness',
+      'ano ilalagay sa illness',
+    ],
+    explanation:
+      'Briefly state the illness, treatment, consultation, or recovery reason relevant to the absence.',
+    examples: ['Fever and medical consultation', 'Recovery after an outpatient procedure'],
+    note: 'Keep it accurate and concise. Attach a medical certificate when the configured rule requires one.',
+  },
+  expected_delivery_date: {
+    title: 'Expected Delivery Date',
+    aliases: ['expected delivery date', 'due date', 'maternity date', 'expected delivery'],
+    explanation:
+      'Enter the expected delivery date stated by your physician or medical record.',
+    examples: ['Expected Delivery Date: August 20, 2026'],
+    note: 'Use the date from your medical document, not an estimated date you made yourself.',
+  },
+  maternity_classification: {
+    title: 'Maternity Leave Classification',
+    aliases: [
+      'maternity classification',
+      'delivery classification',
+      'normal delivery',
+      'caesarean',
+      'cesarean',
+      'c section',
+    ],
+    explanation:
+      'Select Normal Delivery or Caesarean Section based on the applicable medical record.',
+    examples: ['Normal Delivery', 'Caesarean Section'],
+    note: 'Choose the classification supported by your medical document.',
+  },
+  child_delivery_date: {
+    title: 'Child Delivery / Miscarriage Date',
+    aliases: [
+      'child delivery date',
+      'delivery miscarriage date',
+      'miscarriage date',
+      'paternity date',
+      'spouse delivery date',
+    ],
+    explanation:
+      'Enter the actual delivery or miscarriage date shown in the supporting record.',
+    examples: ['Child Delivery Date: July 2, 2026'],
+    note: 'Paternity leave timing is checked from this date.',
+  },
+  accident_date: {
+    title: 'Accident Date',
+    aliases: ['accident date', 'incident date', 'rehabilitation date', 'injury date'],
+    explanation:
+      'Enter the date of the work-related accident or injury covered by the rehabilitation request.',
+    examples: ['Accident Date: June 24, 2026'],
+    note: 'The incident should match the accident report and medical document.',
+  },
+  calamity_date: {
+    title: 'Calamity / Disaster Occurrence Date',
+    aliases: [
+      'calamity date',
+      'disaster date',
+      'occurrence date',
+      'emergency date',
+    ],
+    explanation:
+      'Enter the date the calamity or disaster occurred and affected your residence or immediate family.',
+    examples: ['Calamity Occurrence Date: June 23, 2026'],
+    note: 'Use the date supported by the barangay or disaster-risk document when required.',
+  },
+  women_illness_details: {
+    title: 'Special Leave Benefits for Women - Illness Details',
+    aliases: [
+      'women illness details',
+      'gynecological details',
+      'women leave illness',
+      'special women details',
+    ],
+    explanation:
+      'Briefly identify the gynecological condition or procedure relevant to the request.',
+    examples: ['Recovery after a medically advised gynecological procedure'],
+    note: 'Use wording consistent with the medical certificate and avoid unnecessary sensitive detail.',
+  },
+  study_purpose: {
+    title: 'Purpose of Study Leave',
+    aliases: [
+      'study purpose',
+      'purpose of study leave',
+      'masters degree',
+      'board examination',
+      'bar examination',
+      'study option',
+    ],
+    explanation:
+      'Choose the option that matches the approved study activity.',
+    examples: ["Completion of Master's Degree", 'BAR / Board Examination Review'],
+    note: 'Your supporting school or review documents should match the selected purpose.',
+  },
+  study_details: {
+    title: 'Specify Study Leave Details',
+    aliases: [
+      'study details',
+      'study leave details',
+      'school details',
+      'review details',
+      'course details',
+    ],
+    explanation:
+      'Enter the school, degree, examination, or review program connected to the request.',
+    examples: ['Master of Public Administration thesis completion at [school name]', 'Civil Service examination review at [review center]'],
+    note: 'Replace bracketed text with your truthful details.',
+  },
+  attachment: {
+    title: 'Supporting Attachment',
+    aliases: [
+      'attachment',
+      'attachment field',
+      'attachment to upload',
+      'file to attach',
+      'file i attach',
+      'i attach',
+      'upload field',
+      'upload',
+      'supporting attachment',
+      'supporting document field',
+      'what file',
+      'unsa nga file',
+      'anong file',
+    ],
+    explanation:
+      'Upload the document required by the selected leave type and requested duration.',
+    examples: ['Medical certificate for qualifying sick leave', 'Birth or delivery record for maternity leave'],
+    note: 'Use a readable PDF, JPG, or PNG and make sure the document belongs to your actual request.',
+  },
+  commutation: {
+    title: 'Requested Commutation of Leave',
+    aliases: [
+      'commutation',
+      'commutation leave',
+      'commutation field',
+      'requested commutation',
+      'commutation checkbox',
+      'commute leave',
+      'cash leave',
+      'monetization field',
+    ],
+    explanation:
+      'Checking this box marks the leave request as also asking HR/Admin to consider commutation under office policy.',
+    examples: [
+      'Leave it unchecked for an ordinary leave absence request',
+      'Check it only when HR has instructed you to request commutation',
+    ],
+    note: 'It does not automatically approve the leave, convert credits to cash, or guarantee payment. HR/Admin still reviews the request and applicable policy.',
+  },
+};
+
+const GENERIC_FIELD_HELP_PATTERN =
+  /\b(what (?:do|should|can) i (?:put|enter|write|select|type)|what to (?:put|enter|write|select|type)|example inputs?|sample inputs?|sample reason|example reason|give (?:me )?(?:an? )?example|help (?:me )?(?:with )?(?:this )?field|confused.*field|unsa(?:y| akong)? ibutang|ano(?:ng| ang)? ilalagay|paano fill|paunsa fill)\b/i;
+
 function normalize(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
@@ -345,6 +642,78 @@ function getFormGuidanceForType(typeRecordOrValue) {
   };
 }
 
+function getLeaveFormFieldKey(message) {
+  const text = String(message || '').toLowerCase();
+  let best = null;
+  let bestLength = 0;
+  for (const [key, field] of Object.entries(LEAVE_FORM_FIELDS)) {
+    for (const alias of field.aliases) {
+      if (!text.includes(alias) || alias.length <= bestLength) continue;
+      best = key;
+      bestLength = alias.length;
+    }
+  }
+  return best;
+}
+
+function isLeaveFormFieldHelpQuestion(message) {
+  const text = String(message || '');
+  if (GENERIC_FIELD_HELP_PATTERN.test(text)) return true;
+  const fieldKey = getLeaveFormFieldKey(text);
+  if (!fieldKey) return false;
+  if (
+    fieldKey === 'commutation' &&
+    /\b(what is|what's|what does|meaning|mean|happen|check|checked|checking|checkbox|tick|ticked|request|requested|enable|enabled|turn on|cash|paid|payment|pay|bayad|mabayran)\b/i.test(
+      text
+    )
+  ) {
+    return true;
+  }
+  return /\b(field|form|input|example|sample|put|enter|write|select|choose|fill|upload|attach|meaning|mean|confused|help|ibutang|ilalagay|sagutan)\b/i.test(
+    text
+  );
+}
+
+function reasonExamplesForType(typeRecordOrValue) {
+  const key = guidelineKeyForType(typeRecordOrValue);
+  const examples = {
+    vacationLeave: [
+      'Personal travel and rest in Cebu City',
+      'Family vacation within the Philippines',
+    ],
+    mandatoryForcedLeave: ['Scheduled mandatory leave under the approved office leave calendar'],
+    sickLeave: [
+      'Medical consultation and recovery due to illness',
+      'Rest and recovery as advised after an outpatient consultation',
+    ],
+    maternityLeave: ['Maternity leave for childbirth and post-delivery recovery'],
+    paternityLeave: ['Paternity leave following the delivery of my spouse'],
+    specialPrivilegeLeave: ['Attendance at an immediate family wedding', 'Personal milestone leave'],
+    soloParentLeave: ['Attendance to an important parental obligation'],
+    studyLeave: ['Preparation and review for the scheduled board examination'],
+    tenDayVawcLeave: ['Leave request under RA 9262 with the required supporting document'],
+    rehabilitationPrivilege: ['Rehabilitation and recovery from a work-related injury'],
+    specialLeaveBenefitsForWomen: ['Recovery after a medically advised gynecological procedure'],
+    specialEmergencyCalamityLeave: ['Immediate family and residence needs following the declared calamity'],
+    adoptionLeave: ['Adoption leave following finalization of the adoption decree'],
+    others: ['Authorized leave under [office memorandum or applicable policy]'],
+  };
+  return examples[key] || examples.others;
+}
+
+function getLeaveFormFieldGuidance(message, typeRecordOrValue) {
+  const key = getLeaveFormFieldKey(message);
+  if (!key) return null;
+  const field = LEAVE_FORM_FIELDS[key];
+  return {
+    key,
+    title: field.title,
+    explanation: field.explanation,
+    examples: key === 'reason' ? reasonExamplesForType(typeRecordOrValue) : [...field.examples],
+    note: field.note,
+  };
+}
+
 function buildGuidelinesForTypes(typeRecords = []) {
   return typeRecords
     .map((type) => {
@@ -379,8 +748,12 @@ module.exports = {
   buildAllLeaveGuidelines,
   buildGuidelinesForTypes,
   getFormGuidanceForType,
+  getLeaveFormFieldGuidance,
+  getLeaveFormFieldKey,
   getLeaveGuidanceForType,
   getGuidelineSectionsForMessage,
+  isLeaveFormFieldHelpQuestion,
   GUIDELINE_SECTIONS,
+  LEAVE_FORM_FIELDS,
   summarizeLeaveGuidance,
 };

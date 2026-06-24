@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_overlay.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
@@ -39,40 +40,43 @@ class EmployeeLeaveActions {
     required LeaveProvider provider,
     required LeaveRequest request,
   }) {
-    return LeaveRequestFormScreen(
-      initialRequest: request,
-      onSaveDraft: (updated) async {
-        final saved = updated.id == null || updated.id!.isEmpty
-            ? await provider.saveDraft(updated)
-            : await provider.updateRequest(
-                updated.copyWith(
-                  status: request.status == LeaveRequestStatus.returned
-                      ? LeaveRequestStatus.returned
-                      : LeaveRequestStatus.draft,
-                ),
-              );
-        return saved != null;
-      },
-      onSubmitRequest: (updated) async {
-        final saved = updated.id == null || updated.id!.isEmpty
-            ? await provider.submitRequest(updated)
-            : await provider.updateRequest(
-                updated.copyWith(status: LeaveRequestStatus.pending),
-              );
-        return saved != null;
-      },
-      onSubmitRequestWithAttachment: (updated, fileBytes, fileName) async {
-        final saved = updated.id == null || updated.id!.isEmpty
-            ? await provider.submitRequestWithAttachment(
-                request: updated,
-                fileBytes: fileBytes,
-                fileName: fileName,
-              )
-            : await provider.updateRequest(
-                updated.copyWith(status: LeaveRequestStatus.pending),
-              );
-        return saved != null;
-      },
+    return EmployeeHrmsAssistantOverlay(
+      initialBottom: 36,
+      child: LeaveRequestFormScreen(
+        initialRequest: request,
+        onSaveDraft: (updated) async {
+          final saved = updated.id == null || updated.id!.isEmpty
+              ? await provider.saveDraft(updated)
+              : await provider.updateRequest(
+                  updated.copyWith(
+                    status: request.status == LeaveRequestStatus.returned
+                        ? LeaveRequestStatus.returned
+                        : LeaveRequestStatus.draft,
+                  ),
+                );
+          return saved != null;
+        },
+        onSubmitRequest: (updated) async {
+          final saved = updated.id == null || updated.id!.isEmpty
+              ? await provider.submitRequest(updated)
+              : await provider.updateRequest(
+                  updated.copyWith(status: LeaveRequestStatus.pending),
+                );
+          return saved != null;
+        },
+        onSubmitRequestWithAttachment: (updated, fileBytes, fileName) async {
+          final saved = updated.id == null || updated.id!.isEmpty
+              ? await provider.submitRequestWithAttachment(
+                  request: updated,
+                  fileBytes: fileBytes,
+                  fileName: fileName,
+                )
+              : await provider.updateRequest(
+                  updated.copyWith(status: LeaveRequestStatus.pending),
+                );
+          return saved != null;
+        },
+      ),
     );
   }
 

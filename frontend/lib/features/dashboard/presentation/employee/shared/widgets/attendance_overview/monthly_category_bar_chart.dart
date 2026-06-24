@@ -40,7 +40,7 @@ class MonthlyCategoryBarChart extends StatelessWidget {
       builder: (context, c) {
         final narrow = c.maxWidth < 400;
         const padTop = 4.0;
-        const labelGap = 6.0;
+        const labelGap = 4.0;
 
         return Row(
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -85,7 +85,7 @@ class MonthlyCategoryBarChart extends StatelessWidget {
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 240),
                           curve: Curves.easeOutCubic,
-                          width: narrow ? double.infinity : 32,
+                          width: narrow ? double.infinity : 26,
                           height: barH,
                           decoration: BoxDecoration(
                             color: fill,

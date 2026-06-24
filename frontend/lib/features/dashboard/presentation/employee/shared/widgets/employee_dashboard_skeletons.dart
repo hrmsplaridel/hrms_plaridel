@@ -64,14 +64,16 @@ class AttendanceOverviewLoadingBody extends StatelessWidget {
                   ? 3
                   : 2;
               const spacing = 8.0;
-              const ratio = 1.38;
+              final tileHeight = cw >= 440 ? 72.0 : 68.0;
+              final tileWidth =
+                  (cw - (spacing * (crossAxisCount - 1))) / crossAxisCount;
               return GridView.count(
                 crossAxisCount: crossAxisCount,
                 mainAxisSpacing: spacing,
                 crossAxisSpacing: spacing,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                childAspectRatio: ratio,
+                childAspectRatio: tileWidth / tileHeight,
                 children: List.generate(5, (_) => const _KpiTileSkeleton()),
               );
             },
@@ -96,14 +98,19 @@ class _KpiTileSkeleton extends StatelessWidget {
         border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 9),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const _DashBone(width: 18, height: 18, borderRadius: 5),
-            const SizedBox(height: 8),
-            const _DashBone(width: 36, height: 22, borderRadius: 6),
-            const SizedBox(height: 6),
+            const Row(
+              children: [
+                _DashBone(width: 16, height: 16, borderRadius: 4),
+                Spacer(),
+                _DashBone(width: 30, height: 20, borderRadius: 5),
+              ],
+            ),
+            const SizedBox(height: 5),
             const _DashBone(width: 72, height: 11, borderRadius: 4),
           ],
         ),
@@ -137,9 +144,21 @@ class _DistributionPanelSkeleton extends StatelessWidget {
               const _DashBone(width: 72, height: 11, borderRadius: 4),
             ],
           ),
-          SizedBox(height: narrow ? 8 : 10),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 12,
+            runSpacing: 4,
+            children: const [
+              _DashBone(width: 64, height: 16, borderRadius: 3),
+              _DashBone(width: 48, height: 16, borderRadius: 3),
+              _DashBone(width: 58, height: 16, borderRadius: 3),
+              _DashBone(width: 76, height: 16, borderRadius: 3),
+              _DashBone(width: 68, height: 16, borderRadius: 3),
+            ],
+          ),
+          SizedBox(height: narrow ? 6 : 8),
           SizedBox(
-            height: narrow ? 82 : 92,
+            height: narrow ? 48 : 54,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -149,7 +168,7 @@ class _DistributionPanelSkeleton extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: _DashBone(
                         width: double.infinity,
-                        height: (narrow ? 82 : 92) * h,
+                        height: (narrow ? 48 : 54) * h,
                         borderRadius: 6,
                       ),
                     ),

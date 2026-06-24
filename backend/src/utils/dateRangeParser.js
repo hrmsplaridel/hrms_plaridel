@@ -105,6 +105,23 @@ const WEEKDAYS = {
   domingo: 6,
 };
 
+const NUMBER_WORDS = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+};
+
+function parsedCount(value) {
+  return NUMBER_WORDS[value] || Number(value);
+}
+
 function pad2(value) {
   return String(value).padStart(2, '0');
 }
@@ -415,9 +432,10 @@ function parseAssistantDateRange(message, options = {}) {
     return { label: 'yesterday', startDate: date, endDate: date };
   }
 
-  const daysAgo = text.match(/\b(\d{1,2})\s+days?\s+ago\b/);
+  const countToken = '(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)';
+  const daysAgo = text.match(new RegExp(`\\b${countToken}\\s+days?\\s+ago\\b`));
   if (daysAgo) {
-    const count = Number(daysAgo[1]);
+    const count = parsedCount(daysAgo[1]);
     const date = addDays(today, -count);
     return {
       label: `${count} ${count === 1 ? 'day' : 'days'} ago`,
@@ -426,9 +444,9 @@ function parseAssistantDateRange(message, options = {}) {
     };
   }
 
-  const weeksAgo = text.match(/\b(\d{1,2})\s+weeks?\s+ago\b/);
+  const weeksAgo = text.match(new RegExp(`\\b${countToken}\\s+weeks?\\s+ago\\b`));
   if (weeksAgo) {
-    const count = Number(weeksAgo[1]);
+    const count = parsedCount(weeksAgo[1]);
     const startDate = startOfWeekMonday(addDays(today, -count * 7));
     return {
       label: `${count} ${count === 1 ? 'week' : 'weeks'} ago`,
@@ -437,9 +455,9 @@ function parseAssistantDateRange(message, options = {}) {
     };
   }
 
-  const monthsAgo = text.match(/\b(\d{1,2})\s+months?\s+ago\b/);
+  const monthsAgo = text.match(new RegExp(`\\b${countToken}\\s+months?\\s+ago\\b`));
   if (monthsAgo) {
-    const count = Number(monthsAgo[1]);
+    const count = parsedCount(monthsAgo[1]);
     const month = addMonths(today, -count);
     const startDate = startOfMonth(month);
     return {

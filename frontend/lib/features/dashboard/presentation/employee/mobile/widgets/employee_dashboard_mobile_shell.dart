@@ -25,7 +25,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
     required this.onNotificationTap,
     required this.onFileLeave,
     required this.onFileLocator,
-    required this.onDtrAssistant,
+    required this.onHrmsAssistant,
   });
 
   final double width;
@@ -45,15 +45,13 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
   final void Function(NotificationTapResult? result) onNotificationTap;
   final VoidCallback onFileLeave;
   final VoidCallback onFileLocator;
-  final VoidCallback onDtrAssistant;
+  final VoidCallback onHrmsAssistant;
 
   bool get _useMobileLeaveFab => width < 600 && selectedIndex == 2;
   bool get _useMobileLocatorFab => selectedIndex == 3;
   bool get _showAssistantFab =>
-      selectedIndex == 0 ||
-      selectedIndex == 1 ||
-      selectedIndex == 2 ||
-      selectedIndex == 3;
+      selectedIndex >= 0 &&
+      selectedIndex < employeeDashboardMobileNavItems.length;
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +121,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
             Positioned(right: 16, bottom: 16, child: actionButton),
           if (_showAssistantFab)
             DraggableDtrAssistantLauncher(
-              onPressed: onDtrAssistant,
+              onPressed: onHrmsAssistant,
               initialBottom: _useMobileLeaveFab || _useMobileLocatorFab
                   ? 108
                   : 16,

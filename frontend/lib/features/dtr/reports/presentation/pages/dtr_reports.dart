@@ -2047,11 +2047,12 @@ class _DtrReportsState extends State<DtrReports> {
     required DateTime end,
   }) {
     final dark = AppTheme.dashIsDark(context);
+    final compactPanel = !fullWidth;
     return Container(
       width: fullWidth ? null : 200,
       constraints: fullWidth
           ? const BoxConstraints(maxHeight: 600)
-          : const BoxConstraints(maxWidth: 200, maxHeight: 600),
+          : const BoxConstraints(maxWidth: 200),
       decoration: BoxDecoration(
         color: dark
             ? AppTheme.dashMutedSurfaceOf(context)
@@ -2060,42 +2061,44 @@ class _DtrReportsState extends State<DtrReports> {
         border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(compactPanel ? 12 : 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             CircleAvatar(
-              radius: 32,
+              radius: compactPanel ? 24 : 32,
               backgroundColor: AppTheme.primaryNavy.withValues(
                 alpha: dark ? 0.35 : 0.2,
               ),
               child: Icon(
                 Icons.person_rounded,
-                size: 32,
+                size: compactPanel ? 26 : 32,
                 color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
               ),
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: compactPanel ? 8 : 12),
             Text(
               selectedName,
               style: TextStyle(
-                fontSize: 16,
+                fontSize: compactPanel ? 14 : 16,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.dashTextPrimaryOf(context),
               ),
               textAlign: TextAlign.center,
+              maxLines: compactPanel ? 2 : null,
+              overflow: compactPanel ? TextOverflow.ellipsis : null,
             ),
-            const SizedBox(height: 4),
+            SizedBox(height: compactPanel ? 2 : 4),
             Text(
               '${_months[_selectedMonth - 1]}, $_selectedYear',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: compactPanel ? 11 : 12,
                 color: AppTheme.dashTextSecondaryOf(context),
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: compactPanel ? 8 : 12),
             LayoutBuilder(
               builder: (context, constraints) {
                 return Column(
@@ -2125,9 +2128,9 @@ class _DtrReportsState extends State<DtrReports> {
                           style: ButtonStyle(
                             visualDensity: VisualDensity.compact,
                             padding: WidgetStateProperty.all(
-                              const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
+                              EdgeInsets.symmetric(
+                                horizontal: compactPanel ? 8 : 12,
+                                vertical: compactPanel ? 4 : 6,
                               ),
                             ),
                           ),
@@ -2138,109 +2141,82 @@ class _DtrReportsState extends State<DtrReports> {
                 );
               },
             ),
-            const SizedBox(height: 16),
-            isResponsive
-                ? Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      SizedBox(
-                        width: 140,
-                        child: _SummaryStat(
-                          label: 'Working Days',
-                          value: '$workingDays',
-                        ),
-                      ),
-                      SizedBox(
-                        width: 140,
-                        child: _SummaryStat(
-                          label: 'Late',
-                          value: _formatMinutesOrHours(totalLateMinutes),
-                          hasBorder: true,
-                          borderColor: totalLateMinutes > 0
-                              ? Colors.red
-                              : const Color(0xFF4CAF50),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 140,
-                        child: _SummaryStat(
-                          label: 'Undertime',
-                          value: _formatMinutesOrHours(totalUndertimeMinutes),
-                          hasBorder: totalUndertimeMinutes > 0,
-                          borderColor: Colors.orange,
-                        ),
-                      ),
-                      SizedBox(
-                        width: 140,
-                        child: _SummaryStat(
-                          label: 'Absent',
-                          value: '$absentCount',
-                          hasBorder: absentCount > 0,
-                          borderColor: Colors.orange,
-                        ),
-                      ),
-                      SizedBox(
-                        width: 140,
-                        child: _SummaryStat(
-                          label: 'Tardy',
-                          value: '$tardyCount',
-                          hasBorder: tardyCount > 0,
-                          borderColor: Colors.orange,
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _SummaryStat(
-                        label: 'Working Days',
-                        value: '$workingDays',
-                      ),
-                      const SizedBox(height: 12),
-                      _SummaryStat(
-                        label: 'Late',
-                        value: _formatMinutesOrHours(totalLateMinutes),
-                        hasBorder: true,
-                        borderColor: totalLateMinutes > 0
-                            ? Colors.red
-                            : const Color(0xFF4CAF50),
-                      ),
-                      const SizedBox(height: 12),
-                      _SummaryStat(
-                        label: 'Undertime',
-                        value: _formatMinutesOrHours(totalUndertimeMinutes),
-                        hasBorder: totalUndertimeMinutes > 0,
-                        borderColor: Colors.orange,
-                      ),
-                      const SizedBox(height: 12),
-                      _SummaryStat(
-                        label: 'Absent',
-                        value: '$absentCount',
-                        hasBorder: absentCount > 0,
-                        borderColor: Colors.orange,
-                      ),
-                      const SizedBox(height: 12),
-                      _SummaryStat(
-                        label: 'Tardy',
-                        value: '$tardyCount',
-                        hasBorder: tardyCount > 0,
-                        borderColor: Colors.orange,
-                      ),
-                    ],
+            SizedBox(height: compactPanel ? 10 : 16),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final stats = [
+                  _SummaryStat(
+                    label: 'Working Days',
+                    value: '$workingDays',
+                    compact: compactPanel,
                   ),
-            const SizedBox(height: 16),
+                  _SummaryStat(
+                    label: 'Late',
+                    value: _formatMinutesOrHours(totalLateMinutes),
+                    hasBorder: true,
+                    borderColor: totalLateMinutes > 0
+                        ? Colors.red
+                        : const Color(0xFF4CAF50),
+                    compact: compactPanel,
+                  ),
+                  _SummaryStat(
+                    label: 'Undertime',
+                    value: _formatMinutesOrHours(totalUndertimeMinutes),
+                    hasBorder: totalUndertimeMinutes > 0,
+                    borderColor: Colors.orange,
+                    compact: compactPanel,
+                  ),
+                  _SummaryStat(
+                    label: 'Absent',
+                    value: '$absentCount',
+                    hasBorder: absentCount > 0,
+                    borderColor: Colors.orange,
+                    compact: compactPanel,
+                  ),
+                  _SummaryStat(
+                    label: 'Tardy',
+                    value: '$tardyCount',
+                    hasBorder: tardyCount > 0,
+                    borderColor: Colors.orange,
+                    compact: compactPanel,
+                  ),
+                ];
+                if (compactPanel || isResponsive) {
+                  final gap = compactPanel ? 8.0 : 12.0;
+                  final width = compactPanel
+                      ? ((constraints.maxWidth - gap) / 2).clamp(72.0, 140.0)
+                      : 140.0;
+                  return Wrap(
+                    spacing: gap,
+                    runSpacing: gap,
+                    children: [
+                      for (final stat in stats)
+                        SizedBox(width: width, child: stat),
+                    ],
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < stats.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 12),
+                      stats[i],
+                    ],
+                  ],
+                );
+              },
+            ),
+            SizedBox(height: compactPanel ? 10 : 16),
             Text(
               '$tardinessPct% TARDINESS',
               style: TextStyle(
-                fontSize: 14,
+                fontSize: compactPanel ? 13 : 14,
                 fontWeight: FontWeight.w800,
                 color: AppTheme.dashTextPrimaryOf(context),
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: compactPanel ? 12 : 20),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -2256,10 +2232,14 @@ class _DtrReportsState extends State<DtrReports> {
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.primaryNavy,
                   foregroundColor: AppTheme.white,
+                  padding: EdgeInsets.symmetric(
+                    vertical: compactPanel ? 10 : 12,
+                    horizontal: compactPanel ? 10 : 16,
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: compactPanel ? 8 : 12),
             Text(
               'Generate DTR',
               style: TextStyle(
@@ -2268,7 +2248,7 @@ class _DtrReportsState extends State<DtrReports> {
                 color: AppTheme.dashTextSecondaryOf(context),
               ),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: compactPanel ? 6 : 8),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(
@@ -2610,17 +2590,23 @@ class _SummaryStat extends StatelessWidget {
     required this.value,
     this.hasBorder = false,
     this.borderColor = Colors.grey,
+    this.compact = false,
   });
 
   final String label;
   final String value;
   final bool hasBorder;
   final Color borderColor;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      constraints: BoxConstraints(minHeight: compact ? 50 : 0),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 12,
+        vertical: compact ? 7 : 8,
+      ),
       decoration: BoxDecoration(
         color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(8),
@@ -2632,18 +2618,22 @@ class _SummaryStat extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: compact ? 10 : 11,
               color: AppTheme.dashTextSecondaryOf(context),
             ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 2),
           Text(
             value,
             style: TextStyle(
-              fontSize: 18,
+              fontSize: compact ? 15 : 18,
               fontWeight: FontWeight.w800,
               color: AppTheme.dashTextPrimaryOf(context),
             ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),

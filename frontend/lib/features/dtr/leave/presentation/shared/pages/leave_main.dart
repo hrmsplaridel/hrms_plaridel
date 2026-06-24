@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_overlay.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/admin_leave_screen.dart';
@@ -254,7 +255,7 @@ class _LeaveMainState extends State<LeaveMain> {
   }
 
   Widget _buildLeaveRequestForm() {
-    return LeaveRequestFormScreen(
+    final form = LeaveRequestFormScreen(
       onSaveDraft: (LeaveRequest request) async {
         // FIX #4: If the request already has an ID it was previously saved.
         // Route to updateRequest (PUT) to avoid creating a duplicate draft.
@@ -288,6 +289,8 @@ class _LeaveMainState extends State<LeaveMain> {
             return saved != null;
           },
     );
+    if (widget.isAdmin) return form;
+    return EmployeeHrmsAssistantOverlay(initialBottom: 36, child: form);
   }
 }
 
