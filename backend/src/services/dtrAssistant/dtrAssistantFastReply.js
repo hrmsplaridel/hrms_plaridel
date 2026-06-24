@@ -7,6 +7,7 @@ const {
 const {
   GUIDELINE_SECTIONS,
   getFormGuidanceForType,
+  getLeaveFormFieldGuidance,
   getLeaveGuidanceForType,
   getGuidelineSectionsForMessage,
 } = require('./leaveFilingGuidelines');
@@ -2168,6 +2169,53 @@ function dtrExportGuidanceReply(context, message) {
 
 function dtrPolicyGuidanceReply(context, message) {
   const language = languageOf(message);
+  if (/\b(grace period|grace minutes|late cutoff)\b/i.test(message)) {
+    const scheduledDay = (context.calendar_days || []).find(
+      (day) => day?.shift_name || day?.shift_start
+    );
+    const graceMinutes = Number(scheduledDay?.grace_minutes || 0);
+    const details = [
+      language === 'bisaya'
+        ? 'Ang grace period idugang sa scheduled time-in. Late na ang punch kung molapas sa scheduled start plus grace period.'
+        : language === 'tagalog'
+          ? 'Idinadagdag ang grace period sa scheduled time-in. Late na ang punch kapag lumampas sa scheduled start plus grace period.'
+          : 'The grace period is added to the scheduled time-in. A punch becomes late only after the scheduled start plus the grace period.',
+      scheduledDay?.shift_name
+        ? `${language === 'bisaya' ? 'Assigned shift' : language === 'tagalog' ? 'Assigned shift' : 'Assigned shift'}: ${scheduledDay.shift_name}${
+            fmtScheduleRange(scheduledDay) ? ` (${fmtScheduleRange(scheduledDay)})` : ''
+          }`
+        : null,
+      scheduledDay
+        ? `${language === 'bisaya' ? 'Configured grace period' : language === 'tagalog' ? 'Configured grace period' : 'Configured grace period'}: ${fmtMinutes(graceMinutes)}`
+        : language === 'bisaya'
+          ? 'Wala na-load ang exact assigned schedule para sa selected date, mao nga dili ko mo-invent ug grace minutes.'
+          : language === 'tagalog'
+            ? 'Hindi naka-load ang exact assigned schedule para sa selected date, kaya hindi ako mag-iimbento ng grace minutes.'
+            : 'The exact assigned schedule is not loaded for the selected date, so I will not invent a grace-period value.',
+    ];
+    return structuredReply(language, {
+      title:
+        language === 'bisaya'
+          ? 'DTR grace period'
+          : language === 'tagalog'
+            ? 'DTR grace period'
+            : 'DTR grace period',
+      summary:
+        language === 'bisaya'
+          ? 'Base ang late computation sa imong assigned shift ug configured grace period.'
+          : language === 'tagalog'
+            ? 'Nakabase ang late computation sa assigned shift at configured grace period mo.'
+            : 'Late computation uses your assigned shift and its configured grace period.',
+      details,
+      nextStep:
+        language === 'bisaya'
+          ? 'Pangutan-a ko sa specific date kung gusto nimo makita ang exact shift ug late cutoff.'
+          : language === 'tagalog'
+            ? 'Magtanong ng specific date kung gusto mong makita ang exact shift at late cutoff.'
+            : 'Ask about a specific date to see the exact shift and late cutoff.',
+      limit: 4,
+    });
+  }
   const sections = getDtrPolicySectionsForMessage('', {
     fallbackKeys: [
       'daily_logs',
@@ -2695,6 +2743,51 @@ function leaveAttachmentRequirementReply(context, message) {
 
 function leaveFilingPolicyReply(context, message) {
   const language = languageOf(message);
+  if (
+    /\b(what happens?|what will happen|what happens next|after i submit|after submitting|after submission|human after submit|unsa.*mahitabo|mahitabo.*submit|ano.*mangyayari|mangyayari.*submit)\b/i.test(
+      message
+    )
+  ) {
+    return structuredReply(language, {
+      title:
+        language === 'bisaya'
+          ? 'Human nimo ma-submit ang leave'
+          : language === 'tagalog'
+            ? 'Pagkatapos mong i-submit ang leave'
+            : 'After you submit the leave request',
+      summary:
+        language === 'bisaya'
+          ? 'Ma-record ang request ug moagi sa normal approval workflow. Dili pa dayon na approved.'
+          : language === 'tagalog'
+            ? 'Mare-record ang request at dadaan sa normal approval workflow. Hindi pa ito awtomatikong approved.'
+            : 'The request is recorded and enters the normal approval workflow. Submission does not mean it is already approved.',
+      details:
+        language === 'bisaya'
+          ? [
+              'I-check sa assigned reviewer ang dates, balance, reason, ug attachment.',
+              'Makita nimo sa My Leave kung pending, approved, returned, o rejected ang request.',
+              'Kung returned, basaha ang remarks, i-correct ang form, ug i-submit pag-usab.',
+            ]
+          : language === 'tagalog'
+            ? [
+                'Iche-check ng assigned reviewer ang dates, balance, reason, at attachment.',
+                'Makikita mo sa My Leave kung pending, approved, returned, o rejected ang request.',
+                'Kung returned, basahin ang remarks, ayusin ang form, at i-submit ulit.',
+              ]
+            : [
+                'The assigned reviewer checks the dates, balance, reason, and attachment.',
+                'You can track whether it is pending, approved, returned, or rejected in My Leave.',
+                'If it is returned, read the remarks, correct the form, and submit it again.',
+              ],
+      nextStep:
+        language === 'bisaya'
+          ? 'Ablihi ang My Leave aron ma-track ang status ug reviewer remarks.'
+          : language === 'tagalog'
+            ? 'Buksan ang My Leave para ma-track ang status at reviewer remarks.'
+            : 'Open My Leave to track the status and reviewer remarks.',
+      limit: 4,
+    });
+  }
   const types = matchingLeaveTypes(context, message);
   if (types.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang filing policy para ana nga leave type.';
@@ -2754,6 +2847,254 @@ function leaveFormGuidanceReply(context, message) {
           : 'Use these details when filling out the leave form.',
     details: lines.map(trimTrailingSentencePunctuation),
     limit: 3,
+  });
+}
+
+function localizedLeaveFieldExplanation(field, language) {
+  if (language === 'english') return field.explanation;
+  const bisaya = {
+    leave_type:
+      'Pilia ang leave category nga tinuod nga mo-match sa hinungdan sa imong absence.',
+    custom_leave_type:
+      'Ibutang ang eksaktong official leave name kung wala kini sa standard list.',
+    dates:
+      'Pilia ang unang ug kataposang calendar date nga sakop sa imong leave request.',
+    working_days:
+      'Mao ni ang scheduled working days nga sakop sa imong gipiling dates.',
+    reason:
+      'Pagsulat ug mubo pero tin-aw ug tinuod nga explanation nganong kinahanglan nimo ang leave.',
+    location_option:
+      'Pilia kung ang imong destination naa sulod sa Pilipinas o abroad.',
+    location_details:
+      'Ibutang ang klarong city, municipality, province, o country sa imong leave destination.',
+    sick_nature:
+      'Pilia ang In Hospital kung na-confine ka; piliang Out Patient para sa consultation, treatment, o home recovery.',
+    illness_details:
+      'Isulat sa mubo ang illness, consultation, treatment, o recovery nga related sa imong absence.',
+    expected_delivery_date:
+      'Ibutang ang expected delivery date nga naa sa medical record o gi-hatag sa doctor.',
+    maternity_classification:
+      'Pilia ang Normal Delivery o Caesarean Section base sa medical record.',
+    child_delivery_date:
+      'Ibutang ang actual delivery o miscarriage date nga naa sa supporting record.',
+    accident_date:
+      'Ibutang ang petsa sa work-related accident o injury nga sakop sa rehabilitation request.',
+    calamity_date:
+      'Ibutang ang petsa sa calamity o disaster nga nakaapekto sa imong residence o immediate family.',
+    women_illness_details:
+      'Isulat sa mubo ang gynecological condition o procedure nga related sa request.',
+    study_purpose:
+      'Pilia ang option nga mo-match sa approved study activity.',
+    study_details:
+      'Ibutang ang school, degree, exam, o review program nga related sa request.',
+    attachment:
+      'I-upload ang document nga required sa gipiling leave type ug duration.',
+    commutation:
+      'Kung i-check nimo kini, ma-mark ang leave request nga nangayo usab ug HR/Admin review para sa commutation ubos sa office policy.',
+  };
+  const tagalog = {
+    leave_type:
+      'Piliin ang leave category na talagang tumutugma sa dahilan ng iyong pagliban.',
+    custom_leave_type:
+      'Ilagay ang eksaktong official leave name kung wala ito sa standard list.',
+    dates:
+      'Piliin ang una at huling calendar date na sakop ng leave request.',
+    working_days:
+      'Ito ang scheduled working days na sakop ng napiling dates.',
+    reason:
+      'Sumulat ng maikli, malinaw, at totoong paliwanag kung bakit kailangan ang leave.',
+    location_option:
+      'Piliin kung ang destination ay nasa loob ng Pilipinas o abroad.',
+    location_details:
+      'Ilagay ang malinaw na city, municipality, province, o country ng leave destination.',
+    sick_nature:
+      'Piliin ang In Hospital kung na-confine; piliin ang Out Patient para sa consultation, treatment, o home recovery.',
+    illness_details:
+      'Ilagay nang maikli ang illness, consultation, treatment, o recovery na kaugnay ng absence.',
+    expected_delivery_date:
+      'Ilagay ang expected delivery date mula sa medical record o physician.',
+    maternity_classification:
+      'Piliin ang Normal Delivery o Caesarean Section ayon sa medical record.',
+    child_delivery_date:
+      'Ilagay ang actual delivery o miscarriage date mula sa supporting record.',
+    accident_date:
+      'Ilagay ang petsa ng work-related accident o injury na sakop ng rehabilitation request.',
+    calamity_date:
+      'Ilagay ang petsa ng calamity o disaster na nakaapekto sa residence o immediate family.',
+    women_illness_details:
+      'Ilagay nang maikli ang gynecological condition o procedure na kaugnay ng request.',
+    study_purpose:
+      'Piliin ang option na tumutugma sa approved study activity.',
+    study_details:
+      'Ilagay ang school, degree, exam, o review program na kaugnay ng request.',
+    attachment:
+      'I-upload ang document na required sa napiling leave type at duration.',
+    commutation:
+      'Kapag chineck ito, mamarkahan ang leave request na humihiling din ng HR/Admin review para sa commutation ayon sa office policy.',
+  };
+  return (language === 'bisaya' ? bisaya : tagalog)[field.key] || field.explanation;
+}
+
+function localizedLeaveFieldNote(field, language) {
+  if (language === 'english') return field.note;
+  const bisaya = {
+    reason:
+      'Ayaw pagbutang ug dili kinahanglan nga private medical details. Ayaw kopyaha ang example kung dili kini tinuod.',
+    working_days:
+      'HRMS ang mo-compute ani. Usba ang dates imbis manghula o mag-manual input.',
+    commutation:
+      'Dili niini automatic ma-approve ang leave, ma-convert ang credits ngadto sa cash, o ma-guarantee ang payment. HR/Admin gihapon ang mo-review.',
+  };
+  const tagalog = {
+    reason:
+      'Huwag maglagay ng hindi kailangang private medical details. Huwag kopyahin ang example kung hindi ito totoo.',
+    working_days:
+      'HRMS ang nagko-compute nito. Baguhin ang dates sa halip na hulaan o i-manual input.',
+    commutation:
+      'Hindi nito awtomatikong ina-approve ang leave, kino-convert ang credits sa cash, o ginagarantiya ang payment. HR/Admin pa rin ang magre-review.',
+  };
+  const specific = (language === 'bisaya' ? bisaya : tagalog)[field.key];
+  if (specific) return specific;
+  return language === 'bisaya'
+    ? 'Gamita ang imong tinuod nga details ug siguroa nga mo-match sa supporting records.'
+    : 'Gamitin ang tunay mong details at tiyaking tugma sa supporting records.';
+}
+
+function localizedLeaveFieldExamples(field, language) {
+  if (language === 'english') return field.examples;
+  const translations = {
+    bisaya: {
+      'Medical consultation and recovery due to illness':
+        'Medical consultation ug recovery tungod sa illness',
+      'Rest and recovery as advised after an outpatient consultation':
+        'Rest ug recovery human sa outpatient consultation',
+      'Personal travel and rest in Cebu City':
+        'Personal travel ug rest sa Cebu City',
+      'Family vacation within the Philippines':
+        'Family vacation sulod sa Pilipinas',
+      'Fever and medical consultation':
+        'Hilanat ug medical consultation',
+      'Recovery after an outpatient procedure':
+        'Recovery human sa outpatient procedure',
+      'Leave it unchecked for an ordinary absence request':
+        'Pasagdi nga unchecked para sa ordinary leave absence request',
+      'Leave it unchecked for an ordinary leave absence request':
+        'Pasagdi nga unchecked para sa ordinary leave absence request',
+      'Check it only when HR has instructed you to request commutation':
+        'I-check lang kung gi-instruct ka sa HR nga mag-request ug commutation',
+      'A Monday-to-Tuesday request may show 2 working days if both are scheduled workdays':
+        'Ang Monday hangtod Tuesday mahimong 2 ka working days kung pareho silang scheduled workdays',
+    },
+    tagalog: {
+      'Medical consultation and recovery due to illness':
+        'Medical consultation at recovery dahil sa illness',
+      'Rest and recovery as advised after an outpatient consultation':
+        'Rest at recovery pagkatapos ng outpatient consultation',
+      'Personal travel and rest in Cebu City':
+        'Personal travel at pahinga sa Cebu City',
+      'Family vacation within the Philippines':
+        'Family vacation sa loob ng Pilipinas',
+      'Fever and medical consultation':
+        'Lagnat at medical consultation',
+      'Recovery after an outpatient procedure':
+        'Recovery pagkatapos ng outpatient procedure',
+      'Leave it unchecked for an ordinary absence request':
+        'Iwanang unchecked para sa ordinary leave absence request',
+      'Leave it unchecked for an ordinary leave absence request':
+        'Iwanang unchecked para sa ordinary leave absence request',
+      'Check it only when HR has instructed you to request commutation':
+        'I-check lamang kung inutusan ka ng HR na humiling ng commutation',
+      'A Monday-to-Tuesday request may show 2 working days if both are scheduled workdays':
+        'Ang Monday hanggang Tuesday ay maaaring 2 working days kung parehong scheduled workdays',
+    },
+  };
+  return field.examples.map(
+    (example) => translations[language]?.[example] || example
+  );
+}
+
+function leaveFormFieldHelpReply(context, message) {
+  const language = languageOf(message);
+  const type = requestedLeaveTypeRecord(message, context);
+  const field = getLeaveFormFieldGuidance(message, type);
+  if (!field) {
+    return structuredReply(language, {
+      title: 'Leave form field help',
+      summary:
+        language === 'bisaya'
+          ? 'Unsang field sa leave form ang nakalibog nimo? Isulti ang exact field label.'
+          : language === 'tagalog'
+            ? 'Aling field sa leave form ang nakakalito? Sabihin ang exact field label.'
+            : 'Which leave-form field is confusing? Tell me the exact field label.',
+      details: [
+        'Leave Type',
+        'Start Date / End Date',
+        'Reason / Remarks',
+        'Location or Illness Details',
+        'Attachment',
+        'Requested Commutation',
+      ],
+      nextStep:
+        language === 'bisaya'
+          ? 'Example: "unsa akong ibutang sa reason field sa sick leave?"'
+          : language === 'tagalog'
+            ? 'Example: "ano ang ilalagay sa reason field ng sick leave?"'
+            : 'Example: "What should I put in the sick leave reason field?"',
+      limit: 6,
+    });
+  }
+
+  const typeLabel = type
+    ? labelLeaveType(type.display_name || type.name)
+    : null;
+  const examples = localizedLeaveFieldExamples(field, language);
+  const exampleLabel =
+    language === 'bisaya'
+      ? 'Example input'
+      : language === 'tagalog'
+        ? 'Halimbawang input'
+        : 'Example input';
+  const details = [
+    `${language === 'bisaya' ? 'Unsaon pag-fill' : language === 'tagalog' ? 'Paano sagutan' : 'How to fill it'}: ${localizedLeaveFieldExplanation(
+      field,
+      language
+    )}`,
+    ...examples.map((example) => `${exampleLabel}: ${example}`),
+  ];
+
+  if (field.key === 'attachment' && type) {
+    details.push(
+      `${
+        language === 'bisaya'
+          ? 'Rule para sa leave type'
+          : language === 'tagalog'
+            ? 'Rule para sa leave type'
+            : 'Rule for this leave type'
+      }: ${localizedAttachmentRuleText(type, requestedDaysOrRangeDays(message, context), language)}`
+    );
+  }
+
+  const asksCommutationEffect =
+    field.key === 'commutation' &&
+    /\b(happen|check|checked|checking|tick|ticked|cash|paid|payment|pay|bayad|mabayran|mahitabo|mangyayari)\b/i.test(
+      message
+    );
+  return structuredReply(language, {
+    title: field.title,
+    summary: asksCommutationEffect
+      ? language === 'bisaya'
+        ? 'Dili. Ang pag-check ani dili automatic nga mabayran, ma-convert to cash, o ma-approve ang leave.'
+        : language === 'tagalog'
+          ? 'Hindi. Ang pag-check nito ay hindi awtomatikong payment, cash conversion, o approval ng leave.'
+          : 'No. Checking it does not automatically create a payment, convert leave credits to cash, or approve the leave.'
+      : language === 'bisaya'
+        ? `Mao ni ang tabang para sa ${field.title}${typeLabel ? ` sa ${typeLabel}` : ''}.`
+        : language === 'tagalog'
+          ? `Narito ang tulong para sa ${field.title}${typeLabel ? ` ng ${typeLabel}` : ''}.`
+          : `Here is how to complete ${field.title}${typeLabel ? ` for ${typeLabel}` : ''}.`,
+    details,
+    nextStep: localizedLeaveFieldNote(field, language),
+    limit: 6,
   });
 }
 
@@ -3871,6 +4212,71 @@ function locatorSummaryReply(context, message) {
 
 function locatorRequirementsReply(context, message) {
   const language = languageOf(message);
+  const asksDestination =
+    /\b(destination|destination field|location field|office field|where.*(?:put|enter|write|type)|asa.*ibutang|saan.*ilalagay)\b/i.test(
+      message
+    );
+  const asksReason =
+    /\b(reason field|locator reason|what.*(?:put|enter|write|type).*reason|sample reason|example reason|unsa.*ibutang.*reason|ano.*ilalagay.*reason)\b/i.test(
+      message
+    );
+  const asksRequiredFields =
+    /\b(required fields?|fields? required|what fields? (?:are )?required|which fields? (?:are )?required|unsa.*(?:required|kinahanglan).*fields?|ano.*(?:required|kailangan).*fields?)\b/i.test(
+      message
+    );
+
+  if (asksDestination || asksReason || asksRequiredFields) {
+    const details = [];
+    if (asksDestination || asksRequiredFields) {
+      details.push(
+        language === 'bisaya'
+          ? 'Office / Destination: Isulat ang tinuod nga office, agency, client site, o work location. Example: "Municipal Engineering Office, Plaridel" o "Home work location - Poblacion, Plaridel" para sa WFH.'
+          : language === 'tagalog'
+            ? 'Office / Destination: Ilagay ang totoong office, agency, client site, o work location. Halimbawa: "Municipal Engineering Office, Plaridel" o "Home work location - Poblacion, Plaridel" para sa WFH.'
+            : 'Office / Destination: Enter the actual office, agency, client site, or work location. Example: "Municipal Engineering Office, Plaridel" or "Home work location - Poblacion, Plaridel" for WFH.'
+      );
+    }
+    if (asksReason || asksRequiredFields) {
+      details.push(
+        language === 'bisaya'
+          ? 'Reason: Mubo pero klaro nga official purpose. Example: "Submit and follow up payroll documents" o "Attend the scheduled coordination meeting."'
+          : language === 'tagalog'
+            ? 'Reason: Maikli pero malinaw na official purpose. Halimbawa: "Submit and follow up payroll documents" o "Attend the scheduled coordination meeting."'
+            : 'Reason: Give a short, clear official purpose. Example: "Submit and follow up payroll documents" or "Attend the scheduled coordination meeting."'
+      );
+    }
+    if (asksRequiredFields) {
+      details.push(
+        language === 'bisaya'
+          ? 'Kompletuhon ang locator type, slip date, covered DTR slots, office/destination, reason, ug attachment kung required sa selected type.'
+          : language === 'tagalog'
+            ? 'Kumpletuhin ang locator type, slip date, covered DTR slots, office/destination, reason, at attachment kung required sa napiling type.'
+            : 'Complete the locator type, slip date, covered DTR slots, office/destination, reason, and any attachment required by the selected type.'
+      );
+    }
+    return structuredReply(language, {
+      title:
+        language === 'bisaya'
+          ? 'Tabang sa locator form'
+          : language === 'tagalog'
+            ? 'Tulong sa locator form'
+            : 'Locator form help',
+      summary:
+        language === 'bisaya'
+          ? 'Mao ni ang pwede nimo ibutang. Ilisi ang examples sa imong tinuod nga detalye.'
+          : language === 'tagalog'
+            ? 'Ito ang puwede mong ilagay. Palitan ang examples ng totoong detalye mo.'
+            : 'Here is what to enter. Replace the examples with your real details.',
+      details,
+      nextStep:
+        language === 'bisaya'
+          ? 'Pilia usab ang exact AM/PM slots nga kinahanglan ma-cover sa approved locator.'
+          : language === 'tagalog'
+            ? 'Piliin din ang eksaktong AM/PM slots na kailangang ma-cover ng approved locator.'
+            : 'Also select the exact AM/PM slots that the approved locator should cover.',
+      limit: 5,
+    });
+  }
   const visible = locatorTypeRulesForMessage(context, message);
   if (visible.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang locator request type rules sa system.';
@@ -4225,6 +4631,9 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
   }
   if (intent === 'leave_form_guidance') {
     return leaveFormGuidanceReply(context, message);
+  }
+  if (intent === 'leave_form_field_help') {
+    return leaveFormFieldHelpReply(context, message);
   }
   if (intent === 'leave_eligibility_check') {
     return leaveEligibilityReply(context, message);

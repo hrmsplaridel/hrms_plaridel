@@ -17,6 +17,7 @@ const {
 } = require('./dtrAssistantIntentService');
 const { getEmployeeSelfScope } = require('./dtrAssistantPermissionService');
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
+const { getLeaveFormFieldKey } = require('./leaveFilingGuidelines');
 const {
   buildDtrAssistantDirectMessages,
   buildDtrAssistantIntentMessages,
@@ -387,6 +388,22 @@ function buildSuggestions(intent) {
       { text: 'Show leave requirements', intent: 'leave_requirements' },
     ];
   }
+  if (intent === 'leave_form_field_help') {
+    return [
+      {
+        text: 'What should I put in the reason field?',
+        intent: 'leave_form_field_help',
+      },
+      {
+        text: 'Give me an example for the location field',
+        intent: 'leave_form_field_help',
+      },
+      {
+        text: 'What attachment should I upload?',
+        intent: 'leave_form_field_help',
+      },
+    ];
+  }
   if (intent === 'clarify_filing_topic') {
     return [
       { text: 'File a leave request', intent: 'leave_guided_filing' },
@@ -655,7 +672,8 @@ function buildActions(intent, context, text, attachments = []) {
       value === 'leave_availability_check' ||
       value === 'leave_guided_filing' ||
       value === 'leave_balance_after_filing' ||
-      value === 'leave_form_guidance'
+      value === 'leave_form_guidance' ||
+      value === 'leave_form_field_help'
     ) {
       actions.push(
         action('open_leave_form', 'Open leave form', 'open_leave_form', {
@@ -941,7 +959,7 @@ function parseIntentClassifierResponse(content) {
     return normalizeIntent(parsed.intent);
   } catch (_) {
     const match = text.match(
-      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|dtr_policy_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|locator_status|locator_summary|locator_types|locator_requirements|locator_availability_check|locator_rejection_reason|locator_approval_tracker|unknown)\b/i
+      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|dtr_policy_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_form_field_help|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|locator_status|locator_summary|locator_types|locator_requirements|locator_availability_check|locator_rejection_reason|locator_approval_tracker|unknown)\b/i
     );
     return normalizeIntent(match?.[1]);
   }
@@ -1204,7 +1222,7 @@ function gracefulFallbackContent(text) {
 }
 
 function isFollowUpQuestion(text) {
-  return /\b(it|that|this|one|same|about|how about|what about|translate|answer|reply|say|again|bisayaa?|binisayaa?|cebuano|tagalog|filipino|english|ingles|daw|explain|guidelines?|deadlines?|supporting|documents?|credits?|commutation|monetization|monetisation|terminal leave|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|today|tomorrow|yesterday|ugma|gahapon|kagahapon|week|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|ago|from|to|semana|semanaha|bulan|bulana|buwan|buwana|aning|karong|ngayong|ngano|why|bakit|pila|unsa|ano|how many|status|approved|accepted|pending|rejected|requirements?|remarks?|reason|who|where|asa|kinsa|sino|can|file|pwede|puwede|allowed|eligible)\b/.test(
+  return /\b(it|that|this|one|same|about|how about|what about|what happens?|what will happen|mahitabo|mangyayari|translate|answer|reply|say|again|another|more|example|sample|input|field|check|checked|checking|checkbox|chineck|enable|enabled|turn on|bisayaa?|binisayaa?|cebuano|tagalog|filipino|english|ingles|daw|explain|guidelines?|deadlines?|supporting|documents?|credits?|commutation|monetization|monetisation|terminal leave|ana|ato|adto|niya|same day|same date|next day|following day|sunod adlaw|previous day|day before|today|tomorrow|yesterday|ugma|gahapon|kagahapon|week|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|ago|from|to|semana|semanaha|bulan|bulana|buwan|buwana|aning|karong|ngayong|ngano|why|bakit|pila|unsa|ano|how many|status|approved|accepted|pending|rejected|requirements?|remarks?|reason|who|where|asa|kinsa|sino|can|file|pwede|puwede|allowed|eligible)\b/.test(
     lower(text)
   );
 }
@@ -1387,6 +1405,15 @@ function resolveIntentFromMemory(text, memory) {
   }
   if (isLeaveIntent(activeIntent)) {
     if (
+      activeIntent === 'leave_form_field_help' &&
+      (getLeaveFormFieldKey(value) ||
+        /\b(another|more|example|sample|input|same field|this field|that field|what happens?|what will happen|mahitabo|mangyayari|check|checked|checking|checkbox|chineck|enable|enabled|turn on|bisayaa?|binisayaa?|cebuano|tagalog|filipino|english)\b/.test(
+          value
+        ))
+    ) {
+      return 'leave_form_field_help';
+    }
+    if (
       isLeaveGuidelineSectionQuestion(value) ||
       isLeaveTypeExplanationQuestion(value) ||
       isAllLeaveTypesFollowUpQuestion(value) ||
@@ -1535,6 +1562,7 @@ function resolveIntentFromMemory(text, memory) {
       'leave_request_summary',
       'leave_filing_policy',
       'leave_form_guidance',
+      'leave_form_field_help',
       'leave_eligibility_check',
       'leave_dtr_impact',
       'leave_guideline_section',
@@ -1580,6 +1608,16 @@ function enrichMessageWithMemory(text, memory, memoryIntent = null) {
     lower(restyleSourceText) !== lower(enriched)
   ) {
     enriched = `${restyleSourceText} (${enriched})`;
+  }
+  if (
+    memoryIntent === 'leave_form_field_help' &&
+    activeMemory?.text &&
+    !getLeaveFormFieldKey(enriched) &&
+    /\b(another|more|example|sample|input|same field|this field|that field|what happens?|what will happen|mahitabo|mangyayari|check|checked|checking|checkbox|chineck|enable|enabled|turn on|bisayaa?|binisayaa?|cebuano|tagalog|filipino|english)\b/i.test(
+      enriched
+    )
+  ) {
+    enriched = `${activeMemory.text} (${enriched})`;
   }
   if (
     memoryIntent === 'leave_guideline_section' &&
@@ -1784,6 +1822,7 @@ function buildToolData(intent, context) {
     intent === 'leave_attachment_requirement' ||
     intent === 'leave_filing_policy' ||
     intent === 'leave_form_guidance' ||
+    intent === 'leave_form_field_help' ||
     intent === 'leave_eligibility_check' ||
     intent === 'leave_dtr_impact' ||
     intent === 'leave_guideline_section' ||

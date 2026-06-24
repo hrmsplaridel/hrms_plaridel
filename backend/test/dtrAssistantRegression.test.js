@@ -39,6 +39,11 @@ test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected
     ['paano mag file ng sick leave?', 'leave_form_guidance'],
     ['unsaon pag file ug sick leave?', 'leave_form_guidance'],
     ['unsaon pag file mandatory leave?', 'leave_form_guidance'],
+    ['what should I put in the sick leave reason field?', 'leave_form_field_help'],
+    ['unsa akong ibutang sa location field sa vacation leave?', 'leave_form_field_help'],
+    ['ano ang ilalagay sa illness details field?', 'leave_form_field_help'],
+    ['what attachment should I upload for 5 days sick leave?', 'leave_form_field_help'],
+    ['What is Commutation leave of request?', 'leave_form_field_help'],
     ['can I file 1 day sick leave tomorrow?', 'leave_availability_check'],
     ['okay explain filing deadlines', 'leave_guideline_section'],
     ['can you give me the guidlines of the leave types?', 'leave_guideline_section'],
@@ -76,6 +81,7 @@ test('DTR assistant regression: fuzzy intent scoring handles typos and mixed lan
     ['pila akong sik leev balnce?', 'leave_balance'],
     ['explan sik leev', 'leave_guideline_section'],
     ['unsa requirements sa matirnity leev?', 'leave_requirements'],
+    ['give sampel input for the reasn feild', 'leave_form_field_help'],
     ['how many abssents i have this mnth?', 'dtr_absent_summary'],
     ['naa koy absnt karong bulna?', 'dtr_absent_summary'],
     ['staus sa akong lokator?', 'locator_status'],
@@ -95,6 +101,136 @@ test('DTR assistant regression: unclear fuzzy intent is marked for AI planning',
   const scored = scoreEmployeeAssistantIntent('unsa ani karon?');
   assert.equal(scored.intent, null);
   assert.equal(scored.needsAiPlan, true);
+});
+
+test('DTR assistant regression: leave form field help gives safe examples in the user language', () => {
+  const context = {
+    leave_types: [
+      {
+        name: 'sickLeave',
+        display_name: 'Sick Leave',
+        employee_can_file: true,
+        requires_attachment: false,
+        requires_attachment_when_over_days: 5,
+      },
+      {
+        name: 'vacationLeave',
+        display_name: 'Vacation Leave',
+        employee_can_file: true,
+        requires_attachment: false,
+      },
+    ],
+  };
+
+  const english = buildFastEmployeeAssistantReply(
+    'What should I put in the reason field for sick leave?',
+    context,
+    'leave_form_field_help'
+  );
+  assert.match(english, /General Reason \/ Remarks/i);
+  assert.match(english, /Example input:/i);
+  assert.match(english, /Medical consultation/i);
+  assert.match(english, /Never copy an example if it is not true/i);
+
+  const bisaya = buildFastEmployeeAssistantReply(
+    'unsa akong ibutang sa location field sa vacation leave?',
+    context,
+    'leave_form_field_help'
+  );
+  assert.match(bisaya, /Specify Location/i);
+  assert.match(bisaya, /Ibutang ang klarong city/i);
+  assert.match(bisaya, /Cebu City, Cebu/i);
+  assert.doesNotMatch(bisaya, /Which leave-form field is confusing/i);
+
+  const computed = buildFastEmployeeAssistantReply(
+    'what do I enter in the number of working days field?',
+    context,
+    'leave_form_field_help'
+  );
+  assert.match(computed, /computed by HRMS/i);
+  assert.match(computed, /Change the dates instead/i);
+
+  const attachment = buildFastEmployeeAssistantReply(
+    'what attachment should I upload for 5 days sick leave?',
+    context,
+    'leave_form_field_help'
+  );
+  assert.match(attachment, /Supporting Attachment/i);
+  assert.match(attachment, /Medical certificate/i);
+  assert.match(attachment, /required because the request reaches 5 days/i);
+
+  const commutation = buildFastEmployeeAssistantReply(
+    'What is Commutation leave of request?',
+    context,
+    'leave_form_field_help'
+  );
+  assert.match(commutation, /Requested Commutation of Leave/i);
+  assert.match(commutation, /asking HR\/Admin to consider commutation/i);
+  assert.match(commutation, /does not automatically approve the leave/i);
+  assert.match(commutation, /guarantee payment/i);
+
+  const unclear = buildFastEmployeeAssistantReply(
+    'I am confused with this leave field',
+    context,
+    'leave_form_field_help'
+  );
+  assert.match(unclear, /Tell me the exact field label/i);
+  assert.match(unclear, /Reason \/ Remarks/i);
+});
+
+test('DTR assistant regression: leave form field follow-ups keep the previous field and leave type', () => {
+  const memory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_form_field_help',
+    text: 'what should I put in the reason field for sick leave?',
+    leaveType: 'sick',
+    dateRange: null,
+    toolData: null,
+    modelProfile: 'tools_ollama',
+  });
+
+  const intent = assistantServiceTest.resolveIntentFromMemory(
+    'give me another example',
+    memory
+  );
+  assert.equal(intent, 'leave_form_field_help');
+
+  const enriched = assistantServiceTest.enrichMessageWithMemory(
+    'give me another example',
+    memory,
+    intent
+  );
+  assert.match(enriched, /reason field/i);
+  assert.match(enriched, /sick leave/i);
+});
+
+test('DTR assistant regression: commutation checkbox follow-ups keep their field context', () => {
+  const memory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_form_field_help',
+    text: 'What is Commutation leave of request?',
+    leaveType: null,
+    dateRange: null,
+    toolData: null,
+    modelProfile: 'tools_ollama',
+  });
+
+  for (const followUp of [
+    'What will happen if I checked it?',
+    'unsa mahitabo kung i-check nako ni?',
+    'ano mangyayari kapag chineck ko ito?',
+  ]) {
+    const intent = assistantServiceTest.resolveIntentFromMemory(
+      followUp,
+      memory
+    );
+    assert.equal(intent, 'leave_form_field_help', followUp);
+
+    const enriched = assistantServiceTest.enrichMessageWithMemory(
+      followUp,
+      memory,
+      intent
+    );
+    assert.match(enriched, /commutation/i, followUp);
+  }
 });
 
 test('DTR assistant regression: stronger date phrases resolve to useful ranges', () => {
@@ -1421,4 +1557,170 @@ test('DTR assistant regression: direct open commands generate auto navigation ac
   const question =
     assistantServiceTest.directOpenCommandForMessage('what are locator types?');
   assert.equal(question, null);
+});
+
+test('DTR assistant regression: adversarial typo and overlapping phrases route safely', () => {
+  const cases = [
+    ['wat is my curent shft', 'dtr_schedule_context'],
+    ['check my attendance two weeks ago', 'dtr_range_summary'],
+    ['show my record first monday of june', 'dtr_daily_record'],
+    ['how many hours from monday to friday', 'dtr_hours_summary'],
+    ['i need to correct my pm out', 'dtr_correction_guidance'],
+    ['unsaon pag correct sa pm out nako', 'dtr_correction_guidance'],
+    ['late ba ko gahapon', 'dtr_status_explanation'],
+    ['nganong late ko gahapon', 'dtr_late_reason'],
+    ['pila ko ka adlaw present this month', 'dtr_range_summary'],
+    ['unsa akng dtr statos gahapn', 'dtr_status_explanation'],
+    ['sample reason for vacation leave', 'leave_form_field_help'],
+    ['if i tick commutation will i get cash', 'leave_form_field_help'],
+    ['gi check nako ang commutation mabayran ba ko', 'leave_form_field_help'],
+    ['how do i fill vacation leave reason and location', 'leave_form_guidance'],
+    ['what happens after i submit my leave', 'leave_filing_policy'],
+    ['where should i put my destination in locator', 'locator_requirements'],
+    ['what should i write in locator reason', 'locator_requirements'],
+    ['sample destination for official business', 'locator_requirements'],
+    ['what are required fields for wfh', 'locator_requirements'],
+    ['loacator reqirements', 'locator_requirements'],
+  ];
+
+  for (const [message, expected] of cases) {
+    assert.equal(detectEmployeeAssistantIntent(message), expected, message);
+  }
+
+  assert.equal(
+    detectEmployeeAssistantIntent('why was my leave rejected?'),
+    'leave_rejection_reason'
+  );
+  assert.equal(
+    detectEmployeeAssistantIntent('ngano gi reject akong locator?'),
+    'locator_rejection_reason'
+  );
+});
+
+test('DTR assistant regression: semantic collisions keep the more specific intent', () => {
+  const cases = [
+    ['what logs are missing yesterday', 'dtr_missing_logs'],
+    ['paano ayusin missing am in ko', 'dtr_correction_guidance'],
+    ['explain attendance grace period', 'dtr_policy_guidance'],
+    ['is my sick leave covering absent yesterday', 'dtr_leave_coverage_check'],
+    ['sakop ba sa approved locator akong am in', 'dtr_locator_coverage_check'],
+    ['how many pending leave days do i have', 'leave_pending_days_explanation'],
+    ['nganong naa koy pending balance', 'leave_pending_days_explanation'],
+    ['can i submit vacation leave for next friday', 'leave_availability_check'],
+    ['what documents for paternity leave', 'leave_attachment_requirement'],
+    ['what is the difference between maternity and paternity leave', 'leave_type_compare'],
+    ['guide me file vacation leave tomorrow', 'leave_guided_filing'],
+    ['help me file sick leave june 25 to june 27', 'leave_guided_filing'],
+    ['why are days pending from my balance', 'leave_pending_days_explanation'],
+    ['show summary of my leave requests', 'leave_request_summary'],
+    ['find my leave request on june 9', 'leave_request_lookup'],
+    ['who reviewed my leave request', 'leave_approval_history'],
+    ['show approval timeline of my leave', 'leave_approval_history'],
+    ['show rejected leave requests', 'rejected_leave_requests'],
+    ['what is my latest leave request', 'latest_leave_request'],
+    ['what leave options are available', 'leave_types'],
+    ['sample location for vacation leave', 'leave_form_field_help'],
+    ['what is the advance filing rule for vacation leave', 'leave_filing_policy'],
+    ['explain supporting documents guideline', 'leave_guideline_section'],
+    ['tell me about official business locator', 'locator_types'],
+    ['how do i fill locator destination', 'locator_requirements'],
+    ['can i submit official business next monday', 'locator_availability_check'],
+    ['pila rejected locator nako', 'locator_summary'],
+    ['show my latest wfh', 'latest_locator_request'],
+    ['bakt ako lte kahapn', 'dtr_late_reason'],
+    ['unsaon pg corect missing pm ot', 'dtr_correction_guidance'],
+  ];
+
+  for (const [message, expected] of cases) {
+    const scored = scoreEmployeeAssistantIntent(message);
+    assert.equal(scored.intent, expected, message);
+    assert.ok(scored.confidence >= 0.62, `${message}: ${scored.confidence}`);
+  }
+});
+
+test('DTR assistant regression: word-based relative dates resolve without the LLM', () => {
+  assert.deepEqual(
+    parseAssistantDateRange('check my attendance two weeks ago', {
+      today: '2026-06-24',
+    }),
+    {
+      label: '2 weeks ago',
+      startDate: '2026-06-08',
+      endDate: '2026-06-14',
+    }
+  );
+  assert.deepEqual(
+    parseAssistantDateRange('show my dtr three days ago', {
+      today: '2026-06-24',
+    }),
+    {
+      label: '3 days ago',
+      startDate: '2026-06-21',
+      endDate: '2026-06-21',
+    }
+  );
+  assert.deepEqual(
+    parseAssistantDateRange('attendance two months ago', {
+      today: '2026-06-24',
+    }),
+    {
+      label: '2 months ago',
+      startDate: '2026-04-01',
+      endDate: '2026-04-30',
+    }
+  );
+});
+
+test('DTR assistant regression: workflow and form-help answers are direct and friendly', () => {
+  const postSubmit = buildFastEmployeeAssistantReply(
+    'what happens after i submit my leave',
+    {
+      leave_types: [
+        {
+          name: 'vacationLeave',
+          display_name: 'Vacation Leave',
+          employee_can_file: true,
+        },
+      ],
+    },
+    'leave_filing_policy'
+  );
+  assert.match(postSubmit, /does not mean it is already approved/i);
+  assert.match(postSubmit, /track whether it is pending, approved, returned, or rejected/i);
+  assert.doesNotMatch(postSubmit, /I found no filing policy/i);
+
+  const locatorReason = buildFastEmployeeAssistantReply(
+    'unsa akong ibutang sa locator reason field?',
+    {},
+    'locator_requirements'
+  );
+  assert.match(locatorReason, /Tabang sa locator form/i);
+  assert.match(locatorReason, /Mubo pero klaro nga official purpose/i);
+  assert.doesNotMatch(locatorReason, /Office \/ Destination/i);
+
+  const commutation = buildFastEmployeeAssistantReply(
+    'if i tick commutation will i get cash',
+    {},
+    'leave_form_field_help'
+  );
+  assert.match(commutation, /No\. Checking it does not automatically create a payment/i);
+  assert.match(commutation, /HR\/Admin still reviews/i);
+
+  const gracePeriod = buildFastEmployeeAssistantReply(
+    'explain attendance grace period',
+    {
+      calendar_days: [
+        {
+          shift_name: 'Morning Shift',
+          shift_start: '08:00:00',
+          shift_end: '17:00:00',
+          grace_minutes: 5,
+        },
+      ],
+    },
+    'dtr_policy_guidance'
+  );
+  assert.match(gracePeriod, /scheduled start plus the grace period/i);
+  assert.match(gracePeriod, /Configured grace period: 5 min/i);
+  assert.doesNotMatch(gracePeriod, /DTR Export and Review/i);
 });
