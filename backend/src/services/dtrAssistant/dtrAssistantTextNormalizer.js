@@ -1,6 +1,7 @@
 const PHRASE_REPLACEMENTS = [
   [/\bwat\b/gi, 'what'],
   [/\bpano\b/gi, 'paano'],
+  [/\bmaayos\b/gi, 'ayusin'],
   [/\bmg\s+file\b/gi, 'mag file'],
   [/\bpg\s+(?=file|fill|correct|korek)/gi, 'pag '],
   [/\bmed\s*cert\b/gi, 'medical certificate'],

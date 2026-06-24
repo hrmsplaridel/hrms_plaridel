@@ -361,6 +361,7 @@ function localizeTitle(title, language) {
       .replace(/^Leave requirements$/i, 'Leave requirements')
       .replace(/^Attachment requirement$/i, 'Attachment requirement nimo')
       .replace(/^Leave form guide$/i, 'Giya sa pag-file ug leave')
+      .replace(/^Leave filing check$/i, 'Pag-check sa leave request')
       .replace(/^Leave types you can file$/i, 'Leave types nga pwede nimo ma-file')
       .replace(/^Pending leave requests$/i, 'Pending leave requests nimo')
       .replace(/^Approved leave requests$/i, 'Approved leave requests nimo')
@@ -379,6 +380,7 @@ function localizeTitle(title, language) {
       .replace(/^Leave requirements$/i, 'Leave requirements')
       .replace(/^Attachment requirement$/i, 'Attachment requirement mo')
       .replace(/^Leave form guide$/i, 'Gabay sa pag-file ng leave')
+      .replace(/^Leave filing check$/i, 'Pagsusuri ng leave request')
       .replace(/^Leave types you can file$/i, 'Leave types na puwede mong i-file')
       .replace(/^Pending leave requests$/i, 'Pending leave requests mo')
       .replace(/^Approved leave requests$/i, 'Approved leave requests mo')
@@ -881,12 +883,12 @@ function localizedAttachmentRuleText(type, days, language) {
     if (language === 'bisaya') {
       return requiredNow
         ? `kinahanglan ug attachment kay niabot sa ${count} ang request`
-        : `kinahanglan ug attachment kung ${count} o labaw ang i-file`;
+        : `kinahanglan lang ug attachment kung ${count} o labaw ang i-file`;
     }
     if (language === 'tagalog') {
       return requiredNow
         ? `kailangan ng attachment dahil umabot sa ${count} ang request`
-        : `kailangan ng attachment kapag ${count} o higit pa ang i-file`;
+        : `kailangan lang ng attachment kapag ${count} o higit pa ang i-file`;
     }
   }
   if (language === 'bisaya') {
@@ -1043,6 +1045,15 @@ function isIncompleteDtrRecordForContext(context, record) {
 function isAbsentDtrRecord(record) {
   const status = lower(record?.status);
   return status === 'absent' || status === 'no_record' || status === 'missing';
+}
+
+function hasAnyDtrPunch(record) {
+  return Boolean(
+    record?.time_in ||
+      record?.break_out ||
+      record?.break_in ||
+      record?.time_out
+  );
 }
 
 function dtrIssueRecords(records, predicate) {
@@ -1382,6 +1393,10 @@ function dtrRangeSummaryReply(context, message) {
   const wantsAbsent =
     /\b(absent|absents|absence|absences|pasabot|wala|no record|no-record)\b/.test(lower(message)) &&
     /\b(pila|ilan|how many|count|counts|total)\b/.test(lower(message));
+  const wantsDetailedBreakdown =
+    /\b(full|complete|detailed|details|breakdown|metrics?|hours?|late|undertime|overtime)\b/.test(
+      lower(message)
+    );
   const summary = (() => {
     if (language === 'bisaya') {
       if (wantsPresent) {
@@ -1390,9 +1405,7 @@ function dtrRangeSummaryReply(context, message) {
       if (wantsAbsent) {
         return `Naa koy nakitang ${possibleAbsentOrNoRecord} ka possible absent/no-record workday sa ${label}.`;
       }
-      return issues > 0
-        ? `Nakita nako ang ${issues} ka DTR ${plural(issues, 'item')} nga angay i-review para ani nga period.`
-        : 'Wala koy nakitang klaro nga DTR issue para ani nga period.';
+      return `Para sa ${label}: ${totals.present} ka present/complete, ${totals.incomplete} ka incomplete, ug ${possibleAbsentOrNoRecord} ka possible absent/no-record.`;
     }
     if (language === 'tagalog') {
       if (wantsPresent) {
@@ -1401,9 +1414,7 @@ function dtrRangeSummaryReply(context, message) {
       if (wantsAbsent) {
         return `May nakita akong ${possibleAbsentOrNoRecord} possible absent/no-record workday sa ${label}.`;
       }
-      return issues > 0
-        ? `May nakita akong ${issues} DTR ${plural(issues, 'item')} na kailangang i-review para sa period na ito.`
-        : 'Wala akong nakitang obvious DTR issue para sa period na ito.';
+      return `Para sa ${label}: ${totals.present} present/complete, ${totals.incomplete} incomplete, at ${possibleAbsentOrNoRecord} possible absent/no-record.`;
     }
     if (wantsPresent) {
       return `You have ${totals.present} present/complete DTR ${plural(totals.present, 'day')} for ${label}.`;
@@ -1412,50 +1423,79 @@ function dtrRangeSummaryReply(context, message) {
       return `You have ${possibleAbsentOrNoRecord} possible absent/no-record workday ${plural(possibleAbsentOrNoRecord, 'entry', 'entries')} for ${label}.`;
     }
     return issues > 0
-      ? `I found ${issues} DTR ${plural(issues, 'item')} to review for this period.`
-      : 'I did not find obvious DTR issues for this period.';
+      ? `For ${label}, you have ${totals.present} present/complete ${plural(totals.present, 'day')}, ${totals.incomplete} incomplete ${plural(totals.incomplete, 'day')}, and ${possibleAbsentOrNoRecord} possible absent/no-record ${plural(possibleAbsentOrNoRecord, 'day')}.`
+      : `Your DTR statuses for ${label} have no obvious issues.`;
   })();
-  const absenceTotalLine =
-    noRecords.length > 0 || totals.absent > 0
-      ? `Absent/no-record days: ${possibleAbsentOrNoRecord}`
-      : null;
-  const savedAbsentLine =
-    totals.absent > 0 || noRecords.length > 0
-      ? `Saved absent rows: ${totals.absent}`
-      : null;
-  const noRecordLine =
-    noRecords.length > 0
-      ? `Generated no-record workdays: ${noRecords.length}`
-      : null;
+  const statusLines = [
+    ...records.map((record) => {
+      const date = fmtFriendlyDate(record.attendance_date);
+      const status = lower(record.status);
+      if (status === 'on_leave' || record.leave_type) {
+        return `${date}: On leave${record.leave_type ? ` (${record.leave_type})` : ''}`;
+      }
+      if (status === 'holiday' || record.holiday_name) {
+        return `${date}: Holiday${record.holiday_name ? ` (${record.holiday_name})` : ''}`;
+      }
+      if (isAbsentDtrRecord(record)) return `${date}: Absent`;
+      if (status === 'present' || status === 'complete') return `${date}: Present`;
+      if (isIncompleteDtrRecord(record)) {
+        const missing = missingDtrSlotsForContext(context, record);
+        if (language === 'bisaya') {
+          return `${date}: Incomplete${
+            missing.length > 0 ? ` - kulang ${missing.join(', ')}` : ''
+          }`;
+        }
+        if (language === 'tagalog') {
+          return `${date}: Incomplete${
+            missing.length > 0 ? ` - kulang ang ${missing.join(', ')}` : ''
+          }`;
+        }
+        return `${date}: Incomplete${missing.length > 0 ? ` - missing ${missing.join(', ')}` : ''}`;
+      }
+      return `${date}: ${statusLabel(record.status)}`;
+    }),
+    ...noRecords.map(
+      (day) => {
+        const date = fmtFriendlyDate(day.attendance_date);
+        if (language === 'bisaya') return `${date}: Walay DTR record (possible absent)`;
+        if (language === 'tagalog') return `${date}: Walang DTR record (possible absent)`;
+        return `${date}: No DTR record (possible absence)`;
+      }
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+  const countLines = [
+    totals.present > 0 ? `Present/complete: ${totals.present}` : null,
+    totals.incomplete > 0 ? `Incomplete: ${totals.incomplete}` : null,
+    possibleAbsentOrNoRecord > 0
+      ? `Possible absent/no-record: ${possibleAbsentOrNoRecord}`
+      : null,
+    totals.onLeave > 0 ? `On leave: ${totals.onLeave}` : null,
+    totals.holiday > 0 ? `Holiday: ${totals.holiday}` : null,
+  ];
+  const metricLines = wantsDetailedBreakdown
+    ? [
+        totals.hours > 0 ? `Total hours: ${fmtHours(totals.hours)}` : null,
+        totals.late > 0 ? `Late: ${fmtMinutes(totals.late)}` : null,
+        totals.undertime > 0 ? `Undertime: ${fmtMinutes(totals.undertime)}` : null,
+        totals.overtime > 0 ? `Overtime: ${fmtMinutes(totals.overtime)}` : null,
+      ]
+    : [];
   const issueNextStep =
     issues > 0
-      ? noRecords.length > 0
-        ? language === 'bisaya'
-          ? 'Ang saved absent rows kay kanang naa gyud sa DTR table. Ang generated no-record workdays kay scheduled workdays nga walay punches, mao na sila ang possible absent days.'
-          : language === 'tagalog'
-            ? 'Ang saved absent rows ay yung totoong nasa DTR table. Ang generated no-record workdays ay scheduled workdays na walang punches, kaya sila ang possible absent days.'
-            : 'Saved absent rows are actual DTR rows. Generated no-record workdays are scheduled workdays with no punches, so they are possible absent days.'
-        : 'Check missing logs, leave coverage, or locator coverage for the issue dates.'
+      ? language === 'bisaya'
+        ? 'Pilia ang usa ka issue date kung gusto nimo ma-check ang missing logs, leave, o locator coverage.'
+        : language === 'tagalog'
+          ? 'Pumili ng isang issue date kung gusto mong i-check ang missing logs, leave, o locator coverage.'
+          : 'Choose an issue date if you want me to check its missing logs, leave, or locator coverage.'
       : null;
   return structuredReply(language, {
-    title: `DTR summary for ${label}`,
+    title: `DTR status for ${label}`,
     summary,
-    details: [
-      `Saved DTR rows: ${records.length}`,
-      `Present/complete days: ${totals.present}`,
-      absenceTotalLine,
-      `Incomplete: ${totals.incomplete}`,
-      savedAbsentLine,
-      noRecordLine,
-      `On leave days: ${totals.onLeave}`,
-      `Holiday days: ${totals.holiday}`,
-      `Total hours: ${fmtHours(totals.hours)}`,
-      `Late: ${fmtMinutes(totals.late)}`,
-      `Undertime: ${fmtMinutes(totals.undertime)}`,
-      `Overtime: ${fmtMinutes(totals.overtime)}`,
-    ],
+    details: wantsDetailedBreakdown
+      ? [...countLines, ...statusLines, ...metricLines]
+      : statusLines,
     nextStep: issueNextStep,
-    limit: 13,
+    limit: wantsDetailedBreakdown ? 14 : 10,
   });
 }
 
@@ -1518,16 +1558,46 @@ function dtrMinuteSummaryReply(context, message, kind) {
       : kind === 'undertime'
         ? 'undertime_minutes'
         : 'overtime_minutes';
-  const issueRecords = dtrIssueRecords(records, (record) => Number(record[field] || 0) > 0);
+  const rawIssueRecords = dtrIssueRecords(
+    records,
+    (record) => Number(record[field] || 0) > 0
+  );
+  const issueRecords = rawIssueRecords.filter((record) => {
+    if (Number(record[field] || 0) <= 0) return false;
+    if (isNonWorkingDtrRecord(record) || isAbsentDtrRecord(record)) return false;
+    if (kind === 'undertime' && !hasAnyDtrPunch(record)) return false;
+    return true;
+  });
+  const excludedRecords =
+    kind === 'undertime'
+      ? rawIssueRecords.filter((record) => !issueRecords.includes(record))
+      : [];
   const total = issueRecords.reduce((sum, record) => sum + Number(record[field] || 0), 0);
   if (issueRecords.length === 0) {
+    if (kind === 'undertime' && excludedRecords.length > 0) {
+      const dates = excludedRecords
+        .map((record) => fmtFriendlyDate(record.attendance_date))
+        .join(', ');
+      if (language === 'bisaya') {
+        return `Wala koy nakitang actual undertime sa ${label}. Ang ${dates} kay absent/no-record day, busa dili kini i-count isip undertime.`;
+      }
+      if (language === 'tagalog') {
+        return `Wala akong nakitang actual undertime sa ${label}. Ang ${dates} ay absent/no-record day, kaya hindi ito binibilang bilang undertime.`;
+      }
+      return `I found no actual undertime for ${label}. ${dates} is an absent/no-record day, so it is not counted as undertime.`;
+    }
     if (language === 'bisaya') return `Wala koy nakitang ${kind} records sa ${label}.`;
     if (language === 'tagalog') return `Wala akong nakitang ${kind} records sa ${label}.`;
     return `I found no ${kind} records for ${label}.`;
   }
   const lines = issueRecords.map((record) => `${fmtFriendlyDate(record.attendance_date)}: ${fmtMinutes(record[field])}`);
   return structuredReply(language, {
-    title: `${kind} summary for ${label}`,
+    title:
+      language === 'bisaya'
+        ? `${kind} para sa ${label}`
+        : language === 'tagalog'
+          ? `${kind} para sa ${label}`
+          : `${kind} summary for ${label}`,
     summary:
       language === 'bisaya'
         ? `Naa koy nakitang ${issueRecords.length} ka ${kind} record, total ${fmtMinutes(total)}.`
@@ -1535,9 +1605,12 @@ function dtrMinuteSummaryReply(context, message, kind) {
           ? `May nakita akong ${issueRecords.length} ${kind} record, total ${fmtMinutes(total)}.`
           : `I found ${issueRecords.length} ${kind} ${plural(issueRecords.length, 'record')}, total ${fmtMinutes(total)}.`,
     details: lines,
-    nextStep: kind === 'late'
-      ? 'Ask why you were late if you want the schedule/grace-period breakdown.'
-      : null,
+    nextStep:
+      kind === 'late'
+        ? 'Ask why you were late if you want the schedule/grace-period breakdown.'
+        : kind === 'undertime' && excludedRecords.length > 0
+          ? 'Absent/no-record days are excluded from this undertime total.'
+          : null,
     limit: 8,
   });
 }
@@ -2559,74 +2632,104 @@ function leaveAvailabilityReply(context, message) {
     const details = [
       blockers.length > 0 ? `Issue: ${blockers.join(' | ')}` : null,
       warnings.length > 0 ? `Warning: ${warnings.join(' | ')}` : null,
-      ...notes.map((note) => `Note: ${note}`),
+      ...notes.map((note) => `Attachment: ${note}`),
     ].filter(Boolean);
     if (blockers.length > 0 || enough === false) {
-      const balanceText =
-        enough === false
-          ? `dili igo ang balance: naa kay ${fmtLocalizedDayCount(available, language)} available ${type}, pero ${fmtLocalizedDayCount(days, language)} imong plano`
-          : baseBalanceBisaya;
+      if (enough === false) {
+        const shortage = Math.max(0, days - available);
+        details.unshift(
+          `Available balance: ${fmtLocalizedDayCount(available, language)}`,
+          `Imong gi-request: ${fmtLocalizedDayCount(days, language)}`,
+          `Kulang: ${fmtLocalizedDayCount(shortage, language)}`
+        );
+      }
       return structuredReply(language, {
         title: 'Leave filing check',
-        summary: `Dili pa limpyo ang filing check: ${balanceText}.`,
+        summary:
+          enough === false
+            ? `Dili pa ka maka-file ug ${fmtLocalizedDayCount(days, language)} nga ${type} kay ${fmtLocalizedDayCount(available, language)} ra imong available balance.`
+            : `Dili pa ma-file ang imong ${type} tungod sa filing requirements.`,
         details,
-        nextStep: 'Final approval gihapon ang HR workflow.',
+        nextStep:
+          enough === false
+            ? 'I-adjust ang number of days sulod sa imong available balance, o kontaka ang HR kung kinahanglan gyud nimo ang tibuok leave period.'
+            : 'Ayuhon una ang issue nga nakalista sa taas, dayon i-submit pag-usab.',
       });
     }
     return structuredReply(language, {
       title: 'Leave filing check',
-      summary: `Pwede sa initial filing check: ${baseBalanceBisaya}.`,
+      summary: `Pwede nimo i-file ang ${fmtLocalizedDayCount(days, language)} nga ${type}. ${baseBalanceBisaya}.`,
       details,
-      nextStep: 'Dili pa ni final approval.',
+      nextStep: 'I-review ang dates ug details, dayon i-submit. Pending pa kini hangtod ma-approve.',
     });
   }
   if (language === 'tagalog') {
     const details = [
       blockers.length > 0 ? `Issue: ${blockers.join(' | ')}` : null,
       warnings.length > 0 ? `Warning: ${warnings.join(' | ')}` : null,
-      ...notes.map((note) => `Note: ${note}`),
+      ...notes.map((note) => `Attachment: ${note}`),
     ].filter(Boolean);
     if (blockers.length > 0 || enough === false) {
-      const balanceText =
-        enough === false
-          ? `hindi sapat ang balance: may ${fmtLocalizedDayCount(available, language)} available ${type}, pero ${fmtLocalizedDayCount(days, language)} ang plano mo`
-          : baseBalanceTagalog;
+      if (enough === false) {
+        const shortage = Math.max(0, days - available);
+        details.unshift(
+          `Available balance: ${fmtLocalizedDayCount(available, language)}`,
+          `Request mo: ${fmtLocalizedDayCount(days, language)}`,
+          `Kulang: ${fmtLocalizedDayCount(shortage, language)}`
+        );
+      }
       return structuredReply(language, {
         title: 'Leave filing check',
-        summary: `May issue sa filing check: ${balanceText}.`,
+        summary:
+          enough === false
+            ? `Hindi ka pa makakapag-file ng ${fmtLocalizedDayCount(days, language)} na ${type} dahil ${fmtLocalizedDayCount(available, language)} lang ang available balance mo.`
+            : `Hindi pa ma-file ang ${type} mo dahil may kailangang ayusin sa filing requirements.`,
         details,
-        nextStep: 'Dadaan pa rin ito sa HR approval workflow.',
+        nextStep:
+          enough === false
+            ? 'I-adjust ang bilang ng araw ayon sa available balance mo, o makipag-ugnayan sa HR kung kailangan mo ang buong leave period.'
+            : 'Ayusin muna ang issue sa itaas, pagkatapos ay isumite ulit.',
       });
     }
     return structuredReply(language, {
       title: 'Leave filing check',
-      summary: `Puwede sa initial filing check: ${baseBalanceTagalog}.`,
+      summary: `Puwede mong i-file ang ${fmtLocalizedDayCount(days, language)} na ${type}. ${baseBalanceTagalog}.`,
       details,
-      nextStep: 'Hindi pa ito final approval.',
+      nextStep: 'I-review ang dates at details, pagkatapos ay isumite. Pending pa ito hanggang ma-approve.',
     });
   }
   const details = [
     blockers.length > 0 ? `Issue: ${blockers.join(' | ')}` : null,
     warnings.length > 0 ? `Warning: ${warnings.join(' | ')}` : null,
-    ...notes.map((note) => `Note: ${note}`),
+    ...notes.map((note) => `Attachment: ${note}`),
   ].filter(Boolean);
   if (blockers.length > 0 || enough === false) {
-    const balanceText =
-      enough === false
-        ? `balance is not enough: you have ${fmtLocalizedDayCount(available, language)} available ${type}, but plan to file ${fmtDayCount(days)}`
-        : baseBalanceEnglish;
+    if (enough === false) {
+      const shortage = Math.max(0, days - available);
+      details.unshift(
+        `Available balance: ${fmtDayCount(available)}`,
+        `Requested: ${fmtDayCount(days)}`,
+        `Short by: ${fmtDayCount(shortage)}`
+      );
+    }
     return structuredReply(language, {
       title: 'Leave filing check',
-      summary: `Filing check found an issue: ${balanceText}.`,
+      summary:
+        enough === false
+          ? `You cannot file ${fmtDayCount(days)} of ${type} yet because you only have ${fmtDayCount(available)} available.`
+          : `Your ${type} request cannot be filed yet because a filing requirement needs attention.`,
       details,
-      nextStep: 'This still needs the normal HR approval workflow.',
+      nextStep:
+        enough === false
+          ? 'Reduce the requested days to fit your available balance, or contact HR if you need the full leave period.'
+          : 'Fix the issue listed above, then submit the request again.',
     });
   }
   return structuredReply(language, {
     title: 'Leave filing check',
-    summary: `Initial filing check looks okay: ${baseBalanceEnglish}.`,
+    summary: `You can file ${fmtDayCount(days)} of ${type}. ${baseBalanceEnglish}.`,
     details,
-    nextStep: 'This is not final approval yet.',
+    nextStep: 'Review the dates and details, then submit. The request remains pending until approved.',
   });
 }
 

@@ -1510,7 +1510,11 @@ function resolveIntentFromMemory(text, memory) {
     }
     if (
       /^(why|ngano|bakit)\??$/.test(value.trim()) &&
-      activeIntent === 'dtr_status_explanation'
+      [
+        'today_dtr',
+        'dtr_daily_record',
+        'dtr_status_explanation',
+      ].includes(activeIntent)
     ) {
       return 'dtr_status_explanation';
     }
@@ -1542,6 +1546,14 @@ function resolveIntentFromMemory(text, memory) {
     }
     if (isHowToFileInstructionQuestion(value)) {
       return 'leave_form_guidance';
+    }
+    if (
+      activeIntent === 'leave_balance' &&
+      /\b(why|ngano|bakit|gamay|low|small|mababa|maliit|nabilin|natira|remaining)\b/.test(
+        value
+      )
+    ) {
+      return 'leave_balance';
     }
     if (
       isShortLeaveTypeAnswer(value) ||

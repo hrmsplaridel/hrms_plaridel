@@ -1389,7 +1389,9 @@ test('DTR assistant regression: replies use friendly dates and day counts', () =
 
   assert.match(dtrReply, /April 2026/);
   assert.match(dtrReply, /1 ka present\/complete DTR day/);
-  assert.match(dtrReply, /Total hours: 8 hr/);
+  assert.match(dtrReply, /April 1, 2026: Present/i);
+  assert.match(dtrReply, /April 2, 2026: Walay DTR record/i);
+  assert.doesNotMatch(dtrReply, /Total hours:/i);
   assert.doesNotMatch(dtrReply, /8\.00/);
 });
 
@@ -1423,12 +1425,110 @@ test('DTR assistant regression: range DTR status questions summarize the full ra
     'dtr_status_explanation'
   );
 
-  assert.match(reply, /DTR summary/i);
+  assert.match(reply, /DTR status/i);
   assert.match(reply, /first week of june/i);
-  assert.match(reply, /Saved DTR rows: 2/i);
-  assert.match(reply, /Present\/complete days: 1/i);
-  assert.match(reply, /Absent\/no-record days: 1/i);
+  assert.match(reply, /1 ka present\/complete/i);
+  assert.match(reply, /1 ka possible absent\/no-record/i);
+  assert.match(reply, /June 2, 2026: Absent/i);
+  assert.match(reply, /June 3, 2026: Present/i);
+  assert.doesNotMatch(reply, /Present\/complete: 1/i);
+  assert.doesNotMatch(reply, /Saved DTR rows/i);
+  assert.doesNotMatch(reply, /Generated no-record/i);
+  assert.doesNotMatch(reply, /Total hours: 0 min/i);
+  assert.doesNotMatch(reply, /Late: 0 min/i);
   assert.doesNotMatch(reply, /DTR explanation for June 2, 2026/i);
+});
+
+test('DTR assistant regression: detailed range breakdown includes only useful metrics', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'show my detailed DTR breakdown with hours, late, and undertime this week',
+    {
+      date_range: {
+        label: 'this week',
+        startDate: '2026-06-22',
+        endDate: '2026-06-26',
+      },
+      dtr_records: [
+        {
+          attendance_date: '2026-06-22',
+          status: 'present',
+          total_hours: 7.5,
+          late_minutes: 15,
+          undertime_minutes: 30,
+          overtime_minutes: 0,
+        },
+      ],
+      dtr_calendar_days: [],
+    },
+    'dtr_range_summary'
+  );
+
+  assert.match(reply, /Total hours: 7 hr 30 min/i);
+  assert.match(reply, /Late: 15 min/i);
+  assert.match(reply, /Undertime: 30 min/i);
+  assert.doesNotMatch(reply, /Overtime: 0 min/i);
+  assert.doesNotMatch(reply, /Saved DTR rows/i);
+});
+
+test('DTR assistant regression: full-day absence is not reported as undertime', () => {
+  const absentOnly = buildFastEmployeeAssistantReply(
+    'Show me undertime for this month?',
+    {
+      date_range: {
+        label: 'this month',
+        startDate: '2026-06-01',
+        endDate: '2026-06-30',
+      },
+      dtr_records: [
+        {
+          attendance_date: '2026-06-01',
+          status: 'absent',
+          time_in: null,
+          break_out: null,
+          break_in: null,
+          time_out: null,
+          undertime_minutes: 480,
+        },
+      ],
+    },
+    'dtr_undertime_summary'
+  );
+
+  assert.match(absentOnly, /no actual undertime/i);
+  assert.match(absentOnly, /June 1, 2026 is an absent\/no-record day/i);
+  assert.match(absentOnly, /not counted as undertime/i);
+  assert.doesNotMatch(absentOnly, /total 8 hr/i);
+
+  const mixed = buildFastEmployeeAssistantReply(
+    'Show me undertime for this month?',
+    {
+      date_range: {
+        label: 'this month',
+        startDate: '2026-06-01',
+        endDate: '2026-06-30',
+      },
+      dtr_records: [
+        {
+          attendance_date: '2026-06-01',
+          status: 'absent',
+          undertime_minutes: 480,
+        },
+        {
+          attendance_date: '2026-06-03',
+          status: 'present',
+          time_in: '2026-06-03T00:00:00.000Z',
+          time_out: '2026-06-03T08:30:00.000Z',
+          undertime_minutes: 30,
+        },
+      ],
+    },
+    'dtr_undertime_summary'
+  );
+
+  assert.match(mixed, /1 undertime record, total 30 min/i);
+  assert.match(mixed, /June 3, 2026: 30 min/i);
+  assert.match(mixed, /Absent\/no-record days are excluded/i);
+  assert.doesNotMatch(mixed, /June 1, 2026: 8 hr/i);
 });
 
 test('DTR assistant regression: current shift reply is direct and friendly', () => {
@@ -2164,8 +2264,12 @@ test('DTR assistant regression: leave type answers continue the pending filing c
     context,
     sickIntent
   );
-  assert.match(sickReply, /Dili pa limpyo ang filing check/i);
-  assert.match(sickReply, /0\.75 ka adlaw available sick leave/i);
+  assert.match(sickReply, /Dili pa ka maka-file ug 1 ka adlaw nga sick leave/i);
+  assert.match(sickReply, /Available balance: 0\.75 ka adlaw/i);
+  assert.match(sickReply, /Kulang: 0\.25 ka adlaw/i);
+  assert.match(sickReply, /I-adjust ang number of days/i);
+  assert.doesNotMatch(sickReply, /Dili pa limpyo ang filing check/i);
+  assert.doesNotMatch(sickReply, /Final approval gihapon/i);
   assert.doesNotMatch(sickReply, /Leave balance\s+Here are the leave balances/i);
 
   const vacationIntent = assistantServiceTest.resolveIntentFromMemory(
@@ -2183,8 +2287,9 @@ test('DTR assistant regression: leave type answers continue the pending filing c
     context,
     vacationIntent
   );
-  assert.match(vacationReply, /Pwede sa initial filing check/i);
+  assert.match(vacationReply, /Pwede nimo i-file ang 1 ka adlaw nga vacation leave/i);
   assert.match(vacationReply, /10 ka adlaw available vacation leave/i);
+  assert.match(vacationReply, /Pending pa kini hangtod ma-approve/i);
 
   const tagalogMemory = assistantServiceTest.buildNextAssistantMemory(null, {
     intent: 'leave_availability_check',
@@ -2207,7 +2312,8 @@ test('DTR assistant regression: leave type answers continue the pending filing c
     context,
     tagalogIntent
   );
-  assert.match(tagalogReply, /May issue sa filing check/i);
+  assert.match(tagalogReply, /Hindi ka pa makakapag-file ng 1 araw na sick leave/i);
+  assert.match(tagalogReply, /Kulang: 0\.25 araw/i);
   assert.doesNotMatch(tagalogReply, /Dili pa limpyo/i);
 });
 
@@ -2458,8 +2564,9 @@ test('DTR assistant regression: compact follow-ups produce useful answers with r
     leaveIntent
   );
   assert.match(leaveMessage, /pwede ba ko mag file ug sick leave karon/i);
-  assert.match(leaveReply, /0\.75 ka adlaw available sick leave/i);
-  assert.match(leaveReply, /2 ka adlaw imong plano/i);
+  assert.match(leaveReply, /Dili pa ka maka-file ug 2 ka adlaw nga sick leave/i);
+  assert.match(leaveReply, /Available balance: 0\.75 ka adlaw/i);
+  assert.match(leaveReply, /Kulang: 1\.25 ka adlaw/i);
   assert.doesNotMatch(leaveReply, /Here are the leave balances/i);
 
   const dtrMemory = assistantServiceTest.buildNextAssistantMemory(null, {

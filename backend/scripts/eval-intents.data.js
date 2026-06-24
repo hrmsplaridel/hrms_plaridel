@@ -47,6 +47,7 @@ const GOLDEN = [
   ['unsa nga logs ang kulang gahapon', 'dtr_missing_logs', 'bisaya'],
   ['nganong kulang akong pm in', 'dtr_missing_log_reason', 'bisaya'],
   ['paano ayusin missing am in ko', 'dtr_correction_guidance', 'tl'],
+  ['pano ko maayos ang mising pm out', 'dtr_correction_guidance', 'typo'],
 
   // ---- DTR: range summary / counts ------------------------------------------
   ['show my dtr from Monday to Friday', 'dtr_range_summary', 'en'],
