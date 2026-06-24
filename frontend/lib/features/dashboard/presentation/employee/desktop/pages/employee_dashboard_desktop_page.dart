@@ -1129,9 +1129,7 @@ class _BiometricAttendanceCard extends StatelessWidget {
             ? 'Holiday'
             : isComplete
             ? 'Attendance Complete'
-            : record == null
-            ? 'Biometric Attendance'
-            : 'Biometric Attendance';
+            : 'Today\'s Attendance';
         final primaryValue = isHoliday
             ? 'No log required'
             : latestPunch == null
@@ -1140,10 +1138,10 @@ class _BiometricAttendanceCard extends StatelessWidget {
         final statusText = isHoliday
             ? 'No attendance log required for today.'
             : record == null
-            ? 'Waiting for biometric device log.'
+            ? 'Your biometric punches will appear here.'
             : isComplete
-            ? 'All expected punches are recorded.'
-            : 'Biometric log received; remaining punches will appear after device sync.';
+            ? 'Your attendance for today is complete.'
+            : 'Your latest punch has been recorded. Your next punch will appear here automatically.';
 
         final narrow = MediaQuery.sizeOf(context).width < 600;
         final compactLayout = compact || narrow;
@@ -1273,8 +1271,10 @@ class _BiometricAttendanceCard extends StatelessWidget {
                     Expanded(
                       child: Text(
                         isComplete
-                            ? 'Synced from biometric device'
-                            : 'Biometric device records punches',
+                            ? 'Today\'s attendance is complete'
+                            : latestPunch == null
+                            ? 'Use the biometric device to record attendance'
+                            : 'Recorded through the biometric device',
                         style: TextStyle(
                           color: AppTheme.dashTextPrimaryOf(context),
                           fontSize: compactLayout ? 11 : 12,

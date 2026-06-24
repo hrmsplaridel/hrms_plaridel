@@ -31,38 +31,35 @@ class AttendanceOverviewKpiTile extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: _tintBackground(context, accentColor),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: _tintBorder(accentColor), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: accentColor.withValues(alpha: 0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 9),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 16, color: accentColor),
-            const SizedBox(height: 6),
-            Text(
-              '$value',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                height: 1.05,
-                letterSpacing: -0.5,
-                color: AppTheme.dashTextPrimaryOf(context),
-              ),
+            Row(
+              children: [
+                Icon(icon, size: 15, color: accentColor),
+                const Spacer(),
+                Text(
+                  '$value',
+                  style: TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                    letterSpacing: 0,
+                    color: AppTheme.dashTextPrimaryOf(context),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 5),
             Text(
               label,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11,
@@ -136,7 +133,9 @@ class AttendanceOverviewKpiGrid extends StatelessWidget {
             ? 3
             : 2;
         const spacing = 8.0;
-        const ratio = 1.38;
+        final tileHeight = w >= 440 ? 72.0 : 68.0;
+        final tileWidth =
+            (w - (spacing * (crossAxisCount - 1))) / crossAxisCount;
 
         return GridView.count(
           crossAxisCount: crossAxisCount,
@@ -144,7 +143,7 @@ class AttendanceOverviewKpiGrid extends StatelessWidget {
           crossAxisSpacing: spacing,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          childAspectRatio: ratio,
+          childAspectRatio: tileWidth / tileHeight,
           children: tiles
               .map(
                 (t) => AttendanceOverviewKpiTile(

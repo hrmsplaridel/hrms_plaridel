@@ -225,7 +225,7 @@ class _EmployeeAttendanceOverviewCardState
                     undertime: summary.undertime,
                     onLeave: summary.onLeave,
                   ),
-                  SizedBox(height: narrow ? 10 : 12),
+                  SizedBox(height: narrow ? 8 : 10),
                   _DistributionPanel(
                     narrow: narrow,
                     summary: summary,
@@ -453,14 +453,14 @@ class _DistributionPanel extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(
-        narrow ? 12 : 14,
         narrow ? 10 : 12,
-        narrow ? 12 : 14,
+        narrow ? 8 : 10,
         narrow ? 10 : 12,
+        narrow ? 8 : 10,
       ),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
@@ -501,10 +501,10 @@ class _DistributionPanel extends StatelessWidget {
               ).withValues(alpha: 0.78),
             ),
           ),
-          SizedBox(height: narrow ? 8 : 10),
+          SizedBox(height: narrow ? 5 : 6),
           MonthlyCategoryBarChart(
             data: barData,
-            maxBarHeight: narrow ? 82 : 92,
+            maxBarHeight: narrow ? 48 : 54,
           ),
         ],
       ),
