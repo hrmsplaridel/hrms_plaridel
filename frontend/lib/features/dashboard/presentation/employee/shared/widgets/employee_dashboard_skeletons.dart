@@ -144,7 +144,19 @@ class _DistributionPanelSkeleton extends StatelessWidget {
               const _DashBone(width: 72, height: 11, borderRadius: 4),
             ],
           ),
-          SizedBox(height: narrow ? 8 : 10),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 12,
+            runSpacing: 4,
+            children: const [
+              _DashBone(width: 64, height: 16, borderRadius: 3),
+              _DashBone(width: 48, height: 16, borderRadius: 3),
+              _DashBone(width: 58, height: 16, borderRadius: 3),
+              _DashBone(width: 76, height: 16, borderRadius: 3),
+              _DashBone(width: 68, height: 16, borderRadius: 3),
+            ],
+          ),
+          SizedBox(height: narrow ? 6 : 8),
           SizedBox(
             height: narrow ? 48 : 54,
             child: Row(
@@ -156,7 +168,7 @@ class _DistributionPanelSkeleton extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: _DashBone(
                         width: double.infinity,
-                        height: (narrow ? 82 : 92) * h,
+                        height: (narrow ? 48 : 54) * h,
                         borderRadius: 6,
                       ),
                     ),

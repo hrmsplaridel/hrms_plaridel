@@ -431,7 +431,7 @@ class _MonthNavPill extends StatelessWidget {
   }
 }
 
-class _DistributionPanel extends StatelessWidget {
+class _DistributionPanel extends StatefulWidget {
   const _DistributionPanel({
     required this.narrow,
     required this.summary,
@@ -442,21 +442,59 @@ class _DistributionPanel extends StatelessWidget {
   final MonthlyAttendanceSummary summary;
   final List<MonthlyCategoryBarDatum> barData;
 
+  @override
+  State<_DistributionPanel> createState() => _DistributionPanelState();
+}
+
+class _DistributionPanelState extends State<_DistributionPanel> {
+  late Set<String> _visibleLabels;
+
+  @override
+  void initState() {
+    super.initState();
+    _visibleLabels = widget.barData.map((item) => item.label).toSet();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DistributionPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final availableLabels = widget.barData.map((item) => item.label).toSet();
+    _visibleLabels = _visibleLabels.intersection(availableLabels);
+    if (_visibleLabels.isEmpty) {
+      _visibleLabels = availableLabels;
+    }
+  }
+
+  void _setCategoryVisible(String label, bool visible) {
+    if (!visible && _visibleLabels.length == 1) return;
+    setState(() {
+      if (visible) {
+        _visibleLabels.add(label);
+      } else {
+        _visibleLabels.remove(label);
+      }
+    });
+  }
+
   String _throughLine() {
-    final d = summary.lastStatsDay;
+    final d = widget.summary.lastStatsDay;
     final m = kAttendanceOverviewMonthNames[d.month - 1];
     return 'Data through $m ${d.day}, ${d.year}';
   }
 
   @override
   Widget build(BuildContext context) {
+    final visibleData = widget.barData
+        .where((item) => _visibleLabels.contains(item.label))
+        .toList();
+
     return Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(
-        narrow ? 10 : 12,
-        narrow ? 8 : 10,
-        narrow ? 10 : 12,
-        narrow ? 8 : 10,
+        widget.narrow ? 10 : 12,
+        widget.narrow ? 8 : 10,
+        widget.narrow ? 10 : 12,
+        widget.narrow ? 8 : 10,
       ),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.72),
@@ -474,13 +512,13 @@ class _DistributionPanel extends StatelessWidget {
                 'Distribution',
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
-                  fontSize: narrow ? 12.5 : 13,
+                  fontSize: widget.narrow ? 12.5 : 13,
                   color: AppTheme.dashTextPrimaryOf(context),
                 ),
               ),
               const Spacer(),
               Text(
-                '${summary.totalCategorized} days',
+                '${widget.summary.totalCategorized} days',
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600,
@@ -501,10 +539,62 @@ class _DistributionPanel extends StatelessWidget {
               ).withValues(alpha: 0.78),
             ),
           ),
-          SizedBox(height: narrow ? 5 : 6),
+          SizedBox(height: widget.narrow ? 6 : 8),
+          Wrap(
+            spacing: 12,
+            runSpacing: 4,
+            children: widget.barData.map((item) {
+              final selected = _visibleLabels.contains(item.label);
+              return InkWell(
+                onTap: () => _setCategoryVisible(item.label, !selected),
+                borderRadius: BorderRadius.circular(4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: Checkbox(
+                        value: selected,
+                        onChanged: (value) =>
+                            _setCategoryVisible(item.label, value ?? false),
+                        activeColor: item.color,
+                        checkColor: Colors.white,
+                        side: BorderSide(
+                          color: selected
+                              ? item.color
+                              : AppTheme.dashTextSecondaryOf(
+                                  context,
+                                ).withValues(alpha: 0.65),
+                          width: 1.2,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      item.label,
+                      style: TextStyle(
+                        color: selected
+                            ? AppTheme.dashTextPrimaryOf(context)
+                            : AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+          SizedBox(height: widget.narrow ? 6 : 8),
           MonthlyCategoryBarChart(
-            data: barData,
-            maxBarHeight: narrow ? 48 : 54,
+            data: visibleData,
+            maxBarHeight: widget.narrow ? 48 : 54,
           ),
         ],
       ),
