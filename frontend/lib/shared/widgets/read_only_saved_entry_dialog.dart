@@ -27,6 +27,7 @@ void showReadOnlySavedEntryDialog(
     'Provide previewBuilder or non-empty sections',
   );
 
+  final scrollController = ScrollController();
   showDialog<void>(
     context: context,
     barrierDismissible: true,
@@ -149,9 +150,11 @@ void showReadOnlySavedEntryDialog(
               ),
               Expanded(
                 child: Scrollbar(
+                  controller: scrollController,
                   thumbVisibility: true,
                   radius: const Radius.circular(4),
                   child: SingleChildScrollView(
+                    controller: scrollController,
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
                     child: Align(
                       alignment: Alignment.topCenter,
@@ -263,7 +266,7 @@ void showReadOnlySavedEntryDialog(
         ),
       );
     },
-  );
+  ).whenComplete(scrollController.dispose);
 }
 
 IconData _iconForSavedFormTitle(String title) {

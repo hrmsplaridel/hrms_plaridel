@@ -42,6 +42,7 @@ class AdminLocatorManagementScreen extends StatefulWidget {
 class _AdminLocatorManagementScreenState
     extends State<AdminLocatorManagementScreen> {
   static const int _rowsPerPage = 10;
+  final ScrollController _adminListScrollController = ScrollController();
 
   _LocatorAdminQueue _queue = _LocatorAdminQueue.all;
   LocatorRequestType? _requestTypeFilter;
@@ -82,6 +83,7 @@ class _AdminLocatorManagementScreenState
   @override
   void dispose() {
     _locatorRealtimeSub?.cancel();
+    _adminListScrollController.dispose();
     super.dispose();
   }
 
@@ -336,8 +338,10 @@ class _AdminLocatorManagementScreenState
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxHeight),
           child: Scrollbar(
+            controller: _adminListScrollController,
             thumbVisibility: true,
             child: SingleChildScrollView(
+              controller: _adminListScrollController,
               primary: false,
               physics: const BouncingScrollPhysics(
                 parent: AlwaysScrollableScrollPhysics(),
