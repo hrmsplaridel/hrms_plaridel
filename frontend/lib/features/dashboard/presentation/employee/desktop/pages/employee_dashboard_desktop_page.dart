@@ -242,17 +242,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     showLeaveFormSuccessSnackBar(context, result);
   }
 
-  void _openDtrAssistant() {
+  void _openHrmsAssistant() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const EmployeeDtrAssistantPage()),
     );
   }
 
-  bool get _showDtrAssistantFab =>
-      _selectedNavIndex == 0 ||
-      _selectedNavIndex == 1 ||
-      _selectedNavIndex == 2 ||
-      _selectedNavIndex == 3;
+  bool get _showHrmsAssistantFab =>
+      _selectedNavIndex >= 0 && _selectedNavIndex < _navItems.length;
 
   Widget _buildEmployeeLeaveRequestForm() {
     return LeaveRequestFormScreen(
@@ -369,7 +366,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         onNotificationTap: _applyNotificationTapResult,
         onFileLeave: _openEmployeeLeaveRequestForm,
         onFileLocator: _openEmployeeLocatorRequestForm,
-        onDtrAssistant: _openDtrAssistant,
+        onHrmsAssistant: _openHrmsAssistant,
       );
     }
 
@@ -450,9 +447,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
               ],
             ),
           ),
-          if (_showDtrAssistantFab)
+          if (_showHrmsAssistantFab)
             DraggableDtrAssistantLauncher(
-              onPressed: _openDtrAssistant,
+              onPressed: _openHrmsAssistant,
               initialRight: 24,
               initialBottom: 24,
             ),

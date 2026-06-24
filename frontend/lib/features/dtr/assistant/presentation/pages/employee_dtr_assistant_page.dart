@@ -43,7 +43,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     DtrAssistantMessage(
       role: 'assistant',
       content:
-          'Hi. Ask me about your DTR, leave requests, leave balances, or locator slips.',
+          'Hi. I am your HRMS Assistant. Ask me about your DTR, leave requests, leave balances, or locator slips.',
       createdAt: DateTime.now(),
     ),
   ];
@@ -542,7 +542,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
-        title: const Text('DTR Assistant'),
+        title: const Text('HRMS Assistant'),
         backgroundColor: AppTheme.dashPanelOf(context),
         foregroundColor: AppTheme.dashTextPrimaryOf(context),
         elevation: dark ? 0 : 1,
@@ -813,7 +813,7 @@ class _AssistantHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'DTR Assistant',
+                  'HRMS Assistant',
                   style: TextStyle(
                     color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: 18,
@@ -824,7 +824,7 @@ class _AssistantHeader extends StatelessWidget {
                 Text(
                   sending
                       ? 'Checking your records...'
-                      : 'Answers use your DTR, leave, and locator records.',
+                      : 'Answers use your HRMS records, including DTR, leave, and locator.',
                   style: TextStyle(
                     color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 13,

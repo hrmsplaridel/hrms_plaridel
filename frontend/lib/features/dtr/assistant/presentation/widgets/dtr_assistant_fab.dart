@@ -295,7 +295,7 @@ class _AssistantGreetingBubble extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           child: Text(
-            'Hi, need help with DTR?',
+            'Hi, need help with HRMS?',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(
@@ -331,7 +331,7 @@ class DtrAssistantFab extends StatelessWidget {
     );
 
     return Tooltip(
-      message: 'Ask DTR Assistant',
+      message: 'Ask HRMS Assistant',
       child: SizedBox(
         width: size,
         height: size,
