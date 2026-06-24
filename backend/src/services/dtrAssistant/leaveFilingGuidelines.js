@@ -391,6 +391,8 @@ const LEAVE_FORM_FIELDS = {
       'location field',
       'location details',
       'specify location',
+      'location sa leave form',
+      'location ng leave form',
       'sample location',
       'example location',
       'destination field',
@@ -541,6 +543,9 @@ const LEAVE_FORM_FIELDS = {
       'attachment',
       'attachment field',
       'attachment to upload',
+      'file to attach',
+      'file i attach',
+      'i attach',
       'upload field',
       'upload',
       'supporting attachment',
@@ -664,7 +669,7 @@ function isLeaveFormFieldHelpQuestion(message) {
   ) {
     return true;
   }
-  return /\b(field|form|input|example|sample|put|enter|write|select|choose|fill|upload|meaning|mean|confused|help|ibutang|ilalagay|sagutan)\b/i.test(
+  return /\b(field|form|input|example|sample|put|enter|write|select|choose|fill|upload|attach|meaning|mean|confused|help|ibutang|ilalagay|sagutan)\b/i.test(
     text
   );
 }

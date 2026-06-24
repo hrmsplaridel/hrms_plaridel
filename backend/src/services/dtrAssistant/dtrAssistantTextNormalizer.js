@@ -1,5 +1,8 @@
 const PHRASE_REPLACEMENTS = [
   [/\bwat\b/gi, 'what'],
+  [/\bpano\b/gi, 'paano'],
+  [/\bmg\s+file\b/gi, 'mag file'],
+  [/\bpg\s+(?=file|fill|correct|korek)/gi, 'pag '],
   [/\bmed\s*cert\b/gi, 'medical certificate'],
   [/\bmedical\s*cert\b/gi, 'medical certificate'],
   [/\bna\s+approve\b/gi, 'na-approve'],
@@ -118,16 +121,21 @@ const TOKEN_REPLACEMENTS = {
   pasok: 'pasok',
   busines: 'business',
   bakt: 'bakit',
+  cn: 'can',
   corect: 'correct',
   curent: 'current',
   gahapn: 'gahapon',
   kahapn: 'kahapon',
+  korek: 'correct',
   lte: 'late',
+  mising: 'missing',
   mnth: 'month',
   shft: 'shift',
   statos: 'status',
+  tipes: 'types',
   wek: 'week',
   nganong: 'ngano',
+  fil: 'file',
 };
 
 const FUZZY_WORDS = [

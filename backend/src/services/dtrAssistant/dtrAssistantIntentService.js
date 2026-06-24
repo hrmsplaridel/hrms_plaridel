@@ -18,7 +18,7 @@ function isLeaveHowToFileQuestion(text) {
   ) {
     return false;
   }
-  return /\b(how can i file|how do i file|how to file|how can i apply|how do i apply|how to apply|steps? to file|procedure.*file|guide.*file|paano.*file|paano.*apply|unsaon.*file|unsaon.*apply|paunsa.*file|pag file|pag-file)\b/.test(
+  return /\b(how can i file|how do i file|how to file|how do i make.*(?:leave|request)|how can i make.*(?:leave|request)|how can i apply|how do i apply|how to apply|steps? to file|procedure.*file|guide.*file|paano.*file|paano.*apply|unsaon.*file|unsaon.*apply|paunsa.*(?:file|leave|request)|pag file|pag-file)\b/.test(
     text
   );
 }
@@ -541,6 +541,7 @@ function shouldAllowFuzzyOverride(ruleIntent, fuzzyIntent, message) {
     'locator_rejection_reason',
     'locator_availability_check',
     'latest_locator_request',
+    'locator_summary',
   ]);
   if (protectedRuleIntents.has(ruleIntent)) return false;
 
@@ -690,7 +691,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
       return 'locator_summary';
     }
     if (
-      /\b(what (?:do|should|can) i (?:put|enter|write|select|type)|what to (?:put|enter|write|select|type)|where (?:do|should|can) i (?:put|enter|write|select|type)|how (?:do|can|should) i fill|sample|example|example input|required fields?|fields? required|destination field|location field|reason field)\b/.test(
+      /\b(what (?:do|should|can) i (?:put|enter|write|select|type)|what to (?:put|enter|write|select|type)|where (?:do|should|can) i (?:put|enter|write|select|type)|how (?:do|can|should) i fill|unsa.*ibutang|unsay.*ibutang|ano.*ilalagay|sample|example|example input|required fields?|fields? required|destination field|location field|reason field)\b/.test(
         text
       )
     ) {
@@ -732,6 +733,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     }
     if (
       /\b(summary|summarize|summarise|overview|recap|total|count|counts|pila|kabuok|ilan|how many|history|list|show|records|requests|rejected|approved|accepted|pending|cancelled|canceled|this month|this week|month|week|bulan|bulana|semana|semanaha)\b/.test(text)
+      && !/\bstatus\b/.test(text)
     ) {
       return 'locator_summary';
     }
@@ -835,9 +837,9 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(covered|cover|covers|covering|why|ngano|bakit|on leave)\b/.test(text) &&
+    /\b(covered|cover|covers|covering|sakop|why|ngano|bakit|on leave)\b/.test(text) &&
     /\b(leave|vl|sl)\b/.test(text) &&
-    /\b(dtr|attendance|absent|missing|incomplete|on leave|date)\b/.test(text)
+    /\b(dtr|attendance|absent|absence|missing|incomplete|on leave|date)\b/.test(text)
   ) {
     return 'dtr_leave_coverage_check';
   }
@@ -1029,7 +1031,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(timeline|who approved|who reviewed|kinsa.*approve|kinsa.*review|approval history|review history|action history)\b/.test(
+    /\b(timeline|who approved|who reviewed|kinsa.*approve|kinsa.*review|sino.*approve|sino.*review|approval history|review history|action history)\b/.test(
       text
     ) &&
     /\b(leave|request|approval|approved|review|timeline)\b/.test(text)
@@ -1058,7 +1060,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(why|ngano|bakit).*\b(reject(?:ed)?|return(?:ed)?|declin(?:ed)?|deni(?:ed)?)\b/.test(
+    /\b(why|ngano|bakit).*\b(reject(?:ed)?|return(?:ed)?|declin(?:ed)?|deni(?:ed)?|gibalik|binalik)\b/.test(
       text
     ) &&
     /\b(leave|request)\b/.test(text)
@@ -1252,6 +1254,14 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
+    /\b(unsa|unsay|ano|what|which).*\b(mga\s+)?leave\b.*\b(pwede|puwede|can|available|options?|types?|file)\b/.test(
+      text
+    )
+  ) {
+    return 'leave_types';
+  }
+
+  if (
     /\b(enough|sapat|kaya|pwede|can i file|can file|can i submit|can submit|submit.*leave|file.*leave|leave.*file|available.*for)\b/.test(
       text
     ) &&
@@ -1278,7 +1288,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(leave request|latest leave|last leave|leave status|status.*leave|ano status.*leave|na-approve.*leave|approved na ba.*leave)\b/.test(
+    /\b(latest leave|last leave|leave status|status.*leave|ano status.*leave|na-approve.*leave|approved na ba.*leave)\b/.test(
       text
     )
   ) {

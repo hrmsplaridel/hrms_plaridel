@@ -7,6 +7,8 @@ const {
 } = require('../src/services/dtrAssistant/dtrAssistantIntentService');
 const {
   buildFastEmployeeAssistantReply,
+  requestedLeaveType,
+  requestedLocatorType,
 } = require('../src/services/dtrAssistant/dtrAssistantFastReply');
 const {
   dtrExportRows,
@@ -1559,6 +1561,49 @@ test('DTR assistant regression: direct open commands generate auto navigation ac
   assert.equal(question, null);
 });
 
+test('DTR assistant regression: generic leave filing asks show steps instead of arbitrary leave types', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'how can i file a leave?',
+    {
+      leave_types: [
+        {
+          name: 'tenDayVawcLeave',
+          display_name: '10-Day VAWC Leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'adoptionLeave',
+          display_name: 'Adoption Leave',
+          employee_can_file: true,
+        },
+        {
+          name: 'mandatoryForcedLeave',
+          display_name: 'Mandatory/Forced Leave',
+          employee_can_file: true,
+        },
+      ],
+    },
+    'leave_form_guidance'
+  );
+
+  assert.match(reply, /How to file a leave request/i);
+  assert.match(reply, /Open My Leave and select File Leave Request/i);
+  assert.match(reply, /Choose the leave type that matches your purpose/i);
+  assert.match(reply, /not automatically approved/i);
+  assert.doesNotMatch(reply, /10-Day VAWC Leave:/i);
+  assert.doesNotMatch(reply, /Adoption Leave:/i);
+  assert.doesNotMatch(reply, /Mandatory\/Forced Leave:/i);
+
+  const tagalog = buildFastEmployeeAssistantReply(
+    'paano mag-file ng leave?',
+    {},
+    'leave_form_guidance'
+  );
+  assert.match(tagalog, /Paano mag-file ng leave/i);
+  assert.match(tagalog, /Buksan ang My Leave/i);
+  assert.match(tagalog, /Hindi pa awtomatikong approved/i);
+});
+
 test('DTR assistant regression: adversarial typo and overlapping phrases route safely', () => {
   const cases = [
     ['wat is my curent shft', 'dtr_schedule_context'],
@@ -1723,4 +1768,753 @@ test('DTR assistant regression: workflow and form-help answers are direct and fr
   assert.match(gracePeriod, /scheduled start plus the grace period/i);
   assert.match(gracePeriod, /Configured grace period: 5 min/i);
   assert.doesNotMatch(gracePeriod, /DTR Export and Review/i);
+});
+
+test('DTR assistant regression: broader typo-heavy multilingual prompts stay understood', () => {
+  const cases = [
+    ['unsaon nako pag file ug leave', 'leave_form_guidance'],
+    ['unsaon pg file og leev', 'leave_form_guidance'],
+    ['paunsa ko mag leave request', 'leave_form_guidance'],
+    ['pano mg file ng leev', 'leave_form_guidance'],
+    ['how do i make a leave request', 'leave_form_guidance'],
+    ['how cn i fil a leav', 'leave_form_guidance'],
+    ['unsa nga file akong i attach sa maternity leave', 'leave_form_field_help'],
+    ['unsaon pag fill sa location sa leave form', 'leave_form_field_help'],
+    ['nganong gibalik akong leave request', 'leave_rejection_reason'],
+    ['unsa nga mga leave akong pwede ma file', 'leave_types'],
+    ['sakop ba sa leave akong absence gahapon', 'dtr_leave_coverage_check'],
+    ['unsa akong ibutang sa destination sa locator', 'locator_requirements'],
+    ['ano ilalagay sa destination ng locator', 'locator_requirements'],
+    ['pila akong approved locator this month', 'locator_summary'],
+    ['sino nag review ng leave request ko', 'leave_approval_history'],
+    ['unsaon pg korek sa mising log', 'dtr_correction_guidance'],
+    ['wat leev tipes can i fil', 'leave_types'],
+    ['hw can i fil locatr tomorow', 'locator_availability_check'],
+  ];
+
+  for (const [message, expected] of cases) {
+    const scored = scoreEmployeeAssistantIntent(message);
+    assert.equal(scored.intent, expected, message);
+    assert.ok(scored.confidence >= 0.62, `${message}: ${scored.confidence}`);
+  }
+});
+
+test('DTR assistant regression: Bisaya and Tagalog prompts keep the answer language', () => {
+  const genericLeaveBisaya = buildFastEmployeeAssistantReply(
+    'unsaon nako pag file ug leave',
+    {},
+    'leave_form_guidance'
+  );
+  assert.match(genericLeaveBisaya, /Unsaon pag-file ug leave/i);
+  assert.match(genericLeaveBisaya, /Ablihi ang My Leave/i);
+  assert.doesNotMatch(genericLeaveBisaya, /How to file a leave request/i);
+
+  const genericLeaveTagalog = buildFastEmployeeAssistantReply(
+    'pano mag file ng leave',
+    {},
+    'leave_form_guidance'
+  );
+  assert.match(genericLeaveTagalog, /Paano mag-file ng leave/i);
+  assert.match(genericLeaveTagalog, /Buksan ang My Leave/i);
+  assert.doesNotMatch(genericLeaveTagalog, /Open My Leave and select/i);
+
+  const dtrContext = {
+    date_range: {
+      label: 'yesterday',
+      startDate: '2026-06-23',
+      endDate: '2026-06-23',
+    },
+    dtr_records: [
+      {
+        attendance_date: '2026-06-23',
+        status: 'absent',
+        am_in: null,
+        am_out: null,
+        pm_in: null,
+        pm_out: null,
+      },
+    ],
+    calendar_days: [],
+  };
+  const correctionBisaya = buildFastEmployeeAssistantReply(
+    'unsaon nako pag correct sa missing am out',
+    dtrContext,
+    'dtr_correction_guidance'
+  );
+  assert.match(correctionBisaya, /Unsaon pag-correct sa DTR issue/i);
+  assert.match(correctionBisaya, /Kung missed punch kini/i);
+  assert.doesNotMatch(correctionBisaya, /If this was a missed punch/i);
+
+  const correctionTagalog = buildFastEmployeeAssistantReply(
+    'paano ayusin ang missing pm out',
+    dtrContext,
+    'dtr_correction_guidance'
+  );
+  assert.match(correctionTagalog, /Paano ayusin ang DTR issue/i);
+  assert.match(correctionTagalog, /Kung missed punch ito/i);
+  assert.doesNotMatch(correctionTagalog, /How to fix this DTR issue/i);
+
+  const noScheduleBisaya = buildFastEmployeeAssistantReply(
+    'unsa akong sched ugma',
+    { calendar_days: [] },
+    'dtr_schedule_context'
+  );
+  assert.match(noScheduleBisaya, /Wala koy nakitang assigned shift schedule/i);
+  assert.doesNotMatch(noScheduleBisaya, /I found no assignment/i);
+
+  const leaveTrackerBisaya = buildFastEmployeeAssistantReply(
+    'asa na akong leave request',
+    {
+      recent_leave_requests: [
+        {
+          leave_type: 'Vacation Leave',
+          start_date: '2026-06-27',
+          end_date: '2026-06-27',
+          days: 1,
+          status: 'pending_hr',
+        },
+      ],
+    },
+    'leave_approval_tracker'
+  );
+  assert.match(leaveTrackerBisaya, /kay naghulat sa final HR review/i);
+  assert.doesNotMatch(leaveTrackerBisaya, /currently waiting/i);
+
+  const locatorContext = {
+    locator_types: [
+      {
+        code: 'work_from_home',
+        label: 'Work From Home',
+        employee_can_file: true,
+        requires_attachment: false,
+        coverage_mode: 'wfh',
+      },
+    ],
+    recent_locator_slips: [
+      {
+        slip_date: '2026-06-20',
+        status: 'pending_hr',
+        request_type: 'work_from_home',
+        request_type_label: 'Work From Home',
+        office: 'Home - Plaridel',
+      },
+    ],
+  };
+  const locatorTypesBisaya = buildFastEmployeeAssistantReply(
+    'unsa nga locator types ang pwede',
+    locatorContext,
+    'locator_types'
+  );
+  assert.match(locatorTypesBisaya, /Locator types nga pwede nimo ma-file/i);
+  assert.match(locatorTypesBisaya, /Kinahanglan gihapon ang slip date/i);
+  assert.doesNotMatch(locatorTypesBisaya, /You still need/i);
+
+  const locatorTrackerBisaya = buildFastEmployeeAssistantReply(
+    'asa na akong wfh request',
+    locatorContext,
+    'locator_approval_tracker'
+  );
+  assert.match(locatorTrackerBisaya, /Pagsubay sa locator approval/i);
+  assert.match(locatorTrackerBisaya, /naghulat sa HR review/i);
+  assert.doesNotMatch(locatorTrackerBisaya, /waiting for HR review/i);
+});
+
+test('DTR assistant regression: memory preserves intent, entity, date, language, and topic boundaries', () => {
+  const makeMemory = (intent, text, extra = {}) =>
+    assistantServiceTest.buildNextAssistantMemory(null, {
+      intent,
+      text,
+      dateRange: extra.dateRange || null,
+      leaveType: extra.leaveType || null,
+      locatorType: extra.locatorType || null,
+      modelProfile: 'tools_ollama',
+    });
+
+  const genericLeave = makeMemory(
+    'leave_form_guidance',
+    'how can i file a leave?'
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'how about sick leave?',
+      genericLeave
+    ),
+    'leave_form_guidance'
+  );
+
+  const balanceMemory = makeMemory(
+    'leave_balance',
+    'pila akong sick leave balance?',
+    { leaveType: 'sick' }
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'how about vacation leave?',
+      balanceMemory
+    ),
+    'leave_balance'
+  );
+  assert.doesNotMatch(
+    assistantServiceTest.enrichMessageWithMemory(
+      'how about vacation leave?',
+      balanceMemory,
+      'leave_balance'
+    ),
+    /sick leave/i
+  );
+
+  const absenceMemory = makeMemory(
+    'dtr_absent_summary',
+    'pila akong absent this month?',
+    {
+      dateRange: {
+        label: 'this month',
+        startDate: '2026-06-01',
+        endDate: '2026-06-30',
+      },
+    }
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'last month?',
+      absenceMemory
+    ),
+    'dtr_absent_summary'
+  );
+
+  const lateMemory = makeMemory(
+    'dtr_late_summary',
+    'pila akong late this month?',
+    {
+      dateRange: {
+        label: 'this month',
+        startDate: '2026-06-01',
+        endDate: '2026-06-30',
+      },
+    }
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'how about last week?',
+      lateMemory
+    ),
+    'dtr_late_summary'
+  );
+
+  const scheduleMemory = makeMemory(
+    'dtr_schedule_context',
+    'what is my shift tomorrow?',
+    {
+      dateRange: {
+        label: 'tomorrow',
+        startDate: '2026-06-25',
+        endDate: '2026-06-25',
+      },
+    }
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'what about next day?',
+      scheduleMemory
+    ),
+    'dtr_schedule_context'
+  );
+  assert.match(
+    assistantServiceTest.enrichMessageWithMemory(
+      'what about next day?',
+      scheduleMemory,
+      'dtr_schedule_context'
+    ),
+    /2026-06-26/
+  );
+
+  const locatorMemory = makeMemory('locator_types', 'unsa ang wfh?', {
+    locatorType: 'work_from_home',
+  });
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'pwede ugma?',
+      locatorMemory
+    ),
+    'locator_availability_check'
+  );
+  assert.match(
+    assistantServiceTest.enrichMessageWithMemory(
+      'pwede ugma?',
+      locatorMemory,
+      'locator_availability_check'
+    ),
+    /work from home/i
+  );
+
+  const rejectionMemory = makeMemory(
+    'leave_rejection_reason',
+    'nganong gibalik akong leave request?'
+  );
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'unsa ang remarks?',
+      rejectionMemory
+    ),
+    'leave_rejection_reason'
+  );
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'bisayaa daw na',
+      genericLeave
+    ),
+    'leave_form_guidance'
+  );
+  assert.match(
+    assistantServiceTest.enrichMessageWithMemory(
+      'bisayaa daw na',
+      genericLeave,
+      'leave_form_guidance'
+    ),
+    /how can i file a leave.*bisayaa daw na/i
+  );
+
+  assert.equal(
+    assistantServiceTest.resolveIntentFromMemory(
+      'show my locator status',
+      balanceMemory
+    ),
+    null
+  );
+  assert.equal(
+    detectEmployeeAssistantIntent('show my locator status'),
+    'locator_status'
+  );
+});
+
+test('DTR assistant regression: leave type answers continue the pending filing check', () => {
+  const context = {
+    date_range: {
+      label: 'today',
+      startDate: '2026-06-24',
+      endDate: '2026-06-24',
+    },
+    leave_types: [
+      {
+        name: 'sickLeave',
+        display_name: 'Sick Leave',
+        employee_can_file: true,
+        requires_attachment: false,
+      },
+      {
+        name: 'vacationLeave',
+        display_name: 'Vacation Leave',
+        employee_can_file: true,
+        requires_attachment: false,
+      },
+    ],
+    leave_balances: [
+      {
+        leave_type: 'sickLeave',
+        available_days: 0.75,
+        remaining_days: 0.75,
+        pending_days: 0,
+      },
+      {
+        leave_type: 'vacationLeave',
+        available_days: 10,
+        remaining_days: 10,
+        pending_days: 0,
+      },
+    ],
+    recent_leave_requests: [],
+  };
+
+  const firstMessage = 'pwede bako maka file ug leave karon?';
+  const firstReply = buildFastEmployeeAssistantReply(
+    firstMessage,
+    context,
+    'leave_availability_check'
+  );
+  assert.match(firstReply, /Unsang leave type ang imong gamiton/i);
+
+  const memory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_availability_check',
+    text: firstMessage,
+    dateRange: context.date_range,
+    leaveType: null,
+    modelProfile: 'tools_ollama',
+  });
+
+  const sickIntent = assistantServiceTest.resolveIntentFromMemory(
+    'sick leave',
+    memory
+  );
+  assert.equal(sickIntent, 'leave_availability_check');
+
+  const sickMessage = assistantServiceTest.enrichMessageWithMemory(
+    'sick leave',
+    memory,
+    sickIntent
+  );
+  assert.match(sickMessage, /pwede bako maka file ug leave karon/i);
+  assert.equal(
+    detectEmployeeAssistantIntent(sickMessage),
+    'leave_availability_check'
+  );
+
+  const sickReply = buildFastEmployeeAssistantReply(
+    sickMessage,
+    context,
+    sickIntent
+  );
+  assert.match(sickReply, /Dili pa limpyo ang filing check/i);
+  assert.match(sickReply, /0\.75 ka adlaw available sick leave/i);
+  assert.doesNotMatch(sickReply, /Leave balance\s+Here are the leave balances/i);
+
+  const vacationIntent = assistantServiceTest.resolveIntentFromMemory(
+    'vacation leave',
+    memory
+  );
+  assert.equal(vacationIntent, 'leave_availability_check');
+  const vacationMessage = assistantServiceTest.enrichMessageWithMemory(
+    'vacation leave',
+    memory,
+    vacationIntent
+  );
+  const vacationReply = buildFastEmployeeAssistantReply(
+    vacationMessage,
+    context,
+    vacationIntent
+  );
+  assert.match(vacationReply, /Pwede sa initial filing check/i);
+  assert.match(vacationReply, /10 ka adlaw available vacation leave/i);
+
+  const tagalogMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_availability_check',
+    text: 'pwede ba ako mag file ng leave ngayon?',
+    dateRange: context.date_range,
+    leaveType: null,
+    modelProfile: 'tools_ollama',
+  });
+  const tagalogIntent = assistantServiceTest.resolveIntentFromMemory(
+    'sick leave',
+    tagalogMemory
+  );
+  const tagalogMessage = assistantServiceTest.enrichMessageWithMemory(
+    'sick leave',
+    tagalogMemory,
+    tagalogIntent
+  );
+  const tagalogReply = buildFastEmployeeAssistantReply(
+    tagalogMessage,
+    context,
+    tagalogIntent
+  );
+  assert.match(tagalogReply, /May issue sa filing check/i);
+  assert.doesNotMatch(tagalogReply, /Dili pa limpyo/i);
+});
+
+test('DTR assistant regression: compact follow-ups preserve intent across longer conversations', () => {
+  const conversations = [
+    {
+      name: 'leave availability details',
+      initial: {
+        intent: 'leave_availability_check',
+        text: 'can i file sick leave?',
+        leaveType: 'sick',
+      },
+      turns: [
+        ['2 days', 'leave_availability_check'],
+        ['make it 3 days', 'leave_availability_check'],
+        ['vacation leave instead', 'leave_availability_check'],
+        ['tomorrow', 'leave_availability_check'],
+      ],
+    },
+    {
+      name: 'leave availability asks for type',
+      initial: {
+        intent: 'leave_availability_check',
+        text: 'pwede ba ko mag file ug leave karon?',
+        dateRange: {
+          label: 'today',
+          startDate: '2026-06-24',
+          endDate: '2026-06-24',
+        },
+      },
+      turns: [
+        ['sick leave', 'leave_availability_check'],
+        ['2 days', 'leave_availability_check'],
+        ['vacation leave nalang', 'leave_availability_check'],
+        ['ugma nalang', 'leave_availability_check'],
+      ],
+    },
+    {
+      name: 'leave requirements',
+      initial: {
+        intent: 'leave_requirements',
+        text: 'what are the requirements?',
+      },
+      turns: [
+        ['maternity leave', 'leave_requirements'],
+        ['how about paternity leave?', 'leave_requirements'],
+        ['bisayaa daw', 'leave_requirements'],
+      ],
+    },
+    {
+      name: 'leave attachment',
+      initial: {
+        intent: 'leave_attachment_requirement',
+        text: 'what attachment do i need?',
+      },
+      turns: [
+        ['sick leave', 'leave_attachment_requirement'],
+        ['for 5 days', 'leave_attachment_requirement'],
+        ['how about maternity leave?', 'leave_attachment_requirement'],
+      ],
+    },
+    {
+      name: 'leave guideline',
+      initial: {
+        intent: 'leave_guideline_section',
+        text: 'explain the leave types',
+      },
+      turns: [
+        ['sick leave', 'leave_guideline_section'],
+        ['how about vacation leave?', 'leave_guideline_section'],
+        ['bisayaa daw', 'leave_guideline_section'],
+      ],
+    },
+    {
+      name: 'leave field help',
+      initial: {
+        intent: 'leave_form_field_help',
+        text: 'what do i put in the leave form?',
+      },
+      turns: [
+        ['reason field', 'leave_form_field_help'],
+        ['for sick leave', 'leave_form_field_help'],
+        ['another example', 'leave_form_field_help'],
+      ],
+    },
+    {
+      name: 'DTR status explanation',
+      initial: {
+        intent: 'dtr_status_explanation',
+        text: 'what is my dtr status today?',
+        dateRange: {
+          label: 'today',
+          startDate: '2026-06-24',
+          endDate: '2026-06-24',
+        },
+      },
+      turns: [
+        ['yesterday', 'dtr_status_explanation'],
+        ['how about monday?', 'dtr_status_explanation'],
+        ['why?', 'dtr_status_explanation'],
+        ['bisayaa daw', 'dtr_status_explanation'],
+      ],
+    },
+    {
+      name: 'DTR range and metric switches',
+      initial: {
+        intent: 'dtr_absent_summary',
+        text: 'how many absences this month?',
+        dateRange: {
+          label: 'this month',
+          startDate: '2026-06-01',
+          endDate: '2026-06-30',
+        },
+      },
+      turns: [
+        ['last month', 'dtr_absent_summary'],
+        ['how about late?', 'dtr_late_summary'],
+        ['this month', 'dtr_late_summary'],
+        ['and undertime?', 'dtr_undertime_summary'],
+      ],
+    },
+    {
+      name: 'locator availability details',
+      initial: {
+        intent: 'locator_availability_check',
+        text: 'can i file a locator tomorrow?',
+        dateRange: {
+          label: 'tomorrow',
+          startDate: '2026-06-25',
+          endDate: '2026-06-25',
+        },
+      },
+      turns: [
+        ['wfh', 'locator_availability_check'],
+        ['pm out only', 'locator_availability_check'],
+        ['make it friday', 'locator_availability_check'],
+        ['official business instead', 'locator_availability_check'],
+      ],
+    },
+    {
+      name: 'locator requirements',
+      initial: {
+        intent: 'locator_requirements',
+        text: 'what are locator requirements?',
+      },
+      turns: [
+        ['wfh', 'locator_requirements'],
+        ['what about attachment?', 'locator_requirements'],
+        ['bisayaa daw', 'locator_requirements'],
+      ],
+    },
+    {
+      name: 'locator status and reviewer',
+      initial: {
+        intent: 'locator_status',
+        text: 'what is my locator status?',
+      },
+      turns: [
+        ['wfh', 'locator_status'],
+        ['who is reviewing it?', 'locator_approval_tracker'],
+        ['what are the remarks?', 'locator_approval_tracker'],
+        ['show all this month', 'locator_summary'],
+      ],
+    },
+  ];
+
+  let checkedTurns = 0;
+  for (const conversation of conversations) {
+    let memory = assistantServiceTest.buildNextAssistantMemory(null, {
+      ...conversation.initial,
+      modelProfile: 'tools_ollama',
+    });
+
+    for (const [message, expectedIntent] of conversation.turns) {
+      const intent = assistantServiceTest.resolveIntentFromMemory(
+        message,
+        memory
+      );
+      assert.equal(
+        intent,
+        expectedIntent,
+        `${conversation.name}: ${message}`
+      );
+
+      const enriched = assistantServiceTest.enrichMessageWithMemory(
+        message,
+        memory,
+        intent
+      );
+      memory = assistantServiceTest.buildNextAssistantMemory(memory, {
+        intent,
+        text: enriched,
+        dateRange: parseAssistantDateRange(enriched) || memory.dateRange,
+        leaveType: requestedLeaveType(enriched),
+        locatorType: requestedLocatorType(enriched),
+        modelProfile: 'tools_ollama',
+      });
+      checkedTurns += 1;
+    }
+  }
+
+  assert.equal(checkedTurns, 39);
+});
+
+test('DTR assistant regression: compact follow-ups produce useful answers with retained context', () => {
+  const leaveMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_availability_check',
+    text: 'pwede ba ko mag file ug sick leave karon?',
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-24',
+      endDate: '2026-06-24',
+    },
+    leaveType: 'sick',
+    modelProfile: 'tools_ollama',
+  });
+  const leaveIntent = assistantServiceTest.resolveIntentFromMemory(
+    '2 days',
+    leaveMemory
+  );
+  const leaveMessage = assistantServiceTest.enrichMessageWithMemory(
+    '2 days',
+    leaveMemory,
+    leaveIntent
+  );
+  const leaveReply = buildFastEmployeeAssistantReply(
+    leaveMessage,
+    {
+      date_range: leaveMemory.dateRange,
+      leave_types: [
+        {
+          name: 'sickLeave',
+          display_name: 'Sick Leave',
+          employee_can_file: true,
+          requires_attachment: false,
+        },
+      ],
+      leave_balances: [
+        {
+          leave_type: 'sickLeave',
+          available_days: 0.75,
+          remaining_days: 0.75,
+          pending_days: 0,
+        },
+      ],
+      recent_leave_requests: [],
+    },
+    leaveIntent
+  );
+  assert.match(leaveMessage, /pwede ba ko mag file ug sick leave karon/i);
+  assert.match(leaveReply, /0\.75 ka adlaw available sick leave/i);
+  assert.match(leaveReply, /2 ka adlaw imong plano/i);
+  assert.doesNotMatch(leaveReply, /Here are the leave balances/i);
+
+  const dtrMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'dtr_late_summary',
+    text: 'how about late?',
+    dateRange: {
+      label: 'this month',
+      startDate: '2026-06-01',
+      endDate: '2026-06-30',
+    },
+    modelProfile: 'tools_ollama',
+  });
+  const undertimeIntent = assistantServiceTest.resolveIntentFromMemory(
+    'and undertime?',
+    dtrMemory
+  );
+  const undertimeMessage = assistantServiceTest.enrichMessageWithMemory(
+    'and undertime?',
+    dtrMemory,
+    undertimeIntent
+  );
+  assert.equal(undertimeIntent, 'dtr_undertime_summary');
+  assert.match(undertimeMessage, /2026-06-01 to 2026-06-30/i);
+
+  const locatorMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'locator_requirements',
+    text: 'what are locator requirements?',
+    modelProfile: 'tools_ollama',
+  });
+  const locatorIntent = assistantServiceTest.resolveIntentFromMemory(
+    'wfh',
+    locatorMemory
+  );
+  const locatorMessage = assistantServiceTest.enrichMessageWithMemory(
+    'wfh',
+    locatorMemory,
+    locatorIntent
+  );
+  const locatorReply = buildFastEmployeeAssistantReply(
+    locatorMessage,
+    {
+      locator_types: [
+        {
+          code: 'work_from_home',
+          label: 'Work From Home',
+          employee_can_file: true,
+          requires_attachment: false,
+          coverage_mode: 'wfh',
+        },
+      ],
+    },
+    locatorIntent
+  );
+  assert.equal(locatorIntent, 'locator_requirements');
+  assert.match(locatorReply, /Work From Home/i);
+  assert.match(locatorReply, /no attachment required/i);
+  assert.doesNotMatch(locatorReply, /locator request is approved/i);
 });
