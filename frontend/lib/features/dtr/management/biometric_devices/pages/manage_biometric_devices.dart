@@ -37,6 +37,26 @@ String _formatRelativeSync(DateTime past, DateTime now) {
   return '${past.year}-${past.month.toString().padLeft(2, '0')}-${past.day.toString().padLeft(2, '0')}';
 }
 
+Widget _buildVendorBadge(String vendor) {
+  final label = _BiometricVendor.fromValue(vendor).label;
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF3E5F5),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: const Color(0xFF7B1FA2).withValues(alpha: 0.35)),
+    ),
+    child: Text(
+      label,
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: Color(0xFF7B1FA2),
+      ),
+    ),
+  );
+}
+
 Widget _buildRegistrationBadge(bool isActive) {
   final (label, bg, fg) = isActive
       ? ('Active', const Color(0xFFE3F2FD), const Color(0xFF1565C0))
@@ -120,6 +140,25 @@ Widget _buildSyncBadge(_BiometricSyncHealth health) {
   );
 }
 
+/// Supported biometric device vendors.
+enum _BiometricVendor {
+  zkteco('zkteco', 'ZKTeco'),
+  hikvision('hikvision', 'Hikvision'),
+  anviz('anviz', 'Anviz'),
+  other('other', 'Other');
+
+  const _BiometricVendor(this.value, this.label);
+  final String value;
+  final String label;
+
+  static _BiometricVendor fromValue(String? v) {
+    return _BiometricVendor.values.firstWhere(
+      (e) => e.value == (v ?? '').toLowerCase(),
+      orElse: () => _BiometricVendor.zkteco,
+    );
+  }
+}
+
 class _DeviceRecord {
   const _DeviceRecord({
     required this.id,
@@ -127,6 +166,7 @@ class _DeviceRecord {
     this.deviceId,
     this.location,
     this.ipAddress,
+    this.vendor = 'zkteco',
     this.lastSyncAt,
     required this.isActive,
     this.online,
@@ -136,10 +176,11 @@ class _DeviceRecord {
   final String? deviceId;
   final String? location;
   final String? ipAddress;
+  final String vendor;
   final DateTime? lastSyncAt;
   final bool isActive;
 
-  /// `null` = no IP or probe skipped; `true`/`false` = TCP 4370 reachable from server.
+  /// `null` = no IP or probe skipped; `true`/`false` = reachable from server.
   final bool? online;
 }
 
@@ -159,6 +200,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   final _locationController = TextEditingController();
   final _ipAddressController = TextEditingController();
 
+  _BiometricVendor _selectedVendor = _BiometricVendor.zkteco;
   String _statusFilter = 'Active';
   int _page = 0;
   List<_DeviceRecord> _devices = [];
@@ -243,6 +285,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           deviceId: m['device_id'] as String?,
           location: m['location'] as String?,
           ipAddress: m['ip_address'] as String?,
+          vendor: m['vendor'] as String? ?? 'zkteco',
           lastSyncAt: lastSync != null
               ? DateTime.tryParse(lastSync.toString())
               : null,
@@ -266,6 +309,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
       _deviceIdController.text = d.deviceId ?? '';
       _locationController.text = d.location ?? '';
       _ipAddressController.text = d.ipAddress ?? '';
+      _selectedVendor = _BiometricVendor.fromValue(d.vendor);
     });
   }
 
@@ -276,6 +320,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
       _deviceIdController.clear();
       _locationController.clear();
       _ipAddressController.clear();
+      _selectedVendor = _BiometricVendor.zkteco;
     });
   }
 
@@ -301,6 +346,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           'ip_address': _ipAddressController.text.trim().isEmpty
               ? null
               : _ipAddressController.text.trim(),
+          'vendor': _selectedVendor.value,
           'is_active': true,
         },
       );
@@ -355,6 +401,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           'ip_address': _ipAddressController.text.trim().isEmpty
               ? null
               : _ipAddressController.text.trim(),
+          'vendor': _selectedVendor.value,
         },
       );
       if (mounted) {
@@ -781,6 +828,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               _buildRegistrationBadge(d.isActive),
+                              _buildVendorBadge(d.vendor),
                               _buildOnlineBadge(d.online, d.ipAddress),
                               _buildSyncBadge(health),
                             ],
@@ -980,6 +1028,58 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           controller: _ipAddressController,
           style: AppTheme.dashFieldTextStyle(context),
           decoration: _inputDecoration('e.g. 192.168.1.10'),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Brand / Vendor',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _mutedColor(context),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          decoration: BoxDecoration(
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+            borderRadius: BorderRadius.circular(8),
+            color: _isDark(context)
+                ? AppTheme.dashMutedSurfaceOf(context)
+                : Colors.white,
+          ),
+          child: DropdownButton<_BiometricVendor>(
+            value: _selectedVendor,
+            isExpanded: true,
+            underline: const SizedBox.shrink(),
+            dropdownColor: AppTheme.dashPanelOf(context),
+            style: AppTheme.dashFieldTextStyle(context),
+            items: _BiometricVendor.values
+                .map(
+                  (v) => DropdownMenuItem(
+                    value: v,
+                    child: Text(
+                      v.label,
+                      style: AppTheme.dashFieldTextStyle(context),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) {
+              if (v != null) _updateDeviceFormState(() => _selectedVendor = v);
+            },
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _selectedVendor == _BiometricVendor.zkteco
+              ? 'Uses pyzk over TCP port 4370. Supports live sync and push-to-device.'
+              : _selectedVendor == _BiometricVendor.hikvision
+              ? 'Uses Hikvision ISAPI over HTTP (port 80). Live sync supported.'
+              : _selectedVendor == _BiometricVendor.anviz
+              ? 'Uses Anviz protocol over TCP port 5010. Polling sync supported.'
+              : 'Non-standard device. Use file-based manual import for attendance logs.',
+          style: TextStyle(fontSize: 11, color: _mutedColor(context)),
         ),
         if (showActions) ...[
           const SizedBox(height: 24),
