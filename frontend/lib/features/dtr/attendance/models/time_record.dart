@@ -33,6 +33,7 @@ class TimeRecord {
     this.locatorSlipId,
     this.locatorSlipRequestType,
     this.locatorSlipSegments,
+    this.shiftPunchMode = 'auto',
   });
 
   final String? id;
@@ -87,6 +88,10 @@ class TimeRecord {
   final String? locatorSlipId;
   final String? locatorSlipRequestType;
   final List<String>? locatorSlipSegments;
+
+  /// Employee's shift punch mode for this record's date.
+  /// Values: 'auto', 'full_day', 'am_only', 'pm_only', 'single_session'.
+  final String shiftPunchMode;
 
   LocatorRequestType get locatorRequestType =>
       LocatorRequestType.fromCode(locatorSlipRequestType);
@@ -160,6 +165,7 @@ class TimeRecord {
                 .map((e) => e.toString())
                 .toList()
           : null,
+      shiftPunchMode: json['shift_punch_mode']?.toString() ?? 'auto',
     );
   }
 

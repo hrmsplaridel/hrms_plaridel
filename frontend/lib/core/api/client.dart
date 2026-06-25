@@ -92,7 +92,16 @@ class ApiClient {
             if (e is DioException) {
               return handler.next(e);
             }
-            rethrow;
+            // On Flutter Web (DDC), Dio can throw a LegacyJavaScriptObject
+            // instead of a DioException for network-level errors. Wrap it so
+            // it propagates cleanly without crashing the app.
+            return handler.next(
+              DioException(
+                requestOptions: next,
+                error: e,
+                type: DioExceptionType.unknown,
+              ),
+            );
           }
         },
       ),
