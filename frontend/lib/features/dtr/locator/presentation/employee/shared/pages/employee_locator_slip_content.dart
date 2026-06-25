@@ -49,6 +49,8 @@ class EmployeeLocatorSlipContentState
     extends State<EmployeeLocatorSlipContent> {
   final List<_LocatorSlipDraft> _slips = [];
   final List<_LocatorSlipDraft> _deptHeadQueue = [];
+  final ScrollController _myRequestsScrollController = ScrollController();
+  final ScrollController _approvalItemsScrollController = ScrollController();
   List<LocatorRequestType> _locatorTypes = LocatorRequestType.values;
   Future<bool>? _isDeptHeadFuture;
   _LocatorSection _currentSection = _LocatorSection.requests;
@@ -108,6 +110,8 @@ class EmployeeLocatorSlipContentState
   @override
   void dispose() {
     _locatorRealtimeSub?.cancel();
+    _myRequestsScrollController.dispose();
+    _approvalItemsScrollController.dispose();
     super.dispose();
   }
 
@@ -784,8 +788,10 @@ class EmployeeLocatorSlipContentState
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxHeight),
           child: Scrollbar(
+            controller: _myRequestsScrollController,
             thumbVisibility: true,
             child: SingleChildScrollView(
+              controller: _myRequestsScrollController,
               primary: false,
               physics: const BouncingScrollPhysics(
                 parent: AlwaysScrollableScrollPhysics(),
@@ -985,8 +991,10 @@ class EmployeeLocatorSlipContentState
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxHeight),
           child: Scrollbar(
+            controller: _approvalItemsScrollController,
             thumbVisibility: true,
             child: SingleChildScrollView(
+              controller: _approvalItemsScrollController,
               primary: false,
               physics: const BouncingScrollPhysics(
                 parent: AlwaysScrollableScrollPhysics(),

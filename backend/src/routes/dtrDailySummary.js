@@ -1004,6 +1004,7 @@ router.get('/', protect, async (req, res) => {
         created_at: r.created_at,
         updated_at: r.updated_at,
         employee_name: r.employee_name,
+        shift_punch_mode: shiftInfo?.punchMode || 'auto',
       };
     }));
 
@@ -1115,6 +1116,7 @@ router.get('/', protect, async (req, res) => {
               created_at: null,
               updated_at: null,
               employee_name: userIdToName[empId] || null,
+              shift_punch_mode: shiftInfo?.punchMode || 'auto',
             });
           }
         }
@@ -1191,19 +1193,20 @@ router.get('/', protect, async (req, res) => {
             total_hours: null,
             late_minutes: 0,
             undertime_minutes: absentUndertime,
-            status: 'absent',
-            pm_status: null,
-            remarks: null,
-            source: null,
-            attendance_remark: 'Absent',
-            holiday_id: null,
-            leave_request_id: null,
-            holiday_name: null,
-            holiday_type: null,
-            coverage: null,
-            created_at: null,
-            updated_at: null,
-            employee_name: userIdToName[empId] || null,
+          status: 'absent',
+          pm_status: null,
+          remarks: null,
+          source: null,
+          attendance_remark: 'Absent',
+          holiday_id: null,
+          leave_request_id: null,
+          holiday_name: null,
+          holiday_type: null,
+          coverage: null,
+          created_at: null,
+          updated_at: null,
+          employee_name: userIdToName[empId] || null,
+          shift_punch_mode: shiftInfo?.punchMode || 'auto',
           });
         }
       }
@@ -1243,6 +1246,7 @@ router.get('/', protect, async (req, res) => {
           created_at: null,
           updated_at: null,
           employee_name: userIdToName[empId] || null,
+          shift_punch_mode: getShiftInfoForDateFromAssignments(assignmentsByEmployee, empId, dateStr)?.punchMode || 'auto',
         });
       }
 

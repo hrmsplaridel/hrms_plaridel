@@ -8327,6 +8327,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   bool _exportingReport = false;
   String? _adminPassingApplicantId;
   final ScrollController _horizontalScrollController = ScrollController();
+  final ScrollController _scoreBreakdownVScrollController =
+      ScrollController();
 
   Set<String> get _positionFilterOptions {
     final out = <String>{};
@@ -8875,11 +8877,13 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         ];
 
         return Scrollbar(
+          controller: _scoreBreakdownVScrollController,
           thickness: 8,
           radius: const Radius.circular(8),
           thumbVisibility: true,
           interactive: true,
           child: SingleChildScrollView(
+            controller: _scoreBreakdownVScrollController,
             primary: false,
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
             child: Align(
@@ -8912,6 +8916,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   @override
   void dispose() {
     _horizontalScrollController.dispose();
+    _scoreBreakdownVScrollController.dispose();
     super.dispose();
   }
 

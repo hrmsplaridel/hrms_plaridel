@@ -1289,8 +1289,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
             ),
             source: record.source,
             showActions: !isHardcodedPreview,
-            onEdit: () => _showEditDialog(context, dtr, record),
-            onDelete: () => _confirmDelete(context, dtr, record),
+            onEdit: () => _showEditDialog(dtr, record),
+            onDelete: () => _confirmDelete(dtr, record),
           ),
         );
       }),
@@ -1459,9 +1459,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   tooltip: 'Actions',
                   onSelected: (value) {
                     if (value == 'edit') {
-                      _showEditDialog(context, dtr, record);
+                      _showEditDialog(dtr, record);
                     } else if (value == 'delete') {
-                      _confirmDelete(context, dtr, record);
+                      _confirmDelete(dtr, record);
                     }
                   },
                   itemBuilder: (ctx) => [
@@ -2128,7 +2128,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   }
 
   Future<void> _showEditDialog(
-    BuildContext context,
     DtrProvider dtr,
     TimeRecord r,
   ) async {
@@ -2155,6 +2154,13 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     final originalBreakIn = breakIn;
     final originalTimeOut = timeOut;
 
+    // Derive shift-awareness flags once (r is immutable, so these never change).
+    final punchMode = r.shiftPunchMode;
+    final isAmOnly = punchMode == 'am_only';
+    final isPmOnly = punchMode == 'pm_only';
+    final isSingleSession = punchMode == 'single_session';
+
+    if (!mounted) return;
     final updated = await showDialog<bool>(
       context: context,
       builder: (ctx) {
@@ -2179,31 +2185,69 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
             final pmInM = minutes(breakIn);
             final pmOutM = minutes(timeOut);
             String? validationMessage;
-            if (amInM != null && amOutM != null && amOutM <= amInM) {
-              validationMessage = 'AM Out must be later than AM In.';
-            } else if (pmInM != null && pmOutM != null && pmOutM <= pmInM) {
-              validationMessage = 'PM Out must be later than PM In.';
-            } else if (amOutM != null && pmInM != null && pmInM < amOutM) {
-              validationMessage = 'PM In should not be earlier than AM Out.';
+            if (isAmOnly) {
+              if (amInM != null && amOutM != null && amOutM <= amInM) {
+                validationMessage = 'AM Out must be later than AM In.';
+              }
+            } else if (isPmOnly) {
+              if (pmInM != null && pmOutM != null && pmOutM <= pmInM) {
+                validationMessage = 'PM Out must be later than PM In.';
+              }
+            } else if (isSingleSession) {
+              if (amInM != null && pmOutM != null && pmOutM <= amInM) {
+                validationMessage = 'Time Out must be later than Time In.';
+              }
+            } else {
+              if (amInM != null && amOutM != null && amOutM <= amInM) {
+                validationMessage = 'AM Out must be later than AM In.';
+              } else if (pmInM != null && pmOutM != null && pmOutM <= pmInM) {
+                validationMessage = 'PM Out must be later than PM In.';
+              } else if (amOutM != null && pmInM != null && pmInM < amOutM) {
+                validationMessage = 'PM In should not be earlier than AM Out.';
+              }
             }
 
             var workedMinutes = 0;
             if (validationMessage == null) {
-              if (amInM != null && amOutM != null) {
-                workedMinutes += amOutM - amInM;
-              }
-              if (pmInM != null && pmOutM != null) {
-                workedMinutes += pmOutM - pmInM;
-              }
-              if (workedMinutes == 0 && amInM != null && pmOutM != null) {
-                workedMinutes = pmOutM - amInM;
+              if (isAmOnly) {
+                if (amInM != null && amOutM != null) {
+                  workedMinutes = amOutM - amInM;
+                }
+              } else if (isPmOnly) {
+                if (pmInM != null && pmOutM != null) {
+                  workedMinutes = pmOutM - pmInM;
+                }
+              } else if (isSingleSession) {
+                if (amInM != null && pmOutM != null) {
+                  workedMinutes = pmOutM - amInM;
+                }
+              } else {
+                if (amInM != null && amOutM != null) {
+                  workedMinutes += amOutM - amInM;
+                }
+                if (pmInM != null && pmOutM != null) {
+                  workedMinutes += pmOutM - pmInM;
+                }
+                if (workedMinutes == 0 && amInM != null && pmOutM != null) {
+                  workedMinutes = pmOutM - amInM;
+                }
               }
             }
-            final hasAnyTime =
-                timeIn != null ||
-                breakOut != null ||
-                breakIn != null ||
-                timeOut != null;
+
+            final bool hasAnyTime;
+            if (isAmOnly) {
+              hasAnyTime = timeIn != null || breakOut != null;
+            } else if (isPmOnly) {
+              hasAnyTime = breakIn != null || timeOut != null;
+            } else if (isSingleSession) {
+              hasAnyTime = timeIn != null || timeOut != null;
+            } else {
+              hasAnyTime =
+                  timeIn != null ||
+                  breakOut != null ||
+                  breakIn != null ||
+                  timeOut != null;
+            }
             final canSave = validationMessage == null;
             final screenH = MediaQuery.sizeOf(ctx).height;
 
@@ -2453,81 +2497,155 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               ),
                             ],
                             const SizedBox(height: 18),
-                            Text(
-                              'Morning',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.4,
-                                color: AppTheme.dashTextSecondaryOf(
+                            // Shift-mode badge — shown when mode restricts fields.
+                            if (isAmOnly || isPmOnly || isSingleSession) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.08,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: AppTheme.primaryNavy.withValues(
+                                      alpha: 0.18,
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.schedule_rounded,
+                                      size: 16,
+                                      color: AppTheme.dashIsDark(ctx)
+                                          ? AppTheme.primaryNavyLight
+                                          : AppTheme.primaryNavy,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        isAmOnly
+                                            ? 'AM-only shift — only morning punches apply.'
+                                            : isPmOnly
+                                            ? 'PM-only shift — only afternoon punches apply.'
+                                            : 'Single-session shift — no break; time in and time out only.',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: AppTheme.dashIsDark(ctx)
+                                              ? AppTheme.primaryNavyLight
+                                              : AppTheme.primaryNavy,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                            ],
+                            // Morning section
+                            if (!isPmOnly) ...[
+                              Text(
+                                isSingleSession ? 'Work Session' : 'Morning',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.4,
+                                  color: AppTheme.dashTextSecondaryOf(
+                                    ctx,
+                                  ).withValues(alpha: 0.9),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              _manualEntryPunchTile(
+                                ctx,
+                                label: isSingleSession
+                                    ? 'Time In'
+                                    : 'AM In (time in)',
+                                value: timeIn,
+                                icon: Icons.wb_sunny_outlined,
+                                onTap: () => pickTime(
+                                  timeIn,
+                                  (value) => timeIn = value,
+                                ),
+                                onClear: () => setState(() => timeIn = null),
+                              ),
+                              if (!isSingleSession) ...[
+                                const SizedBox(height: 8),
+                                _manualEntryPunchTile(
                                   ctx,
-                                ).withValues(alpha: 0.9),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            _manualEntryPunchTile(
-                              ctx,
-                              label: 'AM In (time in)',
-                              value: timeIn,
-                              icon: Icons.wb_sunny_outlined,
-                              onTap: () =>
-                                  pickTime(timeIn, (value) => timeIn = value),
-                              onClear: () => setState(() => timeIn = null),
-                            ),
-                            const SizedBox(height: 8),
-                            _manualEntryPunchTile(
-                              ctx,
-                              label: 'AM Out (break out)',
-                              value: breakOut,
-                              icon: Icons.restaurant_outlined,
-                              onTap: () => pickTime(
-                                breakOut,
-                                (value) => breakOut = value,
-                              ),
-                              onClear: () => setState(() => breakOut = null),
-                            ),
-                            const SizedBox(height: 18),
-                            Text(
-                              'Afternoon',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.4,
-                                color: AppTheme.dashTextSecondaryOf(
+                                  label: 'AM Out (break out)',
+                                  value: breakOut,
+                                  icon: Icons.restaurant_outlined,
+                                  onTap: () => pickTime(
+                                    breakOut,
+                                    (value) => breakOut = value,
+                                  ),
+                                  onClear: () =>
+                                      setState(() => breakOut = null),
+                                ),
+                              ],
+                            ],
+                            // Afternoon section
+                            if (!isAmOnly) ...[
+                              SizedBox(height: isPmOnly ? 0 : 18),
+                              if (!isSingleSession) ...[
+                                Text(
+                                  'Afternoon',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.4,
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      ctx,
+                                    ).withValues(alpha: 0.9),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                _manualEntryPunchTile(
                                   ctx,
-                                ).withValues(alpha: 0.9),
+                                  label: 'PM In (break in)',
+                                  value: breakIn,
+                                  icon: Icons.nightlight_outlined,
+                                  onTap: () => pickTime(
+                                    breakIn,
+                                    (value) => breakIn = value,
+                                  ),
+                                  onClear: () =>
+                                      setState(() => breakIn = null),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+                              _manualEntryPunchTile(
+                                ctx,
+                                label: isSingleSession
+                                    ? 'Time Out'
+                                    : 'PM Out (time out)',
+                                value: timeOut,
+                                icon: Icons.logout_rounded,
+                                onTap: () => pickTime(
+                                  timeOut,
+                                  (value) => timeOut = value,
+                                ),
+                                onClear: () => setState(() => timeOut = null),
                               ),
-                            ),
-                            const SizedBox(height: 8),
-                            _manualEntryPunchTile(
-                              ctx,
-                              label: 'PM In (break in)',
-                              value: breakIn,
-                              icon: Icons.nightlight_outlined,
-                              onTap: () =>
-                                  pickTime(breakIn, (value) => breakIn = value),
-                              onClear: () => setState(() => breakIn = null),
-                            ),
-                            const SizedBox(height: 8),
-                            _manualEntryPunchTile(
-                              ctx,
-                              label: 'PM Out (time out)',
-                              value: timeOut,
-                              icon: Icons.logout_rounded,
-                              onTap: () =>
-                                  pickTime(timeOut, (value) => timeOut = value),
-                              onClear: () => setState(() => timeOut = null),
-                            ),
+                            ],
                             if (hasAnyTime) ...[
                               const SizedBox(height: 8),
                               Align(
                                 alignment: Alignment.centerRight,
                                 child: TextButton.icon(
                                   onPressed: () => setState(() {
-                                    timeIn = null;
-                                    breakOut = null;
-                                    breakIn = null;
-                                    timeOut = null;
+                                    if (!isPmOnly) timeIn = null;
+                                    if (!isPmOnly && !isSingleSession) {
+                                      breakOut = null;
+                                    }
+                                    if (!isAmOnly && !isSingleSession) {
+                                      breakIn = null;
+                                    }
+                                    if (!isAmOnly) timeOut = null;
                                   }),
                                   icon: const Icon(
                                     Icons.cleaning_services_rounded,
@@ -2598,7 +2716,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       DateTime? bo;
       DateTime? bi;
       DateTime? tout;
-      if (timeIn != null) {
+      // Only build fields relevant to the shift's punch mode.
+      if (!isPmOnly && timeIn != null) {
         tin = DateTime(
           date.year,
           date.month,
@@ -2607,7 +2726,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
           timeIn!.minute,
         );
       }
-      if (breakOut != null) {
+      if (!isPmOnly && !isSingleSession && breakOut != null) {
         bo = DateTime(
           date.year,
           date.month,
@@ -2616,7 +2735,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
           breakOut!.minute,
         );
       }
-      if (breakIn != null) {
+      if (!isAmOnly && !isSingleSession && breakIn != null) {
         bi = DateTime(
           date.year,
           date.month,
@@ -2625,7 +2744,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
           breakIn!.minute,
         );
       }
-      if (timeOut != null) {
+      if (!isAmOnly && timeOut != null) {
         tout = DateTime(
           date.year,
           date.month,
@@ -2641,19 +2760,22 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
             60.0;
       } else if (tin != null && tout != null) {
         hours = tout.difference(tin).inMinutes / 60.0;
+      } else if (tin != null && bo != null) {
+        hours = bo.difference(tin).inMinutes / 60.0;
+      } else if (bi != null && tout != null) {
+        hours = tout.difference(bi).inMinutes / 60.0;
       }
       final hasAnyTime =
           tin != null || bo != null || bi != null || tout != null;
       if (r.id != null && !hasAnyTime) {
+        _showTimeLogSnack('Time entry removed.', isSuccess: true);
         final removed = await dtr.deleteEntry(r.id!);
-        if (!context.mounted) return;
-        _showTimeLogSnack(
-          context,
-          removed
-              ? 'Time entry removed.'
-              : (dtr.error ?? 'Unable to remove this time entry.'),
-        );
-        if (removed) await _applyFilters(forceRefresh: true);
+        if (!mounted) return;
+        if (!removed) {
+          _showTimeLogSnack(
+            dtr.error ?? 'Unable to remove this time entry.',
+          );
+        }
         return;
       }
       final updatedRec = TimeRecord(
@@ -2684,26 +2806,22 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         locatorSlipRequestType: r.locatorSlipRequestType,
         locatorSlipSegments: r.locatorSlipSegments,
       );
+      _showTimeLogSnack('Time entry updated.', isSuccess: true);
       final saved = r.id != null
           ? await dtr.updateEntry(updatedRec)
           : await dtr.addManualEntry(updatedRec);
-      if (!context.mounted) return;
-      _showTimeLogSnack(
-        context,
-        saved
-            ? 'Time entry updated.'
-            : (dtr.error ?? 'Unable to update this time entry.'),
-      );
-      if (!saved) return;
-      await _applyFilters(forceRefresh: true);
+      if (!mounted) return;
+      if (!saved) {
+        _showTimeLogSnack(dtr.error ?? 'Unable to update this time entry.');
+      }
     }
   }
 
   Future<void> _confirmDelete(
-    BuildContext context,
     DtrProvider dtr,
     TimeRecord r,
   ) async {
+    if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2725,22 +2843,28 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       ),
     );
     if (ok == true && r.id != null) {
+      _showTimeLogSnack('Time entry deleted.', isSuccess: true);
       final deleted = await dtr.deleteEntry(r.id!);
-      if (!context.mounted) return;
-      _showTimeLogSnack(
-        context,
-        deleted
-            ? 'Time entry deleted.'
-            : (dtr.error ??
-                  'Unable to delete this time log. Please try again.'),
-      );
-      if (deleted) await _applyFilters(forceRefresh: true);
+      if (!mounted) return;
+      if (!deleted) {
+        _showTimeLogSnack(
+          dtr.error ?? 'Unable to delete this time log. Please try again.',
+        );
+      }
     }
   }
 
-  void _showTimeLogSnack(BuildContext context, String message) {
+  void _showTimeLogSnack(String message, {bool isSuccess = false}) {
+    if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(content: Text(message)));
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isSuccess ? const Color(0xFF2E7D32) : null,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 }

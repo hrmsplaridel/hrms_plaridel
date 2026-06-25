@@ -71,7 +71,7 @@ function sortByLoggedAtAsc(items, getLoggedAt) {
 router.get('/devices', pushAuth, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, ip_address, device_id FROM biometric_devices WHERE (is_active IS NULL OR is_active = true)`
+      `SELECT id, ip_address, device_id, vendor FROM biometric_devices WHERE (is_active IS NULL OR is_active = true)`
     );
     res.json(result.rows);
   } catch (err) {

@@ -7,15 +7,27 @@ const { execFile } = require('child_process');
 const path = require('path');
 const bcrypt = require('bcrypt');
 
-/** ZKTeco default TCP port; quick reachability probe from the API server (not full pyzk). */
-function probeZkTcpPort(ipRaw, timeoutMs = 2500) {
+/** Default TCP port per vendor for the reachability probe. */
+const VENDOR_DEFAULT_PORT = {
+  zkteco:    4370,
+  hikvision: 80,
+  anviz:     5010,
+  other:     80,
+};
+
+function vendorProbePort(vendor) {
+  return VENDOR_DEFAULT_PORT[(vendor || 'zkteco').toLowerCase()] ?? 4370;
+}
+
+/** TCP reachability probe from the API server (not a full SDK handshake). */
+function probeTcpPort(ipRaw, port = 4370, timeoutMs = 2500) {
   return new Promise((resolve) => {
     const ip = ipRaw && String(ipRaw).trim();
     if (!ip) {
       resolve(null);
       return;
     }
-    const socket = net.createConnection({ host: ip, port: 4370 });
+    const socket = net.createConnection({ host: ip, port });
     let settled = false;
     const done = (reachable) => {
       if (settled) return;
@@ -91,7 +103,7 @@ router.get('/', protect, async (req, res) => {
       req.query.probe_online !== '0' && req.query.probe_online !== 'false';
 
     const result = await pool.query(
-      `SELECT id, name, device_id, location, ip_address, last_sync_at, is_active, created_at
+      `SELECT id, name, device_id, location, ip_address, vendor, last_sync_at, is_active, created_at
        FROM biometric_devices ${where}
        ORDER BY name`
     );
@@ -102,6 +114,7 @@ router.get('/', protect, async (req, res) => {
       device_id: r.device_id,
       location: r.location,
       ip_address: r.ip_address,
+      vendor: r.vendor || 'zkteco',
       last_sync_at: r.last_sync_at,
       is_active: r.is_active ?? true,
       created_at: r.created_at,
@@ -115,7 +128,7 @@ router.get('/', protect, async (req, res) => {
       result.rows.map(async (r) => {
         const row = baseMap(r);
         if (r.ip_address && String(r.ip_address).trim()) {
-          row.online = await probeZkTcpPort(r.ip_address);
+          row.online = await probeTcpPort(r.ip_address, vendorProbePort(r.vendor));
         } else {
           row.online = null;
         }
@@ -129,17 +142,20 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
+const VALID_VENDORS = new Set(['zkteco', 'hikvision', 'anviz', 'other']);
+
 // POST /api/biometric-devices - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { name, device_id, location, ip_address, is_active = true } = req.body;
+    const { name, device_id, location, ip_address, vendor = 'zkteco', is_active = true } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+    const safeVendor = VALID_VENDORS.has((vendor || '').toLowerCase()) ? vendor.toLowerCase() : 'zkteco';
 
     const result = await pool.query(
-      `INSERT INTO biometric_devices (name, device_id, location, ip_address, is_active)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, name, device_id, location, ip_address, last_sync_at, is_active, created_at`,
-      [name.trim(), device_id?.trim() || null, location?.trim() || null, ip_address?.trim() || null, !!is_active]
+      `INSERT INTO biometric_devices (name, device_id, location, ip_address, vendor, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, name, device_id, location, ip_address, vendor, last_sync_at, is_active, created_at`,
+      [name.trim(), device_id?.trim() || null, location?.trim() || null, ip_address?.trim() || null, safeVendor, !!is_active]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -153,7 +169,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, device_id, location, ip_address, is_active } = req.body;
+    const { name, device_id, location, ip_address, vendor, is_active } = req.body;
 
     const updates = [];
     const values = [];
@@ -162,6 +178,11 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (device_id !== undefined) { updates.push(`device_id = $${i++}`); values.push(device_id?.trim() || null); }
     if (location !== undefined) { updates.push(`location = $${i++}`); values.push(location?.trim() || null); }
     if (ip_address !== undefined) { updates.push(`ip_address = $${i++}`); values.push(ip_address?.trim() || null); }
+    if (vendor !== undefined) {
+      const safeVendor = VALID_VENDORS.has((vendor || '').toLowerCase()) ? vendor.toLowerCase() : 'zkteco';
+      updates.push(`vendor = $${i++}`);
+      values.push(safeVendor);
+    }
     if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(!!is_active); }
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
     updates.push('updated_at = now()');
@@ -169,7 +190,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE biometric_devices SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, name, device_id, location, ip_address, last_sync_at, is_active, created_at`,
+       RETURNING id, name, device_id, location, ip_address, vendor, last_sync_at, is_active, created_at`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Biometric device not found' });
