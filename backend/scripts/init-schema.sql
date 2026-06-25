@@ -215,6 +215,7 @@ CREATE TABLE IF NOT EXISTS biometric_devices (
   device_id TEXT UNIQUE,
   location TEXT,
   ip_address TEXT,
+  vendor TEXT NOT NULL DEFAULT 'zkteco',
   last_sync_at TIMESTAMPTZ,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
