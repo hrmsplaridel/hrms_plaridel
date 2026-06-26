@@ -39,11 +39,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   static const int _pageSize = 25;
   int _currentPage = 0; // 0-indexed
 
-  /// Admin: applied API filters (updated on **Apply Filter**).
-  String? _appliedEmployeeId;
-  String? _appliedLeaveType;
-
-  /// Admin: dropdown draft state (Apply copies into applied fields).
+  /// Admin: active filter state (changes trigger an immediate reload).
   String? _draftEmployeeId;
   String? _draftLeaveType;
   String? _draftDepartmentId;
@@ -60,22 +56,14 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   StreamSubscription<AppRealtimeEvent>? _leaveRealtimeSub;
   String? _currentUserId;
 
-  List<_EmployeeOption> get _filteredEmployees {
-    if (_draftDepartmentId == null || _draftDepartmentId!.isEmpty) {
-      return _allEmployees;
-    }
-    return _allEmployees
-        .where((e) => e.departmentId == _draftDepartmentId)
-        .toList();
-  }
+  /// Employees visible in the dropdown — server-filtered when a dept is active.
+  List<_EmployeeOption> get _filteredEmployees => _allEmployees;
 
   @override
   void initState() {
     super.initState();
     final initial = widget.initialFilterUserId?.trim();
     _draftEmployeeId = initial != null && initial.isNotEmpty ? initial : null;
-    _appliedEmployeeId = _draftEmployeeId;
-    _appliedLeaveType = null;
     _draftLeaveType = null;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -97,7 +85,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     ) {
       if (event.name != 'leave_updated') return;
       if (widget.isAdmin) {
-        final filterUserId = _appliedEmployeeId;
+        final filterUserId = _draftEmployeeId;
         if (filterUserId != null &&
             filterUserId.isNotEmpty &&
             !event.affectsUser(filterUserId)) {
@@ -122,14 +110,18 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     await _load(resetPage: true, forceRefresh: true);
   }
 
-  Future<void> _loadEmployees() async {
+  Future<void> _loadEmployees({String? departmentId}) async {
     setState(() {
       _employeesLoading = true;
       _employeesError = null;
     });
     try {
+      final deptParam =
+          departmentId != null && departmentId.isNotEmpty
+              ? '&department_id=$departmentId'
+              : '';
       final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/employees?status=Active',
+        '/api/employees?status=Active$deptParam',
       );
       final rows =
           (res.data ?? const [])
@@ -139,7 +131,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
                 (e) => _EmployeeOption(
                   id: e['id']?.toString() ?? '',
                   name: e['full_name']?.toString() ?? 'Unnamed',
-                  departmentId: e['department_id']?.toString(),
+                  departmentId: e['current_department_id']?.toString(),
                 ),
               )
               .where((e) => e.id.isNotEmpty)
@@ -200,13 +192,13 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     try {
       final q = LeaveLedgerQuery(
         userId: widget.isAdmin
-            ? (_appliedEmployeeId != null && _appliedEmployeeId!.isNotEmpty
-                  ? _appliedEmployeeId
+            ? (_draftEmployeeId != null && _draftEmployeeId!.isNotEmpty
+                  ? _draftEmployeeId
                   : null)
             : null,
         leaveType: widget.isAdmin
-            ? (_appliedLeaveType != null && _appliedLeaveType!.isNotEmpty
-                  ? _appliedLeaveType
+            ? (_draftLeaveType != null && _draftLeaveType!.isNotEmpty
+                  ? _draftLeaveType
                   : null)
             : null,
         limit: _pageSize,
@@ -230,13 +222,6 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     }
   }
 
-  void _applyFilters() {
-    setState(() {
-      _appliedEmployeeId = _draftEmployeeId;
-      _appliedLeaveType = _draftLeaveType;
-    });
-    _load(resetPage: true, forceRefresh: true);
-  }
 
   int get _totalPages {
     final total = _result?.total ?? 0;
@@ -441,20 +426,24 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
             draftEmployeeId: _draftEmployeeId,
             draftLeaveType: _draftLeaveType,
             draftDepartmentId: _draftDepartmentId,
-            onDepartmentChanged: (v) => setState(() {
-              _draftDepartmentId = v;
-              // Clear employee if no longer in new department
-              if (v != null && v.isNotEmpty && _draftEmployeeId != null) {
-                final still = _allEmployees.any(
-                  (e) => e.id == _draftEmployeeId && e.departmentId == v,
-                );
-                if (!still) _draftEmployeeId = null;
-              }
-            }),
-            onEmployeeChanged: (v) => setState(() => _draftEmployeeId = v),
-            onLeaveTypeChanged: (v) => setState(() => _draftLeaveType = v),
-            onApply: _applyFilters,
-            applyEnabled: !_loading || _result != null,
+            onDepartmentChanged: (v) {
+              setState(() {
+                _draftDepartmentId = v;
+                // Always reset employee selection when department changes
+                _draftEmployeeId = null;
+              });
+              // Reload employee list filtered by the new department (server-side)
+              _loadEmployees(departmentId: v);
+              _load(resetPage: true, forceRefresh: true);
+            },
+            onEmployeeChanged: (v) {
+              setState(() => _draftEmployeeId = v);
+              _load(resetPage: true, forceRefresh: true);
+            },
+            onLeaveTypeChanged: (v) {
+              setState(() => _draftLeaveType = v);
+              _load(resetPage: true, forceRefresh: true);
+            },
           ),
           const SizedBox(height: 12),
           Expanded(
@@ -742,18 +731,8 @@ class _EmployeeLedgerRow extends StatelessWidget {
   final LeaveBalanceLedgerEntry entry;
 
   static const List<String> _months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
 
   String _shortDate(DateTime d) =>
@@ -765,18 +744,18 @@ class _EmployeeLedgerRow extends StatelessWidget {
   }
 
   String _signedDaysLabel(double d) {
-    if (d == 0) return '0 Days';
+    if (d == 0) return '0 days';
     final sign = d > 0 ? '+' : '-';
     final a = d.abs();
     final n = a == a.truncateToDouble()
         ? a.toInt().toString()
         : a.toStringAsFixed(2);
-    return '$sign$n Days';
+    return '$sign$n days';
   }
 
   DateTime _displayDate() => ledgerDisplayDateForHistory(entry);
 
-  ({Color bg, Color fg, IconData icon}) _circleStyle(BuildContext context) {
+  ({Color bg, Color fg, IconData icon}) _iconStyle(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
     final a = entry.action.toLowerCase();
     final b = entry.affectedBucket.toLowerCase();
@@ -788,16 +767,16 @@ class _EmployeeLedgerRow extends StatelessWidget {
             ? Colors.green.shade900.withValues(alpha: 0.4)
             : const Color(0xFFE8F5E9),
         fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
-        icon: Icons.arrow_upward_rounded,
+        icon: Icons.add_rounded,
       );
     }
     if (a == 'admin_adjustment' || a.contains('adjust')) {
       return (
         bg: dark
-            ? AppTheme.dashMutedSurfaceOf(context)
-            : const Color(0xFFECEFF1),
-        fg: dark ? Colors.blueGrey.shade300 : const Color(0xFF546E7A),
-        icon: Icons.tune_rounded,
+            ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+            : const Color(0xFFE3F2FD),
+        fg: dark ? AppTheme.primaryNavyLight : const Color(0xFF1565C0),
+        icon: Icons.edit_outlined,
       );
     }
     if (a.contains('approved') ||
@@ -808,7 +787,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
             ? Colors.red.shade900.withValues(alpha: 0.4)
             : const Color(0xFFFFEBEE),
         fg: dark ? Colors.red.shade300 : const Color(0xFFC62828),
-        icon: Icons.arrow_downward_rounded,
+        icon: Icons.remove_rounded,
       );
     }
     if (d < 0) {
@@ -817,7 +796,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
             ? Colors.red.shade900.withValues(alpha: 0.4)
             : const Color(0xFFFFEBEE),
         fg: dark ? Colors.red.shade300 : const Color(0xFFC62828),
-        icon: Icons.arrow_downward_rounded,
+        icon: Icons.remove_rounded,
       );
     }
     if (d > 0) {
@@ -826,157 +805,228 @@ class _EmployeeLedgerRow extends StatelessWidget {
             ? Colors.green.shade900.withValues(alpha: 0.4)
             : const Color(0xFFE8F5E9),
         fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
-        icon: Icons.arrow_upward_rounded,
+        icon: Icons.add_rounded,
       );
     }
     return (
       bg: dark ? AppTheme.dashMutedSurfaceOf(context) : const Color(0xFFECEFF1),
       fg: dark ? Colors.blueGrey.shade300 : const Color(0xFF607D8B),
-      icon: Icons.schedule_rounded,
+      icon: Icons.swap_horiz_rounded,
     );
   }
 
   String _actionTitle(String raw) {
     final a = raw.toLowerCase();
     switch (a) {
-      case 'monthly_accrual':
-        return 'Monthly Accrual';
-      case 'leave_approved':
-        return 'Leave Approved';
-      case 'admin_adjustment':
-        return 'Manual Adjustment';
-      case 'leave_submitted':
-        return 'Leave Submitted';
-      case 'forced_leave_deduction':
-        return 'Forced Leave Deduction';
-      case 'leave_cancelled':
-        return 'Leave Cancelled';
-      case 'leave_rejected':
-        return 'Leave Rejected';
-      case 'leave_returned':
-        return 'Leave Returned';
-      case 'leave_revoked':
-        return 'Leave Revoked';
+      case 'monthly_accrual':   return 'Monthly Accrual';
+      case 'leave_approved':    return 'Leave Approved';
+      case 'admin_adjustment':  return 'Balance Adjustment';
+      case 'leave_submitted':   return 'Leave Filed';
+      case 'forced_leave_deduction': return 'Forced Leave Deduction';
+      case 'leave_cancelled':   return 'Leave Cancelled';
+      case 'leave_rejected':    return 'Leave Not Approved';
+      case 'leave_returned':    return 'Leave Returned';
+      case 'leave_revoked':     return 'Approval Revoked';
       default:
         if (raw.isEmpty) return 'Activity';
         return raw
             .split('_')
             .map((w) {
               if (w.isEmpty) return w;
-              if (w.length == 1) return w.toUpperCase();
               return '${w[0].toUpperCase()}${w.substring(1)}';
             })
             .join(' ');
     }
   }
 
+  /// Human-readable one-liner description for each action type.
+  String _subtitle() {
+    final a = entry.action.toLowerCase();
+    final meta = entry.metadataJson ?? {};
+
+    if (a == 'monthly_accrual') {
+      final ym = meta['target_year_month']?.toString() ??
+          meta['targetYearMonth']?.toString();
+      final months = meta['months_credited'];
+      if (ym != null && ym.length == 7) {
+        final parts = ym.split('-');
+        final mIdx = int.tryParse(parts[1]) ?? 0;
+        const mNames = [
+          '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+        ];
+        final mName = mIdx >= 1 && mIdx <= 12 ? mNames[mIdx] : parts[1];
+        final suffix = months != null && months != 1
+            ? ' · $months months credited'
+            : '';
+        return 'Accrual for $mName ${parts[0]}$suffix';
+      }
+      return 'Monthly leave accrual';
+    }
+
+    if (a == 'leave_approved') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      if (bucket == 'used') {
+        final r = entry.remarks?.trim();
+        return r != null && r.isNotEmpty ? r : 'Days deducted from balance';
+      }
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request approved';
+    }
+
+    if (a == 'leave_submitted') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') {
+        final r = entry.remarks?.trim();
+        return r != null && r.isNotEmpty ? r : 'Days reserved as pending';
+      }
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request submitted';
+    }
+
+    if (a == 'admin_adjustment') {
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Balance manually adjusted by HR';
+    }
+
+    if (a == 'forced_leave_deduction') {
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Forced leave deducted by HR';
+    }
+
+    if (a == 'leave_cancelled') return 'Leave request cancelled';
+    if (a == 'leave_rejected') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request was not approved';
+    }
+    if (a == 'leave_returned') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Returned for correction';
+    }
+    if (a == 'leave_revoked') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      if (bucket == 'used') return 'Deducted days returned to balance';
+      return 'Leave approval was revoked';
+    }
+
+    final r = entry.remarks?.trim();
+    return r != null && r.isNotEmpty ? r : '';
+  }
+
+  /// True effective direction from the employee's perspective:
+  /// - used_days increasing = days consumed (negative effective change)
+  /// - pending_days changing = internal hold (neutral)
+  double _effectiveDaysForColor() {
+    final bucket = entry.affectedBucket.toLowerCase();
+    final d = entry.daysChanged;
+    if (bucket == 'used' && d > 0) return -d;
+    if (bucket == 'pending') return 0;
+    return d;
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
-    final st = _circleStyle(context);
-    final amountColor = entry.daysChanged >= 0
+    final st = _iconStyle(context);
+    final effective = _effectiveDaysForColor();
+    final amountColor = effective > 0
         ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
-        : (dark ? Colors.red.shade300 : const Color(0xFFC62828));
+        : effective < 0
+            ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
+            : (dark
+                ? AppTheme.dashTextSecondaryOf(context)
+                : AppTheme.dashTextSecondaryOf(context));
     final lt = _leaveTypeLabel(entry.leaveType);
-    final metaBrief =
-        entry.metadataJson != null && entry.metadataJson!.isNotEmpty
-        ? entry.metadataJson!.entries
-              .take(2)
-              .map((e) => '${e.key}: ${e.value}')
-              .join(' · ')
-        : null;
+    final subtitle = _subtitle();
 
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 10),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: st.bg),
-            child: Icon(st.icon, color: st.fg, size: 20),
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: st.bg,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Icon(st.icon, color: st.fg, size: 18),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _actionTitle(entry.action),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: AppTheme.dashTextPrimaryOf(context),
-                    height: 1.25,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _shortDate(_displayDate()),
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _actionTitle(entry.action),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          height: 1.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _shortDate(_displayDate()),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.dashTextSecondaryOf(context)
+                            .withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ],
                 ),
                 if (lt.isNotEmpty) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     lt,
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 12,
                       color: AppTheme.dashTextSecondaryOf(context),
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
-                if (entry.remarks != null &&
-                    entry.remarks!.trim().isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    entry.remarks!,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-                if (entry.affectedBucket.isNotEmpty) ...[
+                if (subtitle.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(
-                    entry.affectedBucket,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.dashTextSecondaryOf(
-                        context,
-                      ).withValues(alpha: 0.9),
-                    ),
-                  ),
-                ],
-                if (metaBrief != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    metaBrief,
+                    subtitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      height: 1.25,
+                      fontSize: 12,
+                      color: AppTheme.dashTextSecondaryOf(context)
+                          .withValues(alpha: 0.85),
+                      height: 1.3,
                     ),
                   ),
                 ],
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Text(
-            _signedDaysLabel(entry.daysChanged),
+            _signedDaysLabel(_effectiveDaysForColor()),
             style: TextStyle(
               color: amountColor,
               fontWeight: FontWeight.w700,
-              fontSize: 14,
+              fontSize: 13,
             ),
           ),
         ],
@@ -1196,8 +1246,6 @@ class _AdminFilterCard extends StatelessWidget {
     required this.onEmployeeChanged,
     required this.onLeaveTypeChanged,
     required this.onDepartmentChanged,
-    required this.onApply,
-    required this.applyEnabled,
   });
 
   final bool employeesLoading;
@@ -1211,8 +1259,6 @@ class _AdminFilterCard extends StatelessWidget {
   final ValueChanged<String?> onEmployeeChanged;
   final ValueChanged<String?> onLeaveTypeChanged;
   final ValueChanged<String?> onDepartmentChanged;
-  final VoidCallback? onApply;
-  final bool applyEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1225,18 +1271,6 @@ class _AdminFilterCard extends StatelessWidget {
           final deptField = _departmentDropdown(context);
           final employeeField = _employeeDropdown(context);
           final leaveField = _leaveTypeDropdown(context);
-          final applyBtn = FilledButton(
-            onPressed: applyEnabled ? onApply : null,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: const Text('Apply Filter'),
-          );
 
           if (wide) {
             return Row(
@@ -1247,8 +1281,6 @@ class _AdminFilterCard extends StatelessWidget {
                 Expanded(child: employeeField),
                 const SizedBox(width: 10),
                 Expanded(child: leaveField),
-                const SizedBox(width: 10),
-                applyBtn,
               ],
             );
           }
@@ -1260,8 +1292,6 @@ class _AdminFilterCard extends StatelessWidget {
               employeeField,
               const SizedBox(height: 10),
               leaveField,
-              const SizedBox(height: 10),
-              applyBtn,
             ],
           );
         },
@@ -1345,7 +1375,10 @@ class _AdminFilterCard extends StatelessWidget {
       );
     }
 
+    // Key on draftDepartmentId so the widget fully recreates when dept changes,
+    // which resets FormFieldState and picks up the new employee list.
     return DropdownButtonFormField<String?>(
+      key: ValueKey('emp_${draftDepartmentId ?? 'all'}'),
       initialValue: _safeEmployeeValue(draftEmployeeId, employees),
       dropdownColor: AppTheme.dashPanelOf(context),
       style: AppTheme.dashFieldTextStyle(context),
@@ -1354,7 +1387,9 @@ class _AdminFilterCard extends StatelessWidget {
         'Employee',
       ).copyWith(isDense: true),
       hint: Text(
-        'Select employee…',
+        employees.isEmpty && !employeesLoading
+            ? 'No employees found'
+            : 'All employees',
         style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
       ),
       isExpanded: true,
@@ -1575,23 +1610,23 @@ class _AdminLedgerTile extends StatelessWidget {
   }
 
   String _fmtDt(DateTime d) {
-    final mm = d.month.toString().padLeft(2, '0');
-    final dd = d.day.toString().padLeft(2, '0');
-    final h = d.hour.toString().padLeft(2, '0');
-    final min = d.minute.toString().padLeft(2, '0');
-    return '$mm/$dd/${d.year} · $h:$min';
+    const mNames = [
+      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${mNames[d.month]} ${d.day}, ${d.year}';
   }
 
   DateTime _displayDate() => ledgerDisplayDateForHistory(entry);
 
   String _fmtSigned(double d) {
-    if (d == 0) return '0';
+    if (d == 0) return '0 days';
     final sign = d > 0 ? '+' : '-';
     final a = d.abs();
     final t = a == a.truncateToDouble()
         ? a.toInt().toString()
         : a.toStringAsFixed(2);
-    return '$sign$t';
+    return '$sign$t days';
   }
 
   ({Color bg, Color fg, IconData icon}) _styleForEntry(BuildContext context) {
@@ -1649,31 +1684,21 @@ class _AdminLedgerTile extends StatelessWidget {
   String _actionTitle(String raw) {
     final a = raw.toLowerCase();
     switch (a) {
-      case 'monthly_accrual':
-        return 'Monthly Accrual';
-      case 'leave_approved':
-        return 'Leave Approved';
-      case 'admin_adjustment':
-        return 'Manual Adjustment';
-      case 'leave_submitted':
-        return 'Leave Submitted';
-      case 'forced_leave_deduction':
-        return 'Forced Leave Deduction';
-      case 'leave_cancelled':
-        return 'Leave Cancelled';
-      case 'leave_rejected':
-        return 'Leave Rejected';
-      case 'leave_returned':
-        return 'Leave Returned';
-      case 'leave_revoked':
-        return 'Leave Revoked';
+      case 'monthly_accrual':        return 'Monthly Accrual';
+      case 'leave_approved':         return 'Leave Approved';
+      case 'admin_adjustment':       return 'Balance Adjustment';
+      case 'leave_submitted':        return 'Leave Filed';
+      case 'forced_leave_deduction': return 'Forced Leave Deduction';
+      case 'leave_cancelled':        return 'Leave Cancelled';
+      case 'leave_rejected':         return 'Leave Not Approved';
+      case 'leave_returned':         return 'Leave Returned';
+      case 'leave_revoked':          return 'Approval Revoked';
       default:
-        if (raw.isEmpty) return 'Ledger entry';
+        if (raw.isEmpty) return 'Ledger Entry';
         return raw
             .split('_')
             .map((w) {
               if (w.isEmpty) return w;
-              if (w.length == 1) return w.toUpperCase();
               return '${w[0].toUpperCase()}${w.substring(1)}';
             })
             .join(' ');
@@ -1694,48 +1719,93 @@ class _AdminLedgerTile extends StatelessWidget {
         final year = parts[0];
         const mNames = [
           '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
         ];
         final mIdx = int.tryParse(parts[1]) ?? 0;
         final mName = mIdx >= 1 && mIdx <= 12 ? mNames[mIdx] : parts[1];
         final suffix = months != null && months != 1
-            ? ' · $months months credited'
+            ? ' · $months months back-credited'
             : '';
         return 'Accrual for $mName $year$suffix';
       }
       return 'Monthly leave accrual';
     }
 
-    if (a == 'leave_approved' || a == 'leave_submitted') {
-      final remarks = entry.remarks?.trim();
-      return remarks != null && remarks.isNotEmpty ? remarks : 'Leave request';
+    if (a == 'leave_approved') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      if (bucket == 'used') {
+        final r = entry.remarks?.trim();
+        return r != null && r.isNotEmpty ? r : 'Days deducted from balance';
+      }
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request approved';
     }
-
+    if (a == 'leave_submitted') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') {
+        final r = entry.remarks?.trim();
+        return r != null && r.isNotEmpty ? r : 'Days reserved as pending';
+      }
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request submitted';
+    }
     if (a == 'admin_adjustment') {
-      final remarks = entry.remarks?.trim();
-      return remarks != null && remarks.isNotEmpty
-          ? remarks
-          : 'Manual balance adjustment';
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Balance manually adjusted by HR';
     }
-
     if (a == 'forced_leave_deduction') {
-      return entry.remarks?.trim().isNotEmpty == true
-          ? entry.remarks!.trim()
-          : 'Forced leave deducted by HR';
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Forced leave deducted by HR';
+    }
+    if (a == 'leave_cancelled') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      return 'Leave request cancelled';
+    }
+    if (a == 'leave_rejected') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request was not approved';
+    }
+    if (a == 'leave_returned') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Returned for correction';
+    }
+    if (a == 'leave_revoked') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      if (bucket == 'used') return 'Deducted days returned to balance';
+      return 'Leave approval was revoked';
     }
 
-    final remarks = entry.remarks?.trim();
-    if (remarks != null && remarks.isNotEmpty) return remarks;
+    final r = entry.remarks?.trim();
+    if (r != null && r.isNotEmpty) return r;
     return _leaveTypeLabel(entry.leaveType);
+  }
+
+  /// Effective direction from the employee's perspective for color coding.
+  double _effectiveDaysForColor() {
+    final bucket = entry.affectedBucket.toLowerCase();
+    final d = entry.daysChanged;
+    if (bucket == 'used' && d > 0) return -d;
+    if (bucket == 'pending') return 0;
+    return d;
   }
 
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
     final st = _styleForEntry(context);
-    final amountColor = entry.daysChanged >= 0
+    final effective = _effectiveDaysForColor();
+    final amountColor = effective > 0
         ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
-        : (dark ? Colors.red.shade300 : const Color(0xFFC62828));
+        : effective < 0
+            ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
+            : AppTheme.dashTextSecondaryOf(context);
 
     final subtitle = _subtitle();
     final employeeName = entry.employeeName?.trim() ?? '';
@@ -1818,7 +1888,7 @@ class _AdminLedgerTile extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Text(
-            _fmtSigned(entry.daysChanged),
+            _fmtSigned(_effectiveDaysForColor()),
             style: TextStyle(
               color: amountColor,
               fontWeight: FontWeight.w700,
