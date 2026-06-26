@@ -4195,6 +4195,24 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
   if (asOf === '' || asOf === undefined) asOf = null;
   if (lastAccrual === '' || lastAccrual === undefined) lastAccrual = null;
 
+  // Enhancement 9 — last_accrual_date edit guard:
+  // Prevent setting last_accrual_date to a future date; this would silently skip
+  // upcoming automated accrual runs for the employee.
+  if (lastAccrual != null) {
+    const parsedLastAccrual = new Date(lastAccrual);
+    if (!Number.isNaN(parsedLastAccrual.getTime())) {
+      const todayUtc = new Date();
+      todayUtc.setHours(0, 0, 0, 0);
+      if (parsedLastAccrual > todayUtc) {
+        return res.status(400).json({
+          error:
+            'last_accrual_date cannot be set to a future date. ' +
+            'Setting it in the future would cause the automated accrual cron to skip upcoming months for this employee.',
+        });
+      }
+    }
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
