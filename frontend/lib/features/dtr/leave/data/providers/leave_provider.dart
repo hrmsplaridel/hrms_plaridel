@@ -227,7 +227,20 @@ class LeaveProvider extends ChangeNotifier {
     _balanceCache.clear();
     _ledgerCache.clear();
     _deptHeadCheckCache = null;
+    _deptHeadCheck = null;
     if (notify) notifyListeners();
+  }
+
+  /// Called by the proxy provider whenever [AuthProvider] changes.
+  /// Flushes all caches when the authenticated user switches so stale
+  /// department-head status (and balances/requests) from a previous session
+  /// can never bleed into the new user's view.
+  String? _lastKnownUserId;
+  void onAuthUserChanged(String? newUserId) {
+    if (_lastKnownUserId != null && _lastKnownUserId != newUserId) {
+      invalidateCachedLeaveData(notify: false);
+    }
+    _lastKnownUserId = newUserId;
   }
 
   Future<List<LeaveRequest>> _getMyRequestsCached(

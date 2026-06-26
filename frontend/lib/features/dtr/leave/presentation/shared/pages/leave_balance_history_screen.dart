@@ -36,22 +36,38 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   bool _loading = true;
   String? _error;
   LeaveLedgerResult? _result;
-  static const int _pageSize = 50;
+  static const int _pageSize = 25;
+  int _currentPage = 0; // 0-indexed
 
   /// Admin: applied API filters (updated on **Apply Filter**).
   String? _appliedEmployeeId;
   String? _appliedLeaveType;
 
-  /// Admin: dropdown draft state (Apply copies into [_appliedEmployeeId] / [_appliedLeaveType]).
+  /// Admin: dropdown draft state (Apply copies into applied fields).
   String? _draftEmployeeId;
   String? _draftLeaveType;
+  String? _draftDepartmentId;
 
-  /// Admin: `/api/employees?status=Active` for the employee dropdown.
+  /// Admin: employee list for filter dropdown.
   bool _employeesLoading = true;
   String? _employeesError;
-  List<_EmployeeOption> _employees = const [];
+  List<_EmployeeOption> _allEmployees = const [];
+
+  /// Admin: department list for filter dropdown.
+  bool _departmentsLoading = true;
+  List<_DepartmentOption> _departments = const [];
+
   StreamSubscription<AppRealtimeEvent>? _leaveRealtimeSub;
   String? _currentUserId;
+
+  List<_EmployeeOption> get _filteredEmployees {
+    if (_draftDepartmentId == null || _draftDepartmentId!.isEmpty) {
+      return _allEmployees;
+    }
+    return _allEmployees
+        .where((e) => e.departmentId == _draftDepartmentId)
+        .toList();
+  }
 
   @override
   void initState() {
@@ -65,8 +81,9 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.isAdmin) {
         _loadEmployees();
+        _loadDepartments();
       }
-      _load(resetOffset: true);
+      _load(resetPage: true);
     });
   }
 
@@ -90,7 +107,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
         if (!event.affectsUser(_currentUserId)) return;
       }
       leaveProvider.invalidateCachedLeaveData();
-      unawaited(_refreshFromRealtime());
+      unawaited(_refreshFromRealtime()); 
     });
   }
 
@@ -102,7 +119,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
 
   Future<void> _refreshFromRealtime() async {
     if (!mounted || _loading) return;
-    await _load(resetOffset: true, forceRefresh: true);
+    await _load(resetPage: true, forceRefresh: true);
   }
 
   Future<void> _loadEmployees() async {
@@ -122,6 +139,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
                 (e) => _EmployeeOption(
                   id: e['id']?.toString() ?? '',
                   name: e['full_name']?.toString() ?? 'Unnamed',
+                  departmentId: e['department_id']?.toString(),
                 ),
               )
               .where((e) => e.id.isNotEmpty)
@@ -129,7 +147,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
             ..sort((a, b) => a.name.compareTo(b.name));
       if (!mounted) return;
       setState(() {
-        _employees = rows;
+        _allEmployees = rows;
         _employeesLoading = false;
       });
     } catch (e) {
@@ -141,10 +159,40 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     }
   }
 
+  Future<void> _loadDepartments() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments?status=Active',
+      );
+      final rows =
+          (res.data ?? const [])
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .map(
+                (e) => _DepartmentOption(
+                  id: e['id']?.toString() ?? '',
+                  name: e['name']?.toString() ?? 'Unknown',
+                ),
+              )
+              .where((e) => e.id.isNotEmpty)
+              .toList()
+            ..sort((a, b) => a.name.compareTo(b.name));
+      if (!mounted) return;
+      setState(() {
+        _departments = rows;
+        _departmentsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _departmentsLoading = false);
+    }
+  }
+
   Future<void> _load({
-    required bool resetOffset,
+    required bool resetPage,
     bool forceRefresh = false,
   }) async {
+    if (resetPage) _currentPage = 0;
     setState(() {
       _loading = true;
       _error = null;
@@ -162,7 +210,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
                   : null)
             : null,
         limit: _pageSize,
-        offset: resetOffset ? 0 : (_result?.offset ?? 0),
+        offset: _currentPage * _pageSize,
       );
       final page = await context.read<LeaveProvider>().fetchLeaveLedger(
         q,
@@ -182,51 +230,25 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     }
   }
 
-  Future<void> _loadMore() async {
-    final prev = _result;
-    if (prev == null || prev.rows.length >= prev.total) return;
-    setState(() => _loading = true);
-    try {
-      final q = LeaveLedgerQuery(
-        userId: widget.isAdmin
-            ? (_appliedEmployeeId != null && _appliedEmployeeId!.isNotEmpty
-                  ? _appliedEmployeeId
-                  : null)
-            : null,
-        leaveType: widget.isAdmin
-            ? (_appliedLeaveType != null && _appliedLeaveType!.isNotEmpty
-                  ? _appliedLeaveType
-                  : null)
-            : null,
-        limit: _pageSize,
-        offset: prev.offset + prev.rows.length,
-      );
-      final next = await context.read<LeaveProvider>().fetchLeaveLedger(q);
-      if (!mounted) return;
-      setState(() {
-        _result = LeaveLedgerResult(
-          total: next.total,
-          limit: next.limit,
-          offset: prev.offset,
-          rows: [...prev.rows, ...next.rows],
-        );
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
-  }
-
   void _applyFilters() {
     setState(() {
       _appliedEmployeeId = _draftEmployeeId;
       _appliedLeaveType = _draftLeaveType;
     });
-    _load(resetOffset: true, forceRefresh: true);
+    _load(resetPage: true, forceRefresh: true);
+  }
+
+  int get _totalPages {
+    final total = _result?.total ?? 0;
+    if (total == 0) return 1;
+    return ((total - 1) ~/ _pageSize) + 1;
+  }
+
+  void _goToPage(int page) {
+    final clamped = page.clamp(0, _totalPages - 1);
+    if (clamped == _currentPage) return;
+    _currentPage = clamped;
+    _load(resetPage: false, forceRefresh: true);
   }
 
   @override
@@ -250,7 +272,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
             tooltip: 'Refresh',
             onPressed: _loading
                 ? null
-                : () => _load(resetOffset: true, forceRefresh: true),
+                : () => _load(resetPage: true, forceRefresh: true),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
@@ -304,31 +326,31 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   }
 
   Widget _buildEmployeeHistoryList(LeaveLedgerResult r) {
-    final showMore = r.rows.length < r.total;
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      itemCount: r.rows.length + (showMore ? 1 : 0),
-      itemBuilder: (context, i) {
-        if (i == r.rows.length) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Center(
-              child: TextButton(
-                onPressed: _loading ? null : _loadMore,
-                child: Text(
-                  _loading
-                      ? 'Loading…'
-                      : 'Load more (${r.rows.length} of ${r.total})',
-                ),
-              ),
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            itemCount: r.rows.length,
+            itemBuilder: (context, i) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _EmployeeLedgerRow(entry: r.rows[i]),
             ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _EmployeeLedgerRow(entry: r.rows[i]),
-        );
-      },
+          ),
+        ),
+        if (_totalPages > 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: _PaginationBar(
+              currentPage: _currentPage,
+              totalPages: _totalPages,
+              total: r.total,
+              pageSize: _pageSize,
+              loading: _loading,
+              onPage: _goToPage,
+            ),
+          ),
+      ],
     );
   }
 
@@ -345,7 +367,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
             tooltip: 'Refresh',
             onPressed: _loading
                 ? null
-                : () => _load(resetOffset: true, forceRefresh: true),
+                : () => _load(resetPage: true, forceRefresh: true),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
@@ -405,42 +427,36 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Manage employee leave balances and transaction history.',
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 14,
-              height: 1.45,
-            ),
-          ),
-          const SizedBox(height: 16),
           _AdminSummaryChips(
             stats: _ledgerSummaryStats(_result?.rows ?? const []),
+            total: _result?.total,
           ),
-          const SizedBox(height: 6),
-          Text(
-            'These figures sum days from the ledger rows loaded below (current filters; '
-            'use "Load more" to include additional history). They are activity totals for '
-            'those entries only—not the employee\'s current leave balances.',
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 11,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           _AdminFilterCard(
             employeesLoading: _employeesLoading,
             employeesError: _employeesError,
-            employees: _employees,
+            employees: _filteredEmployees,
+            departments: _departments,
+            departmentsLoading: _departmentsLoading,
             draftEmployeeId: _draftEmployeeId,
             draftLeaveType: _draftLeaveType,
+            draftDepartmentId: _draftDepartmentId,
+            onDepartmentChanged: (v) => setState(() {
+              _draftDepartmentId = v;
+              // Clear employee if no longer in new department
+              if (v != null && v.isNotEmpty && _draftEmployeeId != null) {
+                final still = _allEmployees.any(
+                  (e) => e.id == _draftEmployeeId && e.departmentId == v,
+                );
+                if (!still) _draftEmployeeId = null;
+              }
+            }),
             onEmployeeChanged: (v) => setState(() => _draftEmployeeId = v),
             onLeaveTypeChanged: (v) => setState(() => _draftLeaveType = v),
             onApply: _applyFilters,
             applyEnabled: !_loading || _result != null,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Expanded(
             child: _loading && _result == null
                 ? const Center(child: CircularProgressIndicator())
@@ -465,31 +481,30 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       return const _AdminEmptyState();
     }
 
-    final showMore = r.rows.length < r.total;
-    return ListView.builder(
-      padding: EdgeInsets.zero,
-      itemCount: r.rows.length + (showMore ? 1 : 0),
-      itemBuilder: (context, i) {
-        if (i == r.rows.length) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Center(
-              child: TextButton(
-                onPressed: _loading ? null : _loadMore,
-                child: Text(
-                  _loading
-                      ? 'Loading…'
-                      : 'Load more (${r.rows.length} of ${r.total})',
-                ),
-              ),
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            padding: EdgeInsets.zero,
+            itemCount: r.rows.length,
+            itemBuilder: (context, i) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _AdminLedgerTile(entry: r.rows[i]),
             ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _AdminLedgerTile(entry: r.rows[i]),
-        );
-      },
+          ),
+        ),
+        if (_totalPages > 1) ...[
+          const SizedBox(height: 8),
+          _PaginationBar(
+            currentPage: _currentPage,
+            totalPages: _totalPages,
+            total: r.total,
+            pageSize: _pageSize,
+            loading: _loading,
+            onPage: _goToPage,
+          ),
+        ],
+      ],
     );
   }
 }
@@ -683,6 +698,44 @@ class _EmployeeEmptyState extends StatelessWidget {
   }
 }
 
+DateTime ledgerDisplayDateForHistory(LeaveBalanceLedgerEntry entry) {
+  if (entry.action.toLowerCase() != 'monthly_accrual') {
+    return entry.createdAt;
+  }
+  final metadata = entry.metadataJson;
+  if (metadata == null || metadata.isEmpty) {
+    return entry.createdAt;
+  }
+  return _parseLedgerDateOnly(metadata['last_accrual_date']) ??
+      _parseLedgerYearMonth(
+        metadata['target_year_month'] ?? metadata['targetYearMonth'],
+      ) ??
+      entry.createdAt;
+}
+
+DateTime? _parseLedgerDateOnly(dynamic value) {
+  final raw = value?.toString().trim();
+  if (raw == null || raw.isEmpty) return null;
+  final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(raw);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  final day = int.tryParse(match.group(3)!);
+  if (year == null || month == null || day == null) return null;
+  return DateTime(year, month, day);
+}
+
+DateTime? _parseLedgerYearMonth(dynamic value) {
+  final raw = value?.toString().trim();
+  if (raw == null || raw.isEmpty) return null;
+  final match = RegExp(r'^(\d{4})-(\d{2})$').firstMatch(raw);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  if (year == null || month == null) return null;
+  return DateTime(year, month, 1);
+}
+
 class _EmployeeLedgerRow extends StatelessWidget {
   const _EmployeeLedgerRow({required this.entry});
 
@@ -720,6 +773,8 @@ class _EmployeeLedgerRow extends StatelessWidget {
         : a.toStringAsFixed(2);
     return '$sign$n Days';
   }
+
+  DateTime _displayDate() => ledgerDisplayDateForHistory(entry);
 
   ({Color bg, Color fg, IconData icon}) _circleStyle(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
@@ -859,7 +914,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _shortDate(entry.createdAt),
+                  _shortDate(_displayDate()),
                   style: TextStyle(
                     fontSize: 13,
                     color: AppTheme.dashTextSecondaryOf(context),
@@ -973,9 +1028,10 @@ _LedgerSummaryStats _ledgerSummaryStats(List<LeaveBalanceLedgerEntry> rows) {
 }
 
 class _AdminSummaryChips extends StatelessWidget {
-  const _AdminSummaryChips({required this.stats});
+  const _AdminSummaryChips({required this.stats, this.total});
 
   final _LedgerSummaryStats stats;
+  final int? total;
 
   String _fmt(double v) {
     if ((v - v.round()).abs() < 1e-9) return v.round().toString();
@@ -990,8 +1046,8 @@ class _AdminSummaryChips extends StatelessWidget {
         final narrow = constraints.maxWidth < 520;
         final children = [
           _SummaryChip(
-            label: 'Total Earned',
-            value: _fmt(stats.totalEarned),
+            label: 'Earned',
+            value: '${_fmt(stats.totalEarned)} days',
             icon: Icons.add_rounded,
             iconBoxColor: dark
                 ? Colors.green.shade900.withValues(alpha: 0.4)
@@ -1000,8 +1056,8 @@ class _AdminSummaryChips extends StatelessWidget {
             valueColor: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
           ),
           _SummaryChip(
-            label: 'Total Used',
-            value: _fmt(stats.totalUsed),
+            label: 'Used',
+            value: '${_fmt(stats.totalUsed)} days',
             icon: Icons.remove_rounded,
             iconBoxColor: dark
                 ? Colors.red.shade900.withValues(alpha: 0.4)
@@ -1010,8 +1066,8 @@ class _AdminSummaryChips extends StatelessWidget {
             valueColor: AppTheme.dashTextPrimaryOf(context),
           ),
           _SummaryChip(
-            label: 'Total Pending',
-            value: _fmt(stats.totalPending),
+            label: 'Pending',
+            value: '${_fmt(stats.totalPending)} days',
             icon: Icons.schedule_rounded,
             iconBoxColor: dark
                 ? Colors.amber.shade900.withValues(alpha: 0.35)
@@ -1019,14 +1075,25 @@ class _AdminSummaryChips extends StatelessWidget {
             iconColor: dark ? Colors.amber.shade300 : const Color(0xFFF9A825),
             valueColor: dark ? Colors.amber.shade200 : const Color(0xFFF57F17),
           ),
+          if (total != null)
+            _SummaryChip(
+              label: 'Records',
+              value: total.toString(),
+              icon: Icons.list_alt_rounded,
+              iconBoxColor: dark
+                  ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                  : const Color(0xFFE8EAF6),
+              iconColor: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
+              valueColor: AppTheme.dashTextPrimaryOf(context),
+            ),
         ];
         if (narrow) {
-          return Wrap(spacing: 10, runSpacing: 10, children: children);
+          return Wrap(spacing: 8, runSpacing: 8, children: children);
         }
         return Row(
           children: [
             for (var i = 0; i < children.length; i++) ...[
-              if (i > 0) const SizedBox(width: 10),
+              if (i > 0) const SizedBox(width: 8),
               Expanded(child: children[i]),
             ],
           ],
@@ -1102,7 +1169,15 @@ class _SummaryChip extends StatelessWidget {
 }
 
 class _EmployeeOption {
-  const _EmployeeOption({required this.id, required this.name});
+  const _EmployeeOption({required this.id, required this.name, this.departmentId});
+
+  final String id;
+  final String name;
+  final String? departmentId;
+}
+
+class _DepartmentOption {
+  const _DepartmentOption({required this.id, required this.name});
 
   final String id;
   final String name;
@@ -1113,10 +1188,14 @@ class _AdminFilterCard extends StatelessWidget {
     required this.employeesLoading,
     required this.employeesError,
     required this.employees,
+    required this.departments,
+    required this.departmentsLoading,
     required this.draftEmployeeId,
     required this.draftLeaveType,
+    required this.draftDepartmentId,
     required this.onEmployeeChanged,
     required this.onLeaveTypeChanged,
+    required this.onDepartmentChanged,
     required this.onApply,
     required this.applyEnabled,
   });
@@ -1124,21 +1203,26 @@ class _AdminFilterCard extends StatelessWidget {
   final bool employeesLoading;
   final String? employeesError;
   final List<_EmployeeOption> employees;
+  final List<_DepartmentOption> departments;
+  final bool departmentsLoading;
   final String? draftEmployeeId;
   final String? draftLeaveType;
+  final String? draftDepartmentId;
   final ValueChanged<String?> onEmployeeChanged;
   final ValueChanged<String?> onLeaveTypeChanged;
+  final ValueChanged<String?> onDepartmentChanged;
   final VoidCallback? onApply;
   final bool applyEnabled;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final row = constraints.maxWidth >= 720;
+          final wide = constraints.maxWidth >= 800;
+          final deptField = _departmentDropdown(context);
           final employeeField = _employeeDropdown(context);
           final leaveField = _leaveTypeDropdown(context);
           final applyBtn = FilledButton(
@@ -1146,7 +1230,7 @@ class _AdminFilterCard extends StatelessWidget {
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primaryNavy,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -1154,44 +1238,71 @@ class _AdminFilterCard extends StatelessWidget {
             child: const Text('Apply Filter'),
           );
 
+          if (wide) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(child: deptField),
+                const SizedBox(width: 10),
+                Expanded(child: employeeField),
+                const SizedBox(width: 10),
+                Expanded(child: leaveField),
+                const SizedBox(width: 10),
+                applyBtn,
+              ],
+            );
+          }
           return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                'Filter',
-                style: TextStyle(
-                  color: AppTheme.dashTextPrimaryOf(context),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (row)
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(flex: 2, child: employeeField),
-                    const SizedBox(width: 12),
-                    Expanded(flex: 2, child: leaveField),
-                    const SizedBox(width: 12),
-                    applyBtn,
-                  ],
-                )
-              else
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    employeeField,
-                    const SizedBox(height: 12),
-                    leaveField,
-                    const SizedBox(height: 12),
-                    applyBtn,
-                  ],
-                ),
+              deptField,
+              const SizedBox(height: 10),
+              employeeField,
+              const SizedBox(height: 10),
+              leaveField,
+              const SizedBox(height: 10),
+              applyBtn,
             ],
           );
         },
       ),
+    );
+  }
+
+  Widget _departmentDropdown(BuildContext context) {
+    return DropdownButtonFormField<String?>(
+      initialValue: draftDepartmentId,
+      dropdownColor: AppTheme.dashPanelOf(context),
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: adminLeaveInputDecoration(
+        context,
+        'Department',
+      ).copyWith(isDense: true),
+      hint: Text(
+        departmentsLoading ? 'Loading…' : 'All departments',
+        style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+      ),
+      isExpanded: true,
+      items: [
+        DropdownMenuItem<String?>(
+          value: null,
+          child: Text(
+            'All departments',
+            style: AppTheme.dashFieldTextStyle(context),
+          ),
+        ),
+        ...departments.map(
+          (d) => DropdownMenuItem<String?>(
+            value: d.id,
+            child: Text(
+              d.name,
+              overflow: TextOverflow.ellipsis,
+              style: AppTheme.dashFieldTextStyle(context),
+            ),
+          ),
+        ),
+      ],
+      onChanged: onDepartmentChanged,
     );
   }
 
@@ -1205,13 +1316,13 @@ class _AdminFilterCard extends StatelessWidget {
         child: Row(
           children: [
             const SizedBox(
-              width: 18,
-              height: 18,
+              width: 16,
+              height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
             const SizedBox(width: 10),
             Text(
-              'Loading employees…',
+              'Loading…',
               style: AppTheme.dashFieldTextStyle(context),
             ),
           ],
@@ -1219,32 +1330,18 @@ class _AdminFilterCard extends StatelessWidget {
       );
     }
     if (employeesError != null) {
-      final dark = AppTheme.dashIsDark(context);
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Employees: $employeesError',
-            style: TextStyle(
-              color: dark ? Colors.red.shade300 : Colors.red.shade800,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<String?>(
-            initialValue: draftEmployeeId,
-            decoration: adminLeaveInputDecoration(
-              context,
-              'Employee',
-            ).copyWith(isDense: true),
-            hint: Text(
-              'Select employee…',
-              style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
-            ),
-            items: const [],
-            onChanged: null,
-          ),
-        ],
+      return DropdownButtonFormField<String?>(
+        initialValue: null,
+        decoration: adminLeaveInputDecoration(
+          context,
+          'Employee',
+        ).copyWith(isDense: true),
+        hint: Text(
+          'Error loading employees',
+          style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+        ),
+        items: const [],
+        onChanged: null,
       );
     }
 
@@ -1329,6 +1426,99 @@ class _AdminFilterCard extends StatelessWidget {
   }
 }
 
+// ─── Pagination bar ──────────────────────────────────────────────────────────
+
+class _PaginationBar extends StatelessWidget {
+  const _PaginationBar({
+    required this.currentPage,
+    required this.totalPages,
+    required this.total,
+    required this.pageSize,
+    required this.loading,
+    required this.onPage,
+  });
+
+  final int currentPage;
+  final int totalPages;
+  final int total;
+  final int pageSize;
+  final bool loading;
+  final ValueChanged<int> onPage;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final start = currentPage * pageSize + 1;
+    final end = ((currentPage + 1) * pageSize).clamp(0, total);
+    final labelColor = AppTheme.dashTextSecondaryOf(context);
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.first_page_rounded, size: 20),
+          tooltip: 'First page',
+          onPressed: (loading || currentPage == 0) ? null : () => onPage(0),
+          color: AppTheme.primaryNavy,
+        ),
+        IconButton(
+          icon: const Icon(Icons.chevron_left_rounded, size: 20),
+          tooltip: 'Previous',
+          onPressed:
+              (loading || currentPage == 0) ? null : () => onPage(currentPage - 1),
+          color: AppTheme.primaryNavy,
+        ),
+        const SizedBox(width: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: dark
+                ? AppTheme.primaryNavy.withValues(alpha: 0.25)
+                : AppTheme.primaryNavy.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            '$start–$end of $total',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        IconButton(
+          icon: const Icon(Icons.chevron_right_rounded, size: 20),
+          tooltip: 'Next',
+          onPressed: (loading || currentPage >= totalPages - 1)
+              ? null
+              : () => onPage(currentPage + 1),
+          color: AppTheme.primaryNavy,
+        ),
+        IconButton(
+          icon: const Icon(Icons.last_page_rounded, size: 20),
+          tooltip: 'Last page',
+          onPressed: (loading || currentPage >= totalPages - 1)
+              ? null
+              : () => onPage(totalPages - 1),
+          color: AppTheme.primaryNavy,
+        ),
+        if (loading) ...[
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: labelColor,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _AdminEmptyState extends StatelessWidget {
   const _AdminEmptyState();
 
@@ -1391,6 +1581,8 @@ class _AdminLedgerTile extends StatelessWidget {
     final min = d.minute.toString().padLeft(2, '0');
     return '$mm/$dd/${d.year} · $h:$min';
   }
+
+  DateTime _displayDate() => ledgerDisplayDateForHistory(entry);
 
   String _fmtSigned(double d) {
     if (d == 0) return '0';
@@ -1488,130 +1680,149 @@ class _AdminLedgerTile extends StatelessWidget {
     }
   }
 
+  /// Human-friendly one-line description for each action type.
+  String _subtitle() {
+    final a = entry.action.toLowerCase();
+    final meta = entry.metadataJson ?? {};
+
+    if (a == 'monthly_accrual') {
+      final ym = meta['target_year_month']?.toString() ??
+          meta['targetYearMonth']?.toString();
+      final months = meta['months_credited'];
+      if (ym != null && ym.length == 7) {
+        final parts = ym.split('-');
+        final year = parts[0];
+        const mNames = [
+          '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+        ];
+        final mIdx = int.tryParse(parts[1]) ?? 0;
+        final mName = mIdx >= 1 && mIdx <= 12 ? mNames[mIdx] : parts[1];
+        final suffix = months != null && months != 1
+            ? ' · $months months credited'
+            : '';
+        return 'Accrual for $mName $year$suffix';
+      }
+      return 'Monthly leave accrual';
+    }
+
+    if (a == 'leave_approved' || a == 'leave_submitted') {
+      final remarks = entry.remarks?.trim();
+      return remarks != null && remarks.isNotEmpty ? remarks : 'Leave request';
+    }
+
+    if (a == 'admin_adjustment') {
+      final remarks = entry.remarks?.trim();
+      return remarks != null && remarks.isNotEmpty
+          ? remarks
+          : 'Manual balance adjustment';
+    }
+
+    if (a == 'forced_leave_deduction') {
+      return entry.remarks?.trim().isNotEmpty == true
+          ? entry.remarks!.trim()
+          : 'Forced leave deducted by HR';
+    }
+
+    final remarks = entry.remarks?.trim();
+    if (remarks != null && remarks.isNotEmpty) return remarks;
+    return _leaveTypeLabel(entry.leaveType);
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
     final st = _styleForEntry(context);
-    final meta = entry.metadataJson;
-    final metaBrief = meta != null && meta.isNotEmpty
-        ? meta.entries.take(3).map((e) => '${e.key}: ${e.value}').join(' · ')
-        : null;
-
     final amountColor = entry.daysChanged >= 0
         ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
         : (dark ? Colors.red.shade300 : const Color(0xFFC62828));
 
+    final subtitle = _subtitle();
+    final employeeName = entry.employeeName?.trim() ?? '';
+
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 10),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
               color: st.bg,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(7),
             ),
-            child: Icon(st.icon, color: st.fg, size: 22),
+            child: Icon(st.icon, color: st.fg, size: 18),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _actionTitle(entry.action),
-                  style: TextStyle(
-                    color: AppTheme.dashTextPrimaryOf(context),
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _leaveTypeLabel(entry.leaveType),
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 13,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _actionTitle(entry.action),
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          height: 1.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _fmtDt(_displayDate()),
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context)
+                            .withValues(alpha: 0.8),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Bucket: ${entry.affectedBucket}',
+                  [
+                    _leaveTypeLabel(entry.leaveType),
+                    if (employeeName.isNotEmpty) employeeName,
+                  ].join(' · '),
                   style: TextStyle(
                     color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 12,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                if (entry.relatedLeaveRequestId != null &&
-                    entry.relatedLeaveRequestId!.isNotEmpty) ...[
+                if (subtitle.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(
-                    'Ref #${entry.relatedLeaveRequestId}',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-                if (entry.employeeName != null &&
-                    entry.employeeName!.trim().isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    entry.employeeName!,
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-                if (entry.remarks != null &&
-                    entry.remarks!.trim().isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    entry.remarks!,
-                    style: TextStyle(
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-                if (metaBrief != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    metaBrief,
+                    subtitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 11,
-                      height: 1.25,
+                      color: AppTheme.dashTextSecondaryOf(context)
+                          .withValues(alpha: 0.85),
+                      fontSize: 12,
+                      height: 1.3,
                     ),
                   ),
                 ],
-                const SizedBox(height: 6),
-                Text(
-                  _fmtDt(entry.createdAt),
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(
-                      context,
-                    ).withValues(alpha: 0.85),
-                    fontSize: 11,
-                  ),
-                ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Text(
             _fmtSigned(entry.daysChanged),
             style: TextStyle(
               color: amountColor,
-              fontWeight: FontWeight.w800,
-              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
             ),
           ),
         ],
