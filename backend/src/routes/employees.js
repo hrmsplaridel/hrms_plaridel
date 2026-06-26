@@ -125,7 +125,9 @@ function mapEmployeeListRow(r) {
     salary_grade: r.salary_grade,
     date_hired: r.date_hired,
     employment_status: r.employment_status ?? 'active',
+    current_department_id: r.current_department_id ?? null,
     current_department_name: r.current_department_name ?? null,
+    current_position_id: r.current_position_id ?? null,
     current_position_name: r.current_position_name ?? null,
     ...(r.office_id !== undefined ? { office_id: r.office_id ?? null } : {}),
   };
@@ -134,7 +136,8 @@ function mapEmployeeListRow(r) {
 function employeeListLateralCurSql() {
   return `
        LEFT JOIN LATERAL (
-         SELECT d.name AS current_department_name, p.name AS current_position_name
+         SELECT d.id AS current_department_id, d.name AS current_department_name,
+                p.id AS current_position_id, p.name AS current_position_name
          FROM assignments a
          LEFT JOIN departments d ON d.id = a.department_id
          LEFT JOIN positions p ON p.id = a.position_id
