@@ -36,37 +36,42 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   bool _loading = true;
   String? _error;
   LeaveLedgerResult? _result;
-  static const int _pageSize = 50;
+  static const int _pageSize = 25;
+  int _currentPage = 0; // 0-indexed
 
-  /// Admin: applied API filters (updated on **Apply Filter**).
-  String? _appliedEmployeeId;
-  String? _appliedLeaveType;
-
-  /// Admin: dropdown draft state (Apply copies into [_appliedEmployeeId] / [_appliedLeaveType]).
+  /// Admin: active filter state (changes trigger an immediate reload).
   String? _draftEmployeeId;
   String? _draftLeaveType;
+  String? _draftDepartmentId;
 
-  /// Admin: `/api/employees?status=Active` for the employee dropdown.
+  /// Admin: employee list for filter dropdown.
   bool _employeesLoading = true;
   String? _employeesError;
-  List<_EmployeeOption> _employees = const [];
+  List<_EmployeeOption> _allEmployees = const [];
+
+  /// Admin: department list for filter dropdown.
+  bool _departmentsLoading = true;
+  List<_DepartmentOption> _departments = const [];
+
   StreamSubscription<AppRealtimeEvent>? _leaveRealtimeSub;
   String? _currentUserId;
+
+  /// Employees visible in the dropdown — server-filtered when a dept is active.
+  List<_EmployeeOption> get _filteredEmployees => _allEmployees;
 
   @override
   void initState() {
     super.initState();
     final initial = widget.initialFilterUserId?.trim();
     _draftEmployeeId = initial != null && initial.isNotEmpty ? initial : null;
-    _appliedEmployeeId = _draftEmployeeId;
-    _appliedLeaveType = null;
     _draftLeaveType = null;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.isAdmin) {
         _loadEmployees();
+        _loadDepartments();
       }
-      _load(resetOffset: true);
+      _load(resetPage: true);
     });
   }
 
@@ -80,7 +85,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     ) {
       if (event.name != 'leave_updated') return;
       if (widget.isAdmin) {
-        final filterUserId = _appliedEmployeeId;
+        final filterUserId = _draftEmployeeId;
         if (filterUserId != null &&
             filterUserId.isNotEmpty &&
             !event.affectsUser(filterUserId)) {
@@ -90,7 +95,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
         if (!event.affectsUser(_currentUserId)) return;
       }
       leaveProvider.invalidateCachedLeaveData();
-      unawaited(_refreshFromRealtime());
+      unawaited(_refreshFromRealtime()); 
     });
   }
 
@@ -102,17 +107,21 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
 
   Future<void> _refreshFromRealtime() async {
     if (!mounted || _loading) return;
-    await _load(resetOffset: true, forceRefresh: true);
+    await _load(resetPage: true, forceRefresh: true);
   }
 
-  Future<void> _loadEmployees() async {
+  Future<void> _loadEmployees({String? departmentId}) async {
     setState(() {
       _employeesLoading = true;
       _employeesError = null;
     });
     try {
+      final deptParam =
+          departmentId != null && departmentId.isNotEmpty
+              ? '&department_id=$departmentId'
+              : '';
       final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/employees?status=Active',
+        '/api/employees?status=Active$deptParam',
       );
       final rows =
           (res.data ?? const [])
@@ -122,6 +131,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
                 (e) => _EmployeeOption(
                   id: e['id']?.toString() ?? '',
                   name: e['full_name']?.toString() ?? 'Unnamed',
+                  departmentId: e['current_department_id']?.toString(),
                 ),
               )
               .where((e) => e.id.isNotEmpty)
@@ -129,7 +139,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
             ..sort((a, b) => a.name.compareTo(b.name));
       if (!mounted) return;
       setState(() {
-        _employees = rows;
+        _allEmployees = rows;
         _employeesLoading = false;
       });
     } catch (e) {
@@ -141,10 +151,40 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     }
   }
 
+  Future<void> _loadDepartments() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/departments?status=Active',
+      );
+      final rows =
+          (res.data ?? const [])
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .map(
+                (e) => _DepartmentOption(
+                  id: e['id']?.toString() ?? '',
+                  name: e['name']?.toString() ?? 'Unknown',
+                ),
+              )
+              .where((e) => e.id.isNotEmpty)
+              .toList()
+            ..sort((a, b) => a.name.compareTo(b.name));
+      if (!mounted) return;
+      setState(() {
+        _departments = rows;
+        _departmentsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _departmentsLoading = false);
+    }
+  }
+
   Future<void> _load({
-    required bool resetOffset,
+    required bool resetPage,
     bool forceRefresh = false,
   }) async {
+    if (resetPage) _currentPage = 0;
     setState(() {
       _loading = true;
       _error = null;
@@ -152,17 +192,17 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     try {
       final q = LeaveLedgerQuery(
         userId: widget.isAdmin
-            ? (_appliedEmployeeId != null && _appliedEmployeeId!.isNotEmpty
-                  ? _appliedEmployeeId
+            ? (_draftEmployeeId != null && _draftEmployeeId!.isNotEmpty
+                  ? _draftEmployeeId
                   : null)
             : null,
         leaveType: widget.isAdmin
-            ? (_appliedLeaveType != null && _appliedLeaveType!.isNotEmpty
-                  ? _appliedLeaveType
+            ? (_draftLeaveType != null && _draftLeaveType!.isNotEmpty
+                  ? _draftLeaveType
                   : null)
             : null,
         limit: _pageSize,
-        offset: resetOffset ? 0 : (_result?.offset ?? 0),
+        offset: _currentPage * _pageSize,
       );
       final page = await context.read<LeaveProvider>().fetchLeaveLedger(
         q,
@@ -182,51 +222,18 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     }
   }
 
-  Future<void> _loadMore() async {
-    final prev = _result;
-    if (prev == null || prev.rows.length >= prev.total) return;
-    setState(() => _loading = true);
-    try {
-      final q = LeaveLedgerQuery(
-        userId: widget.isAdmin
-            ? (_appliedEmployeeId != null && _appliedEmployeeId!.isNotEmpty
-                  ? _appliedEmployeeId
-                  : null)
-            : null,
-        leaveType: widget.isAdmin
-            ? (_appliedLeaveType != null && _appliedLeaveType!.isNotEmpty
-                  ? _appliedLeaveType
-                  : null)
-            : null,
-        limit: _pageSize,
-        offset: prev.offset + prev.rows.length,
-      );
-      final next = await context.read<LeaveProvider>().fetchLeaveLedger(q);
-      if (!mounted) return;
-      setState(() {
-        _result = LeaveLedgerResult(
-          total: next.total,
-          limit: next.limit,
-          offset: prev.offset,
-          rows: [...prev.rows, ...next.rows],
-        );
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
+
+  int get _totalPages {
+    final total = _result?.total ?? 0;
+    if (total == 0) return 1;
+    return ((total - 1) ~/ _pageSize) + 1;
   }
 
-  void _applyFilters() {
-    setState(() {
-      _appliedEmployeeId = _draftEmployeeId;
-      _appliedLeaveType = _draftLeaveType;
-    });
-    _load(resetOffset: true, forceRefresh: true);
+  void _goToPage(int page) {
+    final clamped = page.clamp(0, _totalPages - 1);
+    if (clamped == _currentPage) return;
+    _currentPage = clamped;
+    _load(resetPage: false, forceRefresh: true);
   }
 
   @override
@@ -250,7 +257,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
             tooltip: 'Refresh',
             onPressed: _loading
                 ? null
-                : () => _load(resetOffset: true, forceRefresh: true),
+                : () => _load(resetPage: true, forceRefresh: true),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
@@ -304,31 +311,31 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   }
 
   Widget _buildEmployeeHistoryList(LeaveLedgerResult r) {
-    final showMore = r.rows.length < r.total;
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      itemCount: r.rows.length + (showMore ? 1 : 0),
-      itemBuilder: (context, i) {
-        if (i == r.rows.length) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Center(
-              child: TextButton(
-                onPressed: _loading ? null : _loadMore,
-                child: Text(
-                  _loading
-                      ? 'Loading…'
-                      : 'Load more (${r.rows.length} of ${r.total})',
-                ),
-              ),
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            itemCount: r.rows.length,
+            itemBuilder: (context, i) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _EmployeeLedgerRow(entry: r.rows[i]),
             ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _EmployeeLedgerRow(entry: r.rows[i]),
-        );
-      },
+          ),
+        ),
+        if (_totalPages > 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: _PaginationBar(
+              currentPage: _currentPage,
+              totalPages: _totalPages,
+              total: r.total,
+              pageSize: _pageSize,
+              loading: _loading,
+              onPage: _goToPage,
+            ),
+          ),
+      ],
     );
   }
 
@@ -345,7 +352,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
             tooltip: 'Refresh',
             onPressed: _loading
                 ? null
-                : () => _load(resetOffset: true, forceRefresh: true),
+                : () => _load(resetPage: true, forceRefresh: true),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
@@ -405,42 +412,40 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Manage employee leave balances and transaction history.',
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 14,
-              height: 1.45,
-            ),
-          ),
-          const SizedBox(height: 16),
           _AdminSummaryChips(
             stats: _ledgerSummaryStats(_result?.rows ?? const []),
+            total: _result?.total,
           ),
-          const SizedBox(height: 6),
-          Text(
-            'These figures sum days from the ledger rows loaded below (current filters; '
-            'use "Load more" to include additional history). They are activity totals for '
-            'those entries only—not the employee\'s current leave balances.',
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 11,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           _AdminFilterCard(
             employeesLoading: _employeesLoading,
             employeesError: _employeesError,
-            employees: _employees,
+            employees: _filteredEmployees,
+            departments: _departments,
+            departmentsLoading: _departmentsLoading,
             draftEmployeeId: _draftEmployeeId,
             draftLeaveType: _draftLeaveType,
-            onEmployeeChanged: (v) => setState(() => _draftEmployeeId = v),
-            onLeaveTypeChanged: (v) => setState(() => _draftLeaveType = v),
-            onApply: _applyFilters,
-            applyEnabled: !_loading || _result != null,
+            draftDepartmentId: _draftDepartmentId,
+            onDepartmentChanged: (v) {
+              setState(() {
+                _draftDepartmentId = v;
+                // Always reset employee selection when department changes
+                _draftEmployeeId = null;
+              });
+              // Reload employee list filtered by the new department (server-side)
+              _loadEmployees(departmentId: v);
+              _load(resetPage: true, forceRefresh: true);
+            },
+            onEmployeeChanged: (v) {
+              setState(() => _draftEmployeeId = v);
+              _load(resetPage: true, forceRefresh: true);
+            },
+            onLeaveTypeChanged: (v) {
+              setState(() => _draftLeaveType = v);
+              _load(resetPage: true, forceRefresh: true);
+            },
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Expanded(
             child: _loading && _result == null
                 ? const Center(child: CircularProgressIndicator())
@@ -465,31 +470,30 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       return const _AdminEmptyState();
     }
 
-    final showMore = r.rows.length < r.total;
-    return ListView.builder(
-      padding: EdgeInsets.zero,
-      itemCount: r.rows.length + (showMore ? 1 : 0),
-      itemBuilder: (context, i) {
-        if (i == r.rows.length) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Center(
-              child: TextButton(
-                onPressed: _loading ? null : _loadMore,
-                child: Text(
-                  _loading
-                      ? 'Loading…'
-                      : 'Load more (${r.rows.length} of ${r.total})',
-                ),
-              ),
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            padding: EdgeInsets.zero,
+            itemCount: r.rows.length,
+            itemBuilder: (context, i) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _AdminLedgerTile(entry: r.rows[i]),
             ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _AdminLedgerTile(entry: r.rows[i]),
-        );
-      },
+          ),
+        ),
+        if (_totalPages > 1) ...[
+          const SizedBox(height: 8),
+          _PaginationBar(
+            currentPage: _currentPage,
+            totalPages: _totalPages,
+            total: r.total,
+            pageSize: _pageSize,
+            loading: _loading,
+            onPage: _goToPage,
+          ),
+        ],
+      ],
     );
   }
 }
@@ -683,24 +687,52 @@ class _EmployeeEmptyState extends StatelessWidget {
   }
 }
 
+DateTime ledgerDisplayDateForHistory(LeaveBalanceLedgerEntry entry) {
+  if (entry.action.toLowerCase() != 'monthly_accrual') {
+    return entry.createdAt;
+  }
+  final metadata = entry.metadataJson;
+  if (metadata == null || metadata.isEmpty) {
+    return entry.createdAt;
+  }
+  return _parseLedgerDateOnly(metadata['last_accrual_date']) ??
+      _parseLedgerYearMonth(
+        metadata['target_year_month'] ?? metadata['targetYearMonth'],
+      ) ??
+      entry.createdAt;
+}
+
+DateTime? _parseLedgerDateOnly(dynamic value) {
+  final raw = value?.toString().trim();
+  if (raw == null || raw.isEmpty) return null;
+  final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(raw);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  final day = int.tryParse(match.group(3)!);
+  if (year == null || month == null || day == null) return null;
+  return DateTime(year, month, day);
+}
+
+DateTime? _parseLedgerYearMonth(dynamic value) {
+  final raw = value?.toString().trim();
+  if (raw == null || raw.isEmpty) return null;
+  final match = RegExp(r'^(\d{4})-(\d{2})$').firstMatch(raw);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  if (year == null || month == null) return null;
+  return DateTime(year, month, 1);
+}
+
 class _EmployeeLedgerRow extends StatelessWidget {
   const _EmployeeLedgerRow({required this.entry});
 
   final LeaveBalanceLedgerEntry entry;
 
   static const List<String> _months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
 
   String _shortDate(DateTime d) =>
@@ -712,16 +744,18 @@ class _EmployeeLedgerRow extends StatelessWidget {
   }
 
   String _signedDaysLabel(double d) {
-    if (d == 0) return '0 Days';
+    if (d == 0) return '0 days';
     final sign = d > 0 ? '+' : '-';
     final a = d.abs();
     final n = a == a.truncateToDouble()
         ? a.toInt().toString()
         : a.toStringAsFixed(2);
-    return '$sign$n Days';
+    return '$sign$n days';
   }
 
-  ({Color bg, Color fg, IconData icon}) _circleStyle(BuildContext context) {
+  DateTime _displayDate() => ledgerDisplayDateForHistory(entry);
+
+  ({Color bg, Color fg, IconData icon}) _iconStyle(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
     final a = entry.action.toLowerCase();
     final b = entry.affectedBucket.toLowerCase();
@@ -733,16 +767,16 @@ class _EmployeeLedgerRow extends StatelessWidget {
             ? Colors.green.shade900.withValues(alpha: 0.4)
             : const Color(0xFFE8F5E9),
         fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
-        icon: Icons.arrow_upward_rounded,
+        icon: Icons.add_rounded,
       );
     }
     if (a == 'admin_adjustment' || a.contains('adjust')) {
       return (
         bg: dark
-            ? AppTheme.dashMutedSurfaceOf(context)
-            : const Color(0xFFECEFF1),
-        fg: dark ? Colors.blueGrey.shade300 : const Color(0xFF546E7A),
-        icon: Icons.tune_rounded,
+            ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+            : const Color(0xFFE3F2FD),
+        fg: dark ? AppTheme.primaryNavyLight : const Color(0xFF1565C0),
+        icon: Icons.edit_outlined,
       );
     }
     if (a.contains('approved') ||
@@ -753,7 +787,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
             ? Colors.red.shade900.withValues(alpha: 0.4)
             : const Color(0xFFFFEBEE),
         fg: dark ? Colors.red.shade300 : const Color(0xFFC62828),
-        icon: Icons.arrow_downward_rounded,
+        icon: Icons.remove_rounded,
       );
     }
     if (d < 0) {
@@ -762,7 +796,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
             ? Colors.red.shade900.withValues(alpha: 0.4)
             : const Color(0xFFFFEBEE),
         fg: dark ? Colors.red.shade300 : const Color(0xFFC62828),
-        icon: Icons.arrow_downward_rounded,
+        icon: Icons.remove_rounded,
       );
     }
     if (d > 0) {
@@ -771,157 +805,228 @@ class _EmployeeLedgerRow extends StatelessWidget {
             ? Colors.green.shade900.withValues(alpha: 0.4)
             : const Color(0xFFE8F5E9),
         fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
-        icon: Icons.arrow_upward_rounded,
+        icon: Icons.add_rounded,
       );
     }
     return (
       bg: dark ? AppTheme.dashMutedSurfaceOf(context) : const Color(0xFFECEFF1),
       fg: dark ? Colors.blueGrey.shade300 : const Color(0xFF607D8B),
-      icon: Icons.schedule_rounded,
+      icon: Icons.swap_horiz_rounded,
     );
   }
 
   String _actionTitle(String raw) {
     final a = raw.toLowerCase();
     switch (a) {
-      case 'monthly_accrual':
-        return 'Monthly Accrual';
-      case 'leave_approved':
-        return 'Leave Approved';
-      case 'admin_adjustment':
-        return 'Manual Adjustment';
-      case 'leave_submitted':
-        return 'Leave Submitted';
-      case 'forced_leave_deduction':
-        return 'Forced Leave Deduction';
-      case 'leave_cancelled':
-        return 'Leave Cancelled';
-      case 'leave_rejected':
-        return 'Leave Rejected';
-      case 'leave_returned':
-        return 'Leave Returned';
-      case 'leave_revoked':
-        return 'Leave Revoked';
+      case 'monthly_accrual':   return 'Monthly Accrual';
+      case 'leave_approved':    return 'Leave Approved';
+      case 'admin_adjustment':  return 'Balance Adjustment';
+      case 'leave_submitted':   return 'Leave Filed';
+      case 'forced_leave_deduction': return 'Forced Leave Deduction';
+      case 'leave_cancelled':   return 'Leave Cancelled';
+      case 'leave_rejected':    return 'Leave Not Approved';
+      case 'leave_returned':    return 'Leave Returned';
+      case 'leave_revoked':     return 'Approval Revoked';
       default:
         if (raw.isEmpty) return 'Activity';
         return raw
             .split('_')
             .map((w) {
               if (w.isEmpty) return w;
-              if (w.length == 1) return w.toUpperCase();
               return '${w[0].toUpperCase()}${w.substring(1)}';
             })
             .join(' ');
     }
   }
 
+  /// Human-readable one-liner description for each action type.
+  String _subtitle() {
+    final a = entry.action.toLowerCase();
+    final meta = entry.metadataJson ?? {};
+
+    if (a == 'monthly_accrual') {
+      final ym = meta['target_year_month']?.toString() ??
+          meta['targetYearMonth']?.toString();
+      final months = meta['months_credited'];
+      if (ym != null && ym.length == 7) {
+        final parts = ym.split('-');
+        final mIdx = int.tryParse(parts[1]) ?? 0;
+        const mNames = [
+          '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+        ];
+        final mName = mIdx >= 1 && mIdx <= 12 ? mNames[mIdx] : parts[1];
+        final suffix = months != null && months != 1
+            ? ' · $months months credited'
+            : '';
+        return 'Accrual for $mName ${parts[0]}$suffix';
+      }
+      return 'Monthly leave accrual';
+    }
+
+    if (a == 'leave_approved') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      if (bucket == 'used') {
+        final r = entry.remarks?.trim();
+        return r != null && r.isNotEmpty ? r : 'Days deducted from balance';
+      }
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request approved';
+    }
+
+    if (a == 'leave_submitted') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') {
+        final r = entry.remarks?.trim();
+        return r != null && r.isNotEmpty ? r : 'Days reserved as pending';
+      }
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request submitted';
+    }
+
+    if (a == 'admin_adjustment') {
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Balance manually adjusted by HR';
+    }
+
+    if (a == 'forced_leave_deduction') {
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Forced leave deducted by HR';
+    }
+
+    if (a == 'leave_cancelled') return 'Leave request cancelled';
+    if (a == 'leave_rejected') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request was not approved';
+    }
+    if (a == 'leave_returned') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Returned for correction';
+    }
+    if (a == 'leave_revoked') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      if (bucket == 'used') return 'Deducted days returned to balance';
+      return 'Leave approval was revoked';
+    }
+
+    final r = entry.remarks?.trim();
+    return r != null && r.isNotEmpty ? r : '';
+  }
+
+  /// True effective direction from the employee's perspective:
+  /// - used_days increasing = days consumed (negative effective change)
+  /// - pending_days changing = internal hold (neutral)
+  double _effectiveDaysForColor() {
+    final bucket = entry.affectedBucket.toLowerCase();
+    final d = entry.daysChanged;
+    if (bucket == 'used' && d > 0) return -d;
+    if (bucket == 'pending') return 0;
+    return d;
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
-    final st = _circleStyle(context);
-    final amountColor = entry.daysChanged >= 0
+    final st = _iconStyle(context);
+    final effective = _effectiveDaysForColor();
+    final amountColor = effective > 0
         ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
-        : (dark ? Colors.red.shade300 : const Color(0xFFC62828));
+        : effective < 0
+            ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
+            : (dark
+                ? AppTheme.dashTextSecondaryOf(context)
+                : AppTheme.dashTextSecondaryOf(context));
     final lt = _leaveTypeLabel(entry.leaveType);
-    final metaBrief =
-        entry.metadataJson != null && entry.metadataJson!.isNotEmpty
-        ? entry.metadataJson!.entries
-              .take(2)
-              .map((e) => '${e.key}: ${e.value}')
-              .join(' · ')
-        : null;
+    final subtitle = _subtitle();
 
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 10),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: st.bg),
-            child: Icon(st.icon, color: st.fg, size: 20),
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: st.bg,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Icon(st.icon, color: st.fg, size: 18),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _actionTitle(entry.action),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: AppTheme.dashTextPrimaryOf(context),
-                    height: 1.25,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _shortDate(entry.createdAt),
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _actionTitle(entry.action),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          height: 1.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _shortDate(_displayDate()),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.dashTextSecondaryOf(context)
+                            .withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ],
                 ),
                 if (lt.isNotEmpty) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     lt,
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 12,
                       color: AppTheme.dashTextSecondaryOf(context),
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
-                if (entry.remarks != null &&
-                    entry.remarks!.trim().isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    entry.remarks!,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-                if (entry.affectedBucket.isNotEmpty) ...[
+                if (subtitle.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(
-                    entry.affectedBucket,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.dashTextSecondaryOf(
-                        context,
-                      ).withValues(alpha: 0.9),
-                    ),
-                  ),
-                ],
-                if (metaBrief != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    metaBrief,
+                    subtitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      height: 1.25,
+                      fontSize: 12,
+                      color: AppTheme.dashTextSecondaryOf(context)
+                          .withValues(alpha: 0.85),
+                      height: 1.3,
                     ),
                   ),
                 ],
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Text(
-            _signedDaysLabel(entry.daysChanged),
+            _signedDaysLabel(_effectiveDaysForColor()),
             style: TextStyle(
               color: amountColor,
               fontWeight: FontWeight.w700,
-              fontSize: 14,
+              fontSize: 13,
             ),
           ),
         ],
@@ -973,9 +1078,10 @@ _LedgerSummaryStats _ledgerSummaryStats(List<LeaveBalanceLedgerEntry> rows) {
 }
 
 class _AdminSummaryChips extends StatelessWidget {
-  const _AdminSummaryChips({required this.stats});
+  const _AdminSummaryChips({required this.stats, this.total});
 
   final _LedgerSummaryStats stats;
+  final int? total;
 
   String _fmt(double v) {
     if ((v - v.round()).abs() < 1e-9) return v.round().toString();
@@ -990,8 +1096,8 @@ class _AdminSummaryChips extends StatelessWidget {
         final narrow = constraints.maxWidth < 520;
         final children = [
           _SummaryChip(
-            label: 'Total Earned',
-            value: _fmt(stats.totalEarned),
+            label: 'Earned',
+            value: '${_fmt(stats.totalEarned)} days',
             icon: Icons.add_rounded,
             iconBoxColor: dark
                 ? Colors.green.shade900.withValues(alpha: 0.4)
@@ -1000,8 +1106,8 @@ class _AdminSummaryChips extends StatelessWidget {
             valueColor: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
           ),
           _SummaryChip(
-            label: 'Total Used',
-            value: _fmt(stats.totalUsed),
+            label: 'Used',
+            value: '${_fmt(stats.totalUsed)} days',
             icon: Icons.remove_rounded,
             iconBoxColor: dark
                 ? Colors.red.shade900.withValues(alpha: 0.4)
@@ -1010,8 +1116,8 @@ class _AdminSummaryChips extends StatelessWidget {
             valueColor: AppTheme.dashTextPrimaryOf(context),
           ),
           _SummaryChip(
-            label: 'Total Pending',
-            value: _fmt(stats.totalPending),
+            label: 'Pending',
+            value: '${_fmt(stats.totalPending)} days',
             icon: Icons.schedule_rounded,
             iconBoxColor: dark
                 ? Colors.amber.shade900.withValues(alpha: 0.35)
@@ -1019,14 +1125,25 @@ class _AdminSummaryChips extends StatelessWidget {
             iconColor: dark ? Colors.amber.shade300 : const Color(0xFFF9A825),
             valueColor: dark ? Colors.amber.shade200 : const Color(0xFFF57F17),
           ),
+          if (total != null)
+            _SummaryChip(
+              label: 'Records',
+              value: total.toString(),
+              icon: Icons.list_alt_rounded,
+              iconBoxColor: dark
+                  ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                  : const Color(0xFFE8EAF6),
+              iconColor: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
+              valueColor: AppTheme.dashTextPrimaryOf(context),
+            ),
         ];
         if (narrow) {
-          return Wrap(spacing: 10, runSpacing: 10, children: children);
+          return Wrap(spacing: 8, runSpacing: 8, children: children);
         }
         return Row(
           children: [
             for (var i = 0; i < children.length; i++) ...[
-              if (i > 0) const SizedBox(width: 10),
+              if (i > 0) const SizedBox(width: 8),
               Expanded(child: children[i]),
             ],
           ],
@@ -1102,7 +1219,15 @@ class _SummaryChip extends StatelessWidget {
 }
 
 class _EmployeeOption {
-  const _EmployeeOption({required this.id, required this.name});
+  const _EmployeeOption({required this.id, required this.name, this.departmentId});
+
+  final String id;
+  final String name;
+  final String? departmentId;
+}
+
+class _DepartmentOption {
+  const _DepartmentOption({required this.id, required this.name});
 
   final String id;
   final String name;
@@ -1113,85 +1238,101 @@ class _AdminFilterCard extends StatelessWidget {
     required this.employeesLoading,
     required this.employeesError,
     required this.employees,
+    required this.departments,
+    required this.departmentsLoading,
     required this.draftEmployeeId,
     required this.draftLeaveType,
+    required this.draftDepartmentId,
     required this.onEmployeeChanged,
     required this.onLeaveTypeChanged,
-    required this.onApply,
-    required this.applyEnabled,
+    required this.onDepartmentChanged,
   });
 
   final bool employeesLoading;
   final String? employeesError;
   final List<_EmployeeOption> employees;
+  final List<_DepartmentOption> departments;
+  final bool departmentsLoading;
   final String? draftEmployeeId;
   final String? draftLeaveType;
+  final String? draftDepartmentId;
   final ValueChanged<String?> onEmployeeChanged;
   final ValueChanged<String?> onLeaveTypeChanged;
-  final VoidCallback? onApply;
-  final bool applyEnabled;
+  final ValueChanged<String?> onDepartmentChanged;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: AppTheme.dashSurfaceCard(context, radius: 12),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final row = constraints.maxWidth >= 720;
+          final wide = constraints.maxWidth >= 800;
+          final deptField = _departmentDropdown(context);
           final employeeField = _employeeDropdown(context);
           final leaveField = _leaveTypeDropdown(context);
-          final applyBtn = FilledButton(
-            onPressed: applyEnabled ? onApply : null,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: const Text('Apply Filter'),
-          );
 
+          if (wide) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(child: deptField),
+                const SizedBox(width: 10),
+                Expanded(child: employeeField),
+                const SizedBox(width: 10),
+                Expanded(child: leaveField),
+              ],
+            );
+          }
           return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                'Filter',
-                style: TextStyle(
-                  color: AppTheme.dashTextPrimaryOf(context),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (row)
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(flex: 2, child: employeeField),
-                    const SizedBox(width: 12),
-                    Expanded(flex: 2, child: leaveField),
-                    const SizedBox(width: 12),
-                    applyBtn,
-                  ],
-                )
-              else
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    employeeField,
-                    const SizedBox(height: 12),
-                    leaveField,
-                    const SizedBox(height: 12),
-                    applyBtn,
-                  ],
-                ),
+              deptField,
+              const SizedBox(height: 10),
+              employeeField,
+              const SizedBox(height: 10),
+              leaveField,
             ],
           );
         },
       ),
+    );
+  }
+
+  Widget _departmentDropdown(BuildContext context) {
+    return DropdownButtonFormField<String?>(
+      initialValue: draftDepartmentId,
+      dropdownColor: AppTheme.dashPanelOf(context),
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: adminLeaveInputDecoration(
+        context,
+        'Department',
+      ).copyWith(isDense: true),
+      hint: Text(
+        departmentsLoading ? 'Loading…' : 'All departments',
+        style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+      ),
+      isExpanded: true,
+      items: [
+        DropdownMenuItem<String?>(
+          value: null,
+          child: Text(
+            'All departments',
+            style: AppTheme.dashFieldTextStyle(context),
+          ),
+        ),
+        ...departments.map(
+          (d) => DropdownMenuItem<String?>(
+            value: d.id,
+            child: Text(
+              d.name,
+              overflow: TextOverflow.ellipsis,
+              style: AppTheme.dashFieldTextStyle(context),
+            ),
+          ),
+        ),
+      ],
+      onChanged: onDepartmentChanged,
     );
   }
 
@@ -1205,13 +1346,13 @@ class _AdminFilterCard extends StatelessWidget {
         child: Row(
           children: [
             const SizedBox(
-              width: 18,
-              height: 18,
+              width: 16,
+              height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
             const SizedBox(width: 10),
             Text(
-              'Loading employees…',
+              'Loading…',
               style: AppTheme.dashFieldTextStyle(context),
             ),
           ],
@@ -1219,36 +1360,25 @@ class _AdminFilterCard extends StatelessWidget {
       );
     }
     if (employeesError != null) {
-      final dark = AppTheme.dashIsDark(context);
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Employees: $employeesError',
-            style: TextStyle(
-              color: dark ? Colors.red.shade300 : Colors.red.shade800,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<String?>(
-            initialValue: draftEmployeeId,
-            decoration: adminLeaveInputDecoration(
-              context,
-              'Employee',
-            ).copyWith(isDense: true),
-            hint: Text(
-              'Select employee…',
-              style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
-            ),
-            items: const [],
-            onChanged: null,
-          ),
-        ],
+      return DropdownButtonFormField<String?>(
+        initialValue: null,
+        decoration: adminLeaveInputDecoration(
+          context,
+          'Employee',
+        ).copyWith(isDense: true),
+        hint: Text(
+          'Error loading employees',
+          style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+        ),
+        items: const [],
+        onChanged: null,
       );
     }
 
+    // Key on draftDepartmentId so the widget fully recreates when dept changes,
+    // which resets FormFieldState and picks up the new employee list.
     return DropdownButtonFormField<String?>(
+      key: ValueKey('emp_${draftDepartmentId ?? 'all'}'),
       initialValue: _safeEmployeeValue(draftEmployeeId, employees),
       dropdownColor: AppTheme.dashPanelOf(context),
       style: AppTheme.dashFieldTextStyle(context),
@@ -1257,7 +1387,9 @@ class _AdminFilterCard extends StatelessWidget {
         'Employee',
       ).copyWith(isDense: true),
       hint: Text(
-        'Select employee…',
+        employees.isEmpty && !employeesLoading
+            ? 'No employees found'
+            : 'All employees',
         style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
       ),
       isExpanded: true,
@@ -1329,6 +1461,99 @@ class _AdminFilterCard extends StatelessWidget {
   }
 }
 
+// ─── Pagination bar ──────────────────────────────────────────────────────────
+
+class _PaginationBar extends StatelessWidget {
+  const _PaginationBar({
+    required this.currentPage,
+    required this.totalPages,
+    required this.total,
+    required this.pageSize,
+    required this.loading,
+    required this.onPage,
+  });
+
+  final int currentPage;
+  final int totalPages;
+  final int total;
+  final int pageSize;
+  final bool loading;
+  final ValueChanged<int> onPage;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final start = currentPage * pageSize + 1;
+    final end = ((currentPage + 1) * pageSize).clamp(0, total);
+    final labelColor = AppTheme.dashTextSecondaryOf(context);
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.first_page_rounded, size: 20),
+          tooltip: 'First page',
+          onPressed: (loading || currentPage == 0) ? null : () => onPage(0),
+          color: AppTheme.primaryNavy,
+        ),
+        IconButton(
+          icon: const Icon(Icons.chevron_left_rounded, size: 20),
+          tooltip: 'Previous',
+          onPressed:
+              (loading || currentPage == 0) ? null : () => onPage(currentPage - 1),
+          color: AppTheme.primaryNavy,
+        ),
+        const SizedBox(width: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: dark
+                ? AppTheme.primaryNavy.withValues(alpha: 0.25)
+                : AppTheme.primaryNavy.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            '$start–$end of $total',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        IconButton(
+          icon: const Icon(Icons.chevron_right_rounded, size: 20),
+          tooltip: 'Next',
+          onPressed: (loading || currentPage >= totalPages - 1)
+              ? null
+              : () => onPage(currentPage + 1),
+          color: AppTheme.primaryNavy,
+        ),
+        IconButton(
+          icon: const Icon(Icons.last_page_rounded, size: 20),
+          tooltip: 'Last page',
+          onPressed: (loading || currentPage >= totalPages - 1)
+              ? null
+              : () => onPage(totalPages - 1),
+          color: AppTheme.primaryNavy,
+        ),
+        if (loading) ...[
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: labelColor,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _AdminEmptyState extends StatelessWidget {
   const _AdminEmptyState();
 
@@ -1385,21 +1610,23 @@ class _AdminLedgerTile extends StatelessWidget {
   }
 
   String _fmtDt(DateTime d) {
-    final mm = d.month.toString().padLeft(2, '0');
-    final dd = d.day.toString().padLeft(2, '0');
-    final h = d.hour.toString().padLeft(2, '0');
-    final min = d.minute.toString().padLeft(2, '0');
-    return '$mm/$dd/${d.year} · $h:$min';
+    const mNames = [
+      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${mNames[d.month]} ${d.day}, ${d.year}';
   }
 
+  DateTime _displayDate() => ledgerDisplayDateForHistory(entry);
+
   String _fmtSigned(double d) {
-    if (d == 0) return '0';
+    if (d == 0) return '0 days';
     final sign = d > 0 ? '+' : '-';
     final a = d.abs();
     final t = a == a.truncateToDouble()
         ? a.toInt().toString()
         : a.toStringAsFixed(2);
-    return '$sign$t';
+    return '$sign$t days';
   }
 
   ({Color bg, Color fg, IconData icon}) _styleForEntry(BuildContext context) {
@@ -1457,161 +1684,215 @@ class _AdminLedgerTile extends StatelessWidget {
   String _actionTitle(String raw) {
     final a = raw.toLowerCase();
     switch (a) {
-      case 'monthly_accrual':
-        return 'Monthly Accrual';
-      case 'leave_approved':
-        return 'Leave Approved';
-      case 'admin_adjustment':
-        return 'Manual Adjustment';
-      case 'leave_submitted':
-        return 'Leave Submitted';
-      case 'forced_leave_deduction':
-        return 'Forced Leave Deduction';
-      case 'leave_cancelled':
-        return 'Leave Cancelled';
-      case 'leave_rejected':
-        return 'Leave Rejected';
-      case 'leave_returned':
-        return 'Leave Returned';
-      case 'leave_revoked':
-        return 'Leave Revoked';
+      case 'monthly_accrual':        return 'Monthly Accrual';
+      case 'leave_approved':         return 'Leave Approved';
+      case 'admin_adjustment':       return 'Balance Adjustment';
+      case 'leave_submitted':        return 'Leave Filed';
+      case 'forced_leave_deduction': return 'Forced Leave Deduction';
+      case 'leave_cancelled':        return 'Leave Cancelled';
+      case 'leave_rejected':         return 'Leave Not Approved';
+      case 'leave_returned':         return 'Leave Returned';
+      case 'leave_revoked':          return 'Approval Revoked';
       default:
-        if (raw.isEmpty) return 'Ledger entry';
+        if (raw.isEmpty) return 'Ledger Entry';
         return raw
             .split('_')
             .map((w) {
               if (w.isEmpty) return w;
-              if (w.length == 1) return w.toUpperCase();
               return '${w[0].toUpperCase()}${w.substring(1)}';
             })
             .join(' ');
     }
   }
 
+  /// Human-friendly one-line description for each action type.
+  String _subtitle() {
+    final a = entry.action.toLowerCase();
+    final meta = entry.metadataJson ?? {};
+
+    if (a == 'monthly_accrual') {
+      final ym = meta['target_year_month']?.toString() ??
+          meta['targetYearMonth']?.toString();
+      final months = meta['months_credited'];
+      if (ym != null && ym.length == 7) {
+        final parts = ym.split('-');
+        final year = parts[0];
+        const mNames = [
+          '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+        ];
+        final mIdx = int.tryParse(parts[1]) ?? 0;
+        final mName = mIdx >= 1 && mIdx <= 12 ? mNames[mIdx] : parts[1];
+        final suffix = months != null && months != 1
+            ? ' · $months months back-credited'
+            : '';
+        return 'Accrual for $mName $year$suffix';
+      }
+      return 'Monthly leave accrual';
+    }
+
+    if (a == 'leave_approved') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      if (bucket == 'used') {
+        final r = entry.remarks?.trim();
+        return r != null && r.isNotEmpty ? r : 'Days deducted from balance';
+      }
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request approved';
+    }
+    if (a == 'leave_submitted') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') {
+        final r = entry.remarks?.trim();
+        return r != null && r.isNotEmpty ? r : 'Days reserved as pending';
+      }
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request submitted';
+    }
+    if (a == 'admin_adjustment') {
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Balance manually adjusted by HR';
+    }
+    if (a == 'forced_leave_deduction') {
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Forced leave deducted by HR';
+    }
+    if (a == 'leave_cancelled') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      return 'Leave request cancelled';
+    }
+    if (a == 'leave_rejected') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Leave request was not approved';
+    }
+    if (a == 'leave_returned') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty ? r : 'Returned for correction';
+    }
+    if (a == 'leave_revoked') {
+      final bucket = entry.affectedBucket.toLowerCase();
+      if (bucket == 'pending') return 'Pending hold released';
+      if (bucket == 'used') return 'Deducted days returned to balance';
+      return 'Leave approval was revoked';
+    }
+
+    final r = entry.remarks?.trim();
+    if (r != null && r.isNotEmpty) return r;
+    return _leaveTypeLabel(entry.leaveType);
+  }
+
+  /// Effective direction from the employee's perspective for color coding.
+  double _effectiveDaysForColor() {
+    final bucket = entry.affectedBucket.toLowerCase();
+    final d = entry.daysChanged;
+    if (bucket == 'used' && d > 0) return -d;
+    if (bucket == 'pending') return 0;
+    return d;
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
     final st = _styleForEntry(context);
-    final meta = entry.metadataJson;
-    final metaBrief = meta != null && meta.isNotEmpty
-        ? meta.entries.take(3).map((e) => '${e.key}: ${e.value}').join(' · ')
-        : null;
-
-    final amountColor = entry.daysChanged >= 0
+    final effective = _effectiveDaysForColor();
+    final amountColor = effective > 0
         ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
-        : (dark ? Colors.red.shade300 : const Color(0xFFC62828));
+        : effective < 0
+            ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
+            : AppTheme.dashTextSecondaryOf(context);
+
+    final subtitle = _subtitle();
+    final employeeName = entry.employeeName?.trim() ?? '';
 
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 10),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
               color: st.bg,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(7),
             ),
-            child: Icon(st.icon, color: st.fg, size: 22),
+            child: Icon(st.icon, color: st.fg, size: 18),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _actionTitle(entry.action),
-                  style: TextStyle(
-                    color: AppTheme.dashTextPrimaryOf(context),
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _leaveTypeLabel(entry.leaveType),
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 13,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _actionTitle(entry.action),
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          height: 1.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _fmtDt(_displayDate()),
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context)
+                            .withValues(alpha: 0.8),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Bucket: ${entry.affectedBucket}',
+                  [
+                    _leaveTypeLabel(entry.leaveType),
+                    if (employeeName.isNotEmpty) employeeName,
+                  ].join(' · '),
                   style: TextStyle(
                     color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 12,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                if (entry.relatedLeaveRequestId != null &&
-                    entry.relatedLeaveRequestId!.isNotEmpty) ...[
+                if (subtitle.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(
-                    'Ref #${entry.relatedLeaveRequestId}',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-                if (entry.employeeName != null &&
-                    entry.employeeName!.trim().isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    entry.employeeName!,
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-                if (entry.remarks != null &&
-                    entry.remarks!.trim().isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    entry.remarks!,
-                    style: TextStyle(
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-                if (metaBrief != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    metaBrief,
+                    subtitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 11,
-                      height: 1.25,
+                      color: AppTheme.dashTextSecondaryOf(context)
+                          .withValues(alpha: 0.85),
+                      fontSize: 12,
+                      height: 1.3,
                     ),
                   ),
                 ],
-                const SizedBox(height: 6),
-                Text(
-                  _fmtDt(entry.createdAt),
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(
-                      context,
-                    ).withValues(alpha: 0.85),
-                    fontSize: 11,
-                  ),
-                ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Text(
-            _fmtSigned(entry.daysChanged),
+            _fmtSigned(_effectiveDaysForColor()),
             style: TextStyle(
               color: amountColor,
-              fontWeight: FontWeight.w800,
-              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
             ),
           ),
         ],

@@ -38,13 +38,17 @@ class AppProviders extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => DtrProvider()),
         ChangeNotifierProvider(create: (_) => DocuTrackerProvider()),
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
-        ChangeNotifierProvider(
+        ChangeNotifierProxyProvider<AuthProvider, LeaveProvider>(
           create: (context) => LeaveProvider(
             repository: ApiLeaveRepository(),
             onMutation: () {
               context.read<NotificationProvider>().refreshUnreadCount();
             },
           ),
+          update: (context, auth, leave) {
+            leave!.onAuthUserChanged(auth.user?.id);
+            return leave;
+          },
         ),
         ChangeNotifierProvider(create: (_) => RecruitmentHirePrefill()),
       ],

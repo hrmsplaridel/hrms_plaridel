@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS users (
   date_hired DATE,
   employment_status TEXT DEFAULT 'active'
     CHECK (employment_status IN ('active', 'inactive', 'resigned', 'retired', 'terminated')),
+  separation_date DATE,
 
   biometric_user_id TEXT UNIQUE,
 
@@ -356,6 +357,9 @@ CREATE TABLE IF NOT EXISTS leave_types (
   minimum_advance_days INTEGER,
   affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
   balance_ledger_type TEXT NOT NULL DEFAULT 'others',
+  accrues_monthly BOOLEAN NOT NULL DEFAULT false,
+  accrual_monthly_rate NUMERIC(5,2),
+  accrual_annual_cap NUMERIC(8,2),
   is_system BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -454,7 +458,10 @@ SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
         'others'
       ) THEN name
       ELSE 'others'
-    END;
+    END,
+    accrues_monthly = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN true ELSE false END,
+    accrual_monthly_rate = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN 1.25 ELSE NULL END,
+    accrual_annual_cap = NULL;
 
 -- =========================================
 -- LEAVE REQUESTS
@@ -1881,6 +1888,12 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_employee_number ON users(employee_number);
 CREATE INDEX IF NOT EXISTS idx_users_biometric_user_id ON users(biometric_user_id);
 CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
+CREATE INDEX IF NOT EXISTS idx_users_employment_status
+  ON users (employment_status)
+  WHERE employment_status IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_separation_date
+  ON users (separation_date)
+  WHERE separation_date IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_user_id ON auth_refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_expires_at ON auth_refresh_tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_revoked_at ON auth_refresh_tokens(revoked_at);
@@ -1919,6 +1932,9 @@ CREATE INDEX IF NOT EXISTS idx_holidays_type ON holidays(holiday_type);
 CREATE INDEX IF NOT EXISTS idx_holiday_default_template_items_template
 ON holiday_default_template_items(template_id, sort_order, date_from);
 
+CREATE INDEX IF NOT EXISTS idx_leave_types_accrues_monthly
+  ON leave_types (accrues_monthly)
+  WHERE accrues_monthly = true;
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_id ON leave_requests(employee_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_user_id ON leave_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status);
