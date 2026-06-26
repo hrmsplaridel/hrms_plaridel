@@ -4,6 +4,11 @@
  *
  * Multi-instance: uses PostgreSQL pg_try_advisory_lock so only one worker runs per tick.
  * Disable with LEAVE_ACCRUAL_CRON_ENABLED=false (e.g. local dev or secondary instances).
+ *
+ * Enhancement 7 — Self-healing for missed months:
+ *   maxCatchUpMonths is driven by LEAVE_ACCRUAL_MAX_CATCH_UP_MONTHS (default 3).
+ *   If the cron was down for February and March, the April run will automatically
+ *   credit all missed months (up to the configured cap) in a single pass.
  */
 
 const cron = require('node-cron');
@@ -16,6 +21,20 @@ const ACCRUAL_CRON_ADVISORY_LOCK_KEY = 918273645;
 /** Cron: minute hour day-of-month month day-of-week — 00:00 on the 1st, every month. */
 const CRON_EXPRESSION = '0 0 1 * *';
 const CRON_TIMEZONE = 'Asia/Manila';
+
+/**
+ * Enhancement 7 — How many missed months to catch up per cron tick.
+ * Default: 3 (covers a quarterly server outage automatically).
+ * Override via LEAVE_ACCRUAL_MAX_CATCH_UP_MONTHS env var.
+ * Set to 1 to restore the old single-month behaviour.
+ */
+const CRON_MAX_CATCH_UP_MONTHS = Math.max(
+  1,
+  Math.min(
+    120,
+    parseInt(process.env.LEAVE_ACCRUAL_MAX_CATCH_UP_MONTHS || '3', 10) || 3
+  )
+);
 
 /**
  * Current calendar year-month in Asia/Manila as YYYY-MM (for targetMonth).
@@ -130,7 +149,7 @@ function scheduleLeaveMonthlyAccrualCron(pool) {
         const lockResult = await withAccrualAdvisoryLock(pool, async () => {
           const result = await runLeaveMonthlyAccrual(pool, {
             dryRun: false,
-            maxCatchUpMonths: 1,
+            maxCatchUpMonths: CRON_MAX_CATCH_UP_MONTHS,
             targetMonth: ym,
           });
           console.log(
@@ -171,7 +190,7 @@ function scheduleLeaveMonthlyAccrualCron(pool) {
   );
 
   console.log(
-    `[leaveMonthlyAccrual][cron] scheduled expr="${CRON_EXPRESSION}" timezone=${CRON_TIMEZONE} (1st of month 00:00 Manila)`,
+    `[leaveMonthlyAccrual][cron] scheduled expr="${CRON_EXPRESSION}" timezone=${CRON_TIMEZONE} (1st of month 00:00 Manila) maxCatchUpMonths=${CRON_MAX_CATCH_UP_MONTHS}`,
   );
   return task;
 }
@@ -184,4 +203,5 @@ module.exports = {
   broadcastMonthlyAccrualResult,
   CRON_EXPRESSION,
   CRON_TIMEZONE,
+  CRON_MAX_CATCH_UP_MONTHS,
 };
