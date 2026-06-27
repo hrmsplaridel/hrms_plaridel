@@ -3,6 +3,7 @@ const { chatCompletion } = require('../llm/llmClient');
 const { getLlmConfig } = require('../llm/llmConfig');
 const { loadEmployeeAssistantContext } = require('./dtrAssistantDataService');
 const {
+  assistantGreetingReply,
   buildFastEmployeeAssistantReply,
   requestedLeaveType,
   requestedLocatorType,
@@ -2182,6 +2183,24 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   const scope = getEmployeeSelfScope(user);
   const memory = getAssistantMemory(scope.userId);
   const normalizedTextForRules = normalizeAssistantMessageForRules(text);
+  const greetingReply = assistantGreetingReply(normalizedTextForRules);
+  if (greetingReply) {
+    return buildAssistantResult({
+      content: greetingReply,
+      provider: 'hrms',
+      model: 'hrms-greeting-rules',
+      modelProfile: profile.id,
+      mode: scope.mode,
+      context: emptyAssistantContext(
+        parseAssistantDateRange(normalizedTextForRules)
+      ),
+      intent: 'assistant_greeting',
+      intentConfidence: 1,
+      intentSource: 'greeting_rules',
+      attachments: [],
+      text: normalizedTextForRules,
+    });
+  }
   const memoryIntent = resolveIntentFromMemory(normalizedTextForRules, memory);
   const effectiveText = enrichMessageWithMemory(
     normalizedTextForRules,

@@ -315,11 +315,88 @@ function isTagalogOrBisaya(message) {
   );
 }
 
+function normalizedGreetingText(message) {
+  return lower(message)
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isAssistantGreetingMessage(message) {
+  const text = normalizedGreetingText(message);
+  if (!text || text.length > 72) return false;
+
+  const exact = new Set([
+    'hello',
+    'hi',
+    'hey',
+    'helo',
+    'hello there',
+    'hi there',
+    'good morning',
+    'good afternoon',
+    'good evening',
+    'what are you',
+    'who are you',
+    'what can you do',
+    'what do you do',
+    'what is this',
+    'unsaka',
+    'unsa ka',
+    'unsa man ka',
+    'kinsa ka',
+    'kumusta',
+    'kumusta ka',
+    'ano ka',
+    'sino ka',
+    'kamusta',
+    'kamusta ka',
+    'ano ka ba',
+    'sino ka ba',
+  ]);
+
+  if (exact.has(text)) return true;
+  if (/^(hello|hi|hey|helo|kumusta|kamusta)(\s+there|\s+po)?$/.test(text)) return true;
+  if (/^good\s+(morning|afternoon|evening)(\s+po)?$/.test(text)) return true;
+  if (/^(what|who)\s+are\s+you(\s+ba)?$/.test(text)) return true;
+  if (/^(what|who)\s+(is|are)\s+you$/.test(text)) return true;
+  if (/^(unsa|kinsa)\s+ka(\s+man|\s+ba)?$/.test(text)) return true;
+  if (/^unsaka$/.test(text)) return true;
+  if (/^(ano|sino)\s+ka(\s+ba)?$/.test(text)) return true;
+  if (/^(what can you do|what do you do)$/.test(text)) return true;
+
+  return false;
+}
+
+function assistantGreetingReply(message) {
+  if (!isAssistantGreetingMessage(message)) return null;
+
+  const language = languageOf(message);
+  if (language === 'bisaya') {
+    return (
+      'Kumusta! Ako ang imong HRMS Assistant. ' +
+      'Makatabang ko sa imong DTR, leave, ug locator records.'
+    );
+  }
+  if (language === 'tagalog') {
+    return (
+      'Kumusta! Ako ang iyong HRMS Assistant. ' +
+      'Makakatulong ako sa iyong DTR, leave, at locator records.'
+    );
+  }
+  return (
+    'Hi! I am your HRMS Assistant. ' +
+    'I can help with your DTR, leave, and locator records.'
+  );
+}
+
 function languageOf(message) {
   const text = lower(message);
   if (/\b(tagaloga?|tagalog|filipino)\b/.test(text)) return 'tagalog';
   if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(text)) return 'bisaya';
   if (/\b(english|ingles)\b/.test(text)) return 'english';
+  if (/\b(kumusta|unsaka|kinsa)\b/.test(text)) return 'bisaya';
+  if (/\b(kamusta)\b/.test(text)) return 'tagalog';
   if (/\b(ngano|unsa|unsaon|unsay|unsa'y|karon|pila|kabuok|naa|akong|nako|nabilin|gamay|kuwang|imong|nimo|gikan|mahimong|adlaw|kinahanglan|ug|kay|aning|bulana|adtong|adtung|adtun|atong|niadtong|niadtung|ana|adto|ato|duty|daw|apil|ila|nga)\b/.test(text)) {
     return 'bisaya';
   }
@@ -4862,6 +4939,9 @@ function locatorApprovalTrackerReply(context, message) {
 }
 
 function buildFastEmployeeAssistantReply(message, context, intent) {
+  const greetingReply = assistantGreetingReply(message);
+  if (greetingReply) return greetingReply;
+
   const text = lower(message);
   const localized = isTagalogOrBisaya(message);
 
@@ -5227,7 +5307,9 @@ function leaveBalanceProjectionReply(context, message) {
 }
 
 module.exports = {
+  assistantGreetingReply,
   buildFastEmployeeAssistantReply,
+  isAssistantGreetingMessage,
   requestedLeaveType,
   requestedLocatorType,
 };
