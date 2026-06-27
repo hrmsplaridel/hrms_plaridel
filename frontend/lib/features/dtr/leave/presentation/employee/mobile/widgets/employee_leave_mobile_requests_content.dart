@@ -12,12 +12,8 @@ class EmployeeLeaveMobileRequestsContent extends StatelessWidget {
     required this.loading,
     required this.useScrollableList,
     required this.maxListHeight,
-    required this.openOnTap,
     required this.scrollController,
-    required this.selectedRequestKey,
-    required this.requestKey,
     required this.onOpenRequest,
-    required this.onToggleSelection,
   });
 
   final Widget filters;
@@ -26,12 +22,8 @@ class EmployeeLeaveMobileRequestsContent extends StatelessWidget {
   final bool loading;
   final bool useScrollableList;
   final double maxListHeight;
-  final bool openOnTap;
   final ScrollController scrollController;
-  final String? selectedRequestKey;
-  final String Function(LeaveRequest request) requestKey;
   final ValueChanged<LeaveRequest> onOpenRequest;
-  final ValueChanged<LeaveRequest> onToggleSelection;
 
   @override
   Widget build(BuildContext context) {
@@ -83,9 +75,7 @@ class EmployeeLeaveMobileRequestsContent extends StatelessWidget {
         padding: EdgeInsets.only(bottom: index == requests.length - 1 ? 0 : 12),
         child: _EmployeeLeaveMobileRequestItem(
           request: request,
-          isSelected: !openOnTap && requestKey(request) == selectedRequestKey,
-          onTap: () =>
-              openOnTap ? onOpenRequest(request) : onToggleSelection(request),
+          onTap: () => onOpenRequest(request),
         ),
       );
     });
@@ -100,12 +90,10 @@ class EmployeeLeaveMobileRequestsContent extends StatelessWidget {
 class _EmployeeLeaveMobileRequestItem extends StatelessWidget {
   const _EmployeeLeaveMobileRequestItem({
     required this.request,
-    required this.isSelected,
     required this.onTap,
   });
 
   final LeaveRequest request;
-  final bool isSelected;
   final VoidCallback onTap;
 
   @override
@@ -113,7 +101,6 @@ class _EmployeeLeaveMobileRequestItem extends StatelessWidget {
     return LeaveCard(
       request: request,
       onTap: onTap,
-      isSelected: isSelected,
       showActions: false,
       onViewDetails: () {},
       onViewHistory: () {},
