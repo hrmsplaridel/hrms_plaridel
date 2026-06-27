@@ -9,6 +9,7 @@ const { pool } = require('./config/db');
 const { initWebSocket } = require('./websockets/biometricStream');
 const { initAppEventsWebSocket } = require('./websockets/appEvents');
 const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
+const { scheduleYearEndForcedLeaveCron } = require('./jobs/leaveYearEndForcedLeaveScheduler');
 const {
   scheduleAuthRefreshTokenCleanupCron,
 } = require('./jobs/authRefreshTokenCleanupScheduler');
@@ -207,6 +208,7 @@ const server = app.listen(PORT, HOST, () => {
   console.log('  GET  /api/rsp/storage/signed-url - admin signed attachment URL (service role)');
   console.log('  API  /api/rsp-ld-saved-entries/:table - RSP/L&D saved forms (admin JWT, PostgreSQL)');
   scheduleLeaveMonthlyAccrualCron(pool);
+  scheduleYearEndForcedLeaveCron(pool);
   scheduleAuthRefreshTokenCleanupCron(pool);
   // DocuTracker: server-side escalation worker (workflow control).
   try {
