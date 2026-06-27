@@ -103,46 +103,51 @@ class _AnimatedSidebarWidthState extends State<AnimatedSidebarWidth>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _collapseT,
-      child: widget.child,
-      builder: (context, child) {
-        final t = _collapseT.value;
-        final width = lerpDouble(
-          kDashboardSidebarExpandedWidth,
-          kDashboardSidebarCollapsedWidth,
-          t,
-        )!;
-        // Lay out at full expanded width inside OverflowBox so collapsing
-        // never squeezes the tree to 72px (which broke translate + clip).
-        final alignX = lerpDouble(-1.0, 0.0, t)!;
-        return ClipRect(
-          clipBehavior: Clip.hardEdge,
-          child: SizedBox(
-            width: width,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final h = constraints.maxHeight;
-                return SidebarCollapseScope(
-                  collapseT: t,
-                  child: OverflowBox(
-                    minWidth: kDashboardSidebarExpandedWidth,
-                    maxWidth: kDashboardSidebarExpandedWidth,
-                    minHeight: h,
-                    maxHeight: h,
-                    alignment: Alignment(alignX, 0),
-                    child: SizedBox(
-                      width: kDashboardSidebarExpandedWidth,
-                      height: h,
-                      child: child!,
+    // LayoutBuilder is hoisted ABOVE AnimatedBuilder: the available height does
+    // not change while the rail collapses horizontally, so we read constraints
+    // once instead of rerunning the layout callback on every animation frame.
+    return RepaintBoundary(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final h = constraints.maxHeight;
+          return AnimatedBuilder(
+            animation: _collapseT,
+            child: widget.child,
+            builder: (context, child) {
+              final t = _collapseT.value;
+              final width = lerpDouble(
+                kDashboardSidebarExpandedWidth,
+                kDashboardSidebarCollapsedWidth,
+                t,
+              )!;
+              // Lay out at full expanded width inside OverflowBox so collapsing
+              // never squeezes the tree to 72px (which broke translate + clip).
+              final alignX = lerpDouble(-1.0, 0.0, t)!;
+              return ClipRect(
+                clipBehavior: Clip.hardEdge,
+                child: SizedBox(
+                  width: width,
+                  child: SidebarCollapseScope(
+                    collapseT: t,
+                    child: OverflowBox(
+                      minWidth: kDashboardSidebarExpandedWidth,
+                      maxWidth: kDashboardSidebarExpandedWidth,
+                      minHeight: h,
+                      maxHeight: h,
+                      alignment: Alignment(alignX, 0),
+                      child: SizedBox(
+                        width: kDashboardSidebarExpandedWidth,
+                        height: h,
+                        child: child!,
+                      ),
                     ),
                   ),
-                );
-              },
-            ),
-          ),
-        );
-      },
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
