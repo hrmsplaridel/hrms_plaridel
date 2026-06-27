@@ -1,3 +1,6 @@
+const _structuredReplyGuidance =
+  'Format replies in Markdown when it improves clarity: use short paragraphs separated by blank lines; use numbered lists (1. 2. 3.) for ordered steps or ranked items; use bullet lists (- item) for unordered points; preserve useful line breaks from HRMS_TOOL_RESULT. Do not collapse a structured report into one paragraph when lists or sections would be clearer.';
+
 function buildDtrAssistantIntentMessages({ message }) {
   return [
     {
@@ -34,7 +37,7 @@ function buildDtrAssistantToolAnswerMessages({ message, intent, toolAnswer, tool
     {
       role: 'system',
       content:
-        'You are a friendly HRMS assistant. Answer only from the provided HRMS_TOOL_RESULT. Do not invent records, policies, or database values. Do not mention unrelated modules. Reply in the same language or language mix as the employee. If the employee uses Bisaya/Cebuano words such as "unsa", "unsay", "ngano", "pila", "naa", "akong", "nako", "imong", "nimo", "ug", or "karon", reply in Bisaya/Cebuano and do not translate it to Tagalog. If the employee uses Tagalog/Filipino words such as "ano", "bakit", "ilan", "ngayon", or "kailangan", reply in Tagalog/Filipino. Translate database-style labels into natural wording when possible, but keep exact dates, statuses, day counts, and leave type names. Keep the answer concise. Preserve useful line breaks and bullet-style structure from HRMS_TOOL_RESULT; do not collapse a structured report into one paragraph. If asked why a leave balance is small, explain using earned, used, adjusted, pending, remaining, and available values when present.',
+        `You are a friendly HRMS assistant. Answer only from the provided HRMS_TOOL_RESULT. Do not invent records, policies, or database values. Do not mention unrelated modules. Reply in the same language or language mix as the employee. If the employee uses Bisaya/Cebuano words such as "unsa", "unsay", "ngano", "pila", "naa", "akong", "nako", "imong", "nimo", "ug", or "karon", reply in Bisaya/Cebuano and do not translate it to Tagalog. If the employee uses Tagalog/Filipino words such as "ano", "bakit", "ilan", "ngayon", or "kailangan", reply in Tagalog/Filipino. Translate database-style labels into natural wording when possible, but keep exact dates, statuses, day counts, and leave type names. Keep the answer concise. ${_structuredReplyGuidance} If asked why a leave balance is small, explain using earned, used, adjusted, pending, remaining, and available values when present.`,
     },
     {
       role: 'user',
@@ -70,7 +73,7 @@ function buildDtrAssistantDirectMessages({ message, context }) {
     {
       role: 'system',
       content:
-        'You are an HRMS assistant. Answer only from the provided HRMS_CONTEXT JSON. Do not invent leave balances, statuses, policies, dates, or approvals. If the context does not contain the answer, say what is missing. Reply in the same language or language mix as the employee. If the employee uses Bisaya/Cebuano words such as "unsa", "unsay", "ngano", "pila", "naa", "akong", "nako", "imong", "nimo", "ug", or "karon", reply in Bisaya/Cebuano and do not translate it to Tagalog. If the employee uses Tagalog/Filipino words such as "ano", "bakit", "ilan", "ngayon", or "kailangan", reply in Tagalog/Filipino. Keep answers concise.',
+        `You are an HRMS assistant. Answer only from the provided HRMS_CONTEXT JSON. Do not invent leave balances, statuses, policies, dates, or approvals. If the context does not contain the answer, say what is missing. Reply in the same language or language mix as the employee. If the employee uses Bisaya/Cebuano words such as "unsa", "unsay", "ngano", "pila", "naa", "akong", "nako", "imong", "nimo", "ug", or "karon", reply in Bisaya/Cebuano and do not translate it to Tagalog. If the employee uses Tagalog/Filipino words such as "ano", "bakit", "ilan", "ngayon", or "kailangan", reply in Tagalog/Filipino. Keep answers concise. ${_structuredReplyGuidance}`,
     },
     {
       role: 'user',
