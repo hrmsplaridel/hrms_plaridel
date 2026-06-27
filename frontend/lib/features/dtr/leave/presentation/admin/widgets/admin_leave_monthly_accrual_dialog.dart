@@ -124,75 +124,84 @@ class _AdminMonthlyAccrualDialogState extends State<AdminMonthlyAccrualDialog> {
     final busy = _loadingPreview || _applying;
     final canApply = !busy && _preview != null && _preview!.rowsUpdated > 0;
 
-    return AlertDialog(
-      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-      title: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(
-                alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              Icons.event_repeat_rounded,
-              color: AppTheme.dashIsDark(context)
-                  ? AppTheme.primaryNavyLight
-                  : AppTheme.primaryNavy,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Run Monthly Accrual'),
-                const SizedBox(height: 4),
-                Text(
-                  'Preview affected employees before adding monthly VL and SL credits.',
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
+    return Scaffold(
+      backgroundColor: Theme.of(context).canvasColor,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryNavy.withValues(
+                        alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.event_repeat_rounded,
+                      color: AppTheme.dashIsDark(context)
+                          ? AppTheme.primaryNavyLight
+                          : AppTheme.primaryNavy,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Run Monthly Accrual',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Preview affected employees before adding monthly VL and SL credits.',
+                          style: TextStyle(
+                            color: AppTheme.dashTextSecondaryOf(context),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Close',
+                    onPressed: busy ? null : () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-      content: SizedBox(
-        width: 780,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LayoutBuilder(
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Form(
+                key: _formKey,
+                child: LayoutBuilder(
                   builder: (context, constraints) {
                     final fields = [
                       TextFormField(
                         controller: _targetMonthController,
                         enabled: !busy,
-                        decoration:
-                            adminLeaveInputDecoration(
-                              context,
-                              'Target month',
-                            ).copyWith(
-                              prefixIcon: const Icon(
-                                Icons.calendar_month_outlined,
-                              ),
-                              hintText: 'YYYY-MM',
-                            ),
+                        decoration: adminLeaveInputDecoration(
+                          context,
+                          'Target month',
+                        ).copyWith(
+                          prefixIcon: const Icon(Icons.calendar_month_outlined),
+                          hintText: 'YYYY-MM',
+                        ),
                         validator: _validateTargetMonth,
                       ),
                       TextFormField(
@@ -224,56 +233,91 @@ class _AdminMonthlyAccrualDialogState extends State<AdminMonthlyAccrualDialog> {
                     );
                   },
                 ),
-                const SizedBox(height: 12),
-                if (_error != null)
-                  _AdminMonthlyAccrualStatusPanel(
-                    icon: Icons.error_outline_rounded,
-                    message: _error!,
-                    warning: true,
-                  )
-                else if (_loadingPreview)
-                  const LinearProgressIndicator(minHeight: 2)
-                else if (_preview == null)
-                  const _AdminMonthlyAccrualStatusPanel(
-                    icon: Icons.search_rounded,
-                    message:
-                        'Run preview to see employees who will receive accrual before applying.',
-                  )
-                else
-                  _AdminMonthlyAccrualPreview(result: _preview!),
-              ],
+              ),
             ),
-          ),
+            Expanded(child: _buildBody(busy)),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: busy ? null : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: busy ? null : _previewAccrual,
+                    icon: _loadingPreview
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.search_rounded),
+                    label: Text(_loadingPreview ? 'Previewing...' : 'Preview'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: canApply ? _applyAccrual : null,
+                    icon: _applying
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.check_circle_outline_rounded),
+                    label: Text(_applying ? 'Applying...' : 'Apply Accrual'),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: busy ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+    );
+  }
+
+  Widget _buildBody(bool busy) {
+    if (_error != null) {
+      return Align(
+        alignment: Alignment.topCenter,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: _AdminMonthlyAccrualStatusPanel(
+            icon: Icons.error_outline_rounded,
+            message: _error!,
+            warning: true,
+          ),
         ),
-        OutlinedButton.icon(
-          onPressed: busy ? null : _previewAccrual,
-          icon: _loadingPreview
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.search_rounded),
-          label: Text(_loadingPreview ? 'Previewing...' : 'Preview'),
+      );
+    }
+    if (_loadingPreview) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: LinearProgressIndicator(minHeight: 2),
         ),
-        FilledButton.icon(
-          onPressed: canApply ? _applyAccrual : null,
-          icon: _applying
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.check_circle_outline_rounded),
-          label: Text(_applying ? 'Applying...' : 'Apply Accrual'),
+      );
+    }
+    if (_preview == null) {
+      return Align(
+        alignment: Alignment.topCenter,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: const _AdminMonthlyAccrualStatusPanel(
+            icon: Icons.search_rounded,
+            message:
+                'Run preview to see employees who will receive accrual before applying.',
+          ),
         ),
-      ],
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+      child: _AdminMonthlyAccrualPreview(result: _preview!),
     );
   }
 }
@@ -336,25 +380,26 @@ class _AdminMonthlyAccrualPreviewState
                 'No employees will receive accrual for this target month. They may already be credited.',
           )
         else
-          Container(
-            width: double.infinity,
-            constraints: const BoxConstraints(maxHeight: 360),
-            decoration: BoxDecoration(
-              color: AppTheme.dashMutedSurfaceOf(context),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.dashHairlineOf(context)),
-            ),
-            child: Scrollbar(
-              controller: _detailsScrollController,
-              child: ListView.separated(
+          Expanded(
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: AppTheme.dashMutedSurfaceOf(context),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.dashHairlineOf(context)),
+              ),
+              child: Scrollbar(
                 controller: _detailsScrollController,
-                primary: false,
-                shrinkWrap: true,
-                itemCount: rows.length,
-                separatorBuilder: (_, __) =>
-                    Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-                itemBuilder: (context, index) =>
-                    _AdminMonthlyAccrualDetailTile(detail: rows[index]),
+                child: ListView.separated(
+                  controller: _detailsScrollController,
+                  itemCount: rows.length,
+                  separatorBuilder: (_, __) => Divider(
+                    height: 1,
+                    color: AppTheme.dashHairlineOf(context),
+                  ),
+                  itemBuilder: (context, index) =>
+                      _AdminMonthlyAccrualDetailTile(detail: rows[index]),
+                ),
               ),
             ),
           ),

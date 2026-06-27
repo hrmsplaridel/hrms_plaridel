@@ -22,6 +22,7 @@ import 'package:hrms_plaridel/features/dtr/leave/utils/leave_request_pdf.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_details_side_sheet.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_monthly_accrual_dialog.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_year_end_forced_leave_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_request_queue.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_review_dialogs.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_screen_utils.dart';
@@ -477,6 +478,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           onForcedLeaveDeduction: widget.isDepartmentHead
               ? null
               : _applyForcedLeaveDeduction,
+          onYearEndForcedLeave: widget.isDepartmentHead ? null : _yearEndForcedLeaveDeduction,
           onMonthlyAccrual: widget.isDepartmentHead ? null : _runMonthlyAccrual,
           onManualBalanceAdjustment: widget.isDepartmentHead
               ? null
@@ -934,7 +936,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _runMonthlyAccrual() async {
-    final result = await showDialog<MonthlyLeaveAccrualResult>(
+    final result = await openResponsiveRightSidePanel<MonthlyLeaveAccrualResult>(
       context: context,
       builder: (_) => const AdminMonthlyAccrualDialog(),
     );
@@ -947,8 +949,25 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     await _loadRequests();
   }
 
+  Future<void> _yearEndForcedLeaveDeduction() async {
+    final result = await openResponsiveRightSidePanel<YearEndForcedLeaveApplyResult>(
+      context: context,
+      builder: (_) => const AdminYearEndForcedLeaveDialog(),
+    );
+    if (!mounted) return;
+    if (result != null) {
+      final applied = result.summary.applied;
+      _showMessage(
+        applied > 0
+            ? 'Year-end forced leave deduction applied for $applied employee(s).'
+            : 'Year-end forced leave review completed. No new deductions applied.',
+      );
+      await _loadRequests();
+    }
+  }
+
   Future<void> _manualBalanceAdjustment() async {
-    final saved = await showDialog<bool>(
+    final saved = await openResponsiveRightSidePanel<bool>(
       context: context,
       builder: (_) => const _ManualBalanceAdjustmentDialog(),
     );
@@ -958,12 +977,12 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   void _openLeaveLedger() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => LeaveBalanceHistoryScreen(
-          isAdmin: true,
-          initialFilterUserId: _employeeFilter,
-        ),
+    openResponsiveRightSidePanel<void>(
+      context: context,
+      builder: (_) => LeaveBalanceHistoryScreen(
+        isAdmin: true,
+        inPanel: true,
+        initialFilterUserId: _employeeFilter,
       ),
     );
   }
@@ -1082,12 +1101,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _openLeaveTypeRules() async {
-    await showDialog<void>(
+    await openResponsiveRightSidePanel<void>(
       context: context,
-      builder: (_) => Dialog(
-        insetPadding: const EdgeInsets.all(24),
-        child: const LeaveTypeManagementScreen(),
-      ),
+      builder: (_) => const LeaveTypeManagementScreen(),
     );
     if (!mounted) return;
     await _loadLeaveTypeFilterOptions(forceRefresh: true);
@@ -1115,6 +1131,7 @@ class _AdminHeaderCard extends StatelessWidget {
     required this.reviewing,
     required this.onRefresh,
     this.onForcedLeaveDeduction,
+    this.onYearEndForcedLeave,
     this.onMonthlyAccrual,
     this.onManualBalanceAdjustment,
     this.onEmployeeLeaveCard,
@@ -1127,6 +1144,7 @@ class _AdminHeaderCard extends StatelessWidget {
   final bool reviewing;
   final Future<void> Function() onRefresh;
   final Future<void> Function()? onForcedLeaveDeduction;
+  final Future<void> Function()? onYearEndForcedLeave;
   final Future<void> Function()? onMonthlyAccrual;
   final Future<void> Function()? onManualBalanceAdjustment;
   final Future<void> Function()? onEmployeeLeaveCard;
@@ -1166,11 +1184,11 @@ class _AdminHeaderCard extends StatelessWidget {
           icon: Icons.event_repeat_rounded,
           onSelected: onMonthlyAccrual!,
         ),
-      if (onForcedLeaveDeduction != null)
+      if (onYearEndForcedLeave != null)
         _HeaderMenuAction(
-          label: 'Apply Year-End Forced Leave Deduction',
-          icon: Icons.assignment_turned_in_rounded,
-          onSelected: onForcedLeaveDeduction!,
+          label: 'Year-End Forced Leave Deduction',
+          icon: Icons.event_available_rounded,
+          onSelected: onYearEndForcedLeave!,
           separatedBefore: true,
         ),
     ];
@@ -2231,76 +2249,138 @@ class _ManualBalanceAdjustmentDialogState
         hasEmployees &&
         hasSelectedEmployee;
 
-    return AlertDialog(
-      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-      title: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(
-                alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
+    return Scaffold(
+      backgroundColor: Theme.of(context).canvasColor,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryNavy.withValues(
+                        alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.account_balance_wallet_outlined,
+                      color: AppTheme.dashIsDark(context)
+                          ? AppTheme.primaryNavyLight
+                          : AppTheme.primaryNavy,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Manual Balance Adjustment',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Update leave credit buckets and record an audit note.',
+                          style: TextStyle(
+                            color: AppTheme.dashTextSecondaryOf(context),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Close',
+                    onPressed: saving ? null : () => Navigator.of(context).pop(),
+                  ),
+                ],
               ),
-              borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(
-              Icons.account_balance_wallet_outlined,
-              color: AppTheme.dashIsDark(context)
-                  ? AppTheme.primaryNavyLight
-                  : AppTheme.primaryNavy,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Manual Balance Adjustment'),
-                const SizedBox(height: 4),
-                Text(
-                  'Update leave credit buckets and record an audit note.',
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Form(
+                  key: _formKey,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  child: _buildFormContent(
+                    saving: saving,
+                    hasDepartments: hasDepartments,
+                    hasEmployees: hasEmployees,
+                    hasSelectedEmployee: hasSelectedEmployee,
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
-        ],
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: saving ? null : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: canSave ? _onSave : null,
+                    icon: saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_outlined),
+                    label: Text(saving ? 'Saving...' : 'Update balance'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
-      content: SizedBox(
-        width: 640,
-        child: Form(
-          key: _formKey,
-          autovalidateMode: AutovalidateMode.onUserInteraction,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_loadingEmployees)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (_employeesError != null)
-                  Text(
-                    'Failed to load employees: $_employeesError',
-                    style: TextStyle(color: Colors.red.shade700),
-                  )
-                else if (!hasDepartments)
-                  _statusPanel(
-                    icon: Icons.apartment_outlined,
-                    message:
-                        'No active departments are available for adjustment.',
-                  )
-                else ...[
+    );
+  }
+
+  Widget _buildFormContent({
+    required bool saving,
+    required bool hasDepartments,
+    required bool hasEmployees,
+    required bool hasSelectedEmployee,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_loadingEmployees)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_employeesError != null)
+          Text(
+            'Failed to load employees: $_employeesError',
+            style: TextStyle(color: Colors.red.shade700),
+          )
+        else if (!hasDepartments)
+          _statusPanel(
+            icon: Icons.apartment_outlined,
+            message: 'No active departments are available for adjustment.',
+          )
+        else ...[
                   _sectionHeader(
                     icon: Icons.person_search_outlined,
                     title: 'Employee and Leave Type',
@@ -2487,28 +2567,7 @@ class _ManualBalanceAdjustmentDialogState
                         : 'Approvals continue to update used and pending days automatically after this adjustment.',
                     warning: _draftBalance.availableDays < 0,
                   ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: saving ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton.icon(
-          onPressed: canSave ? _onSave : null,
-          icon: saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.save_outlined),
-          label: Text(saving ? 'Saving...' : 'Update balance'),
-        ),
+        ],
       ],
     );
   }
