@@ -39,21 +39,21 @@ class EmployeeLocatorMobileRequestCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
             color: isSelected ? selectedColor : AppTheme.dashPanelOf(context),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: borderColor),
             boxShadow: dark
                 ? null
                 : [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.04),
-                      blurRadius: 12,
-                      offset: const Offset(0, 5),
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
                     ),
                   ],
           ),
@@ -73,7 +73,7 @@ class EmployeeLocatorMobileRequestCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: AppTheme.dashTextPrimaryOf(context),
-                            fontSize: 16,
+                            fontSize: 15,
                             fontWeight: FontWeight.w800,
                             height: 1.2,
                           ),
@@ -94,22 +94,22 @@ class EmployeeLocatorMobileRequestCard extends StatelessWidget {
                   statusPill,
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Text(
                 office.trim().isEmpty ? 'Location not set' : office,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: AppTheme.dashTextPrimaryOf(context),
-                  fontSize: 13,
+                  fontSize: 12.5,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               if (remarks.trim().isNotEmpty) ...[
-                const SizedBox(height: 5),
+                const SizedBox(height: 3),
                 Text(
                   remarks.trim(),
-                  maxLines: 2,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppTheme.dashTextSecondaryOf(context),
@@ -118,10 +118,10 @@ class EmployeeLocatorMobileRequestCard extends StatelessWidget {
                   ),
                 ),
               ],
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 6,
+                runSpacing: 6,
                 children: [
                   _LocatorMobileMetaChip(
                     icon: Icons.schedule_rounded,
@@ -150,10 +150,10 @@ class _LocatorMobileMetaChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Row(

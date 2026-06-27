@@ -812,21 +812,19 @@ class EmployeeLocatorSlipContentState
     return EmployeeLocatorMobileRequestList(
       maxHeight: maxHeight,
       useScrollableList: useScrollableList,
+      scrollController: _myRequestsScrollController,
       children: List.generate(items.length, (index) {
         final item = items[index];
-        return Padding(
-          padding: EdgeInsets.only(bottom: index == items.length - 1 ? 0 : 12),
-          child: EmployeeLocatorMobileRequestCard(
-            title: item.requestType.label,
-            dateLabel: _formatDate(item.date),
-            office: item.office,
-            remarks: item.remarks,
-            isSelected: _slipSelectionKey(item) == _selectedSlipId,
-            segmentsText: _approvalSegmentsText(item),
-            typeLabel: item.requestType.shortLabel,
-            statusPill: _myRequestStatusPill(item),
-            onTap: () => _openSlipDetails(item),
-          ),
+        return EmployeeLocatorMobileRequestCard(
+          title: item.requestType.label,
+          dateLabel: _formatDate(item.date),
+          office: item.office,
+          remarks: item.remarks,
+          isSelected: _slipSelectionKey(item) == _selectedSlipId,
+          segmentsText: _approvalSegmentsText(item),
+          typeLabel: item.requestType.shortLabel,
+          statusPill: _myRequestStatusPill(item),
+          onTap: () => _openSlipDetails(item),
         );
       }),
     );
