@@ -790,8 +790,11 @@ class _AssistantHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+    final lottieSize = isNarrow ? 54.0 : 74.0;
+
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(isNarrow ? 12 : 14),
       decoration: BoxDecoration(
         color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(8),
@@ -800,14 +803,14 @@ class _AssistantHeader extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 74,
-            height: 74,
+            width: lottieSize,
+            height: lottieSize,
             child: Lottie.asset(
               'assets/animations/chatbot_assistant.json',
               repeat: true,
             ),
           ),
-          const SizedBox(width: 14),
+          SizedBox(width: isNarrow ? 12 : 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -816,7 +819,7 @@ class _AssistantHeader extends StatelessWidget {
                   'HRMS Assistant',
                   style: TextStyle(
                     color: AppTheme.dashTextPrimaryOf(context),
-                    fontSize: 18,
+                    fontSize: isNarrow ? 16 : 18,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -827,7 +830,7 @@ class _AssistantHeader extends StatelessWidget {
                       : 'Answers use your HRMS records, including DTR, leave, and locator.',
                   style: TextStyle(
                     color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 13,
+                    fontSize: isNarrow ? 12 : 13,
                     height: 1.3,
                   ),
                 ),

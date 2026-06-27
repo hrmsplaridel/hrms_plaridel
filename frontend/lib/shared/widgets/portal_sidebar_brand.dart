@@ -191,11 +191,16 @@ class DashboardAppHeaderBar extends StatelessWidget {
     this.compactActions = false,
     this.onViewAllNotifications,
     this.onNotificationTap,
+    this.showNotifications = true,
   });
 
   final Widget trailing;
   final VoidCallback? onViewAllNotifications;
   final void Function(NotificationTapResult? result)? onNotificationTap;
+
+  /// When false, the header notification bell is hidden (mobile uses the bottom
+  /// navigation bell instead).
+  final bool showNotifications;
 
   /// When false (desktop), brand lives in the sidebar rail; this bar is actions only.
   final bool showBrand;
@@ -303,6 +308,7 @@ class DashboardAppHeaderBar extends StatelessWidget {
             compact: compact,
             onViewAllNotifications: onViewAllNotifications,
             onNotificationTap: onNotificationTap,
+            showNotifications: showNotifications,
           ),
           DashboardHeaderActionDivider(compact: compact, emphasized: true),
           trailing,

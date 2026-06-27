@@ -33,6 +33,38 @@ class DtrAssistantInputBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+
+    final textField = TextField(
+      controller: controller,
+      enabled: enabled,
+      minLines: 1,
+      maxLines: 4,
+      textInputAction: TextInputAction.send,
+      onSubmitted: (_) => _send(),
+      decoration: InputDecoration(
+        hintText: 'Ask about your HRMS records and services',
+        filled: true,
+        fillColor: AppTheme.dashMutedSurfaceOf(context),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+      ),
+    );
+
+    final modelSelector = _AssistantModelSelector(
+      enabled: enabled,
+      profiles: modelProfiles,
+      selectedId: selectedModelProfile,
+      onChanged: onModelChanged,
+      iconOnly: isNarrow,
+    );
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -41,52 +73,38 @@ class DtrAssistantInputBar extends StatelessWidget {
           top: BorderSide(color: AppTheme.dashHairlineOf(context)),
         ),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: controller,
-              enabled: enabled,
-              minLines: 1,
-              maxLines: 4,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => _send(),
-              decoration: InputDecoration(
-                hintText: 'Ask about your HRMS records and services',
-                filled: true,
-                fillColor: AppTheme.dashMutedSurfaceOf(context),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          _AssistantModelSelector(
-            enabled: enabled,
-            profiles: modelProfiles,
-            selectedId: selectedModelProfile,
-            onChanged: onModelChanged,
-          ),
-          const SizedBox(width: 8),
-          if (sending)
-            IconButton.filled(
-              tooltip: 'Stop generating',
-              onPressed: onStop,
-              icon: const Icon(Icons.stop_rounded),
-            )
-          else
-            IconButton.filled(
-              tooltip: 'Send',
-              onPressed: enabled ? _send : null,
-              icon: const Icon(Icons.send_rounded),
-            ),
-        ],
+      child: SafeArea(
+        top: false,
+        child: ListenableBuilder(
+          listenable: controller,
+          builder: (context, _) {
+            final hasText = controller.text.trim().isNotEmpty;
+            final canSend = enabled && hasText;
+
+            final sendButton = sending
+                ? IconButton.filled(
+                    tooltip: 'Stop generating',
+                    onPressed: onStop,
+                    icon: const Icon(Icons.stop_rounded),
+                  )
+                : IconButton.filled(
+                    tooltip: 'Send',
+                    onPressed: canSend ? _send : null,
+                    icon: const Icon(Icons.send_rounded),
+                  );
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                modelSelector,
+                const SizedBox(width: 8),
+                Expanded(child: textField),
+                const SizedBox(width: 8),
+                sendButton,
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -98,12 +116,16 @@ class _AssistantModelSelector extends StatelessWidget {
     required this.profiles,
     required this.selectedId,
     required this.onChanged,
+    this.iconOnly = false,
   });
 
   final bool enabled;
   final List<DtrAssistantModelProfile> profiles;
   final String selectedId;
   final ValueChanged<String> onChanged;
+
+  /// Compact, label-less control (icon only) to fit on a single row on mobile.
+  final bool iconOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -175,36 +197,47 @@ class _AssistantModelSelector extends StatelessWidget {
       },
       child: Container(
         height: 48,
-        constraints: const BoxConstraints(minWidth: 76, maxWidth: 128),
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        width: iconOnly ? 48 : null,
+        constraints: iconOnly
+            ? null
+            : const BoxConstraints(minWidth: 76, maxWidth: 128),
+        padding: EdgeInsets.symmetric(horizontal: iconOnly ? 0 : 10),
         decoration: BoxDecoration(
           color: AppTheme.dashMutedSurfaceOf(context),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: AppTheme.dashHairlineOf(context)),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.tune_rounded,
-              size: 18,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                shortLabel,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppTheme.dashTextPrimaryOf(context),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
+        child: iconOnly
+            ? Center(
+                child: Icon(
+                  Icons.tune_rounded,
+                  size: 20,
+                  color: AppTheme.dashTextSecondaryOf(context),
                 ),
+              )
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.tune_rounded,
+                    size: 18,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      shortLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }
