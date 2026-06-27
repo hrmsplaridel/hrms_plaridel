@@ -1250,16 +1250,26 @@ class EmployeeLocatorSlipContentState
     BuildContext context,
     String employeeName,
   ) async {
-    final created = await showDialog<_LocatorSlipDraft>(
-      context: context,
-      builder: (_) => EmployeeHrmsAssistantOverlay(
-        initialBottom: 92,
-        child: _LocatorSlipFormDialog(
-          employeeName: employeeName,
-          requestTypes: _locatorTypes,
-        ),
-      ),
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
+    final form = _LocatorSlipFormDialog(
+      employeeName: employeeName,
+      requestTypes: _locatorTypes,
     );
+    final _LocatorSlipDraft? created;
+    if (isMobile) {
+      created = await Navigator.of(context, rootNavigator: true)
+          .push<_LocatorSlipDraft>(
+        MaterialPageRoute<_LocatorSlipDraft>(builder: (_) => form),
+      );
+    } else {
+      created = await showDialog<_LocatorSlipDraft>(
+        context: context,
+        builder: (_) => EmployeeHrmsAssistantOverlay(
+          initialBottom: 92,
+          child: form,
+        ),
+      );
+    }
     if (!mounted || created == null) return;
     setState(() {
       _error = null;
@@ -1762,6 +1772,11 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
+    return isMobile ? _buildFullScreen(context) : _buildDialog(context);
+  }
+
+  Widget _buildDialog(BuildContext context) {
     const accent = Color(0xFFF57C00);
     return AlertDialog(
       backgroundColor: AppTheme.dashPanelOf(context),
@@ -1782,73 +1797,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         width: 360,
         child: Form(
           key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _datePicker(),
-                const SizedBox(height: 14),
-                _requestTypeDropdown(),
-                if (_isWfhRequest) ...[
-                  const SizedBox(height: 14),
-                  _wfhCoverageDropdown(),
-                ],
-                const SizedBox(height: 14),
-                _segmentSelector(),
-                const SizedBox(height: 14),
-                EmployeeLocatorMobileLabeledField(
-                  label: 'Name',
-                  labelColor: AppTheme.dashTextSecondaryOf(context),
-                  child: TextFormField(
-                    initialValue: widget.employeeName,
-                    enabled: false,
-                    decoration: _inputDecoration().copyWith(
-                      hintText: widget.employeeName,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                EmployeeLocatorMobileLabeledField(
-                  label: _requestType.locationLabel,
-                  labelColor: AppTheme.dashTextSecondaryOf(context),
-                  child: TextFormField(
-                    controller: _officeController,
-                    decoration: _inputDecoration().copyWith(
-                      hintText: _requestType.locationHint,
-                    ),
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? '${_requestType.locationLabel} is required'
-                        : null,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                EmployeeLocatorMobileLabeledField(
-                  label: 'Remarks / Reasons',
-                  labelColor: AppTheme.dashTextSecondaryOf(context),
-                  child: TextFormField(
-                    controller: _remarksController,
-                    minLines: 4,
-                    maxLines: 4,
-                    decoration: _inputDecoration().copyWith(
-                      hintText: 'Enter remarks...',
-                      alignLabelWithHint: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
-                    ),
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'Remarks/Reasons is required'
-                        : null,
-                  ),
-                ),
-                if (_requiresAttachment) ...[
-                  const SizedBox(height: 14),
-                  _attachmentPicker(),
-                ],
-              ],
-            ),
-          ),
+          child: SingleChildScrollView(child: _formFields(context)),
         ),
       ),
       actions: [
@@ -1857,6 +1806,120 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
           onCancel: () => Navigator.of(context).pop(),
           onSubmit: _save,
         ),
+      ],
+    );
+  }
+
+  Widget _buildFullScreen(BuildContext context) {
+    const accent = Color(0xFFF57C00);
+    return Scaffold(
+      backgroundColor: AppTheme.dashPanelOf(context),
+      appBar: AppBar(
+        backgroundColor: AppTheme.dashPanelOf(context),
+        foregroundColor: AppTheme.dashTextPrimaryOf(context),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        title: Text(
+          'File Request',
+          style: TextStyle(
+            color: AppTheme.dashTextPrimaryOf(context),
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: _formFields(context),
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+          decoration: BoxDecoration(
+            color: AppTheme.dashPanelOf(context),
+            border: Border(
+              top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
+          ),
+          child: EmployeeLocatorMobileFormActions(
+            accent: accent,
+            onCancel: () => Navigator.of(context).pop(),
+            onSubmit: _save,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _formFields(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _datePicker(),
+        const SizedBox(height: 14),
+        _requestTypeDropdown(),
+        if (_isWfhRequest) ...[
+          const SizedBox(height: 14),
+          _wfhCoverageDropdown(),
+        ],
+        const SizedBox(height: 14),
+        _segmentSelector(),
+        const SizedBox(height: 14),
+        EmployeeLocatorMobileLabeledField(
+          label: 'Name',
+          labelColor: AppTheme.dashTextSecondaryOf(context),
+          child: TextFormField(
+            initialValue: widget.employeeName,
+            enabled: false,
+            decoration: _inputDecoration().copyWith(
+              hintText: widget.employeeName,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        EmployeeLocatorMobileLabeledField(
+          label: _requestType.locationLabel,
+          labelColor: AppTheme.dashTextSecondaryOf(context),
+          child: TextFormField(
+            controller: _officeController,
+            decoration: _inputDecoration().copyWith(
+              hintText: _requestType.locationHint,
+            ),
+            validator: (v) => (v == null || v.trim().isEmpty)
+                ? '${_requestType.locationLabel} is required'
+                : null,
+          ),
+        ),
+        const SizedBox(height: 12),
+        EmployeeLocatorMobileLabeledField(
+          label: 'Remarks / Reasons',
+          labelColor: AppTheme.dashTextSecondaryOf(context),
+          child: TextFormField(
+            controller: _remarksController,
+            minLines: 4,
+            maxLines: 4,
+            decoration: _inputDecoration().copyWith(
+              hintText: 'Enter remarks...',
+              alignLabelWithHint: true,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 12,
+              ),
+            ),
+            validator: (v) => (v == null || v.trim().isEmpty)
+                ? 'Remarks/Reasons is required'
+                : null,
+          ),
+        ),
+        if (_requiresAttachment) ...[
+          const SizedBox(height: 14),
+          _attachmentPicker(),
+        ],
       ],
     );
   }
