@@ -611,4 +611,36 @@ class MockLeaveRepository implements LeaveRepository {
       rows: const [],
     );
   }
+
+  @override
+  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(int year) async {
+    return YearEndForcedLeaveComplianceResult(
+      year: year,
+      requiredDays: 5,
+      employees: const [],
+      summary: const YearEndForcedLeaveSummary(
+        total: 0,
+        compliant: 0,
+        pendingDeduction: 0,
+        alreadyDeducted: 0,
+      ),
+    );
+  }
+
+  @override
+  Future<YearEndForcedLeaveApplyResult> applyYearEndForcedLeaveDeductions(
+    YearEndForcedLeaveApplyInput input,
+  ) async {
+    return YearEndForcedLeaveApplyResult(
+      dryRun: input.dryRun,
+      year: input.year,
+      results: const [],
+      summary: const YearEndForcedLeaveSummary(
+        total: 0,
+        compliant: 0,
+        pendingDeduction: 0,
+        alreadyDeducted: 0,
+      ),
+    );
+  }
 }
