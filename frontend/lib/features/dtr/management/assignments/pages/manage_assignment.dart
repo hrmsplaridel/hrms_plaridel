@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
@@ -115,13 +117,21 @@ class ManageAssignment extends StatefulWidget {
 }
 
 class _ManageAssignmentState extends State<ManageAssignment> {
+  static const _kPageSizes = [10, 25, 50];
+
   final _searchController = TextEditingController();
   String _employeeStatusFilter = 'All';
   String? _employeeDepartmentFilterId;
   String _assignmentStatusFilter = 'Active';
   String? _selectedEmployeeId;
+  String? _selectedEmployeeName;
   List<_EmployeeSummary> _employees = [];
   bool _loadingEmployees = false;
+  int _pageIndex = 0;
+  int _pageSize = 25;
+  int _totalEmployeeCount = 0;
+  String _searchQuery = '';
+  Timer? _searchDebounceTimer;
 
   List<_AssignmentRecord> _assignments = [];
   bool _loadingAssignments = false;
@@ -211,58 +221,172 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   @override
   void dispose() {
+    _searchDebounceTimer?.cancel();
     _searchController.dispose();
     _remarksController.dispose();
     _designationRemarksController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadEmployees() async {
+  Map<String, dynamic> _employeeListQueryBase() {
+    final status = _employeeStatusFilter == 'Active'
+        ? 'Active'
+        : _employeeStatusFilter == 'Inactive'
+        ? 'Inactive'
+        : 'All';
+    final query = <String, dynamic>{
+      'status': status,
+      'role': 'All',
+      'sort': 'full_name',
+      'order': 'asc',
+    };
+    final departmentId = _employeeDepartmentFilterId?.trim();
+    if (departmentId != null && departmentId.isNotEmpty) {
+      query['department_id'] = departmentId;
+    }
+    final sq = _searchQuery.trim();
+    if (sq.isNotEmpty) {
+      query['q'] = sq;
+    }
+    return query;
+  }
+
+  Future<void> _loadEmployees({bool clampPage = true}) async {
     setState(() => _loadingEmployees = true);
     try {
-      final status = _employeeStatusFilter == 'Active'
-          ? 'Active'
-          : _employeeStatusFilter == 'Inactive'
-          ? 'Inactive'
-          : 'All';
-      final queryParameters = <String, dynamic>{
-        'status': status,
-        'role': 'All',
+      final query = <String, dynamic>{
+        ..._employeeListQueryBase(),
+        'limit': _pageSize,
+        'offset': _pageIndex * _pageSize,
       };
-      final departmentId = _employeeDepartmentFilterId?.trim();
-      if (departmentId != null && departmentId.isNotEmpty) {
-        queryParameters['department_id'] = departmentId;
-      }
-      final res = await ApiClient.instance.get<List<dynamic>>(
+      final res = await ApiClient.instance.get<dynamic>(
         '/api/employees',
-        queryParameters: queryParameters,
+        queryParameters: query,
       );
-      final data = res.data ?? [];
-      _employees = data.map((e) {
-        final m = e as Map<String, dynamic>;
-        final empNum = m['employee_number'];
-        return _EmployeeSummary(
-          id: m['id'] as String,
-          fullName: m['full_name'] as String? ?? 'Unknown',
-          employeeNumber: empNum is int
-              ? empNum
-              : (empNum != null ? int.tryParse(empNum.toString()) : null),
-        );
-      }).toList();
-      if (_selectedEmployeeId != null &&
-          !_employees.any((e) => e.id == _selectedEmployeeId)) {
-        _clearEmployeeSelection();
+      final data = res.data;
+      List<_EmployeeSummary> next;
+      int total;
+      if (data is Map) {
+        final list = data['employees'] as List<dynamic>? ?? [];
+        total = (data['total'] as num?)?.toInt() ?? 0;
+        next = list.map((e) {
+          final m = e as Map<String, dynamic>;
+          final empNum = m['employee_number'];
+          return _EmployeeSummary(
+            id: m['id'] as String,
+            fullName: m['full_name'] as String? ?? 'Unknown',
+            employeeNumber: empNum is int
+                ? empNum
+                : (empNum != null ? int.tryParse(empNum.toString()) : null),
+          );
+        }).toList();
+      } else if (data is List) {
+        next = data.map((e) {
+          final m = e as Map<String, dynamic>;
+          final empNum = m['employee_number'];
+          return _EmployeeSummary(
+            id: m['id'] as String,
+            fullName: m['full_name'] as String? ?? 'Unknown',
+            employeeNumber: empNum is int
+                ? empNum
+                : (empNum != null ? int.tryParse(empNum.toString()) : null),
+          );
+        }).toList();
+        total = next.length;
+      } else {
+        next = [];
+        total = 0;
+      }
+
+      var pageIdx = _pageIndex;
+      if (clampPage && total > 0 && _pageSize > 0) {
+        final maxPage = (total - 1) ~/ _pageSize;
+        if (pageIdx > maxPage) {
+          pageIdx = maxPage;
+        }
+      }
+
+      if (clampPage && pageIdx != _pageIndex) {
+        if (mounted) {
+          setState(() {
+            _pageIndex = pageIdx;
+            _loadingEmployees = false;
+          });
+          await _loadEmployees(clampPage: false);
+          return;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _employees = next;
+          _totalEmployeeCount = total;
+          _loadingEmployees = false;
+          final selectedId = _selectedEmployeeId;
+          if (selectedId != null) {
+            final match = next.where((e) => e.id == selectedId);
+            if (match.isNotEmpty) {
+              _selectedEmployeeName = match.first.fullName;
+            }
+          }
+        });
       }
     } catch (e) {
       debugPrint('Load employees failed: $e');
-      _employees = [];
-      _clearEmployeeSelection();
+      if (mounted) {
+        setState(() {
+          _employees = [];
+          _totalEmployeeCount = 0;
+          _loadingEmployees = false;
+        });
+      }
     }
-    if (mounted) setState(() => _loadingEmployees = false);
     if (!_initialPrefillApplied && widget.initialEmployeeId != null) {
       _initialPrefillApplied = true;
       await _applyInitialEmployeePrefill();
     }
+  }
+
+  void _onSearchChanged() {
+    _searchDebounceTimer?.cancel();
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      final next = _searchController.text.trim();
+      if (next == _searchQuery) return;
+      setState(() {
+        _searchQuery = next;
+        _pageIndex = 0;
+        _clearEmployeeSelection();
+      });
+      _loadEmployees();
+    });
+  }
+
+  void _goToEmployeePage(int index) {
+    final maxPage = _totalEmployeeCount > 0
+        ? (_totalEmployeeCount - 1) ~/ _pageSize
+        : 0;
+    if (index < 0 || index > maxPage || index == _pageIndex) return;
+    setState(() => _pageIndex = index);
+    _loadEmployees();
+  }
+
+  void _setEmployeePageSize(int size) {
+    if (!_kPageSizes.contains(size)) return;
+    setState(() {
+      _pageSize = size;
+      _pageIndex = 0;
+    });
+    _loadEmployees();
+  }
+
+  void _resetEmployeeFiltersAndReload(VoidCallback updateFilters) {
+    setState(() {
+      updateFilters();
+      _pageIndex = 0;
+      _clearEmployeeSelection();
+    });
+    _loadEmployees();
   }
 
   Future<void> _applyInitialEmployeePrefill() async {
@@ -271,13 +395,34 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       widget.onInitialEmployeeConsumed?.call();
       return;
     }
-    if (!_employees.any((e) => e.id == id)) {
+
+    if (_employees.any((e) => e.id == id)) {
+      if (!mounted) return;
+      final employee = _employees.firstWhere((e) => e.id == id);
+      setState(() {
+        _selectedEmployeeId = id;
+        _selectedEmployeeName = employee.fullName;
+      });
+      await Future.wait([_loadAssignments(), _loadDesignations()]);
       widget.onInitialEmployeeConsumed?.call();
       return;
     }
-    if (!mounted) return;
-    setState(() => _selectedEmployeeId = id);
-    await Future.wait([_loadAssignments(), _loadDesignations()]);
+
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/employees/$id',
+      );
+      final data = res.data;
+      if (data != null && mounted) {
+        setState(() {
+          _selectedEmployeeId = id;
+          _selectedEmployeeName = data['full_name'] as String? ?? 'Unknown';
+        });
+        await Future.wait([_loadAssignments(), _loadDesignations()]);
+      }
+    } catch (e) {
+      debugPrint('Initial employee prefill failed: $e');
+    }
     widget.onInitialEmployeeConsumed?.call();
   }
 
@@ -606,6 +751,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   void _clearEmployeeSelection() {
     _selectedEmployeeId = null;
+    _selectedEmployeeName = null;
     _assignments = [];
     _designations = [];
     _selectedAssignment = null;
@@ -1425,12 +1571,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   Widget _buildLeftPanel() {
     final dark = _isDark(context);
-    final search = _searchController.text.toLowerCase();
-    final filtered = search.isEmpty
-        ? _employees
-        : _employees
-              .where((e) => e.fullName.toLowerCase().contains(search))
-              .toList();
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1489,7 +1629,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               padding: EdgeInsets.all(32),
               child: Center(child: CircularProgressIndicator()),
             )
-          else if (filtered.isEmpty)
+          else if (_employees.isEmpty)
             Container(
               constraints: const BoxConstraints(minHeight: 120),
               alignment: Alignment.center,
@@ -1502,7 +1642,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               ),
             )
           else
-            ...filtered.map((e) {
+            ..._employees.map((e) {
               final isSelected = _selectedEmployeeId == e.id;
               return Material(
                 color: isSelected
@@ -1514,6 +1654,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                   onTap: () {
                     _updateAssignmentFormState(() {
                       _selectedEmployeeId = e.id;
+                      _selectedEmployeeName = e.fullName;
                       _selectedAssignment = null;
                       _selectedDeptId = null;
                       _selectedPositionId = null;
@@ -1569,6 +1710,91 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 ),
               );
             }),
+          if (!_loadingEmployees && _totalEmployeeCount > 0)
+            _buildEmployeePaginationBar(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmployeePaginationBar() {
+    final total = _totalEmployeeCount;
+    final maxPage = total <= 0 ? 0 : (total - 1) ~/ _pageSize;
+    final start = total == 0 ? 0 : _pageIndex * _pageSize + 1;
+    final end = total == 0
+        ? 0
+        : (_pageIndex * _pageSize + _employees.length).clamp(0, total);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            total == 0 ? 'No results' : 'Showing $start–$end of $total',
+            style: TextStyle(
+              fontSize: 12,
+              color: _mutedColor(context).withValues(alpha: 0.9),
+            ),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Rows',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _mutedColor(context).withValues(alpha: 0.85),
+                ),
+              ),
+              const SizedBox(width: 8),
+              DropdownButton<int>(
+                value: _pageSize,
+                dropdownColor: AppTheme.dashPanelOf(context),
+                style: AppTheme.dashFieldTextStyle(context),
+                underline: const SizedBox.shrink(),
+                isDense: true,
+                items: _kPageSizes
+                    .map(
+                      (s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(
+                          '$s / page',
+                          style: AppTheme.dashFieldTextStyle(context),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) _setEmployeePageSize(v);
+                },
+              ),
+            ],
+          ),
+          IconButton(
+            tooltip: 'Previous page',
+            icon: const Icon(Icons.chevron_left_rounded),
+            onPressed: _pageIndex > 0
+                ? () => _goToEmployeePage(_pageIndex - 1)
+                : null,
+          ),
+          Text(
+            'Page ${_pageIndex + 1} / ${maxPage + 1}',
+            style: TextStyle(
+              fontSize: 12,
+              color: _headingColor(context),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Next page',
+            icon: const Icon(Icons.chevron_right_rounded),
+            onPressed: _pageIndex < maxPage
+                ? () => _goToEmployeePage(_pageIndex + 1)
+                : null,
+          ),
         ],
       ),
     );
@@ -1577,7 +1803,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   Widget _buildSearchField() {
     return TextField(
       controller: _searchController,
-      onChanged: (_) => setState(() {}),
+      onChanged: (_) => _onSearchChanged(),
       style: AppTheme.dashFieldTextStyle(context),
       decoration: AppTheme.dashInputDecoration(
         context,
@@ -1650,8 +1876,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               ),
             ],
             onChanged: (v) {
-              setState(() => _employeeDepartmentFilterId = v);
-              _loadEmployees();
+              _resetEmployeeFiltersAndReload(() {
+                _employeeDepartmentFilterId = v;
+              });
             },
           ),
         ),
@@ -1678,21 +1905,17 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             )
             .toList(),
         onChanged: (v) {
-          setState(() => _employeeStatusFilter = v ?? 'All');
-          _loadEmployees();
+          _resetEmployeeFiltersAndReload(() {
+            _employeeStatusFilter = v ?? 'All';
+          });
         },
       ),
     );
   }
 
   Widget _buildRightPanel() {
-    _EmployeeSummary? sel;
-    if (_selectedEmployeeId != null) {
-      try {
-        sel = _employees.firstWhere((e) => e.id == _selectedEmployeeId);
-      } catch (_) {}
-    }
-    final hasSelection = sel != null;
+    final hasSelection = _selectedEmployeeId != null;
+    final employeeLabel = _selectedEmployeeName ?? 'Select an employee';
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1715,7 +1938,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Assignments for ${hasSelection ? sel.fullName : 'Select an employee'}',
+                    'Assignments for ${hasSelection ? employeeLabel : 'Select an employee'}',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
