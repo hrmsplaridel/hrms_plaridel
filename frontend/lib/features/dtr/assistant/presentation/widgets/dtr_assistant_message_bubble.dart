@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
 import 'package:share_plus/share_plus.dart';
@@ -71,14 +72,25 @@ class DtrAssistantMessageBubble extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SelectableText(
-                    message.content,
-                    style: TextStyle(
-                      color: textColor,
-                      height: 1.35,
-                      fontSize: 14,
+                  if (isUser)
+                    SelectableText(
+                      message.content,
+                      style: TextStyle(
+                        color: textColor,
+                        height: 1.35,
+                        fontSize: 14,
+                      ),
+                    )
+                  else
+                    MarkdownBody(
+                      data: message.content,
+                      selectable: true,
+                      shrinkWrap: true,
+                      styleSheet: _assistantMarkdownStyleSheet(
+                        context,
+                        textColor: textColor,
+                      ),
                     ),
-                  ),
                   if (!isUser && message.attachments.isNotEmpty) ...[
                     const SizedBox(height: 10),
                     for (final attachment in message.attachments)
@@ -158,6 +170,37 @@ class DtrAssistantMessageBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+MarkdownStyleSheet _assistantMarkdownStyleSheet(
+  BuildContext context, {
+  required Color textColor,
+}) {
+  final base = TextStyle(
+    color: textColor,
+    fontSize: 14,
+    height: 1.35,
+  );
+
+  return MarkdownStyleSheet(
+    p: base,
+    pPadding: const EdgeInsets.only(bottom: 8),
+    strong: base.copyWith(fontWeight: FontWeight.w700),
+    em: base.copyWith(fontStyle: FontStyle.italic),
+    listBullet: base,
+    listIndent: 24,
+    blockSpacing: 8,
+    h1: base.copyWith(fontSize: 18, fontWeight: FontWeight.w800),
+    h2: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
+    h3: base.copyWith(fontSize: 15, fontWeight: FontWeight.w700),
+    horizontalRuleDecoration: BoxDecoration(
+      border: Border(
+        top: BorderSide(
+          color: AppTheme.dashHairlineOf(context),
+        ),
+      ),
+    ),
+  );
 }
 
 class _AssistantAttachmentButton extends StatelessWidget {

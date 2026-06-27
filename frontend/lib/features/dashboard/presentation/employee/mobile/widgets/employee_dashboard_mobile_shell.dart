@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_bottom_bar.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_drawer.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_nav_items.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dashboard_layout_metrics.dart';
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
@@ -55,14 +57,27 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final menuActive =
+        selectedIndex >= 1 &&
+        selectedIndex < employeeDashboardMobileNavItems.length;
+
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
-      bottomNavigationBar: DashboardMobileBottomNav(
-        items: employeeDashboardMobileNavItems,
-        selectedIndex: selectedIndex < employeeDashboardMobileNavItems.length
-            ? selectedIndex
-            : -1,
-        onSelected: onNavSelected,
+      drawer: EmployeeDashboardMobileDrawer(
+        displayName: displayName,
+        avatarPath: avatarPath,
+        selectedIndex: selectedIndex,
+        onNavSelected: onNavSelected,
+        onProfile: onProfile,
+      ),
+      bottomNavigationBar: Builder(
+        builder: (innerContext) => EmployeeDashboardMobileBottomBar(
+          dashboardSelected: selectedIndex == 0,
+          menuActive: menuActive,
+          onDashboard: () => onNavSelected(0),
+          onMenu: () => Scaffold.of(innerContext).openDrawer(),
+          onNotifications: onViewAllNotifications,
+        ),
       ),
       body: Stack(
         children: [
@@ -71,6 +86,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
               children: [
                 DashboardAppHeaderBar(
                   compactActions: width < 600,
+                  showNotifications: false,
                   onViewAllNotifications: onViewAllNotifications,
                   onNotificationTap: onNotificationTap,
                   trailing: DashboardAccountMenuButton(

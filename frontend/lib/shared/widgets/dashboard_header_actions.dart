@@ -26,11 +26,16 @@ class DashboardHeaderActions extends StatelessWidget {
     this.compact = false,
     this.onViewAllNotifications,
     this.onNotificationTap,
+    this.showNotifications = true,
   });
 
   final bool compact;
   final VoidCallback? onViewAllNotifications;
   final void Function(NotificationTapResult? result)? onNotificationTap;
+
+  /// When false, the notification bell is hidden (e.g. mobile, where the bell
+  /// lives in the bottom navigation bar instead).
+  final bool showNotifications;
 
   static const Color _darkModeCircleNavy = Color(0xFF1A237E);
   static const Color _darkModeMoonBlue = Color(0xFF90CAF9);
@@ -78,12 +83,14 @@ class DashboardHeaderActions extends StatelessWidget {
             ),
           ),
         ),
-        SizedBox(width: compact ? 6 : 8),
-        DashboardNotificationBellButton(
-          compact: compact,
-          onViewAll: onViewAllNotifications,
-          onNotificationTap: onNotificationTap,
-        ),
+        if (showNotifications) ...[
+          SizedBox(width: compact ? 6 : 8),
+          DashboardNotificationBellButton(
+            compact: compact,
+            onViewAll: onViewAllNotifications,
+            onNotificationTap: onNotificationTap,
+          ),
+        ],
       ],
     );
   }

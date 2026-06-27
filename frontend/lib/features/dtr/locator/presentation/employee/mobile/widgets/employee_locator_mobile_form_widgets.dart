@@ -101,29 +101,31 @@ class EmployeeLocatorMobileFormActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      spacing: 40,
       children: [
-        TextButton(
-          onPressed: onCancel,
-          style: TextButton.styleFrom(
-            foregroundColor: accent,
-            textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        Expanded(
+          child: TextButton(
+            onPressed: onCancel,
+            style: TextButton.styleFrom(
+              foregroundColor: accent,
+              textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            child: const Text('Cancel'),
           ),
-          child: const Text('Cancel'),
         ),
         const SizedBox(width: 12),
-        FilledButton(
-          onPressed: onSubmit,
-          style: FilledButton.styleFrom(
-            backgroundColor: accent,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(72, 38),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+        Expanded(
+          child: FilledButton(
+            onPressed: onSubmit,
+            style: FilledButton.styleFrom(
+              backgroundColor: accent,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 42),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
+            child: const Text('Submit'),
           ),
-          child: const Text('Submit'),
         ),
       ],
     );

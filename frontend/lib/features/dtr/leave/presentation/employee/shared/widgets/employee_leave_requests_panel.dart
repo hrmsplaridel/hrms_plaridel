@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/desktop/widgets/employee_leave_desktop_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/mobile/widgets/employee_leave_mobile_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/history_timeline.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_status_chip.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
-import 'package:hrms_plaridel/shared/widgets/section_header_actions.dart';
 
 const _leaveRequestFilterOptions = <RequestFilterOption<LeaveRequestStatus>>[
   RequestFilterOption(label: 'All'),
@@ -38,7 +38,6 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
 
 class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
   late final ScrollController _requestsScrollController;
-  String? _selectedRequestKey;
   LeaveRequestStatus? _selectedStatus;
   DateTime? _fromDate;
   DateTime? _toDate;
@@ -68,51 +67,16 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
         : (screenHeight * 0.58).clamp(380.0, 700.0);
     final filteredRequests = _filteredRequests;
     final useScrollableList = filteredRequests.length > 3;
-    LeaveRequest? selectedRequest;
-    for (final item in filteredRequests) {
-      if (_requestKey(item) == _selectedRequestKey) {
-        selectedRequest = item;
-        break;
-      }
-    }
 
     return _EmployeeRequestsSectionCard(
       title: 'My Requests',
       subtitle: 'Recent leave applications and their current status.',
       icon: Icons.event_note_rounded,
-      headerTrailing: isMobile
-          ? null
-          : SectionHeaderActions(
-              children: [
-                SectionHeaderActionButton.outlined(
-                  context: context,
-                  onPressed: selectedRequest == null
-                      ? null
-                      : () => _showDetails(context, selectedRequest!),
-                  label: 'View Details',
-                ),
-                SectionHeaderActionButton.outlined(
-                  context: context,
-                  onPressed: selectedRequest == null
-                      ? null
-                      : () => _showHistory(context, selectedRequest!),
-                  label: 'View History',
-                ),
-                if (selectedRequest != null &&
-                    _canEmployeeCancel(selectedRequest))
-                  SectionHeaderActionButton.outlined(
-                    context: context,
-                    onPressed: () => widget.onCancel(selectedRequest!),
-                    label: 'Cancel',
-                    icon: Icons.cancel_outlined,
-                  ),
-              ],
-            ),
       child: _buildRequestsContent(
         filteredRequests: filteredRequests,
         useScrollableList: useScrollableList,
         maxListHeight: maxListHeight,
-        openOnTap: isMobile,
+        isMobile: isMobile,
       ),
     );
   }
@@ -146,9 +110,20 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     required List<LeaveRequest> filteredRequests,
     required bool useScrollableList,
     required double maxListHeight,
-    required bool openOnTap,
+    required bool isMobile,
   }) {
     final filters = _buildRequestFiltersBar(filteredRequests.length);
+    if (!isMobile) {
+      return EmployeeLeaveDesktopRequestsContent(
+        filters: filters,
+        requests: filteredRequests,
+        allRequests: widget.requests,
+        loading: widget.loading,
+        maxListHeight: maxListHeight,
+        scrollController: _requestsScrollController,
+        onOpenRequest: (request) => _showDetails(context, request),
+      );
+    }
     return EmployeeLeaveMobileRequestsContent(
       filters: filters,
       requests: filteredRequests,
@@ -156,12 +131,8 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
       loading: widget.loading,
       useScrollableList: useScrollableList,
       maxListHeight: maxListHeight,
-      openOnTap: openOnTap,
       scrollController: _requestsScrollController,
-      selectedRequestKey: _selectedRequestKey,
-      requestKey: _requestKey,
       onOpenRequest: (request) => _showDetails(context, request),
-      onToggleSelection: _toggleSelection,
     );
   }
 
@@ -194,18 +165,6 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
       }
       return true;
     }).toList();
-  }
-
-  void _toggleSelection(LeaveRequest request) {
-    final key = _requestKey(request);
-    setState(() {
-      _selectedRequestKey = _selectedRequestKey == key ? null : key;
-    });
-  }
-
-  String _requestKey(LeaveRequest request) {
-    return request.id ??
-        '${request.createdAt?.toIso8601String() ?? ''}-${request.startDate?.toIso8601String() ?? ''}-${request.endDate?.toIso8601String() ?? ''}-${request.leaveTypeLabel}';
   }
 
   DateTime _dateOnly(DateTime value) =>
@@ -795,14 +754,12 @@ class _EmployeeRequestsSectionCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.child,
-    this.headerTrailing,
   });
 
   final String title;
   final String subtitle;
   final IconData icon;
   final Widget child;
-  final Widget? headerTrailing;
 
   static const double _mobileBreakpoint = 600;
 
@@ -858,21 +815,8 @@ class _EmployeeRequestsSectionCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (!isMobile && headerTrailing != null) ...[
-                const SizedBox(width: 12),
-                Flexible(
-                  child: Align(
-                    alignment: Alignment.topRight,
-                    child: headerTrailing!,
-                  ),
-                ),
-              ],
             ],
           ),
-          if (isMobile && headerTrailing != null) ...[
-            const SizedBox(height: 12),
-            SizedBox(width: double.infinity, child: headerTrailing!),
-          ],
           const SizedBox(height: 20),
           child,
         ],
