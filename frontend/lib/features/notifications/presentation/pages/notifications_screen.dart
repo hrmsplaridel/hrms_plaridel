@@ -34,6 +34,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     ]);
   }
 
+  bool _isNarrow(BuildContext context) =>
+      MediaQuery.sizeOf(context).width < 400;
+
   bool _docuTrackerAdmin(BuildContext context) {
     final role = context.read<AuthProvider>().user?.role?.toLowerCase();
     return role == 'admin' || role == 'hr';
@@ -100,13 +103,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            Text(
-              'Notifications',
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 18,
-                color: AppTheme.dashTextPrimaryOf(context),
-                letterSpacing: -0.2,
+            Flexible(
+              child: Text(
+                'Notifications',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                  color: AppTheme.dashTextPrimaryOf(context),
+                  letterSpacing: -0.2,
+                ),
               ),
             ),
           ],
@@ -115,15 +122,24 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         actions: [
           if (totalUnread > 0)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: TextButton.icon(
-                onPressed: () => _markAllRead(np, doc),
-                icon: const Icon(Icons.done_all_rounded, size: 18),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primaryNavy,
-                ),
-                label: const Text('Mark all read'),
-              ),
+              padding: const EdgeInsets.only(right: 4),
+              child: _isNarrow(context)
+                  ? IconButton(
+                      onPressed: () => _markAllRead(np, doc),
+                      tooltip: 'Mark all read',
+                      style: IconButton.styleFrom(
+                        foregroundColor: AppTheme.primaryNavy,
+                      ),
+                      icon: const Icon(Icons.done_all_rounded, size: 20),
+                    )
+                  : TextButton.icon(
+                      onPressed: () => _markAllRead(np, doc),
+                      icon: const Icon(Icons.done_all_rounded, size: 18),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.primaryNavy,
+                      ),
+                      label: const Text('Mark all read'),
+                    ),
             ),
         ],
         bottom: NotificationsUi.appBarBottomDivider(),
