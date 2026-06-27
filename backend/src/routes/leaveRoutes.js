@@ -40,6 +40,11 @@ const {
 } = require('../services/holidayRangeUtils');
 const leaveNotifications = require('../services/leaveNotifications');
 const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
+const {
+  getYearEndForcedLeaveCompliance,
+  applyYearEndForcedLeaveDeductions,
+  manilaYearNow: yearEndManilaYearNow,
+} = require('../services/leaveYearEndForcedLeave');
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 
@@ -4516,6 +4521,78 @@ router.get('/:id', protect, async (req, res) => {
   } catch (err) {
     console.error('[leave GET /:id]', err);
     res.status(500).json({ error: 'Failed to fetch leave request' });
+  }
+});
+
+// ============================================================
+// Year-end Forced Leave Compliance + Bulk Deduction
+// ============================================================
+
+// GET /api/leave/admin/year-end-forced-leave?year=YYYY
+// Returns per-employee forced leave compliance data for the given year.
+router.get('/admin/year-end-forced-leave', protect, requireAdminOrHr, async (req, res) => {
+  try {
+    const yearRaw = req.query.year;
+    const year = yearRaw ? parseInt(String(yearRaw).trim(), 10) : yearEndManilaYearNow();
+    const maxYear = new Date().getFullYear() + 1;
+    if (!Number.isInteger(year) || year < 1900 || year > maxYear) {
+      return res.status(400).json({ error: `year must be between 1900 and ${maxYear}` });
+    }
+    const result = await getYearEndForcedLeaveCompliance(pool, { year });
+    res.json(result);
+  } catch (err) {
+    console.error('[leave GET /admin/year-end-forced-leave]', err);
+    res.status(500).json({ error: 'Failed to fetch year-end forced leave compliance' });
+  }
+});
+
+// POST /api/leave/admin/year-end-forced-leave/apply
+// Body: { year, dry_run?, employee_ids?, remarks? }
+// If dry_run=true: returns preview without writing. Otherwise applies deductions.
+router.post('/admin/year-end-forced-leave/apply', protect, requireAdminOrHr, async (req, res) => {
+  try {
+    const actorUserId = req.user?.id;
+    const yearRaw = req.body?.year ?? req.query?.year;
+    const year = yearRaw ? parseInt(String(yearRaw).trim(), 10) : yearEndManilaYearNow();
+    const maxYear = new Date().getFullYear() + 1;
+    if (!Number.isInteger(year) || year < 1900 || year > maxYear) {
+      return res.status(400).json({ error: `year must be between 1900 and ${maxYear}` });
+    }
+
+    const dryRun =
+      req.body?.dry_run === true ||
+      req.body?.dryRun === true ||
+      req.query?.dry_run === '1' ||
+      req.query?.dry_run === 'true';
+
+    const rawIds = req.body?.employee_ids ?? req.body?.employeeIds;
+    const employeeIds = Array.isArray(rawIds) && rawIds.length > 0
+      ? rawIds.map((id) => String(id).trim()).filter(Boolean)
+      : null;
+
+    const remarks = (req.body?.remarks || '').toString().trim() || null;
+
+    const result = await applyYearEndForcedLeaveDeductions(pool, {
+      year,
+      actorUserId,
+      dryRun,
+      employeeIds,
+      remarks,
+    });
+
+    if (!dryRun && result.summary?.applied > 0) {
+      broadcastAppEvent('leave_updated', {
+        action: 'forced_leave_deduction',
+        source: 'year_end_bulk',
+        year,
+        applied: result.summary.applied,
+      });
+    }
+
+    res.status(dryRun ? 200 : 201).json(result);
+  } catch (err) {
+    console.error('[leave POST /admin/year-end-forced-leave/apply]', err);
+    res.status(500).json({ error: 'Failed to apply year-end forced leave deductions' });
   }
 });
 
