@@ -337,16 +337,13 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     final selected = _selected;
     final systemLocked = selected?.isSystem == true;
 
-    return SizedBox(
-      width: 1180,
-      height: 720,
-      child: ColoredBox(
-        color: AppTheme.dashCanvasOf(context),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+    return ColoredBox(
+      color: AppTheme.dashCanvasOf(context),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
               Row(
                 children: [
                   Expanded(
@@ -389,7 +386,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             ],
           ),
         ),
-      ),
     );
   }
 

@@ -277,6 +277,208 @@ class MonthlyLeaveAccrualResult {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Year-end forced leave compliance models
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One employee row returned by the year-end forced leave compliance query.
+class YearEndForcedLeaveEmployee {
+  const YearEndForcedLeaveEmployee({
+    required this.userId,
+    required this.fullName,
+    required this.employeeNumber,
+    required this.departmentName,
+    required this.forcedDaysUsed,
+    required this.requiredDays,
+    required this.suggestedDeduction,
+    required this.vlAvailable,
+    required this.alreadyDeducted,
+    required this.canApply,
+    required this.status,
+    this.deductedDays,
+    this.deductedAt,
+    // apply result fields (populated after apply)
+    this.daysToDeduct,
+    this.applyStatus,
+    this.applyError,
+    this.appliedAt,
+  });
+
+  final String userId;
+  final String fullName;
+  final String? employeeNumber;
+  final String? departmentName;
+  final double forcedDaysUsed;
+  final double requiredDays;
+  final double suggestedDeduction;
+  final double vlAvailable;
+  final bool alreadyDeducted;
+  final bool canApply;
+
+  /// 'pending' | 'compliant' | 'deducted'
+  final String status;
+
+  final double? deductedDays;
+  final DateTime? deductedAt;
+
+  // Set when this row comes from an apply result:
+  final double? daysToDeduct;
+  final String? applyStatus; // 'applied' | 'would_apply' | 'already_deducted' | 'compliant' | 'insufficient_balance' | 'error'
+  final String? applyError;
+  final DateTime? appliedAt;
+
+  factory YearEndForcedLeaveEmployee.fromJson(Map<String, dynamic> j) {
+    return YearEndForcedLeaveEmployee(
+      userId: j['user_id']?.toString() ?? '',
+      fullName: j['full_name']?.toString() ?? '',
+      employeeNumber: j['employee_number']?.toString(),
+      departmentName: j['current_department_name']?.toString(),
+      forcedDaysUsed: _pd(j['forced_leave_days_used']),
+      requiredDays: _pd(j['required_days']) == 0 ? 5 : _pd(j['required_days']),
+      suggestedDeduction: _pd(j['suggested_deduction']),
+      vlAvailable: _pd(j['vl_available']),
+      alreadyDeducted: j['already_deducted'] == true,
+      canApply: j['can_apply'] == true,
+      status: j['status']?.toString() ?? 'pending',
+      deductedDays: _pd2(j['deducted_days']),
+      deductedAt: _parseDate(j['deducted_at']),
+      daysToDeduct: _pd2(j['days_to_deduct']),
+      applyStatus: j['apply_status']?.toString(),
+      applyError: j['error']?.toString(),
+      appliedAt: _parseDate(j['applied_at']),
+    );
+  }
+
+  static double _pd(dynamic v) =>
+      v == null ? 0 : (v is num ? v.toDouble() : double.tryParse(v.toString()) ?? 0);
+  static double? _pd2(dynamic v) =>
+      v == null ? null : (v is num ? v.toDouble() : double.tryParse(v.toString()));
+  static DateTime? _parseDate(dynamic v) =>
+      v == null ? null : DateTime.tryParse(v.toString());
+}
+
+/// Summary counts from the compliance query.
+class YearEndForcedLeaveSummary {
+  const YearEndForcedLeaveSummary({
+    required this.total,
+    required this.compliant,
+    required this.pendingDeduction,
+    required this.alreadyDeducted,
+    // apply result extras:
+    this.applied = 0,
+    this.insufficientBalance = 0,
+    this.errors = 0,
+    this.totalEligible = 0,
+    this.wouldApply = 0,
+  });
+
+  final int total;
+  final int compliant;
+  final int pendingDeduction;
+  final int alreadyDeducted;
+  final int applied;
+  final int insufficientBalance;
+  final int errors;
+  final int totalEligible;
+  final int wouldApply;
+
+  factory YearEndForcedLeaveSummary.fromJson(Map<String, dynamic> j) {
+    return YearEndForcedLeaveSummary(
+      total: _pi(j['total']),
+      compliant: _pi(j['compliant']),
+      pendingDeduction: _pi(j['pending_deduction']),
+      alreadyDeducted: _pi(j['already_deducted']),
+      applied: _pi(j['applied']),
+      insufficientBalance: _pi(j['insufficient_balance']),
+      errors: _pi(j['errors']),
+      totalEligible: _pi(j['total_eligible']),
+      wouldApply: _pi(j['would_apply']),
+    );
+  }
+
+  static int _pi(dynamic v) =>
+      v == null ? 0 : (v is int ? v : int.tryParse(v.toString()) ?? 0);
+}
+
+/// Full result from GET /api/leave/admin/year-end-forced-leave.
+class YearEndForcedLeaveComplianceResult {
+  const YearEndForcedLeaveComplianceResult({
+    required this.year,
+    required this.requiredDays,
+    required this.employees,
+    required this.summary,
+  });
+
+  final int year;
+  final double requiredDays;
+  final List<YearEndForcedLeaveEmployee> employees;
+  final YearEndForcedLeaveSummary summary;
+
+  factory YearEndForcedLeaveComplianceResult.fromJson(Map<String, dynamic> j) {
+    final rawEmployees = j['employees'];
+    return YearEndForcedLeaveComplianceResult(
+      year: (j['year'] as num?)?.toInt() ?? DateTime.now().year,
+      requiredDays: (j['required_days'] as num?)?.toDouble() ?? 5,
+      summary: YearEndForcedLeaveSummary.fromJson(
+        j['summary'] is Map ? Map<String, dynamic>.from(j['summary'] as Map) : {},
+      ),
+      employees: rawEmployees is List
+          ? rawEmployees
+              .whereType<Map>()
+              .map((e) => YearEndForcedLeaveEmployee.fromJson(Map<String, dynamic>.from(e)))
+              .toList()
+          : const [],
+    );
+  }
+}
+
+/// Result from POST /api/leave/admin/year-end-forced-leave/apply.
+class YearEndForcedLeaveApplyResult {
+  const YearEndForcedLeaveApplyResult({
+    required this.dryRun,
+    required this.year,
+    required this.summary,
+    required this.results,
+  });
+
+  final bool dryRun;
+  final int year;
+  final YearEndForcedLeaveSummary summary;
+  final List<YearEndForcedLeaveEmployee> results;
+
+  factory YearEndForcedLeaveApplyResult.fromJson(Map<String, dynamic> j) {
+    final rawResults = j['results'];
+    return YearEndForcedLeaveApplyResult(
+      dryRun: j['dry_run'] == true,
+      year: (j['year'] as num?)?.toInt() ?? DateTime.now().year,
+      summary: YearEndForcedLeaveSummary.fromJson(
+        j['summary'] is Map ? Map<String, dynamic>.from(j['summary'] as Map) : {},
+      ),
+      results: rawResults is List
+          ? rawResults
+              .whereType<Map>()
+              .map((e) => YearEndForcedLeaveEmployee.fromJson(Map<String, dynamic>.from(e)))
+              .toList()
+          : const [],
+    );
+  }
+}
+
+/// Input for the year-end forced leave bulk apply endpoint.
+class YearEndForcedLeaveApplyInput {
+  const YearEndForcedLeaveApplyInput({
+    required this.year,
+    required this.dryRun,
+    this.employeeIds,
+    this.remarks,
+  });
+
+  final int year;
+  final bool dryRun;
+  final List<String>? employeeIds;
+  final String? remarks;
+}
+
 int? _parseInt(dynamic value) {
   if (value == null) return null;
   if (value is int) return value;
@@ -408,6 +610,14 @@ abstract class LeaveRepository {
   /// Admin/HR previews or applies monthly VL/SL accrual.
   Future<MonthlyLeaveAccrualResult> runMonthlyAccrual(
     MonthlyLeaveAccrualInput input,
+  );
+
+  /// Fetch year-end forced leave compliance for all active employees.
+  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(int year);
+
+  /// Preview or apply year-end forced leave deductions in bulk.
+  Future<YearEndForcedLeaveApplyResult> applyYearEndForcedLeaveDeductions(
+    YearEndForcedLeaveApplyInput input,
   );
 
   /// Balance movement audit (GET /api/leave/ledger). Employees: omit [query.userId].

@@ -513,6 +513,43 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
+  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(int year) async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/admin/year-end-forced-leave',
+        queryParameters: {'year': year},
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return YearEndForcedLeaveComplianceResult.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<YearEndForcedLeaveApplyResult> applyYearEndForcedLeaveDeductions(
+    YearEndForcedLeaveApplyInput input,
+  ) async {
+    try {
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/leave/admin/year-end-forced-leave/apply',
+        data: {
+          'year': input.year,
+          'dry_run': input.dryRun,
+          if (input.employeeIds != null) 'employee_ids': input.employeeIds,
+          if (input.remarks != null && input.remarks!.isNotEmpty) 'remarks': input.remarks,
+        },
+      );
+      final data = res.data;
+      if (data == null) throw Exception('No data returned');
+      return YearEndForcedLeaveApplyResult.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
   Future<LeaveLedgerResult> getLeaveLedger(LeaveLedgerQuery query) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(

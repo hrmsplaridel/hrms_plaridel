@@ -2,6 +2,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
@@ -29,6 +30,7 @@ class LeaveCardPrintView {
     required double vacationRemainingDays,
     required double sickRemainingDays,
     Map<String, String> balanceLedgerTypes = const {},
+    List<LeaveBalanceLedgerEntry> forcedLeaveDeductions = const [],
   }) async {
     final sorted = [...requests]
       ..sort((a, b) {
@@ -44,6 +46,7 @@ class LeaveCardPrintView {
       vacationRemainingDays: vacationRemainingDays,
       sickRemainingDays: sickRemainingDays,
       balanceLedgerTypes: balanceLedgerTypes,
+      forcedLeaveDeductions: forcedLeaveDeductions,
     );
     const rowsPerPage = 34;
     final chunks = <List<_LeaveCardRow>>[];
@@ -423,6 +426,7 @@ class LeaveCardPrintView {
     required double vacationRemainingDays,
     required double sickRemainingDays,
     required Map<String, String> balanceLedgerTypes,
+    List<LeaveBalanceLedgerEntry> forcedLeaveDeductions = const [],
   }) {
     final cardRequests = requests
         .where(
@@ -431,50 +435,105 @@ class LeaveCardPrintView {
               _isSickLedgerRequest(request, balanceLedgerTypes),
         )
         .toList();
-    if (cardRequests.isEmpty) {
+    final deductions = forcedLeaveDeductions
+        .where(
+          (entry) =>
+              entry.action == 'forced_leave_deduction' &&
+              entry.leaveType == LeaveType.vacationLeave.value,
+        )
+        .toList();
+    if (cardRequests.isEmpty && deductions.isEmpty) {
       return List.generate(16, (_) => const _LeaveCardRow.empty());
     }
     final vacEarnedStr = _fmtNum(vacationEarnedDays);
     final slEarnedStr = _fmtNum(sickEarnedDays);
-    final vacationUsedInRows = cardRequests
-        .where(
-          (request) => _isVacationLedgerRequest(request, balanceLedgerTypes),
-        )
-        .fold<double>(0, (sum, request) => sum + _withPayDays(request));
+    final deductionDaysTotal = deductions.fold<double>(
+      0,
+      (sum, entry) => sum + _forcedDeductionDays(entry),
+    );
+    final vacationUsedInRows =
+        cardRequests
+            .where(
+              (request) =>
+                  _isVacationLedgerRequest(request, balanceLedgerTypes),
+            )
+            .fold<double>(0, (sum, request) => sum + _withPayDays(request)) +
+        deductionDaysTotal;
     final sickUsedInRows = cardRequests
         .where((request) => _isSickLedgerRequest(request, balanceLedgerTypes))
         .fold<double>(0, (sum, request) => sum + _withPayDays(request));
     var vacationBalance = vacationRemainingDays + vacationUsedInRows;
     var sickBalance = sickRemainingDays + sickUsedInRows;
-    final rows = cardRequests.map((request) {
-      final start = request.startDate;
-      final end = request.endDate;
-      final period = (start != null && end != null)
-          ? '${_fmtDate(start)} - ${_fmtDate(end)}'
-          : (start != null ? _fmtDate(start) : '');
-      final withPay = _withPayDays(request);
-      final withoutPay = _withoutPayDays(request);
-      final isSick = _isSickLedgerRequest(request, balanceLedgerTypes);
-      final isVacation = _isVacationLedgerRequest(request, balanceLedgerTypes);
-      final actionDate = request.reviewedAt ?? request.dateFiled;
-      if (isVacation) {
-        vacationBalance -= withPay;
-      }
-      if (isSick) {
-        sickBalance -= withPay;
-      }
-      return _LeaveCardRow(
-        period: period,
-        particulars: request.leaveTypeLabel,
-        vacEarned: vacEarnedStr,
-        vacWithPay: isVacation ? _fmtNum(withPay) : '',
-        vacBalance: _fmtNum(vacationBalance),
-        vacWithoutPay: isVacation ? _fmtNum(withoutPay) : '',
-        slEarned: slEarnedStr,
-        slWithPay: isSick ? _fmtNum(withPay) : '',
-        slBalance: _fmtNum(sickBalance),
-        slWithoutPay: isSick ? _fmtNum(withoutPay) : '',
-        dateTakenOnApplication: actionDate != null ? _fmtDate(actionDate) : '',
+
+    final timeline = <_PrintLeaveCardTimelineItem>[
+      for (final request in cardRequests)
+        _PrintLeaveCardTimelineItem.request(
+          request,
+          request.startDate ?? request.dateFiled ?? DateTime(1900),
+        ),
+      for (final entry in deductions)
+        _PrintLeaveCardTimelineItem.deduction(entry, entry.createdAt),
+    ]..sort((a, b) => a.sortDate.compareTo(b.sortDate));
+
+    final rows = timeline.map((item) {
+      return item.when(
+        request: (request) {
+          final start = request.startDate;
+          final end = request.endDate;
+          final period = (start != null && end != null)
+              ? '${_fmtDate(start)} - ${_fmtDate(end)}'
+              : (start != null ? _fmtDate(start) : '');
+          final withPay = _withPayDays(request);
+          final withoutPay = _withoutPayDays(request);
+          final isSick = _isSickLedgerRequest(request, balanceLedgerTypes);
+          final isVacation = _isVacationLedgerRequest(
+            request,
+            balanceLedgerTypes,
+          );
+          final actionDate = request.reviewedAt ?? request.dateFiled;
+          if (isVacation) {
+            vacationBalance -= withPay;
+          }
+          if (isSick) {
+            sickBalance -= withPay;
+          }
+          return _LeaveCardRow(
+            period: period,
+            particulars: request.leaveTypeLabel,
+            vacEarned: vacEarnedStr,
+            vacWithPay: isVacation ? _fmtNum(withPay) : '',
+            vacBalance: _fmtNum(vacationBalance),
+            vacWithoutPay: isVacation ? _fmtNum(withoutPay) : '',
+            slEarned: slEarnedStr,
+            slWithPay: isSick ? _fmtNum(withPay) : '',
+            slBalance: _fmtNum(sickBalance),
+            slWithoutPay: isSick ? _fmtNum(withoutPay) : '',
+            dateTakenOnApplication: actionDate != null
+                ? _fmtDate(actionDate)
+                : '',
+          );
+        },
+        deduction: (entry) {
+          final deductedDays = _forcedDeductionDays(entry);
+          vacationBalance -= deductedDays;
+          final year =
+              entry.metadataJson?['year'] ??
+              entry.metadataJson?['deduction_year'];
+          final period = year != null ? 'CY $year' : _fmtDate(entry.createdAt);
+          return _LeaveCardRow(
+            period: period,
+            particulars: _forcedDeductionParticulars(entry),
+            vacEarned: vacEarnedStr,
+            vacWithPay: _fmtNum(deductedDays),
+            vacBalance: _fmtNum(vacationBalance),
+            vacWithoutPay: '',
+            slEarned: slEarnedStr,
+            slWithPay: '',
+            slBalance: _fmtNum(sickBalance),
+            slWithoutPay: '',
+            dateTakenOnApplication: _fmtDate(entry.createdAt),
+          );
+        },
       );
     }).toList();
     if (rows.length < 16) {
@@ -550,6 +609,26 @@ class LeaveCardPrintView {
     final dd = value.day.toString().padLeft(2, '0');
     return '$mm/$dd/${value.year}';
   }
+
+  static double _forcedDeductionDays(LeaveBalanceLedgerEntry entry) {
+    final meta = entry.metadataJson?['deducted_days'];
+    if (meta is num && meta > 0) return meta.toDouble();
+    if (entry.affectedBucket.toLowerCase() == 'used' && entry.daysChanged > 0) {
+      return entry.daysChanged;
+    }
+    return entry.daysChanged.abs();
+  }
+
+  static String _forcedDeductionParticulars(LeaveBalanceLedgerEntry entry) {
+    final year =
+        entry.metadataJson?['year'] ?? entry.metadataJson?['deduction_year'];
+    if (year != null) {
+      return 'Year-end Mandatory Leave Deduction ($year)';
+    }
+    final remarks = entry.remarks?.trim();
+    if (remarks != null && remarks.isNotEmpty) return remarks;
+    return 'Year-end Mandatory Leave Deduction';
+  }
 }
 
 class _CellData {
@@ -599,4 +678,41 @@ class _LeaveCardRow {
   final String slBalance;
   final String slWithoutPay;
   final String dateTakenOnApplication;
+}
+
+class _PrintLeaveCardTimelineItem {
+  const _PrintLeaveCardTimelineItem._({
+    required this.sortDate,
+    this.request,
+    this.deduction,
+  });
+
+  factory _PrintLeaveCardTimelineItem.request(
+    LeaveRequest request,
+    DateTime sortDate,
+  ) {
+    return _PrintLeaveCardTimelineItem._(sortDate: sortDate, request: request);
+  }
+
+  factory _PrintLeaveCardTimelineItem.deduction(
+    LeaveBalanceLedgerEntry entry,
+    DateTime sortDate,
+  ) {
+    return _PrintLeaveCardTimelineItem._(sortDate: sortDate, deduction: entry);
+  }
+
+  final DateTime sortDate;
+  final LeaveRequest? request;
+  final LeaveBalanceLedgerEntry? deduction;
+
+  T when<T>({
+    required T Function(LeaveRequest request) request,
+    required T Function(LeaveBalanceLedgerEntry entry) deduction,
+  }) {
+    final r = this.request;
+    if (r != null) return request(r);
+    final d = this.deduction;
+    if (d != null) return deduction(d);
+    throw StateError('Invalid leave card timeline item');
+  }
 }

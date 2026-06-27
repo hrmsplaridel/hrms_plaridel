@@ -19,10 +19,14 @@ class LeaveBalanceHistoryScreen extends StatefulWidget {
   const LeaveBalanceHistoryScreen({
     super.key,
     required this.isAdmin,
+    this.inPanel = false,
     this.initialFilterUserId,
   });
 
   final bool isAdmin;
+
+  /// When true, renders as a right-side panel (no full-page AppBar back).
+  final bool inPanel;
 
   /// Pre-fills admin employee filter (e.g. queue filter).
   final String? initialFilterUserId;
@@ -340,6 +344,51 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   }
 
   Widget _buildAdminScaffold(BuildContext context) {
+    if (widget.inPanel) {
+      return Scaffold(
+        backgroundColor: AppTheme.dashCanvasOf(context),
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Leave Ledger',
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Refresh',
+                      onPressed: _loading
+                          ? null
+                          : () => _load(resetPage: true, forceRefresh: true),
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+              if (_error != null) _errorBanner(),
+              Expanded(child: _buildAdminBody()),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(

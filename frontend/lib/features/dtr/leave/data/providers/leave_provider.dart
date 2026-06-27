@@ -708,6 +708,44 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
+  Future<YearEndForcedLeaveComplianceResult?> getYearEndForcedLeaveCompliance(int year) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      return await _repository.getYearEndForcedLeaveCompliance(year);
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<YearEndForcedLeaveApplyResult?> applyYearEndForcedLeaveDeductions(
+    YearEndForcedLeaveApplyInput input,
+  ) async {
+    _reviewing = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final result = await _repository.applyYearEndForcedLeaveDeductions(input);
+      if (!input.dryRun) _notifyMutation();
+      return result;
+    } catch (e) {
+      _error = e is Exception && e.toString().startsWith('Exception: ')
+          ? e.toString().replaceFirst('Exception: ', '')
+          : e.toString();
+      return null;
+    } finally {
+      _reviewing = false;
+      notifyListeners();
+    }
+  }
+
   /// Admin/HR: create or overwrite one [LeaveBalance] row for an employee.
   Future<LeaveBalance?> upsertBalance(
     LeaveBalance balance, {
