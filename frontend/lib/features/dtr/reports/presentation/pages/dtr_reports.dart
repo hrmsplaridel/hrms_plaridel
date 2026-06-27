@@ -969,6 +969,15 @@ class _DtrReportsState extends State<DtrReports> {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Review employee late arrivals and undertime by date range, department, and employee.',
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 14,
+                          height: 1.4,
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       _buildFilters(context, isMobile),
                       const SizedBox(height: 24),
