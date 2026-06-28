@@ -4,6 +4,7 @@ const { authMiddleware } = require('../middleware/auth');
 const {
   chatWithDtrAssistant,
   getDtrAssistantModelProfiles,
+  resetDtrAssistantChat,
 } = require('../services/dtrAssistant/dtrAssistantService');
 const { getDtrExport } = require('../services/dtrAssistant/dtrAssistantExportService');
 const {
@@ -60,6 +61,20 @@ router.post('/chat', protect, async (req, res) => {
         err.message ||
         'Failed to generate DTR assistant response',
       code: err.code || null,
+    });
+  }
+});
+
+router.post('/reset', protect, async (req, res) => {
+  try {
+    res.json(resetDtrAssistantChat(req.user));
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) {
+      console.error('[dtr-assistant POST /reset]', err);
+    }
+    res.status(status).json({
+      error: err.message || 'Failed to reset assistant chat',
     });
   }
 });

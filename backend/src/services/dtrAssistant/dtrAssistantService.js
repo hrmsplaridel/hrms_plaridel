@@ -11,7 +11,13 @@ const {
 const {
   getAssistantMemory,
   setAssistantMemory,
+  clearAssistantMemory,
 } = require('./dtrAssistantMemoryService');
+const {
+  buildLeaveActionPayload,
+  buildLocatorActionPayload,
+  nextTopicPrefill,
+} = require('./dtrAssistantActionPrefill');
 const {
   normalizeIntent,
   scoreEmployeeAssistantIntent,
@@ -315,6 +321,10 @@ function buildNextAssistantMemory(previous, next) {
   };
 
   if (topic) {
+    const leavePrefill =
+      topic === 'leave' ? nextTopicPrefill('leave', next.text, previous, previousTopicState) : null;
+    const locatorPrefill =
+      topic === 'locator' ? nextTopicPrefill('locator', next.text, previous, previousTopicState) : null;
     topics[topic] = {
       intent: next.intent || previousTopicState.intent || null,
       topic,
@@ -322,6 +332,14 @@ function buildNextAssistantMemory(previous, next) {
       dateRange: next.dateRange || previousTopicState.dateRange || null,
       leaveType: topic === 'leave' ? leaveType : previousTopicState.leaveType || null,
       locatorType: topic === 'locator' ? locatorType : previousTopicState.locatorType || null,
+      leavePrefill:
+        topic === 'leave'
+          ? leavePrefill || previousTopicState.leavePrefill || null
+          : previousTopicState.leavePrefill || null,
+      locatorPrefill:
+        topic === 'locator'
+          ? locatorPrefill || previousTopicState.locatorPrefill || null
+          : previousTopicState.locatorPrefill || null,
       toolData: next.toolData || previousTopicState.toolData || null,
       updatedAt: turn.createdAt,
     };
@@ -332,6 +350,14 @@ function buildNextAssistantMemory(previous, next) {
     topic,
     leaveType,
     locatorType,
+    leavePrefill:
+      topic === 'leave'
+        ? topics.leave?.leavePrefill || previous?.leavePrefill || null
+        : previous?.leavePrefill || null,
+    locatorPrefill:
+      topic === 'locator'
+        ? topics.locator?.locatorPrefill || previous?.locatorPrefill || null
+        : previous?.locatorPrefill || null,
     dateRange: next.dateRange || previous?.dateRange || null,
     toolData: next.toolData || null,
     modelProfile: next.modelProfile || previous?.modelProfile || null,
@@ -684,7 +710,7 @@ function uniqueActions(actions) {
   }).slice(0, 4);
 }
 
-function buildActions(intent, context, text, attachments = []) {
+function buildActions(intent, context, text, attachments = [], memory = null) {
   const value = String(intent || '');
   const actions = [];
   const rangePayload = dateRangePayload(context);
@@ -706,10 +732,12 @@ function buildActions(intent, context, text, attachments = []) {
   }
 
   if (isLeaveIntent(value)) {
-    const payload = {
-      ...rangePayload,
+    const payload = buildLeaveActionPayload({
+      text,
+      memory,
       leaveType,
-    };
+      rangePayload,
+    });
     if (
       value === 'leave_availability_check' ||
       value === 'leave_guided_filing' ||
@@ -733,10 +761,12 @@ function buildActions(intent, context, text, attachments = []) {
   }
 
   if (isLocatorIntent(value) || value === 'dtr_locator_coverage_check') {
-    const payload = {
-      ...rangePayload,
+    const payload = buildLocatorActionPayload({
+      text,
+      memory,
       locatorType,
-    };
+      rangePayload,
+    });
     if (
       value === 'locator_types' ||
       value === 'locator_requirements' ||
@@ -963,6 +993,7 @@ function buildAssistantResult({
   attachments,
   text,
   actions,
+  memory,
 }) {
   const safeAttachments = attachments || [];
   const safeIntentConfidence = numericConfidence(intentConfidence);
@@ -981,7 +1012,7 @@ function buildAssistantResult({
       promptPreview: text || null,
       suggestions: buildSuggestions(intent),
       attachments: safeAttachments,
-      actions: actions || buildActions(intent, context, text || '', safeAttachments),
+      actions: actions || buildActions(intent, context, text || '', safeAttachments, memory),
     },
     provider,
     model,
@@ -2258,6 +2289,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'greeting_rules',
       attachments: [],
       text: normalizedTextForRules,
+      memory,
     });
   }
   const memoryIntent = resolveIntentFromMemory(normalizedTextForRules, memory);
@@ -2297,6 +2329,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'clarification_rules',
       attachments: [],
       text: normalizedTextForRules,
+      memory: getAssistantMemory(scope.userId),
     });
   }
 
@@ -2328,6 +2361,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       attachments: [],
       text: normalizedTextForRules,
       actions: directOpenCommand.actions,
+      memory: getAssistantMemory(scope.userId),
     });
   }
 
@@ -2440,6 +2474,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'direct_ai',
       attachments: [],
       text: plannedText,
+      memory: getAssistantMemory(scope.userId),
     });
   }
 
@@ -2483,6 +2518,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource,
       attachments,
       text: plannedText,
+      memory: getAssistantMemory(scope.userId),
     });
   }
 
@@ -2499,11 +2535,22 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     intentSource,
     attachments: fallbackAttachments,
     text: plannedText,
+    memory,
   });
+}
+
+function resetDtrAssistantChat(user) {
+  const scope = getEmployeeSelfScope(user);
+  clearAssistantMemory(scope.userId);
+  return {
+    ok: true,
+    mode: scope.mode,
+  };
 }
 
 module.exports = {
   chatWithDtrAssistant,
+  resetDtrAssistantChat,
   getDtrAssistantModelProfiles,
   __test: {
     buildActions,

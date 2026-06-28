@@ -451,6 +451,137 @@ test('DTR assistant regression: Bisaya locator filing prompts stay friendly and 
   assert.doesNotMatch(reply, /Enter office or destination/i);
 });
 
+test('DTR assistant regression: locator guided filing acknowledges the detected type', () => {
+  const context = {
+    locator_types: [
+      {
+        code: 'work_from_home',
+        label: 'Work From Home',
+        short_label: 'WFH',
+        location_label: 'Work Location',
+        location_hint: 'Enter work location',
+        dtr_slot_label: 'WFH',
+        requires_attachment: false,
+        coverage_mode: 'wfh',
+      },
+    ],
+  };
+
+  const reply = buildFastEmployeeAssistantReply(
+    'tabangi kog file ug wfh',
+    context,
+    'locator_guided_filing'
+  );
+
+  assert.match(reply, /slip date/i);
+  assert.match(reply, /Work From Home|WFH/i);
+  assert.match(reply, /file ug Work From Home|file ug WFH|Work From Home \(WFH\)/i);
+  assert.doesNotMatch(reply, /official business locator/i);
+  assert.doesNotMatch(
+    reply,
+    /Official Business, Pass Slip,? (o|or) Work From Home/i
+  );
+});
+
+test('DTR assistant regression: locator availability check is shift-aware on a rest day', () => {
+  // 2026-06-28 is a Sunday. The calendar day carries an assigned shift, but the
+  // schedule only requires logs Mon-Fri, so it must not read as an active workday.
+  const context = {
+    date_range: { startDate: '2026-06-28', endDate: '2026-06-28' },
+    dtr_calendar_days: [
+      {
+        attendance_date: '2026-06-28',
+        shift_id: 7,
+        shift_name: 'Morning Shift',
+        start_time: '08:00:00',
+        end_time: '17:00:00',
+        working_days: [1, 2, 3, 4, 5],
+        holiday_coverage: 'none',
+      },
+      {
+        attendance_date: '2026-06-29',
+        shift_id: 7,
+        shift_name: 'Morning Shift',
+        start_time: '08:00:00',
+        end_time: '17:00:00',
+        working_days: [1, 2, 3, 4, 5],
+        holiday_coverage: 'none',
+      },
+    ],
+    locator_types: [
+      {
+        code: 'work_from_home',
+        label: 'Work From Home',
+        short_label: 'WFH',
+        requires_attachment: true,
+        coverage_mode: 'wfh',
+      },
+    ],
+  };
+
+  const reply = buildFastEmployeeAssistantReply(
+    'pwede ko mag-file ug wfh?',
+    context,
+    'locator_availability_check'
+  );
+
+  // The schedule line must acknowledge the rest day, not present an active shift.
+  assert.match(reply, /rest day|non-working/i);
+  // It must not claim required DTR slot selection on a rest day...
+  assert.doesNotMatch(reply, /choose AM in, AM out, PM in, or PM out/i);
+  // ...and should point the employee at the next working day.
+  assert.match(reply, /next working day|sunod nga working day|susunod na working day/i);
+});
+
+test('DTR assistant regression: "enough credits" questions get a direct verdict', () => {
+  const makeContext = (available) => ({
+    leave_balances: [
+      {
+        leave_type: 'sick',
+        earned_days: 5,
+        used_days: 0,
+        adjusted_days: 0,
+        pending_days: 0,
+        remaining_days: available,
+        available_days: available,
+      },
+    ],
+  });
+
+  const enoughReply = buildFastEmployeeAssistantReply(
+    'naa ba koy saktong credits para maka file ug sick leave?',
+    makeContext(3),
+    'leave_balance'
+  );
+  assert.match(enoughReply, /Leave credits check/i);
+  assert.match(enoughReply, /Oo|Yes/i);
+  assert.match(enoughReply, /3 ka adlaw|3 days/i);
+
+  const partialReply = buildFastEmployeeAssistantReply(
+    'do i have enough sick leave credits?',
+    makeContext(0.75),
+    'leave_balance'
+  );
+  assert.match(partialReply, /not enough for a full day/i);
+  assert.match(partialReply, /half-day|partial/i);
+
+  const noneReply = buildFastEmployeeAssistantReply(
+    'do i have enough sick leave credits?',
+    makeContext(0),
+    'leave_balance'
+  );
+  assert.match(noneReply, /^Leave credits check[\s\S]*\bNo\b/i);
+  assert.match(noneReply, /no available credits/i);
+
+  // A plain balance question must NOT trigger the yes/no verdict path.
+  const plainReply = buildFastEmployeeAssistantReply(
+    'what is my leave balance?',
+    makeContext(3),
+    'leave_balance'
+  );
+  assert.doesNotMatch(plainReply, /Leave credits check/i);
+});
+
 test('DTR assistant regression: how-to-file leave questions show form guidance', () => {
   const reply = buildFastEmployeeAssistantReply(
     'how can I file sick leave?',

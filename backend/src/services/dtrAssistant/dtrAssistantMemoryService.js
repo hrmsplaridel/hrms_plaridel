@@ -1,4 +1,4 @@
-const DEFAULT_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
 const MAX_ENTRIES = 1000;
 
 const memory = new Map();
@@ -43,7 +43,15 @@ function setAssistantMemory(userId, value, ttlMs = DEFAULT_TTL_MS) {
   });
 }
 
+function clearAssistantMemory(userId) {
+  const key = String(userId || '');
+  if (!key) return false;
+  return memory.delete(key);
+}
+
 module.exports = {
   getAssistantMemory,
   setAssistantMemory,
+  clearAssistantMemory,
+  DEFAULT_TTL_MS,
 };
