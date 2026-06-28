@@ -105,6 +105,44 @@ test('DTR assistant regression: unclear fuzzy intent is marked for AI planning',
   assert.equal(scored.needsAiPlan, true);
 });
 
+test('DTR assistant regression: language detection handles typos and mixed language', () => {
+  const { detectAssistantLanguage } = require('../src/services/dtrAssistant/dtrAssistantLanguage');
+  const {
+    assistantGreetingReply,
+    isAssistantGreetingMessage,
+  } = require('../src/services/dtrAssistant/dtrAssistantFastReply');
+  const { normalizeAssistantMessageForRules } = require('../src/services/dtrAssistant/dtrAssistantTextNormalizer');
+
+  const languageCases = [
+    ['pila akong sik leev balnce?', 'bisaya'],
+    ['pano ko maayos ang mising pm out?', 'tagalog'],
+    ['how many absent nako this month?', 'bisaya'],
+    ['komusta!', 'bisaya'],
+    ['kamusta ka', 'tagalog'],
+    ['explain in bisayaa daw', 'bisaya'],
+    ['what is my leave balance?', 'english'],
+  ];
+
+  for (const [message, expected] of languageCases) {
+    assert.equal(detectAssistantLanguage(message), expected, message);
+  }
+
+  assert.equal(
+    normalizeAssistantMessageForRules('pila akong sik leev balnce?'),
+    'pila akong sick leave balance?'
+  );
+  assert.equal(
+    normalizeAssistantMessageForRules('pano ko maayos ang mising pm out?'),
+    'paano ko ayusin ang missing pm out?'
+  );
+
+  assert.ok(isAssistantGreetingMessage('helo'));
+  assert.ok(isAssistantGreetingMessage('komusta!'));
+  assert.ok(isAssistantGreetingMessage('what are you?'));
+  assert.match(assistantGreetingReply('komusta!'), /HRMS Assistant/i);
+  assert.match(assistantGreetingReply('kamusta ka'), /HRMS Assistant/i);
+});
+
 test('DTR assistant regression: leave form field help gives safe examples in the user language', () => {
   const context = {
     leave_types: [
@@ -1881,9 +1919,9 @@ test('DTR assistant regression: adversarial typo and overlapping phrases route s
     ['gi check nako ang commutation mabayran ba ko', 'leave_form_field_help'],
     ['how do i fill vacation leave reason and location', 'leave_form_guidance'],
     ['what happens after i submit my leave', 'leave_filing_policy'],
-    ['where should i put my destination in locator', 'locator_requirements'],
-    ['what should i write in locator reason', 'locator_requirements'],
-    ['sample destination for official business', 'locator_requirements'],
+    ['where should i put my destination in locator', 'locator_form_field_help'],
+    ['what should i write in locator reason', 'locator_form_field_help'],
+    ['sample destination for official business', 'locator_form_field_help'],
     ['what are required fields for wfh', 'locator_requirements'],
     ['loacator reqirements', 'locator_requirements'],
   ];
@@ -1928,7 +1966,7 @@ test('DTR assistant regression: semantic collisions keep the more specific inten
     ['what is the advance filing rule for vacation leave', 'leave_filing_policy'],
     ['explain supporting documents guideline', 'leave_guideline_section'],
     ['tell me about official business locator', 'locator_types'],
-    ['how do i fill locator destination', 'locator_requirements'],
+    ['how do i fill locator destination', 'locator_form_field_help'],
     ['can i submit official business next monday', 'locator_availability_check'],
     ['pila rejected locator nako', 'locator_summary'],
     ['show my latest wfh', 'latest_locator_request'],
@@ -2043,8 +2081,8 @@ test('DTR assistant regression: broader typo-heavy multilingual prompts stay und
     ['nganong gibalik akong leave request', 'leave_rejection_reason'],
     ['unsa nga mga leave akong pwede ma file', 'leave_types'],
     ['sakop ba sa leave akong absence gahapon', 'dtr_leave_coverage_check'],
-    ['unsa akong ibutang sa destination sa locator', 'locator_requirements'],
-    ['ano ilalagay sa destination ng locator', 'locator_requirements'],
+    ['unsa akong ibutang sa destination sa locator', 'locator_form_field_help'],
+    ['ano ilalagay sa destination ng locator', 'locator_form_field_help'],
     ['pila akong approved locator this month', 'locator_summary'],
     ['sino nag review ng leave request ko', 'leave_approval_history'],
     ['unsaon pg korek sa mising log', 'dtr_correction_guidance'],

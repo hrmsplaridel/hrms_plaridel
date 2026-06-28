@@ -125,6 +125,8 @@ const FUZZY_INTENT_PROFILES = [
       'absent karong bulana',
       'absence summary',
       'no record this month',
+      'how many absent nako this month',
+      'naa koy absnt karong bulan',
     ],
   },
   {
@@ -163,6 +165,9 @@ const FUZZY_INTENT_PROFILES = [
       'how to correct dtr',
       'paano i correct dtr',
       'unsaon pag correct dtr',
+      'pano ko maayos ang missing pm out',
+      'paano ayusin missing pm out',
+      'how to fix missing pm out',
     ],
   },
   {
@@ -275,7 +280,7 @@ const FUZZY_INTENT_PROFILES = [
   },
   {
     intent: 'leave_form_guidance',
-    phrases: ['how to file leave', 'how can i file leave', 'paano mag file leave', 'unsaon pag file leave', 'leave form'],
+    phrases: ['how to file leave', 'how can i file leave', 'paano mag file leave', 'unsaon pag file leave', 'unsaon nako pag file leave', 'leave form'],
   },
   {
     intent: 'leave_form_field_help',
@@ -328,11 +333,11 @@ const FUZZY_INTENT_PROFILES = [
   },
   {
     intent: 'locator_status',
-    phrases: ['locator status', 'locator approved', 'locator accepted', 'na approve locator', 'latest locator', 'where is locator'],
+    phrases: ['locator status', 'locator approved', 'locator accepted', 'na approve locator', 'latest locator', 'where is locator', 'status sa akong locator'],
   },
   {
     intent: 'locator_requirements',
-    phrases: ['locator requirements', 'how to file locator', 'locator attachment', 'pass slip requirements', 'wfh requirements'],
+    phrases: ['locator requirements', 'how to file locator', 'locator attachment', 'pass slip requirements', 'wfh requirements', 'unsaon pag file locator slip'],
   },
   {
     intent: 'locator_form_field_help',

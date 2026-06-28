@@ -15,6 +15,8 @@ const {
   getLeaveGuidanceForType,
   getGuidelineSectionsForMessage,
 } = require('./leaveFilingGuidelines');
+const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
+const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
 
 function lower(value) {
   return String(value || '').toLowerCase();
@@ -320,7 +322,7 @@ function isTagalogOrBisaya(message) {
 }
 
 function normalizedGreetingText(message) {
-  return lower(message)
+  return normalizeAssistantMessageForRules(message)
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -360,7 +362,7 @@ function isAssistantGreetingMessage(message) {
   ]);
 
   if (exact.has(text)) return true;
-  if (/^(hello|hi|hey|helo|kumusta|kamusta)(\s+there|\s+po)?$/.test(text)) return true;
+  if (/^(hello|hi|hey|helo|hii|kumusta|kamusta|komusta)(\s+there|\s+po)?$/.test(text)) return true;
   if (/^good\s+(morning|afternoon|evening)(\s+po)?$/.test(text)) return true;
   if (/^(what|who)\s+are\s+you(\s+ba)?$/.test(text)) return true;
   if (/^(what|who)\s+(is|are)\s+you$/.test(text)) return true;
@@ -395,19 +397,7 @@ function assistantGreetingReply(message) {
 }
 
 function languageOf(message) {
-  const text = lower(message);
-  if (/\b(tagaloga?|tagalog|filipino)\b/.test(text)) return 'tagalog';
-  if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(text)) return 'bisaya';
-  if (/\b(english|ingles)\b/.test(text)) return 'english';
-  if (/\b(kumusta|unsaka|kinsa)\b/.test(text)) return 'bisaya';
-  if (/\b(kamusta)\b/.test(text)) return 'tagalog';
-  if (/\b(ngano|unsa|unsaon|unsay|unsa'y|karon|pila|kabuok|naa|akong|nako|nabilin|gamay|kuwang|imong|nimo|gikan|mahimong|adlaw|kinahanglan|ug|kay|aning|bulana|adtong|adtung|adtun|atong|niadtong|niadtung|ana|adto|ato|duty|daw|apil|ila|nga)\b/.test(text)) {
-    return 'bisaya';
-  }
-  if (/\b(tagalog|filipino|ano|paano|pano|ngayon|ako|ko|ba|may|wala|ilan|bakit|maliit|natira|kailangan|pasok|noong|nung)\b/.test(text)) {
-    return 'tagalog';
-  }
-  return 'english';
+  return detectAssistantLanguage(message);
 }
 
 function responseLabels(language) {
