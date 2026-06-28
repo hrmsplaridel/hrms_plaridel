@@ -19,6 +19,7 @@ const {
 const { getEmployeeSelfScope } = require('./dtrAssistantPermissionService');
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
 const { getLeaveFormFieldKey } = require('./leaveFilingGuidelines');
+const { getLocatorFormFieldKey, isLocatorFormFieldHelpQuestion } = require('./locatorFilingGuidelines');
 const {
   buildDtrAssistantDirectMessages,
   buildDtrAssistantIntentMessages,
@@ -190,6 +191,8 @@ function isLocatorIntent(intent) {
     value === 'locator_summary' ||
     value === 'locator_types' ||
     value === 'locator_requirements' ||
+    value === 'locator_form_field_help' ||
+    value === 'locator_guided_filing' ||
     value === 'locator_availability_check' ||
     value === 'locator_rejection_reason' ||
     value === 'locator_approval_tracker'
@@ -405,10 +408,36 @@ function buildSuggestions(intent) {
       },
     ];
   }
+  if (intent === 'locator_form_field_help') {
+    return [
+      {
+        text: 'What should I put in the locator reason field?',
+        intent: 'locator_form_field_help',
+      },
+      {
+        text: 'Give me an example for the destination field',
+        intent: 'locator_form_field_help',
+      },
+      {
+        text: 'Which DTR slots should I select?',
+        intent: 'locator_form_field_help',
+      },
+    ];
+  }
+  if (intent === 'locator_guided_filing') {
+    return [
+      { text: 'What locator types can I file?', intent: 'locator_types' },
+      {
+        text: 'What should I put in the reason field?',
+        intent: 'locator_form_field_help',
+      },
+      { text: 'Can I file locator tomorrow?', intent: 'locator_availability_check' },
+    ];
+  }
   if (intent === 'clarify_filing_topic') {
     return [
       { text: 'File a leave request', intent: 'leave_guided_filing' },
-      { text: 'File a locator / WFH', intent: 'locator_types' },
+      { text: 'File a locator / WFH', intent: 'locator_guided_filing' },
       { text: 'Check leave balance first', intent: 'leave_balance' },
     ];
   }
@@ -462,6 +491,8 @@ function buildSuggestions(intent) {
     intent === 'locator_summary' ||
     intent === 'locator_types' ||
     intent === 'locator_requirements' ||
+    intent === 'locator_form_field_help' ||
+    intent === 'locator_guided_filing' ||
     intent === 'locator_availability_check' ||
     intent === 'locator_rejection_reason' ||
     intent === 'locator_approval_tracker' ||
@@ -470,7 +501,17 @@ function buildSuggestions(intent) {
     return [
       { text: 'What is my locator status?', intent: 'locator_status' },
       { text: 'What locator types can I file?', intent: 'locator_types' },
+      { text: 'What should I put in the reason field?', intent: 'locator_form_field_help' },
+    ];
+  }
+  if (
+    intent === 'locator_form_field_help' ||
+    intent === 'locator_guided_filing'
+  ) {
+    return [
       { text: 'Can I file locator tomorrow?', intent: 'locator_availability_check' },
+      { text: 'What locator types can I file?', intent: 'locator_types' },
+      { text: 'Open locator form', intent: 'locator_guided_filing' },
     ];
   }
   if (intent === 'leave_availability_check') {
@@ -699,6 +740,8 @@ function buildActions(intent, context, text, attachments = []) {
     if (
       value === 'locator_types' ||
       value === 'locator_requirements' ||
+      value === 'locator_form_field_help' ||
+      value === 'locator_guided_filing' ||
       value === 'locator_availability_check'
     ) {
       actions.push(
@@ -960,7 +1003,7 @@ function parseIntentClassifierResponse(content) {
     return normalizeIntent(parsed.intent);
   } catch (_) {
     const match = text.match(
-      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|dtr_policy_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_form_field_help|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|locator_status|locator_summary|locator_types|locator_requirements|locator_availability_check|locator_rejection_reason|locator_approval_tracker|unknown)\b/i
+      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|dtr_policy_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_form_field_help|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|locator_status|locator_summary|locator_types|locator_requirements|locator_form_field_help|locator_guided_filing|locator_availability_check|locator_rejection_reason|locator_approval_tracker|unknown)\b/i
     );
     return normalizeIntent(match?.[1]);
   }
@@ -1421,6 +1464,8 @@ function resolveIntentFromMemory(text, memory) {
     [
       'locator_types',
       'locator_requirements',
+      'locator_form_field_help',
+      'locator_guided_filing',
       'locator_availability_check',
       'locator_status',
       'locator_summary',
@@ -1440,10 +1485,20 @@ function resolveIntentFromMemory(text, memory) {
     /\b(types?|kinds?|options?|how about|what about|wfh|work from home|pass slip|official business|ob|on field|fieldwork|field work)\b/.test(value);
   if (!locatorTypeFollowUp && explicitTopic && explicitTopic !== memoryTopic) return null;
   if (isLocatorIntent(activeIntent)) {
+    if (
+      activeIntent === 'locator_form_field_help' &&
+      (getLocatorFormFieldKey(value) ||
+        /\b(another|more|example|sample|input|same field|this field|that field|bisayaa?|binisayaa?|cebuano|tagalog|filipino|english)\b/.test(
+          value
+        ))
+    ) {
+      return 'locator_form_field_help';
+    }
     if (/\b(can file|can i file|pwede|puwede|allowed|eligible|qualified|available|tomorrow|ugma|karon|today|date|day|file)\b/.test(value)) {
       return 'locator_availability_check';
     }
     if (/\b(requirement|requirements|attachment|document|docs|need|needed|kinahanglan|kailangan|rule|rules|policy|how to file|unsaon|paano)\b/.test(value)) {
+      if (isLocatorFormFieldHelpQuestion(value)) return 'locator_form_field_help';
       return 'locator_requirements';
     }
     if (
@@ -1729,6 +1784,8 @@ function resolveIntentFromMemory(text, memory) {
       'locator_summary',
       'locator_types',
       'locator_requirements',
+      'locator_form_field_help',
+      'locator_guided_filing',
       'locator_availability_check',
       'locator_rejection_reason',
       'locator_approval_tracker',
@@ -2040,6 +2097,8 @@ function buildToolData(intent, context) {
     intent === 'locator_summary' ||
     intent === 'locator_types' ||
     intent === 'locator_requirements' ||
+    intent === 'locator_form_field_help' ||
+    intent === 'locator_guided_filing' ||
     intent === 'locator_availability_check' ||
     intent === 'locator_rejection_reason' ||
     intent === 'locator_approval_tracker'

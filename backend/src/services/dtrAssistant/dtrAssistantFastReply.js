@@ -5,6 +5,10 @@ const {
   policyPointLines,
 } = require('./attendanceLocatorPolicies');
 const {
+  getLocatorFormFieldGuidance,
+  getLocatorFormFieldKey,
+} = require('./locatorFilingGuidelines');
+const {
   GUIDELINE_SECTIONS,
   getFormGuidanceForType,
   getLeaveFormFieldGuidance,
@@ -3415,6 +3419,307 @@ function leaveFormFieldHelpReply(context, message) {
   });
 }
 
+function requestedLocatorTypeRecord(message, context) {
+  const requested =
+    requestedSpecificLocatorType(message) || requestedLocatorType(message);
+  if (!requested) return null;
+  const types = context.locator_types || [];
+  return types.find((type) => locatorTypeMatches(type, requested)) || null;
+}
+
+function localizedLocatorFieldExplanation(field, language) {
+  if (language === 'english') return field.explanation;
+  const bisaya = {
+    slip_date:
+      'Pilia ang workday nga sakop sa locator slip. Kinahanglan valid scheduled working day.',
+    locator_type:
+      'Pilia ang locator category nga mo-match sa imong tinuod nga activity sama sa Official Business, Pass Slip, o Work From Home.',
+    covered_slots:
+      'Pili-a ang eksaktong AM/PM time-in o time-out slots nga kinahanglan ma-cover sa approved locator.',
+    destination:
+      'Ibutang ang tinuod nga office, agency, client site, o work location nga related sa request.',
+    reason:
+      'Isulat ug mubo pero klaro nga official purpose nga makatabang sa reviewer.',
+    attachment:
+      'I-upload ang supporting document nga required sa gipiling locator type, kung naa.',
+  };
+  const tagalog = {
+    slip_date:
+      'Piliin ang workday na sakop ng locator slip. Dapat valid scheduled working day.',
+    locator_type:
+      'Piliin ang locator category na tumutugma sa aktwal na activity tulad ng Official Business, Pass Slip, o Work From Home.',
+    covered_slots:
+      'Piliin ang eksaktong AM/PM time-in o time-out slots na dapat ma-cover ng approved locator.',
+    destination:
+      'Ilagay ang totoong office, agency, client site, o work location na kaugnay ng request.',
+    reason:
+      'Sumulat ng maikli pero malinaw na official purpose na makakatulong sa reviewer.',
+    attachment:
+      'I-upload ang supporting document na required ng napiling locator type, kung mayroon.',
+  };
+  return (language === 'bisaya' ? bisaya : tagalog)[field.key] || field.explanation;
+}
+
+function localizedLocatorFieldNote(field, language) {
+  if (language === 'english') return field.note;
+  const bisaya = {
+    slip_date: 'Ayaw pagpili ug rest day o holiday gawas kung gitugot sa HR policy.',
+    locator_type: 'Lain-lain ang rules sa kada type. Pilia ang tinuod nga purpose.',
+    covered_slots: 'Pili-a lang ang slots nga tinuod nga kinahanglan i-cover.',
+    destination: 'Gamita ang tinuod nga lugar. Ayaw kopyaha ang example kung dili tinuod.',
+    reason: 'Panindota ug work-related. Ayaw kopyaha ang example kung dili tinuod.',
+    attachment: 'Ang uban nga locator type wala’y required attachment.',
+  };
+  const tagalog = {
+    slip_date: 'Huwag pumili ng rest day o holiday maliban kung pinapayagan ng HR policy.',
+    locator_type: 'Magkaiba ang rules bawat type. Piliin ang totoong purpose.',
+    covered_slots: 'Piliin lamang ang slots na talagang kailangan i-cover.',
+    destination: 'Gamitin ang totoong lugar. Huwag kopyahin ang example kung hindi totoo.',
+    reason: 'Panatilihing work-related. Huwag kopyahin ang example kung hindi totoo.',
+    attachment: 'May locator type na walang required attachment.',
+  };
+  return (language === 'bisaya' ? bisaya : tagalog)[field.key] || field.note;
+}
+
+function localizedLocatorFieldExamples(field, language) {
+  if (language === 'english') return field.examples;
+  const translations = {
+    bisaya: {
+      'Attend coordination meeting at the Municipal Treasurer\'s Office':
+        'Mo-attend ug coordination meeting sa Municipal Treasurer\'s Office',
+      'Follow up payroll documents at the provincial office':
+        'Mo-follow up ug payroll documents sa provincial office',
+      'Work-from-home due to approved office arrangement':
+        'Work-from-home tungod sa approved office arrangement',
+      'Remote work for assigned project tasks during inclement weather':
+        'Remote work para sa assigned project tasks during inclement weather',
+      'Pass slip to attend an urgent personal matter for 2 hours':
+        'Pass slip para sa urgent personal matter sulod sa 2 ka oras',
+      'Short official errand outside the office during work hours':
+        'Mubo nga official errand gawas sa office during work hours',
+      'Municipal Engineering Office, Plaridel':
+        'Municipal Engineering Office, Plaridel',
+      'Provincial Capitol, Malolos': 'Provincial Capitol, Malolos',
+      'Home work location - Poblacion, Plaridel':
+        'Home work location - Poblacion, Plaridel',
+      'Municipal Health Office, Plaridel': 'Municipal Health Office, Plaridel',
+      'Today if the activity is today': 'Karon kung karon ang activity',
+      'The exact workday you were out or on field':
+        'Ang eksaktong workday nga wala ka o naa sa field',
+      'AM In and AM Out only': 'AM In ug AM Out lang',
+      'PM In and PM Out for an afternoon activity':
+        'PM In ug PM Out para sa afternoon activity',
+      'Official travel order': 'Official travel order',
+      'Meeting invitation or office memorandum':
+        'Meeting invitation o office memorandum',
+    },
+    tagalog: {
+      'Attend coordination meeting at the Municipal Treasurer\'s Office':
+        'Dumalo sa coordination meeting sa Municipal Treasurer\'s Office',
+      'Follow up payroll documents at the provincial office':
+        'Mag-follow up ng payroll documents sa provincial office',
+      'Work-from-home due to approved office arrangement':
+        'Work-from-home dahil sa approved office arrangement',
+      'Remote work for assigned project tasks during inclement weather':
+        'Remote work para sa assigned project tasks during inclement weather',
+      'Pass slip to attend an urgent personal matter for 2 hours':
+        'Pass slip para sa urgent personal matter sa loob ng 2 oras',
+      'Short official errand outside the office during work hours':
+        'Maikling official errand sa labas ng office during work hours',
+      'Municipal Engineering Office, Plaridel':
+        'Municipal Engineering Office, Plaridel',
+      'Provincial Capitol, Malolos': 'Provincial Capitol, Malolos',
+      'Home work location - Poblacion, Plaridel':
+        'Home work location - Poblacion, Plaridel',
+      'Municipal Health Office, Plaridel': 'Municipal Health Office, Plaridel',
+      'Today if the activity is today': 'Ngayon kung ngayon ang activity',
+      'The exact workday you were out or on field':
+        'Ang eksaktong workday na wala ka o nasa field',
+      'AM In and AM Out only': 'AM In at AM Out lang',
+      'PM In and PM Out for an afternoon activity':
+        'PM In at PM Out para sa afternoon activity',
+      'Official travel order': 'Official travel order',
+      'Meeting invitation or office memorandum':
+        'Meeting invitation o office memorandum',
+    },
+  };
+  return field.examples.map(
+    (example) => translations[language]?.[example] || example
+  );
+}
+
+function locatorFormFieldHelpReply(context, message) {
+  const language = languageOf(message);
+  const typeRecord = requestedLocatorTypeRecord(message, context);
+  const locatorTypeValue =
+    requestedSpecificLocatorType(message) ||
+    requestedLocatorType(message) ||
+    lower(typeRecord?.request_type || typeRecord?.code || '');
+  const field = getLocatorFormFieldGuidance(message, locatorTypeValue);
+  if (!field) {
+    return structuredReply(language, {
+      title: 'Locator form field help',
+      summary:
+        language === 'bisaya'
+          ? 'Unsang field sa locator form ang nakalibog nimo? Isulti ang exact field label.'
+          : language === 'tagalog'
+            ? 'Aling field sa locator form ang nakakalito? Sabihin ang exact field label.'
+            : 'Which locator-form field is confusing? Tell me the exact field label.',
+      details: [
+        'Slip Date',
+        'Locator Type',
+        'Covered DTR Slots',
+        'Office / Destination',
+        'Reason / Remarks',
+        'Attachment',
+      ],
+      nextStep:
+        language === 'bisaya'
+          ? 'Example: "unsa akong ibutang sa reason field sa official business locator?"'
+          : language === 'tagalog'
+            ? 'Example: "ano ang ilalagay sa reason field ng official business locator?"'
+            : 'Example: "What should I put in the locator reason field for official business?"',
+      limit: 6,
+    });
+  }
+
+  const typeLabel = typeRecord ? locatorTypeName(typeRecord) : null;
+  const examples = localizedLocatorFieldExamples(field, language);
+  const exampleLabel =
+    language === 'bisaya'
+      ? 'Example input'
+      : language === 'tagalog'
+        ? 'Halimbawang input'
+        : 'Example input';
+  const details = [
+    `${language === 'bisaya' ? 'Unsaon pag-fill' : language === 'tagalog' ? 'Paano sagutan' : 'How to fill it'}: ${localizedLocatorFieldExplanation(
+      field,
+      language
+    )}`,
+    ...examples.map((example) => `${exampleLabel}: ${example}`),
+  ];
+
+  if (field.key === 'attachment' && typeRecord) {
+    details.push(
+      `${
+        language === 'bisaya'
+          ? 'Rule para sa locator type'
+          : language === 'tagalog'
+            ? 'Rule para sa locator type'
+            : 'Rule for this locator type'
+      }: ${locatorAttachmentText(typeRecord, language)}`
+    );
+  }
+
+  if (field.key === 'locator_type') {
+    const visible = locatorTypeRulesForMessage(context, message).slice(0, 4);
+    if (visible.length > 0) {
+      details.push(
+        ...(language === 'bisaya'
+          ? ['Available types:']
+          : language === 'tagalog'
+            ? ['Available types:']
+            : ['Available types:']),
+        ...visible.map((type) => fmtLocatorTypeRule(type, language))
+      );
+    }
+  }
+
+  return structuredReply(language, {
+    title: field.title,
+    summary:
+      language === 'bisaya'
+        ? `Mao ni ang tabang para sa ${field.title}${typeLabel ? ` sa ${typeLabel}` : ''}.`
+        : language === 'tagalog'
+          ? `Narito ang tulong para sa ${field.title}${typeLabel ? ` ng ${typeLabel}` : ''}.`
+          : `Here is how to complete ${field.title}${typeLabel ? ` for ${typeLabel}` : ''}.`,
+    details,
+    nextStep: localizedLocatorFieldNote(field, language),
+    limit: 8,
+  });
+}
+
+function locatorGuidedFilingReply(context, message) {
+  const language = languageOf(message);
+  const typeRecord = requestedLocatorTypeRecord(message, context);
+  const typeHint = requestedLocatorType(message);
+  const missing = [];
+  if (!typeHint) missing.push('locator type');
+  if (!hasDateRangeHint(message)) missing.push('slip date');
+
+  if (missing.length > 0) {
+    return structuredReply(language, {
+      title:
+        language === 'bisaya'
+          ? 'Tabang sa locator filing'
+          : language === 'tagalog'
+            ? 'Tulong sa locator filing'
+            : 'Locator filing guide',
+      summary:
+        language === 'bisaya'
+          ? `Kulang pa: ${missing.join(', ')}.`
+          : language === 'tagalog'
+            ? `Kulang pa: ${missing.join(', ')}.`
+            : `Still missing: ${missing.join(', ')}.`,
+      details: [
+        language === 'bisaya'
+          ? 'Locator type: Official Business, Pass Slip, o Work From Home'
+          : language === 'tagalog'
+            ? 'Locator type: Official Business, Pass Slip, o Work From Home'
+            : 'Locator type: Official Business, Pass Slip, or Work From Home',
+        language === 'bisaya'
+          ? 'Slip date: ang workday nga sakop sa imong activity'
+          : language === 'tagalog'
+            ? 'Slip date: ang workday na sakop ng activity'
+            : 'Slip date: the workday covered by your activity',
+        language === 'bisaya'
+          ? 'Sunod: covered slots, office/destination, reason, ug attachment kung required'
+          : language === 'tagalog'
+            ? 'Susunod: covered slots, office/destination, reason, at attachment kung required'
+            : 'Next: covered slots, office/destination, reason, and attachment if required',
+      ],
+      nextStep:
+        language === 'bisaya'
+          ? 'Example: "Tabangi ko mag-file ug official business locator ugma. Unsa akong ibutang sa reason?"'
+          : language === 'tagalog'
+            ? 'Example: "Tulungan mo akong mag-file ng official business locator bukas. Ano ang ilalagay sa reason?"'
+            : 'Example: "Help me file an official business locator tomorrow. What should I put in the reason field?"',
+      limit: 4,
+    });
+  }
+
+  const visible = typeRecord
+    ? [typeRecord]
+    : locatorTypeRulesForMessage(context, message).slice(0, 2);
+  const ruleLines = visible.map((type) => fmtLocatorTypeRule(type, language));
+  const availability = locatorAvailabilityReply(context, message);
+
+  return structuredReply(language, {
+    title:
+      language === 'bisaya'
+        ? 'Locator filing guide'
+        : language === 'tagalog'
+          ? 'Locator filing guide'
+          : 'Locator filing guide',
+    summary: availability,
+    details: [
+      ...ruleLines,
+      language === 'bisaya'
+        ? 'Sa form: pilia ang covered AM/PM slots, isulat ang destination, reason, ug attachment kung required.'
+        : language === 'tagalog'
+          ? 'Sa form: piliin ang covered AM/PM slots, ilagay ang destination, reason, at attachment kung required.'
+          : 'In the form: select covered AM/PM slots, enter destination, reason, and attachment if required.',
+    ],
+    nextStep:
+      language === 'bisaya'
+        ? 'I-submit sa locator module; dili pa ko mo-auto-submit.'
+        : language === 'tagalog'
+          ? 'I-submit sa locator module; hindi ako mag-auto-submit.'
+          : 'Submit it in the locator module; I will not auto-submit it.',
+    limit: 6,
+  });
+}
+
 function leaveEligibilityReply(context, message) {
   const language = languageOf(message);
   const types = matchingLeaveTypes(context, message).slice(0, 3);
@@ -5103,6 +5408,12 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
   }
   if (intent === 'locator_types') {
     return locatorTypesReply(context, message);
+  }
+  if (intent === 'locator_form_field_help') {
+    return locatorFormFieldHelpReply(context, message);
+  }
+  if (intent === 'locator_guided_filing') {
+    return locatorGuidedFilingReply(context, message);
   }
   if (intent === 'locator_requirements') {
     return locatorRequirementsReply(context, message);

@@ -2,6 +2,9 @@ const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormali
 const {
   isLeaveFormFieldHelpQuestion,
 } = require('./leaveFilingGuidelines');
+const {
+  isLocatorFormFieldHelpQuestion,
+} = require('./locatorFilingGuidelines');
 
 function lower(value) {
   return String(value || '').toLowerCase();
@@ -99,6 +102,8 @@ function normalizeIntent(value) {
     'locator_summary',
     'locator_types',
     'locator_requirements',
+    'locator_form_field_help',
+    'locator_guided_filing',
     'locator_availability_check',
     'locator_rejection_reason',
     'locator_approval_tracker',
@@ -328,6 +333,27 @@ const FUZZY_INTENT_PROFILES = [
   {
     intent: 'locator_requirements',
     phrases: ['locator requirements', 'how to file locator', 'locator attachment', 'pass slip requirements', 'wfh requirements'],
+  },
+  {
+    intent: 'locator_form_field_help',
+    phrases: [
+      'what should i put in the locator reason field',
+      'sample locator reason',
+      'unsa akong ibutang sa locator reason',
+      'unsay ibutang sa destination field',
+      'ano ilalagay sa locator reason',
+      'help me with this locator field',
+    ],
+  },
+  {
+    intent: 'locator_guided_filing',
+    phrases: [
+      'help me file locator',
+      'guide me file wfh',
+      'tabangi ko mag file ug locator',
+      'gusto nako mag file ug pass slip',
+      'assist me file official business',
+    ],
   },
   {
     intent: 'locator_availability_check',
@@ -671,6 +697,16 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (hasLocatorTopic) {
+    if (isLocatorFormFieldHelpQuestion(text)) {
+      return 'locator_form_field_help';
+    }
+    if (
+      /\b(help me file|guide me file|assist me file|tabangi.*file|tabangi ko|mag file ko|mag-file ko|i want to file|gusto ko mag file|gusto nako mag file|tabangan.*locator|tabangi.*locator|tabangi.*wfh|tabangi.*pass slip)\b/.test(
+        text
+      )
+    ) {
+      return 'locator_guided_filing';
+    }
     if (
       /\b(latest|last|most recent|recent)\b/.test(text) &&
       /\b(show|what|which|my|request|status|wfh|locator|official business|pass slip)\b/.test(
