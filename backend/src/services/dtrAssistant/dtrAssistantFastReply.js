@@ -5,12 +5,18 @@ const {
   policyPointLines,
 } = require('./attendanceLocatorPolicies');
 const {
+  getLocatorFormFieldGuidance,
+  getLocatorFormFieldKey,
+} = require('./locatorFilingGuidelines');
+const {
   GUIDELINE_SECTIONS,
   getFormGuidanceForType,
   getLeaveFormFieldGuidance,
   getLeaveGuidanceForType,
   getGuidelineSectionsForMessage,
 } = require('./leaveFilingGuidelines');
+const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
+const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
 
 function lower(value) {
   return String(value || '').toLowerCase();
@@ -316,7 +322,7 @@ function isTagalogOrBisaya(message) {
 }
 
 function normalizedGreetingText(message) {
-  return lower(message)
+  return normalizeAssistantMessageForRules(message)
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -356,7 +362,7 @@ function isAssistantGreetingMessage(message) {
   ]);
 
   if (exact.has(text)) return true;
-  if (/^(hello|hi|hey|helo|kumusta|kamusta)(\s+there|\s+po)?$/.test(text)) return true;
+  if (/^(hello|hi|hey|helo|hii|kumusta|kamusta|komusta)(\s+there|\s+po)?$/.test(text)) return true;
   if (/^good\s+(morning|afternoon|evening)(\s+po)?$/.test(text)) return true;
   if (/^(what|who)\s+are\s+you(\s+ba)?$/.test(text)) return true;
   if (/^(what|who)\s+(is|are)\s+you$/.test(text)) return true;
@@ -391,19 +397,7 @@ function assistantGreetingReply(message) {
 }
 
 function languageOf(message) {
-  const text = lower(message);
-  if (/\b(tagaloga?|tagalog|filipino)\b/.test(text)) return 'tagalog';
-  if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(text)) return 'bisaya';
-  if (/\b(english|ingles)\b/.test(text)) return 'english';
-  if (/\b(kumusta|unsaka|kinsa)\b/.test(text)) return 'bisaya';
-  if (/\b(kamusta)\b/.test(text)) return 'tagalog';
-  if (/\b(ngano|unsa|unsaon|unsay|unsa'y|karon|pila|kabuok|naa|akong|nako|nabilin|gamay|kuwang|imong|nimo|gikan|mahimong|adlaw|kinahanglan|ug|kay|aning|bulana|adtong|adtung|adtun|atong|niadtong|niadtung|ana|adto|ato|duty|daw|apil|ila|nga)\b/.test(text)) {
-    return 'bisaya';
-  }
-  if (/\b(tagalog|filipino|ano|paano|pano|ngayon|ako|ko|ba|may|wala|ilan|bakit|maliit|natira|kailangan|pasok|noong|nung)\b/.test(text)) {
-    return 'tagalog';
-  }
-  return 'english';
+  return detectAssistantLanguage(message);
 }
 
 function responseLabels(language) {
@@ -601,17 +595,18 @@ function locatorPolicyLines(message, fallbackKeys, options = {}) {
 }
 
 function requestedLeaveType(message) {
-  const text = lower(message).replace(/[\s_-]+/g, '');
-  if (/\b(sick|sl|sickleave)\b/.test(lower(message)) || text.includes('sickleave')) {
-    return 'sick';
-  }
-  if (
-    /\b(vacation|vl|vacationleave)\b/.test(lower(message)) ||
-    text.includes('vacationleave')
-  ) {
-    return 'vacation';
-  }
-  return null;
+  const lowered = lower(message);
+  // Pick whichever leave type appears first so the employee's latest wording wins.
+  // Memory context is appended after the current message (e.g. "vacation leave (sick leave)"),
+  // so an earlier match reflects what the employee just asked for.
+  const sickMatch = lowered.match(/\b(sick\s*leave|sick|sl)\b/);
+  const vacationMatch = lowered.match(/\b(vacation\s*leave|vacation|vl)\b/);
+  const sickIndex = sickMatch ? sickMatch.index : -1;
+  const vacationIndex = vacationMatch ? vacationMatch.index : -1;
+  if (sickIndex === -1 && vacationIndex === -1) return null;
+  if (vacationIndex === -1) return 'sick';
+  if (sickIndex === -1) return 'vacation';
+  return sickIndex <= vacationIndex ? 'sick' : 'vacation';
 }
 
 function normalizedText(value) {
@@ -690,6 +685,28 @@ function isWhyBalanceQuestion(message) {
   return /\b(why|ngano|bakit|gamay|small|low|maliit|nabilin|natira|remaining)\b/.test(
     text
   );
+}
+
+function isEnoughBalanceQuestion(message) {
+  const text = lower(message);
+  const sufficiency =
+    /\b(enough|sufficient|sapat|sakto|saktong|igo|igong|kasakto|kaya ba|pwede ba|puwede ba|makaya)\b/.test(
+      text
+    );
+  const creditContext =
+    /\b(credit|credits|balance|leave|sick|vacation|maternity|paternity|adlaw|araw|days?)\b/.test(
+      text
+    );
+  if (sufficiency && creditContext) return true;
+  // "do i have ... credits", "naa ba koy ... credits", "may/meron ... credits ba"
+  if (
+    /\b(naa\s*ba\s*ko|naa\s*bay|do\s*i\s*have|may\b.*\bba|meron\s*ba)\b[\s\S]*\b(credit|credits|balance)\b/.test(
+      text
+    )
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function hasDateRangeHint(message) {
@@ -1255,6 +1272,15 @@ function dtrCalendarDays(context) {
 function calendarDayForDate(context, date) {
   const key = fmtDate(date);
   return dtrCalendarDays(context).find((day) => day.attendance_date === key) || null;
+}
+
+function nextWorkingCalendarDay(context, date) {
+  const key = fmtDate(date);
+  if (!key) return null;
+  const upcoming = dtrCalendarDays(context)
+    .filter((day) => day.attendance_date > key && isCalendarWorkingDay(day))
+    .sort((a, b) => String(a.attendance_date).localeCompare(String(b.attendance_date)));
+  return upcoming[0] || null;
 }
 
 function dtrRecordForDate(context, date) {
@@ -2477,6 +2503,137 @@ function dtrPolicyGuidanceReply(context, message) {
   });
 }
 
+function leaveCanFileNote(available, language) {
+  const value = asNumber(available);
+  if (value == null) {
+    return language === 'bisaya'
+      ? 'wala ma-load ang available credits'
+      : language === 'tagalog'
+        ? 'hindi ma-load ang available credits'
+        : 'available credits are not loaded';
+  }
+  if (value >= 1) {
+    return language === 'bisaya'
+      ? `pwede ka mag-file hangtod ${fmtLocalizedDayCount(value, language)}`
+      : language === 'tagalog'
+        ? `puwede kang mag-file hanggang ${fmtLocalizedDayCount(value, language)}`
+        : `you can file up to ${fmtLocalizedDayCount(value, language)}`;
+  }
+  if (value > 0) {
+    return language === 'bisaya'
+      ? `naa ka ${fmtLocalizedDayCount(value, language)}, half-day/partial lang kung gitugot sa HR policy`
+      : language === 'tagalog'
+        ? `mayroon kang ${fmtLocalizedDayCount(value, language)}, half-day/partial lang kung pinapayagan ng HR policy`
+        : `you have ${fmtLocalizedDayCount(value, language)}; only a half-day/partial may be allowed if HR policy permits`;
+  }
+  return language === 'bisaya'
+    ? 'wala kay available credits para maka-file'
+    : language === 'tagalog'
+      ? 'wala kang available credits para makapag-file'
+      : 'you have no available credits to file with';
+}
+
+function leaveBalanceSufficiencyReply(visibleBalances, language) {
+  // Single (usually type-specific) balance: give a direct yes/no answer.
+  if (visibleBalances.length === 1) {
+    const b = visibleBalances[0];
+    const type = labelLeaveType(b.leave_type);
+    const available = asNumber(b.available_days);
+    // tier: 'unknown' (not loaded), 'full' (>=1 day), 'partial' (0<x<1), 'none' (<=0)
+    const tier =
+      available == null
+        ? 'unknown'
+        : available >= 1
+          ? 'full'
+          : available > 0
+            ? 'partial'
+            : 'none';
+    const note = leaveCanFileNote(available, language);
+    let verdict;
+    if (tier === 'unknown') {
+      verdict =
+        language === 'bisaya'
+          ? `Wala ma-load ang ${type} credits, mao dili nako ma-confirm.`
+          : language === 'tagalog'
+            ? `Hindi ma-load ang ${type} credits, kaya hindi ko ma-confirm.`
+            : `Your ${type} credits are not loaded, so I cannot confirm.`;
+    } else if (tier === 'full') {
+      verdict =
+        language === 'bisaya'
+          ? `Oo, naa kay igong ${type} credits — ${note}.`
+          : language === 'tagalog'
+            ? `Oo, may sapat kang ${type} credits — ${note}.`
+            : `Yes, you have enough ${type} credits — ${note}.`;
+    } else if (tier === 'partial') {
+      verdict =
+        language === 'bisaya'
+          ? `Kulang para sa full day: ${note}.`
+          : language === 'tagalog'
+            ? `Kulang para sa full day: ${note}.`
+            : `Not enough for a full day: ${note}.`;
+    } else {
+      verdict =
+        language === 'bisaya'
+          ? `Wala, kulang ang imong ${type} credits — ${note}.`
+          : language === 'tagalog'
+            ? `Hindi, kulang ang ${type} credits mo — ${note}.`
+            : `No, your ${type} credits are not enough — ${note}.`;
+    }
+    return structuredReply(language, {
+      title:
+        language === 'english' ? 'Leave credits check' : 'Leave credits check',
+      summary: verdict,
+      details: [
+        `${type}: ${balanceFormulaLine(b, language)}`,
+        language === 'bisaya'
+          ? 'Ang available credits mao ang pwede nimo magamit karon (earned − used − pending + adjusted).'
+          : language === 'tagalog'
+            ? 'Ang available credits ay ang puwede mong gamitin ngayon (earned − used − pending + adjusted).'
+            : 'Available credits are what you can use now (earned − used − pending + adjusted).',
+      ],
+      nextStep:
+        language === 'bisaya'
+          ? 'Para sigurado, sulti kung pila ka adlaw imong i-file (pananglitan, "1 day sick leave ugma").'
+          : language === 'tagalog'
+            ? 'Para sigurado, sabihin kung ilang araw ang ifa-file mo (halimbawa, "1 day sick leave bukas").'
+            : 'For a precise check, tell me how many days you plan to file (e.g., "1 day sick leave tomorrow").',
+      limit: 5,
+    });
+  }
+
+  // Multiple balances: list each type with a quick verdict.
+  const lines = visibleBalances.map((b) => {
+    const type = labelLeaveType(b.leave_type);
+    const available = asNumber(b.available_days);
+    const verdict =
+      available == null
+        ? language === 'bisaya'
+          ? 'wala ma-load'
+          : language === 'tagalog'
+            ? 'hindi ma-load'
+            : 'not loaded'
+        : available > 0
+          ? language === 'english'
+            ? `enough (${fmtLocalizedDayCount(available, language)} available)`
+            : `igo (${fmtLocalizedDayCount(available, language)} available)`
+          : language === 'english'
+            ? 'no available credits'
+            : 'walay available credits';
+    return `${type}: ${verdict}`;
+  });
+  return structuredReply(language, {
+    title: 'Leave credits check',
+    summary:
+      language === 'bisaya'
+        ? 'Ania ang quick check sa imong leave credits. Sultihi ko sa espisipikong leave type ug adlaw para sa tukmang sagot.'
+        : language === 'tagalog'
+          ? 'Narito ang mabilis na check sa iyong leave credits. Sabihin ang espesipikong leave type at araw para sa eksaktong sagot.'
+          : 'Here is a quick check of your leave credits. Tell me the specific leave type and number of days for an exact answer.',
+    details: lines,
+    limit: 8,
+  });
+}
+
 function leaveBalanceReply(context, localized, message) {
   const balances = context.leave_balances || [];
   if (balances.length === 0) {
@@ -2494,6 +2651,11 @@ function leaveBalanceReply(context, localized, message) {
   });
   const visibleBalances = selected.length > 0 ? selected : balances;
   const why = isWhyBalanceQuestion(message);
+  const enough = !why && isEnoughBalanceQuestion(message);
+
+  if (enough) {
+    return leaveBalanceSufficiencyReply(visibleBalances, language);
+  }
 
   if (why && visibleBalances.length === 1) {
     const b = visibleBalances[0];
@@ -3411,6 +3573,341 @@ function leaveFormFieldHelpReply(context, message) {
           : `Here is how to complete ${field.title}${typeLabel ? ` for ${typeLabel}` : ''}.`,
     details,
     nextStep: localizedLeaveFieldNote(field, language),
+    limit: 6,
+  });
+}
+
+function requestedLocatorTypeRecord(message, context) {
+  const requested =
+    requestedSpecificLocatorType(message) || requestedLocatorType(message);
+  if (!requested) return null;
+  const types = context.locator_types || [];
+  return types.find((type) => locatorTypeMatches(type, requested)) || null;
+}
+
+function localizedLocatorFieldExplanation(field, language) {
+  if (language === 'english') return field.explanation;
+  const bisaya = {
+    slip_date:
+      'Pilia ang workday nga sakop sa locator slip. Kinahanglan valid scheduled working day.',
+    locator_type:
+      'Pilia ang locator category nga mo-match sa imong tinuod nga activity sama sa Official Business, Pass Slip, o Work From Home.',
+    covered_slots:
+      'Pili-a ang eksaktong AM/PM time-in o time-out slots nga kinahanglan ma-cover sa approved locator.',
+    destination:
+      'Ibutang ang tinuod nga office, agency, client site, o work location nga related sa request.',
+    reason:
+      'Isulat ug mubo pero klaro nga official purpose nga makatabang sa reviewer.',
+    attachment:
+      'I-upload ang supporting document nga required sa gipiling locator type, kung naa.',
+  };
+  const tagalog = {
+    slip_date:
+      'Piliin ang workday na sakop ng locator slip. Dapat valid scheduled working day.',
+    locator_type:
+      'Piliin ang locator category na tumutugma sa aktwal na activity tulad ng Official Business, Pass Slip, o Work From Home.',
+    covered_slots:
+      'Piliin ang eksaktong AM/PM time-in o time-out slots na dapat ma-cover ng approved locator.',
+    destination:
+      'Ilagay ang totoong office, agency, client site, o work location na kaugnay ng request.',
+    reason:
+      'Sumulat ng maikli pero malinaw na official purpose na makakatulong sa reviewer.',
+    attachment:
+      'I-upload ang supporting document na required ng napiling locator type, kung mayroon.',
+  };
+  return (language === 'bisaya' ? bisaya : tagalog)[field.key] || field.explanation;
+}
+
+function localizedLocatorFieldNote(field, language) {
+  if (language === 'english') return field.note;
+  const bisaya = {
+    slip_date: 'Ayaw pagpili ug rest day o holiday gawas kung gitugot sa HR policy.',
+    locator_type: 'Lain-lain ang rules sa kada type. Pilia ang tinuod nga purpose.',
+    covered_slots: 'Pili-a lang ang slots nga tinuod nga kinahanglan i-cover.',
+    destination: 'Gamita ang tinuod nga lugar. Ayaw kopyaha ang example kung dili tinuod.',
+    reason: 'Panindota ug work-related. Ayaw kopyaha ang example kung dili tinuod.',
+    attachment: 'Ang uban nga locator type wala’y required attachment.',
+  };
+  const tagalog = {
+    slip_date: 'Huwag pumili ng rest day o holiday maliban kung pinapayagan ng HR policy.',
+    locator_type: 'Magkaiba ang rules bawat type. Piliin ang totoong purpose.',
+    covered_slots: 'Piliin lamang ang slots na talagang kailangan i-cover.',
+    destination: 'Gamitin ang totoong lugar. Huwag kopyahin ang example kung hindi totoo.',
+    reason: 'Panatilihing work-related. Huwag kopyahin ang example kung hindi totoo.',
+    attachment: 'May locator type na walang required attachment.',
+  };
+  return (language === 'bisaya' ? bisaya : tagalog)[field.key] || field.note;
+}
+
+function localizedLocatorFieldExamples(field, language) {
+  if (language === 'english') return field.examples;
+  const translations = {
+    bisaya: {
+      'Attend coordination meeting at the Municipal Treasurer\'s Office':
+        'Mo-attend ug coordination meeting sa Municipal Treasurer\'s Office',
+      'Follow up payroll documents at the provincial office':
+        'Mo-follow up ug payroll documents sa provincial office',
+      'Work-from-home due to approved office arrangement':
+        'Work-from-home tungod sa approved office arrangement',
+      'Remote work for assigned project tasks during inclement weather':
+        'Remote work para sa assigned project tasks during inclement weather',
+      'Pass slip to attend an urgent personal matter for 2 hours':
+        'Pass slip para sa urgent personal matter sulod sa 2 ka oras',
+      'Short official errand outside the office during work hours':
+        'Mubo nga official errand gawas sa office during work hours',
+      'Municipal Engineering Office, Plaridel':
+        'Municipal Engineering Office, Plaridel',
+      'Provincial Capitol, Malolos': 'Provincial Capitol, Malolos',
+      'Home work location - Poblacion, Plaridel':
+        'Home work location - Poblacion, Plaridel',
+      'Municipal Health Office, Plaridel': 'Municipal Health Office, Plaridel',
+      'Today if the activity is today': 'Karon kung karon ang activity',
+      'The exact workday you were out or on field':
+        'Ang eksaktong workday nga wala ka o naa sa field',
+      'AM In and AM Out only': 'AM In ug AM Out lang',
+      'PM In and PM Out for an afternoon activity':
+        'PM In ug PM Out para sa afternoon activity',
+      'Official travel order': 'Official travel order',
+      'Meeting invitation or office memorandum':
+        'Meeting invitation o office memorandum',
+    },
+    tagalog: {
+      'Attend coordination meeting at the Municipal Treasurer\'s Office':
+        'Dumalo sa coordination meeting sa Municipal Treasurer\'s Office',
+      'Follow up payroll documents at the provincial office':
+        'Mag-follow up ng payroll documents sa provincial office',
+      'Work-from-home due to approved office arrangement':
+        'Work-from-home dahil sa approved office arrangement',
+      'Remote work for assigned project tasks during inclement weather':
+        'Remote work para sa assigned project tasks during inclement weather',
+      'Pass slip to attend an urgent personal matter for 2 hours':
+        'Pass slip para sa urgent personal matter sa loob ng 2 oras',
+      'Short official errand outside the office during work hours':
+        'Maikling official errand sa labas ng office during work hours',
+      'Municipal Engineering Office, Plaridel':
+        'Municipal Engineering Office, Plaridel',
+      'Provincial Capitol, Malolos': 'Provincial Capitol, Malolos',
+      'Home work location - Poblacion, Plaridel':
+        'Home work location - Poblacion, Plaridel',
+      'Municipal Health Office, Plaridel': 'Municipal Health Office, Plaridel',
+      'Today if the activity is today': 'Ngayon kung ngayon ang activity',
+      'The exact workday you were out or on field':
+        'Ang eksaktong workday na wala ka o nasa field',
+      'AM In and AM Out only': 'AM In at AM Out lang',
+      'PM In and PM Out for an afternoon activity':
+        'PM In at PM Out para sa afternoon activity',
+      'Official travel order': 'Official travel order',
+      'Meeting invitation or office memorandum':
+        'Meeting invitation o office memorandum',
+    },
+  };
+  return field.examples.map(
+    (example) => translations[language]?.[example] || example
+  );
+}
+
+function locatorFormFieldHelpReply(context, message) {
+  const language = languageOf(message);
+  const typeRecord = requestedLocatorTypeRecord(message, context);
+  const locatorTypeValue =
+    requestedSpecificLocatorType(message) ||
+    requestedLocatorType(message) ||
+    lower(typeRecord?.request_type || typeRecord?.code || '');
+  const field = getLocatorFormFieldGuidance(message, locatorTypeValue);
+  if (!field) {
+    return structuredReply(language, {
+      title: 'Locator form field help',
+      summary:
+        language === 'bisaya'
+          ? 'Unsang field sa locator form ang nakalibog nimo? Isulti ang exact field label.'
+          : language === 'tagalog'
+            ? 'Aling field sa locator form ang nakakalito? Sabihin ang exact field label.'
+            : 'Which locator-form field is confusing? Tell me the exact field label.',
+      details: [
+        'Slip Date',
+        'Locator Type',
+        'Covered DTR Slots',
+        'Office / Destination',
+        'Reason / Remarks',
+        'Attachment',
+      ],
+      nextStep:
+        language === 'bisaya'
+          ? 'Example: "unsa akong ibutang sa reason field sa official business locator?"'
+          : language === 'tagalog'
+            ? 'Example: "ano ang ilalagay sa reason field ng official business locator?"'
+            : 'Example: "What should I put in the locator reason field for official business?"',
+      limit: 6,
+    });
+  }
+
+  const typeLabel = typeRecord ? locatorTypeName(typeRecord) : null;
+  const examples = localizedLocatorFieldExamples(field, language);
+  const exampleLabel =
+    language === 'bisaya'
+      ? 'Example input'
+      : language === 'tagalog'
+        ? 'Halimbawang input'
+        : 'Example input';
+  const details = [
+    `${language === 'bisaya' ? 'Unsaon pag-fill' : language === 'tagalog' ? 'Paano sagutan' : 'How to fill it'}: ${localizedLocatorFieldExplanation(
+      field,
+      language
+    )}`,
+    ...examples.map((example) => `${exampleLabel}: ${example}`),
+  ];
+
+  if (field.key === 'attachment' && typeRecord) {
+    details.push(
+      `${
+        language === 'bisaya'
+          ? 'Rule para sa locator type'
+          : language === 'tagalog'
+            ? 'Rule para sa locator type'
+            : 'Rule for this locator type'
+      }: ${locatorAttachmentText(typeRecord, language)}`
+    );
+  }
+
+  if (field.key === 'locator_type') {
+    const visible = locatorTypeRulesForMessage(context, message).slice(0, 4);
+    if (visible.length > 0) {
+      details.push(
+        ...(language === 'bisaya'
+          ? ['Available types:']
+          : language === 'tagalog'
+            ? ['Available types:']
+            : ['Available types:']),
+        ...visible.map((type) => fmtLocatorTypeRule(type, language))
+      );
+    }
+  }
+
+  return structuredReply(language, {
+    title: field.title,
+    summary:
+      language === 'bisaya'
+        ? `Mao ni ang tabang para sa ${field.title}${typeLabel ? ` sa ${typeLabel}` : ''}.`
+        : language === 'tagalog'
+          ? `Narito ang tulong para sa ${field.title}${typeLabel ? ` ng ${typeLabel}` : ''}.`
+          : `Here is how to complete ${field.title}${typeLabel ? ` for ${typeLabel}` : ''}.`,
+    details,
+    nextStep: localizedLocatorFieldNote(field, language),
+    limit: 8,
+  });
+}
+
+function localizedLocatorTypeLabel(typeHint, typeRecord) {
+  if (typeRecord) return locatorTypeName(typeRecord);
+  if (typeHint === 'work_from_home') return 'Work From Home (WFH)';
+  if (typeHint === 'pass_slip') return 'Pass Slip';
+  if (typeHint === 'locator') return 'Official Business / Locator';
+  return null;
+}
+
+function locatorGuidedFilingExampleText(language, typeLabel) {
+  const exampleType = typeLabel || 'official business locator';
+  if (language === 'bisaya') {
+    return `Example: "Tabangi ko mag-file ug ${exampleType} ugma. Unsa akong ibutang sa reason?"`;
+  }
+  if (language === 'tagalog') {
+    return `Example: "Tulungan mo akong mag-file ng ${exampleType} bukas. Ano ang ilalagay sa reason?"`;
+  }
+  return `Example: "Help me file a ${exampleType} tomorrow. What should I put in the reason field?"`;
+}
+
+function locatorGuidedFilingReply(context, message) {
+  const language = languageOf(message);
+  const typeRecord = requestedLocatorTypeRecord(message, context);
+  const typeHint = requestedLocatorType(message);
+  const typeLabel = localizedLocatorTypeLabel(typeHint, typeRecord);
+  const missing = [];
+  if (!typeHint) missing.push('locator type');
+  if (!hasDateRangeHint(message)) missing.push('slip date');
+
+  if (missing.length > 0) {
+    const typeDetail = typeLabel
+      ? language === 'bisaya'
+        ? `Locator type: ${typeLabel} (na-detect na sa imong message)`
+        : language === 'tagalog'
+          ? `Locator type: ${typeLabel} (na-detect na sa message mo)`
+          : `Locator type: ${typeLabel} (already detected from your message)`
+      : language === 'bisaya'
+        ? 'Locator type: Official Business, Pass Slip, o Work From Home'
+        : language === 'tagalog'
+          ? 'Locator type: Official Business, Pass Slip, o Work From Home'
+          : 'Locator type: Official Business, Pass Slip, or Work From Home';
+
+    const summary = (() => {
+      if (typeLabel) {
+        if (language === 'bisaya') {
+          return `Para sa ${typeLabel}, kulang pa: ${missing.join(', ')}.`;
+        }
+        if (language === 'tagalog') {
+          return `Para sa ${typeLabel}, kulang pa: ${missing.join(', ')}.`;
+        }
+        return `For ${typeLabel}, still missing: ${missing.join(', ')}.`;
+      }
+      if (language === 'bisaya' || language === 'tagalog') {
+        return `Kulang pa: ${missing.join(', ')}.`;
+      }
+      return `Still missing: ${missing.join(', ')}.`;
+    })();
+
+    return structuredReply(language, {
+      title:
+        language === 'bisaya'
+          ? 'Tabang sa locator filing'
+          : language === 'tagalog'
+            ? 'Tulong sa locator filing'
+            : 'Locator filing guide',
+      summary,
+      details: [
+        typeDetail,
+        language === 'bisaya'
+          ? 'Slip date: ang workday nga sakop sa imong activity'
+          : language === 'tagalog'
+            ? 'Slip date: ang workday na sakop ng activity'
+            : 'Slip date: the workday covered by your activity',
+        language === 'bisaya'
+          ? 'Sunod: covered slots, office/destination, reason, ug attachment kung required'
+          : language === 'tagalog'
+            ? 'Susunod: covered slots, office/destination, reason, at attachment kung required'
+            : 'Next: covered slots, office/destination, reason, and attachment if required',
+      ],
+      nextStep: locatorGuidedFilingExampleText(language, typeLabel),
+      limit: 4,
+    });
+  }
+
+  const visible = typeRecord
+    ? [typeRecord]
+    : locatorTypeRulesForMessage(context, message).slice(0, 2);
+  const ruleLines = visible.map((type) => fmtLocatorTypeRule(type, language));
+  const availability = locatorAvailabilityReply(context, message);
+
+  return structuredReply(language, {
+    title:
+      language === 'bisaya'
+        ? 'Locator filing guide'
+        : language === 'tagalog'
+          ? 'Locator filing guide'
+          : 'Locator filing guide',
+    summary: availability,
+    details: [
+      ...ruleLines,
+      language === 'bisaya'
+        ? 'Sa form: pilia ang covered AM/PM slots, isulat ang destination, reason, ug attachment kung required.'
+        : language === 'tagalog'
+          ? 'Sa form: piliin ang covered AM/PM slots, ilagay ang destination, reason, at attachment kung required.'
+          : 'In the form: select covered AM/PM slots, enter destination, reason, and attachment if required.',
+    ],
+    nextStep:
+      language === 'bisaya'
+        ? 'I-submit sa locator module; dili pa ko mo-auto-submit.'
+        : language === 'tagalog'
+          ? 'I-submit sa locator module; hindi ako mag-auto-submit.'
+          : 'Submit it in the locator module; I will not auto-submit it.',
     limit: 6,
   });
 }
@@ -4747,29 +5244,100 @@ function locatorAvailabilityReply(context, message) {
     if (date && slip.slip_date !== date) return false;
     return locatorTypeMatches(slip, requestedType);
   });
+  const isWorkingDay = day ? isCalendarWorkingDay(day) : null;
+  const isWholeDayHoliday =
+    day?.holiday_name && day.holiday_coverage === 'whole_day';
+  const friendlyDate = date ? fmtFriendlyDate(date) : '';
+  const scheduleRange = fmtScheduleRange(day);
+  const expectedSlots = day ? expectedSlotsForCalendarDay(day) : [];
+
   const issues = [];
   if (!date) issues.push('No target date was detected.');
-  if (day?.holiday_name && day.holiday_coverage === 'whole_day') {
+  if (isWholeDayHoliday) {
     issues.push(`Date is marked as whole-day holiday: ${day.holiday_name}`);
   }
-  if (day && !isCalendarWorkingDay(day)) {
-    issues.push('Schedule says this is not a required-log working day.');
+  if (day && !isWorkingDay && !isWholeDayHoliday) {
+    issues.push(
+      language === 'bisaya'
+        ? `Base sa schedule, ang ${friendlyDate} kay rest day/non-working (walay required DTR logs).`
+        : language === 'tagalog'
+          ? `Base sa schedule, ang ${friendlyDate} ay rest day/non-working (walang required DTR logs).`
+          : `Based on the schedule, ${friendlyDate} is a rest day / non-working day (no required DTR logs).`
+    );
   }
   if (!day && date) {
     issues.push('Schedule details are not loaded for this date.');
   }
 
+  // Shift-aware schedule line: avoid showing an active-looking shift on a rest day.
+  let scheduleLine = null;
+  if (day?.shift_name || day?.start_time) {
+    const base = `${day.shift_name || 'Shift'}${scheduleRange ? ` (${scheduleRange})` : ''}`;
+    if (isWorkingDay) {
+      scheduleLine = `Schedule: ${base}`;
+    } else {
+      scheduleLine =
+        language === 'bisaya'
+          ? `Schedule: ${base} ang naka-assign, pero rest day/non-working ang ${friendlyDate}`
+          : language === 'tagalog'
+            ? `Schedule: ${base} ang naka-assign, pero rest day/non-working ang ${friendlyDate}`
+            : `Schedule: ${base} is assigned, but ${friendlyDate} is a rest day / non-working day`;
+    }
+  } else if (day && !isWorkingDay) {
+    scheduleLine =
+      language === 'bisaya'
+        ? `Schedule: rest day/walay required logs sa ${friendlyDate}`
+        : language === 'tagalog'
+          ? `Schedule: rest day/walang required logs sa ${friendlyDate}`
+          : `Schedule: rest day / no required logs on ${friendlyDate}`;
+  }
+
+  // Shift-aware DTR coverage hint.
+  let coverageLine;
+  if (requestedSlot) {
+    coverageLine = `Requested DTR coverage: ${requestedSlot}`;
+  } else if (day && !isWorkingDay) {
+    coverageLine =
+      language === 'bisaya'
+        ? 'DTR coverage: walay required DTR slots sa rest day; pilia ang working day kung gusto nimo ma-cover ang DTR.'
+        : language === 'tagalog'
+          ? 'DTR coverage: walang required DTR slots sa rest day; pumili ng working day kung gusto mong ma-cover ang DTR.'
+          : 'DTR coverage: no required DTR slots on a rest day; pick a working day if you want this to cover DTR.';
+  } else if (expectedSlots.length > 0) {
+    coverageLine =
+      language === 'bisaya'
+        ? `DTR coverage: pili sa ${expectedSlots.join(', ')}.`
+        : language === 'tagalog'
+          ? `DTR coverage: pumili sa ${expectedSlots.join(', ')}.`
+          : `DTR coverage: choose from ${expectedSlots.join(', ')}.`;
+  } else {
+    coverageLine = 'DTR coverage: choose AM in, AM out, PM in, or PM out.';
+  }
+
+  // Suggest the next working day when the resolved date is not workable.
+  let nextWorkingLine = null;
+  if (day && !isWorkingDay) {
+    const nextWorking = nextWorkingCalendarDay(context, date);
+    if (nextWorking) {
+      const nextLabel = `${fmtFriendlyDate(nextWorking.attendance_date)}${
+        nextWorking.shift_name ? ` (${nextWorking.shift_name})` : ''
+      }`;
+      nextWorkingLine =
+        language === 'bisaya'
+          ? `Sunod nga working day: ${nextLabel}.`
+          : language === 'tagalog'
+            ? `Susunod na working day: ${nextLabel}.`
+            : `Next working day: ${nextLabel}.`;
+    }
+  }
+
   const typeLabel = type?.label || type?.code || (requestedType ? requestedType.replace(/_/g, ' ') : 'not selected');
   const details = [
-    date ? `Date: ${fmtFriendlyDate(date)}` : null,
+    date ? `Date: ${friendlyDate}` : null,
     `Locator type: ${typeLabel}`,
-    day?.shift_name
-      ? `Schedule: ${day.shift_name}${fmtScheduleRange(day) ? ` (${fmtScheduleRange(day)})` : ''}`
-      : null,
+    scheduleLine,
     day?.holiday_name ? `Holiday: ${day.holiday_name} (${day.holiday_coverage || 'whole_day'})` : null,
-    requestedSlot
-      ? `Requested DTR coverage: ${requestedSlot}`
-      : 'DTR coverage: choose AM in, AM out, PM in, or PM out.',
+    coverageLine,
     type
       ? `Attachment: ${type.requires_attachment ? 'required' : 'not required by this locator type'}`
       : 'Type rules: choose the exact locator type to check attachment rules.',
@@ -4777,6 +5345,7 @@ function locatorAvailabilityReply(context, message) {
       ? `Existing locator on this date: ${existing.map(fmtLocatorSlip).join('; ')}`
       : null,
     ...issues,
+    nextWorkingLine,
     ...locatorPolicyLines(message, ['filing_checks', 'dtr_coverage'], {
       maxPointsPerSection: 1,
     }),
@@ -5103,6 +5672,12 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
   }
   if (intent === 'locator_types') {
     return locatorTypesReply(context, message);
+  }
+  if (intent === 'locator_form_field_help') {
+    return locatorFormFieldHelpReply(context, message);
+  }
+  if (intent === 'locator_guided_filing') {
+    return locatorGuidedFilingReply(context, message);
   }
   if (intent === 'locator_requirements') {
     return locatorRequirementsReply(context, message);

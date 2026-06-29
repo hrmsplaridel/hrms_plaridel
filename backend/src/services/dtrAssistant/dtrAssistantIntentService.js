@@ -1,7 +1,11 @@
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
+const { scoreSemanticIntents } = require('./dtrAssistantSemanticIntent');
 const {
   isLeaveFormFieldHelpQuestion,
 } = require('./leaveFilingGuidelines');
+const {
+  isLocatorFormFieldHelpQuestion,
+} = require('./locatorFilingGuidelines');
 
 function lower(value) {
   return String(value || '').toLowerCase();
@@ -99,6 +103,8 @@ function normalizeIntent(value) {
     'locator_summary',
     'locator_types',
     'locator_requirements',
+    'locator_form_field_help',
+    'locator_guided_filing',
     'locator_availability_check',
     'locator_rejection_reason',
     'locator_approval_tracker',
@@ -120,6 +126,8 @@ const FUZZY_INTENT_PROFILES = [
       'absent karong bulana',
       'absence summary',
       'no record this month',
+      'how many absent nako this month',
+      'naa koy absnt karong bulan',
     ],
   },
   {
@@ -158,6 +166,9 @@ const FUZZY_INTENT_PROFILES = [
       'how to correct dtr',
       'paano i correct dtr',
       'unsaon pag correct dtr',
+      'pano ko maayos ang missing pm out',
+      'paano ayusin missing pm out',
+      'how to fix missing pm out',
     ],
   },
   {
@@ -270,7 +281,7 @@ const FUZZY_INTENT_PROFILES = [
   },
   {
     intent: 'leave_form_guidance',
-    phrases: ['how to file leave', 'how can i file leave', 'paano mag file leave', 'unsaon pag file leave', 'leave form'],
+    phrases: ['how to file leave', 'how can i file leave', 'paano mag file leave', 'unsaon pag file leave', 'unsaon nako pag file leave', 'leave form'],
   },
   {
     intent: 'leave_form_field_help',
@@ -323,11 +334,32 @@ const FUZZY_INTENT_PROFILES = [
   },
   {
     intent: 'locator_status',
-    phrases: ['locator status', 'locator approved', 'locator accepted', 'na approve locator', 'latest locator', 'where is locator'],
+    phrases: ['locator status', 'locator approved', 'locator accepted', 'na approve locator', 'latest locator', 'where is locator', 'status sa akong locator'],
   },
   {
     intent: 'locator_requirements',
-    phrases: ['locator requirements', 'how to file locator', 'locator attachment', 'pass slip requirements', 'wfh requirements'],
+    phrases: ['locator requirements', 'how to file locator', 'locator attachment', 'pass slip requirements', 'wfh requirements', 'unsaon pag file locator slip'],
+  },
+  {
+    intent: 'locator_form_field_help',
+    phrases: [
+      'what should i put in the locator reason field',
+      'sample locator reason',
+      'unsa akong ibutang sa locator reason',
+      'unsay ibutang sa destination field',
+      'ano ilalagay sa locator reason',
+      'help me with this locator field',
+    ],
+  },
+  {
+    intent: 'locator_guided_filing',
+    phrases: [
+      'help me file locator',
+      'guide me file wfh',
+      'tabangi ko mag file ug locator',
+      'gusto nako mag file ug pass slip',
+      'assist me file official business',
+    ],
   },
   {
     intent: 'locator_availability_check',
@@ -575,11 +607,15 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
   }
 
   const fuzzy = scoreFuzzyIntents(message);
+  const semantic = scoreSemanticIntents(message);
   const ruleIntent = detectEmployeeAssistantIntentByRules(message, null);
   const top = fuzzy.top;
   const runnerUp = fuzzy.runnerUp;
+  const semanticTop = semantic.top;
   const ruleScore =
     fuzzy.scores.find((item) => item.intent === ruleIntent)?.confidence || 0;
+  const semanticScore =
+    semantic.scores.find((item) => item.intent === ruleIntent)?.confidence || 0;
 
   if (ruleIntent) {
     if (
@@ -599,13 +635,32 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
       };
     }
 
-    const confidence = Math.max(ruleScore, ruleScore >= 0.5 ? 0.84 : 0.74);
+    if (
+      semanticTop &&
+      semanticTop.intent !== ruleIntent &&
+      hasIntentDomainSignal(message, semanticTop.intent) &&
+      semanticTop.confidence >= 0.58 &&
+      semanticTop.confidence - Math.max(ruleScore, semanticScore) >= 0.12
+    ) {
+      return {
+        intent: semanticTop.intent,
+        confidence: semanticTop.confidence,
+        source: 'semantic_override',
+        needsAiPlan: semanticTop.confidence < 0.78,
+        fuzzy,
+        semantic,
+        ruleIntent,
+      };
+    }
+
+    const confidence = Math.max(ruleScore, semanticScore, ruleScore >= 0.5 ? 0.84 : 0.74);
     return {
       intent: ruleIntent,
       confidence,
-      source: ruleScore >= 0.5 ? 'rules_fuzzy' : 'rules',
+      source: semanticScore >= ruleScore ? 'rules_semantic' : ruleScore >= 0.5 ? 'rules_fuzzy' : 'rules',
       needsAiPlan: confidence < 0.78,
       fuzzy,
+      semantic,
       ruleIntent,
     };
   }
@@ -623,16 +678,34 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
       source: 'fuzzy',
       needsAiPlan: top.confidence < 0.72,
       fuzzy,
+      semantic,
+      ruleIntent: null,
+    };
+  }
+
+  if (
+    semanticTop &&
+    semanticTop.confidence >= 0.55 &&
+    hasIntentDomainSignal(message, semanticTop.intent)
+  ) {
+    return {
+      intent: semanticTop.intent,
+      confidence: semanticTop.confidence,
+      source: 'semantic',
+      needsAiPlan: semanticTop.confidence < 0.72,
+      fuzzy,
+      semantic,
       ruleIntent: null,
     };
   }
 
   return {
     intent: null,
-    confidence: top?.confidence || 0,
+    confidence: top?.confidence || semanticTop?.confidence || 0,
     source: 'unclear',
     needsAiPlan: true,
     fuzzy,
+    semantic,
     ruleIntent: null,
   };
 }
@@ -671,6 +744,16 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (hasLocatorTopic) {
+    if (isLocatorFormFieldHelpQuestion(text)) {
+      return 'locator_form_field_help';
+    }
+    if (
+      /\b(help me file|guide me file|assist me file|tabangi.*file|tabangi ko|mag file ko|mag-file ko|i want to file|gusto ko mag file|gusto nako mag file|tabangan.*locator|tabangi.*locator|tabangi.*wfh|tabangi.*pass slip)\b/.test(
+        text
+      )
+    ) {
+      return 'locator_guided_filing';
+    }
     if (
       /\b(latest|last|most recent|recent)\b/.test(text) &&
       /\b(show|what|which|my|request|status|wfh|locator|official business|pass slip)\b/.test(
@@ -1395,6 +1478,7 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
 
 module.exports = {
   detectEmployeeAssistantIntent,
+  intentDomain,
   normalizeIntent,
   scoreEmployeeAssistantIntent,
   scoreFuzzyIntents,

@@ -40,6 +40,10 @@ class DtrAssistantApi {
     throw Exception('Assistant returned an invalid response.');
   }
 
+  Future<void> resetChat() async {
+    await _client.post<Map<String, dynamic>>('/api/dtr-assistant/reset');
+  }
+
   Future<({String defaultModelProfile, List<DtrAssistantModelProfile> models})>
   fetchModels() async {
     final res = await _client.get<Map<String, dynamic>>(

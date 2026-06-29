@@ -17,6 +17,27 @@ const PHRASE_REPLACEMENTS = [
   [/\bpassslip\b/gi, 'pass slip'],
   [/\boffical\s+business\b/gi, 'official business'],
   [/\boficial\s+business\b/gi, 'official business'],
+  [/\boffcial\s+business\b/gi, 'official business'],
+  [/\bsik\s+leev\b/gi, 'sick leave'],
+  [/\bsik\s+leave\b/gi, 'sick leave'],
+  [/\bvacaton\s+leave\b/gi, 'vacation leave'],
+  [/\bunsaon\s+nko\b/gi, 'unsaon nako'],
+  [/\bunsaon\s+ko\b/gi, 'unsaon nako'],
+  [/\bpg\s+file\b/gi, 'pag file'],
+  [/\bkarong\s+bulna\b/gi, 'karong bulan'],
+  [/\bthis\s+mnth\b/gi, 'this month'],
+  [/\bwhats\s+my\b/gi, 'what is my'],
+  [/\bwats\s+my\b/gi, 'what is my'],
+  [/\bhow\s+many\s+abssents\b/gi, 'how many absents'],
+  [/\bhow\s+many\s+absnts\b/gi, 'how many absents'],
+  [/\bstaus\s+sa\b/gi, 'status sa'],
+  [/\bpwede\s+ko\s+mag\s+lokator\b/gi, 'pwede ko mag locator'],
+  [/\bunsaon\s+pag\s+file\s+loacator\b/gi, 'unsaon pag file locator'],
+  [/\bunsaon\s+pag\s+file\s+locator\b/gi, 'unsaon pag file locator'],
+  [/\bpila\s+accpeted\b/gi, 'pila accepted'],
+  [/\bgive\s+sampel\b/gi, 'give sample'],
+  [/\bresn\s+feild\b/gi, 'reason field'],
+  [/\breason\s+feild\b/gi, 'reason field'],
   [/\bfield\s*wrk\b/gi, 'fieldwork'],
   [/\bfield\s*work\b/gi, 'fieldwork'],
   [/\bwork\s+frm\s+home\b/gi, 'work from home'],
@@ -122,21 +143,77 @@ const TOKEN_REPLACEMENTS = {
   pasok: 'pasok',
   busines: 'business',
   bakt: 'bakit',
+  baket: 'bakit',
+  bkit: 'bakit',
   cn: 'can',
   corect: 'correct',
   curent: 'current',
   gahapn: 'gahapon',
   kahapn: 'kahapon',
   korek: 'correct',
+  knse: 'kailangan',
   lte: 'late',
   mising: 'missing',
+  missng: 'missing',
   mnth: 'month',
+  nko: 'nako',
+  pno: 'paano',
   shft: 'shift',
+  staus: 'status',
   statos: 'status',
   tipes: 'types',
   wek: 'week',
   nganong: 'ngano',
+  nganu: 'ngano',
+  unsay: 'unsa',
+  unsaoy: 'unsa',
+  butng: 'butang',
+  ibtnag: 'ibutang',
+  ibutng: 'ibutang',
+  ilagay: 'ilagay',
+  ilalagy: 'ilalagay',
+  bulna: 'bulan',
+  semanha: 'semana',
+  semanaa: 'semana',
+  komusta: 'kumusta',
+  kumustaa: 'kumusta',
+  hwat: 'what',
+  whos: 'who',
+  wat: 'what',
+  wats: 'what',
+  abssents: 'absents',
+  absnts: 'absents',
+  accpeted: 'accepted',
+  accpted: 'accepted',
+  feild: 'field',
+  resn: 'reason',
+  sampel: 'sample',
+  smaple: 'sample',
+  explan: 'explain',
+  matirnity: 'maternity',
+  lokator: 'locator',
+  loacator: 'locator',
+  balnce: 'balance',
+  leev: 'leave',
+  sik: 'sick',
   fil: 'file',
+  pasok: 'pasok',
+  busines: 'business',
+  offcial: 'official',
+  oficial: 'official',
+  offical: 'official',
+  attachmnt: 'attachment',
+  attachement: 'attachment',
+  requirment: 'requirement',
+  requirments: 'requirements',
+  guidline: 'guideline',
+  guidlines: 'guidelines',
+  tomorow: 'tomorrow',
+  yesterdy: 'yesterday',
+  vacaton: 'vacation',
+  absentt: 'absent',
+  absnt: 'absent',
+  absnts: 'absent',
 };
 
 const FUZZY_WORDS = [
@@ -203,7 +280,37 @@ const FUZZY_WORDS = [
   'undertime',
   'vacation',
   'yesterday',
+  'missing',
+  'explain',
+  'correct',
+  'month',
+  'absent',
+  'absents',
+  'pm',
+  'am',
 ];
+
+const SKIP_FUZZY = new Set([
+  'ngayon',
+  'karon',
+  'ngano',
+  'nganu',
+  'unsa',
+  'unsay',
+  'unsaon',
+  'bakit',
+  'paano',
+  'pano',
+  'ugma',
+  'gahapon',
+  'kailangan',
+  'nako',
+  'akong',
+  'butang',
+  'ibutang',
+  'maayos',
+  'ayusin',
+]);
 
 function preserveCase(original, replacement) {
   if (!original) return replacement;
@@ -240,14 +347,18 @@ function levenshtein(a, b) {
 
 function fuzzyReplacement(token) {
   const normalized = token.toLowerCase();
-  if (normalized.length < 4 || /\d/.test(normalized)) return null;
+  if (normalized.length < 4 || /\d/.test(normalized) || SKIP_FUZZY.has(normalized)) {
+    return null;
+  }
 
   let best = null;
   let bestDistance = Infinity;
   for (const word of FUZZY_WORDS) {
-    if (word[0] !== normalized[0]) continue;
     const distance = levenshtein(normalized, word);
     const threshold = normalized.length <= 5 ? 1 : 2;
+    const firstCharOk =
+      word[0] === normalized[0] || (distance === 1 && normalized.length >= 5);
+    if (!firstCharOk) continue;
     if (distance <= threshold && distance < bestDistance) {
       best = word;
       bestDistance = distance;

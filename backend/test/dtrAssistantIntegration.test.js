@@ -8,6 +8,13 @@ const {
 const {
   getDtrExport,
 } = require('../src/services/dtrAssistant/dtrAssistantExportService');
+const {
+  parseAssistantDateRange,
+} = require('../src/utils/dateRangeParser');
+
+function expectedTomorrowDate() {
+  return parseAssistantDateRange('tomorrow').startDate;
+}
 
 function assistantContext(dateRange, userId) {
   return {
@@ -308,7 +315,7 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
     (action) => action.type === 'open_leave_form'
   );
   assert.equal(leaveFormAction.payload.leaveType, 'sick');
-  assert.equal(leaveFormAction.payload.startDate, '2026-06-25');
+  assert.equal(leaveFormAction.payload.startDate, expectedTomorrowDate());
 
   const rejectedLeave = await chatWithDtrAssistant(pool, {
     user: { ...user, id: `${user.id}-rejected` },
@@ -340,7 +347,7 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
     (action) => action.type === 'open_locator_form'
   );
   assert.equal(locatorFormAction.payload.locatorType, 'work_from_home');
-  assert.equal(locatorFormAction.payload.startDate, '2026-06-25');
+  assert.equal(locatorFormAction.payload.startDate, expectedTomorrowDate());
 
   const directAction = await chatWithDtrAssistant(pool, {
     user: { ...user, id: `${user.id}-action` },

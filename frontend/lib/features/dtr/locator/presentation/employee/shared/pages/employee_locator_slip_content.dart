@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
+import 'package:hrms_plaridel/features/dtr/locator/models/locator_slip_form_initial_values.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_details_widgets.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_form_widgets.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_request_card.dart';
@@ -75,12 +76,14 @@ class EmployeeLocatorSlipContentState
   Color _mutedColor(BuildContext context) =>
       AppTheme.dashTextSecondaryOf(context);
 
-  Future<void> openCreateForm() async {
+  Future<void> openCreateForm({
+    LocatorSlipFormInitialValues? initialValues,
+  }) async {
     final auth = context.read<AuthProvider>();
     final displayName = auth.displayName.trim().isEmpty
         ? 'Employee'
         : auth.displayName.trim();
-    await _openCreateForm(context, displayName);
+    await _openCreateForm(context, displayName, initialValues: initialValues);
   }
 
   @override
@@ -1248,12 +1251,14 @@ class EmployeeLocatorSlipContentState
 
   Future<void> _openCreateForm(
     BuildContext context,
-    String employeeName,
-  ) async {
+    String employeeName, {
+    LocatorSlipFormInitialValues? initialValues,
+  }) async {
     final isMobile = MediaQuery.sizeOf(context).width < 600;
     final form = _LocatorSlipFormDialog(
       employeeName: employeeName,
       requestTypes: _locatorTypes,
+      initialValues: initialValues,
     );
     final _LocatorSlipDraft? created;
     if (isMobile) {
@@ -1670,10 +1675,12 @@ class _LocatorSlipFormDialog extends StatefulWidget {
   const _LocatorSlipFormDialog({
     required this.employeeName,
     required this.requestTypes,
+    this.initialValues,
   });
 
   final String employeeName;
   final List<LocatorRequestType> requestTypes;
+  final LocatorSlipFormInitialValues? initialValues;
 
   @override
   State<_LocatorSlipFormDialog> createState() => _LocatorSlipFormDialogState();
@@ -1755,12 +1762,64 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   @override
   void initState() {
     super.initState();
+    final initial = widget.initialValues;
     if (widget.requestTypes.isNotEmpty) {
-      _requestType = widget.requestTypes.first;
-      if (_requestType.usesWfhCoverage) {
-        _applyWfhCoverage(_wfhCoverage);
+      if (initial?.requestTypeCode != null &&
+          initial!.requestTypeCode!.trim().isNotEmpty) {
+        final code = initial.requestTypeCode!.trim().toLowerCase();
+        _requestType = widget.requestTypes.firstWhere(
+          (type) => type.code == code,
+          orElse: () => widget.requestTypes.firstWhere(
+            (type) =>
+                type.code ==
+                LocatorRequestType.fromCode(code).code,
+            orElse: () => widget.requestTypes.first,
+          ),
+        );
+      } else {
+        _requestType = widget.requestTypes.first;
       }
     }
+    if (initial?.slipDate != null) {
+      final date = initial!.slipDate!;
+      _date = DateTime(date.year, date.month, date.day);
+    }
+    if (initial?.office != null && initial!.office!.trim().isNotEmpty) {
+      _officeController.text = initial.office!.trim();
+    }
+    if (initial?.reason != null && initial!.reason!.trim().isNotEmpty) {
+      _remarksController.text = initial.reason!.trim();
+    }
+    if (_requestType.usesWfhCoverage) {
+      if (initial != null && initial.hasSlotSelection) {
+        _amIn = initial.amIn ?? false;
+        _amOut = initial.amOut ?? false;
+        _pmIn = initial.pmIn ?? false;
+        _pmOut = initial.pmOut ?? false;
+        _wfhCoverage = _coverageFromSlots(_amIn, _amOut, _pmIn, _pmOut);
+      } else {
+        _applyWfhCoverage(_wfhCoverage);
+      }
+    } else if (initial != null && initial.hasSlotSelection) {
+      _amIn = initial.amIn ?? false;
+      _amOut = initial.amOut ?? false;
+      _pmIn = initial.pmIn ?? false;
+      _pmOut = initial.pmOut ?? false;
+    }
+  }
+
+  _WfhCoverage _coverageFromSlots(
+    bool amIn,
+    bool amOut,
+    bool pmIn,
+    bool pmOut,
+  ) {
+    final amSelected = amIn && amOut;
+    final pmSelected = pmIn && pmOut;
+    if (amSelected && pmSelected) return _WfhCoverage.wholeDay;
+    if (amSelected) return _WfhCoverage.amOnly;
+    if (pmSelected) return _WfhCoverage.pmOnly;
+    return _WfhCoverage.wholeDay;
   }
 
   @override

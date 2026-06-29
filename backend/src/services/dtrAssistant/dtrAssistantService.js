@@ -11,7 +11,28 @@ const {
 const {
   getAssistantMemory,
   setAssistantMemory,
+  clearAssistantMemory,
 } = require('./dtrAssistantMemoryService');
+const {
+  buildLeaveActionPayload,
+  buildLocatorActionPayload,
+  mergePrefill,
+  nextTopicPrefill,
+} = require('./dtrAssistantActionPrefill');
+const {
+  extractMessageEntities,
+  extractDayCount,
+  mergePlannerExtraction,
+  normalizePlannerExtraction,
+} = require('./dtrAssistantMessageExtraction');
+const {
+  combineMultiIntentReplies,
+  detectMultipleIntents,
+} = require('./dtrAssistantMultiIntent');
+const {
+  applyPendingClarificationAnswer,
+  evaluateGuidedClarification,
+} = require('./dtrAssistantGuidedClarification');
 const {
   normalizeIntent,
   scoreEmployeeAssistantIntent,
@@ -19,6 +40,7 @@ const {
 const { getEmployeeSelfScope } = require('./dtrAssistantPermissionService');
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
 const { getLeaveFormFieldKey } = require('./leaveFilingGuidelines');
+const { getLocatorFormFieldKey, isLocatorFormFieldHelpQuestion } = require('./locatorFilingGuidelines');
 const {
   buildDtrAssistantDirectMessages,
   buildDtrAssistantIntentMessages,
@@ -190,6 +212,8 @@ function isLocatorIntent(intent) {
     value === 'locator_summary' ||
     value === 'locator_types' ||
     value === 'locator_requirements' ||
+    value === 'locator_form_field_help' ||
+    value === 'locator_guided_filing' ||
     value === 'locator_availability_check' ||
     value === 'locator_rejection_reason' ||
     value === 'locator_approval_tracker'
@@ -282,6 +306,25 @@ function memoryLocatorTypeForIntent(intent, effectiveText, memory) {
   );
 }
 
+function memoryWithClarificationPatch(memory, patch) {
+  if (!patch) return memory;
+  const base = memory || {};
+  return {
+    ...base,
+    leaveType: patch.leaveType || base.leaveType || null,
+    locatorType: patch.locatorType || base.locatorType || null,
+    dateRange: patch.dateRange || base.dateRange || null,
+    pendingClarification: patch.pendingClarification ?? base.pendingClarification ?? null,
+    dayCount: patch.dayCount ?? base.dayCount ?? null,
+    leavePrefill: patch.leavePrefill
+      ? mergePrefill(base.leavePrefill || {}, patch.leavePrefill)
+      : base.leavePrefill || null,
+    locatorPrefill: patch.locatorPrefill
+      ? mergePrefill(base.locatorPrefill || {}, patch.locatorPrefill)
+      : base.locatorPrefill || null,
+  };
+}
+
 function buildNextAssistantMemory(previous, next) {
   const topic = topicForIntent(next.intent);
   const previousTopicState = strictMemoryTopicState(previous, topic) || {};
@@ -312,6 +355,10 @@ function buildNextAssistantMemory(previous, next) {
   };
 
   if (topic) {
+    const leavePrefill =
+      topic === 'leave' ? nextTopicPrefill('leave', next.text, previous, previousTopicState) : null;
+    const locatorPrefill =
+      topic === 'locator' ? nextTopicPrefill('locator', next.text, previous, previousTopicState) : null;
     topics[topic] = {
       intent: next.intent || previousTopicState.intent || null,
       topic,
@@ -319,6 +366,14 @@ function buildNextAssistantMemory(previous, next) {
       dateRange: next.dateRange || previousTopicState.dateRange || null,
       leaveType: topic === 'leave' ? leaveType : previousTopicState.leaveType || null,
       locatorType: topic === 'locator' ? locatorType : previousTopicState.locatorType || null,
+      leavePrefill:
+        topic === 'leave'
+          ? leavePrefill || previousTopicState.leavePrefill || null
+          : previousTopicState.leavePrefill || null,
+      locatorPrefill:
+        topic === 'locator'
+          ? locatorPrefill || previousTopicState.locatorPrefill || null
+          : previousTopicState.locatorPrefill || null,
       toolData: next.toolData || previousTopicState.toolData || null,
       updatedAt: turn.createdAt,
     };
@@ -329,9 +384,21 @@ function buildNextAssistantMemory(previous, next) {
     topic,
     leaveType,
     locatorType,
+    leavePrefill:
+      topic === 'leave'
+        ? topics.leave?.leavePrefill || previous?.leavePrefill || null
+        : previous?.leavePrefill || null,
+    locatorPrefill:
+      topic === 'locator'
+        ? topics.locator?.locatorPrefill || previous?.locatorPrefill || null
+        : previous?.locatorPrefill || null,
     dateRange: next.dateRange || previous?.dateRange || null,
     toolData: next.toolData || null,
     modelProfile: next.modelProfile || previous?.modelProfile || null,
+    pendingClarification:
+      next.pendingClarification !== undefined
+        ? next.pendingClarification
+        : previous?.pendingClarification || null,
     lastUserMessage: turn.text,
     history,
     topics,
@@ -405,10 +472,36 @@ function buildSuggestions(intent) {
       },
     ];
   }
+  if (intent === 'locator_form_field_help') {
+    return [
+      {
+        text: 'What should I put in the locator reason field?',
+        intent: 'locator_form_field_help',
+      },
+      {
+        text: 'Give me an example for the destination field',
+        intent: 'locator_form_field_help',
+      },
+      {
+        text: 'Which DTR slots should I select?',
+        intent: 'locator_form_field_help',
+      },
+    ];
+  }
+  if (intent === 'locator_guided_filing') {
+    return [
+      { text: 'What locator types can I file?', intent: 'locator_types' },
+      {
+        text: 'What should I put in the reason field?',
+        intent: 'locator_form_field_help',
+      },
+      { text: 'Can I file locator tomorrow?', intent: 'locator_availability_check' },
+    ];
+  }
   if (intent === 'clarify_filing_topic') {
     return [
       { text: 'File a leave request', intent: 'leave_guided_filing' },
-      { text: 'File a locator / WFH', intent: 'locator_types' },
+      { text: 'File a locator / WFH', intent: 'locator_guided_filing' },
       { text: 'Check leave balance first', intent: 'leave_balance' },
     ];
   }
@@ -462,6 +555,8 @@ function buildSuggestions(intent) {
     intent === 'locator_summary' ||
     intent === 'locator_types' ||
     intent === 'locator_requirements' ||
+    intent === 'locator_form_field_help' ||
+    intent === 'locator_guided_filing' ||
     intent === 'locator_availability_check' ||
     intent === 'locator_rejection_reason' ||
     intent === 'locator_approval_tracker' ||
@@ -470,7 +565,17 @@ function buildSuggestions(intent) {
     return [
       { text: 'What is my locator status?', intent: 'locator_status' },
       { text: 'What locator types can I file?', intent: 'locator_types' },
+      { text: 'What should I put in the reason field?', intent: 'locator_form_field_help' },
+    ];
+  }
+  if (
+    intent === 'locator_form_field_help' ||
+    intent === 'locator_guided_filing'
+  ) {
+    return [
       { text: 'Can I file locator tomorrow?', intent: 'locator_availability_check' },
+      { text: 'What locator types can I file?', intent: 'locator_types' },
+      { text: 'Open locator form', intent: 'locator_guided_filing' },
     ];
   }
   if (intent === 'leave_availability_check') {
@@ -643,7 +748,7 @@ function uniqueActions(actions) {
   }).slice(0, 4);
 }
 
-function buildActions(intent, context, text, attachments = []) {
+function buildActions(intent, context, text, attachments = [], memory = null) {
   const value = String(intent || '');
   const actions = [];
   const rangePayload = dateRangePayload(context);
@@ -665,10 +770,12 @@ function buildActions(intent, context, text, attachments = []) {
   }
 
   if (isLeaveIntent(value)) {
-    const payload = {
-      ...rangePayload,
+    const payload = buildLeaveActionPayload({
+      text,
+      memory,
       leaveType,
-    };
+      rangePayload,
+    });
     if (
       value === 'leave_availability_check' ||
       value === 'leave_guided_filing' ||
@@ -692,13 +799,17 @@ function buildActions(intent, context, text, attachments = []) {
   }
 
   if (isLocatorIntent(value) || value === 'dtr_locator_coverage_check') {
-    const payload = {
-      ...rangePayload,
+    const payload = buildLocatorActionPayload({
+      text,
+      memory,
       locatorType,
-    };
+      rangePayload,
+    });
     if (
       value === 'locator_types' ||
       value === 'locator_requirements' ||
+      value === 'locator_form_field_help' ||
+      value === 'locator_guided_filing' ||
       value === 'locator_availability_check'
     ) {
       actions.push(
@@ -920,6 +1031,7 @@ function buildAssistantResult({
   attachments,
   text,
   actions,
+  memory,
 }) {
   const safeAttachments = attachments || [];
   const safeIntentConfidence = numericConfidence(intentConfidence);
@@ -938,7 +1050,7 @@ function buildAssistantResult({
       promptPreview: text || null,
       suggestions: buildSuggestions(intent),
       attachments: safeAttachments,
-      actions: actions || buildActions(intent, context, text || '', safeAttachments),
+      actions: actions || buildActions(intent, context, text || '', safeAttachments, memory),
     },
     provider,
     model,
@@ -960,7 +1072,7 @@ function parseIntentClassifierResponse(content) {
     return normalizeIntent(parsed.intent);
   } catch (_) {
     const match = text.match(
-      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|dtr_policy_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_form_field_help|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|locator_status|locator_summary|locator_types|locator_requirements|locator_availability_check|locator_rejection_reason|locator_approval_tracker|unknown)\b/i
+      /\b(today_dtr|missing_logs|dtr_daily_record|dtr_range_summary|dtr_missing_logs|dtr_missing_log_reason|dtr_late_summary|dtr_late_reason|dtr_undertime_summary|dtr_overtime_summary|dtr_absent_summary|dtr_status_explanation|dtr_correction_guidance|dtr_leave_coverage_check|dtr_locator_coverage_check|dtr_holiday_check|dtr_schedule_context|dtr_export_guidance|dtr_policy_guidance|leave_balance|pending_leave_requests|approved_leave_requests|rejected_leave_requests|leave_history|leave_availability_check|leave_attachment_requirement|leave_overlap_check|leave_pending_days_explanation|leave_balance_after_filing|leave_request_summary|leave_filing_policy|leave_form_guidance|leave_form_field_help|leave_eligibility_check|leave_dtr_impact|leave_guideline_section|leave_type_compare|leave_guided_filing|leave_approval_history|leave_rejection_reason|leave_approval_tracker|leave_request_lookup|leave_types|leave_requirements|latest_leave_request|latest_locator_request|locator_status|locator_summary|locator_types|locator_requirements|locator_form_field_help|locator_guided_filing|locator_availability_check|locator_rejection_reason|locator_approval_tracker|unknown)\b/i
     );
     return normalizeIntent(match?.[1]);
   }
@@ -1009,6 +1121,7 @@ function parseToolPlanResponse(content) {
       typeof parsed.normalizedQuestion === 'string'
         ? parsed.normalizedQuestion.slice(0, 500).trim()
         : '',
+    extraction: normalizePlannerExtraction(parsed.extraction),
   };
 }
 
@@ -1232,7 +1345,8 @@ function isShortDurationAnswer(text) {
   const value = lower(text).trim();
   return (
     value.split(/\s+/).filter(Boolean).length <= 5 &&
-    /\b\d+(?:\.\d+)?\s*(?:day|days|adlaw|ka adlaw)?\b/.test(value)
+    (/\b\d+(?:\.\d+)?\s*(?:day|days|adlaw|ka adlaw|araw)?\b/.test(value) ||
+      extractDayCount(value) != null)
   );
 }
 
@@ -1331,6 +1445,12 @@ function rangeCorrectionIntentForDtr(activeIntent, text, memory) {
 function resolveIntentFromMemory(text, memory) {
   if (!memory) return null;
   const value = lower(text);
+  if (memory.pendingClarification?.intent) {
+    const wordCount = value.split(/\s+/).filter(Boolean).length;
+    if (wordCount <= 12 && !explicitTopicFromText(text)) {
+      return memory.pendingClarification.intent;
+    }
+  }
   const memoryTopic = memory.topic || topicForIntent(memory.intent);
   const explicitTopic = explicitTopicFromText(text);
   if (isLanguageRestyleRequest(value)) {
@@ -1421,6 +1541,8 @@ function resolveIntentFromMemory(text, memory) {
     [
       'locator_types',
       'locator_requirements',
+      'locator_form_field_help',
+      'locator_guided_filing',
       'locator_availability_check',
       'locator_status',
       'locator_summary',
@@ -1440,10 +1562,20 @@ function resolveIntentFromMemory(text, memory) {
     /\b(types?|kinds?|options?|how about|what about|wfh|work from home|pass slip|official business|ob|on field|fieldwork|field work)\b/.test(value);
   if (!locatorTypeFollowUp && explicitTopic && explicitTopic !== memoryTopic) return null;
   if (isLocatorIntent(activeIntent)) {
+    if (
+      activeIntent === 'locator_form_field_help' &&
+      (getLocatorFormFieldKey(value) ||
+        /\b(another|more|example|sample|input|same field|this field|that field|bisayaa?|binisayaa?|cebuano|tagalog|filipino|english)\b/.test(
+          value
+        ))
+    ) {
+      return 'locator_form_field_help';
+    }
     if (/\b(can file|can i file|pwede|puwede|allowed|eligible|qualified|available|tomorrow|ugma|karon|today|date|day|file)\b/.test(value)) {
       return 'locator_availability_check';
     }
     if (/\b(requirement|requirements|attachment|document|docs|need|needed|kinahanglan|kailangan|rule|rules|policy|how to file|unsaon|paano)\b/.test(value)) {
+      if (isLocatorFormFieldHelpQuestion(value)) return 'locator_form_field_help';
       return 'locator_requirements';
     }
     if (
@@ -1729,6 +1861,8 @@ function resolveIntentFromMemory(text, memory) {
       'locator_summary',
       'locator_types',
       'locator_requirements',
+      'locator_form_field_help',
+      'locator_guided_filing',
       'locator_availability_check',
       'locator_rejection_reason',
       'locator_approval_tracker',
@@ -2040,6 +2174,8 @@ function buildToolData(intent, context) {
     intent === 'locator_summary' ||
     intent === 'locator_types' ||
     intent === 'locator_requirements' ||
+    intent === 'locator_form_field_help' ||
+    intent === 'locator_guided_filing' ||
     intent === 'locator_availability_check' ||
     intent === 'locator_rejection_reason' ||
     intent === 'locator_approval_tracker'
@@ -2141,6 +2277,7 @@ async function planToolWithLocalAi(text, profile) {
       intent: plan?.intent || null,
       dateRange: plan?.dateRange || null,
       normalizedQuestion: plan?.normalizedQuestion || '',
+      extraction: plan?.extraction || null,
       provider: result.provider,
       model: result.model,
     };
@@ -2183,6 +2320,10 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   const scope = getEmployeeSelfScope(user);
   const memory = getAssistantMemory(scope.userId);
   const normalizedTextForRules = normalizeAssistantMessageForRules(text);
+  const clarificationPatch = memory?.pendingClarification
+    ? applyPendingClarificationAnswer(normalizedTextForRules, memory)
+    : null;
+  const workingMemory = memoryWithClarificationPatch(memory, clarificationPatch);
   const greetingReply = assistantGreetingReply(normalizedTextForRules);
   if (greetingReply) {
     return buildAssistantResult({
@@ -2199,19 +2340,22 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'greeting_rules',
       attachments: [],
       text: normalizedTextForRules,
+      memory,
     });
   }
-  const memoryIntent = resolveIntentFromMemory(normalizedTextForRules, memory);
+  const memoryIntent = resolveIntentFromMemory(normalizedTextForRules, workingMemory);
   const effectiveText = enrichMessageWithMemory(
     normalizedTextForRules,
-    memory,
+    workingMemory,
     memoryIntent
   );
-  const clarificationIntent = clarificationIntentForMessage(
-    normalizedTextForRules,
-    intent,
-    memoryIntent
-  );
+  const clarificationIntent = workingMemory?.pendingClarification
+    ? null
+    : clarificationIntentForMessage(
+        normalizedTextForRules,
+        intent,
+        memoryIntent
+      );
   if (clarificationIntent) {
     const clarificationContext = emptyAssistantContext(
       parseAssistantDateRange(normalizedTextForRules)
@@ -2238,6 +2382,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'clarification_rules',
       attachments: [],
       text: normalizedTextForRules,
+      memory: getAssistantMemory(scope.userId),
     });
   }
 
@@ -2269,6 +2414,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       attachments: [],
       text: normalizedTextForRules,
       actions: directOpenCommand.actions,
+      memory: getAssistantMemory(scope.userId),
     });
   }
 
@@ -2303,6 +2449,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   let provider = 'hrms';
   let plannedDateRange = parseAssistantDateRange(effectiveText);
   let plannedText = effectiveText;
+  let plannerExtraction = null;
 
   if (shouldAskAiForToolPlan({
     resolvedIntent,
@@ -2331,6 +2478,9 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     if (planned.normalizedQuestion) {
       plannedText = `${effectiveText} (${planned.normalizedQuestion})`;
     }
+    if (planned.extraction) {
+      plannerExtraction = planned.extraction;
+    }
   }
 
   const context = await loadEmployeeAssistantContext(pool, {
@@ -2338,6 +2488,22 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     message: plannedText,
     dateRange: plannedDateRange,
   });
+
+  const mergedExtraction = mergePlannerExtraction(
+    extractMessageEntities(plannedText, workingMemory),
+    plannerExtraction
+  );
+  const extractionMemory = memoryWithClarificationPatch(workingMemory, {
+    leaveType: mergedExtraction.leaveType,
+    locatorType: mergedExtraction.locatorType,
+    dateRange: mergedExtraction.dateRange,
+    leavePrefill: mergedExtraction.leavePrefill,
+    locatorPrefill: mergedExtraction.locatorPrefill,
+    pendingClarification: workingMemory?.pendingClarification ?? null,
+  });
+  if (mergedExtraction.dateRange?.startDate) {
+    context.date_range = mergedExtraction.dateRange;
+  }
 
   if (!resolvedIntent) {
     const classified = await classifyIntentWithLocalAi(plannedText, profile);
@@ -2381,7 +2547,103 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'direct_ai',
       attachments: [],
       text: plannedText,
+      memory: getAssistantMemory(scope.userId),
     });
+  }
+
+  const guided = evaluateGuidedClarification({
+    intent: resolvedIntent,
+    text: plannedText,
+    context,
+    memory: extractionMemory,
+  });
+  if (guided?.content) {
+    setAssistantMemory(
+      scope.userId,
+      buildNextAssistantMemory(extractionMemory, {
+        intent: resolvedIntent,
+        text: plannedText,
+        dateRange: context.date_range,
+        leaveType:
+          guided.pendingClarification?.leaveType ||
+          mergedExtraction.leaveType ||
+          extractionMemory.leaveType,
+        locatorType:
+          guided.pendingClarification?.locatorType ||
+          mergedExtraction.locatorType ||
+          extractionMemory.locatorType,
+        pendingClarification: guided.pendingClarification,
+        modelProfile: profile.id,
+      })
+    );
+
+    return buildAssistantResult({
+      content: guided.content,
+      provider: 'hrms',
+      model: 'hrms-guided-clarification',
+      modelProfile: profile.id,
+      mode: scope.mode,
+      context,
+      intent: resolvedIntent,
+      intentConfidence: Math.max(intentConfidence, 0.85),
+      intentSource: 'guided_clarification',
+      attachments: [],
+      text: plannedText,
+      memory: getAssistantMemory(scope.userId),
+    });
+  }
+
+  const multi = detectMultipleIntents(effectiveText, { explicitIntent: intent });
+  if (multi.isMulti && multi.intents.length >= 2 && !workingMemory?.pendingClarification) {
+    const multiReplies = [];
+    for (const item of multi.intents) {
+      const segmentText = item.segment || plannedText;
+      const reply = buildFastEmployeeAssistantReply(segmentText, context, item.intent);
+      if (reply) {
+        multiReplies.push({ intent: item.intent, content: reply });
+      }
+    }
+    if (multiReplies.length >= 2) {
+      const combined = combineMultiIntentReplies(multiReplies, effectiveText);
+      const primaryIntent = multiReplies[0].intent;
+      setAssistantMemory(
+        scope.userId,
+        buildNextAssistantMemory(extractionMemory, {
+          intent: primaryIntent,
+          text: plannedText,
+          leaveType: memoryLeaveTypeForIntent(
+            primaryIntent,
+            plannedText,
+            context,
+            extractionMemory
+          ),
+          locatorType: memoryLocatorTypeForIntent(
+            primaryIntent,
+            plannedText,
+            extractionMemory
+          ),
+          dateRange: context.date_range,
+          toolData: { reason: 'multi_intent' },
+          modelProfile: profile.id,
+          pendingClarification: null,
+        })
+      );
+
+      return buildAssistantResult({
+        content: compactAssistantContent(combined),
+        provider: 'hrms',
+        model: 'hrms-multi-intent',
+        modelProfile: profile.id,
+        mode: scope.mode,
+        context,
+        intent: primaryIntent,
+        intentConfidence: Math.max(intentConfidence, 0.8),
+        intentSource: 'multi_intent',
+        attachments: [],
+        text: plannedText,
+        memory: getAssistantMemory(scope.userId),
+      });
+    }
   }
 
   const fastReply = buildFastEmployeeAssistantReply(
@@ -2402,14 +2664,24 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
           profile,
         });
 
-    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
+    setAssistantMemory(scope.userId, buildNextAssistantMemory(extractionMemory, {
       intent: resolvedIntent,
       text: plannedText,
-      leaveType: memoryLeaveTypeForIntent(resolvedIntent, plannedText, context, memory),
-      locatorType: memoryLocatorTypeForIntent(resolvedIntent, plannedText, memory),
+      leaveType: memoryLeaveTypeForIntent(
+        resolvedIntent,
+        plannedText,
+        context,
+        extractionMemory
+      ),
+      locatorType: memoryLocatorTypeForIntent(
+        resolvedIntent,
+        plannedText,
+        extractionMemory
+      ),
       dateRange: context.date_range,
       toolData,
       modelProfile: profile.id,
+      pendingClarification: null,
     }));
 
     return buildAssistantResult({
@@ -2424,6 +2696,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource,
       attachments,
       text: plannedText,
+      memory: getAssistantMemory(scope.userId),
     });
   }
 
@@ -2440,11 +2713,22 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     intentSource,
     attachments: fallbackAttachments,
     text: plannedText,
+    memory,
   });
+}
+
+function resetDtrAssistantChat(user) {
+  const scope = getEmployeeSelfScope(user);
+  clearAssistantMemory(scope.userId);
+  return {
+    ok: true,
+    mode: scope.mode,
+  };
 }
 
 module.exports = {
   chatWithDtrAssistant,
+  resetDtrAssistantChat,
   getDtrAssistantModelProfiles,
   __test: {
     buildActions,
