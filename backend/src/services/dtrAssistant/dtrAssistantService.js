@@ -16,8 +16,23 @@ const {
 const {
   buildLeaveActionPayload,
   buildLocatorActionPayload,
+  mergePrefill,
   nextTopicPrefill,
 } = require('./dtrAssistantActionPrefill');
+const {
+  extractMessageEntities,
+  extractDayCount,
+  mergePlannerExtraction,
+  normalizePlannerExtraction,
+} = require('./dtrAssistantMessageExtraction');
+const {
+  combineMultiIntentReplies,
+  detectMultipleIntents,
+} = require('./dtrAssistantMultiIntent');
+const {
+  applyPendingClarificationAnswer,
+  evaluateGuidedClarification,
+} = require('./dtrAssistantGuidedClarification');
 const {
   normalizeIntent,
   scoreEmployeeAssistantIntent,
@@ -291,6 +306,25 @@ function memoryLocatorTypeForIntent(intent, effectiveText, memory) {
   );
 }
 
+function memoryWithClarificationPatch(memory, patch) {
+  if (!patch) return memory;
+  const base = memory || {};
+  return {
+    ...base,
+    leaveType: patch.leaveType || base.leaveType || null,
+    locatorType: patch.locatorType || base.locatorType || null,
+    dateRange: patch.dateRange || base.dateRange || null,
+    pendingClarification: patch.pendingClarification ?? base.pendingClarification ?? null,
+    dayCount: patch.dayCount ?? base.dayCount ?? null,
+    leavePrefill: patch.leavePrefill
+      ? mergePrefill(base.leavePrefill || {}, patch.leavePrefill)
+      : base.leavePrefill || null,
+    locatorPrefill: patch.locatorPrefill
+      ? mergePrefill(base.locatorPrefill || {}, patch.locatorPrefill)
+      : base.locatorPrefill || null,
+  };
+}
+
 function buildNextAssistantMemory(previous, next) {
   const topic = topicForIntent(next.intent);
   const previousTopicState = strictMemoryTopicState(previous, topic) || {};
@@ -361,6 +395,10 @@ function buildNextAssistantMemory(previous, next) {
     dateRange: next.dateRange || previous?.dateRange || null,
     toolData: next.toolData || null,
     modelProfile: next.modelProfile || previous?.modelProfile || null,
+    pendingClarification:
+      next.pendingClarification !== undefined
+        ? next.pendingClarification
+        : previous?.pendingClarification || null,
     lastUserMessage: turn.text,
     history,
     topics,
@@ -1083,6 +1121,7 @@ function parseToolPlanResponse(content) {
       typeof parsed.normalizedQuestion === 'string'
         ? parsed.normalizedQuestion.slice(0, 500).trim()
         : '',
+    extraction: normalizePlannerExtraction(parsed.extraction),
   };
 }
 
@@ -1306,7 +1345,8 @@ function isShortDurationAnswer(text) {
   const value = lower(text).trim();
   return (
     value.split(/\s+/).filter(Boolean).length <= 5 &&
-    /\b\d+(?:\.\d+)?\s*(?:day|days|adlaw|ka adlaw)?\b/.test(value)
+    (/\b\d+(?:\.\d+)?\s*(?:day|days|adlaw|ka adlaw|araw)?\b/.test(value) ||
+      extractDayCount(value) != null)
   );
 }
 
@@ -1405,6 +1445,12 @@ function rangeCorrectionIntentForDtr(activeIntent, text, memory) {
 function resolveIntentFromMemory(text, memory) {
   if (!memory) return null;
   const value = lower(text);
+  if (memory.pendingClarification?.intent) {
+    const wordCount = value.split(/\s+/).filter(Boolean).length;
+    if (wordCount <= 12 && !explicitTopicFromText(text)) {
+      return memory.pendingClarification.intent;
+    }
+  }
   const memoryTopic = memory.topic || topicForIntent(memory.intent);
   const explicitTopic = explicitTopicFromText(text);
   if (isLanguageRestyleRequest(value)) {
@@ -2231,6 +2277,7 @@ async function planToolWithLocalAi(text, profile) {
       intent: plan?.intent || null,
       dateRange: plan?.dateRange || null,
       normalizedQuestion: plan?.normalizedQuestion || '',
+      extraction: plan?.extraction || null,
       provider: result.provider,
       model: result.model,
     };
@@ -2273,6 +2320,10 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   const scope = getEmployeeSelfScope(user);
   const memory = getAssistantMemory(scope.userId);
   const normalizedTextForRules = normalizeAssistantMessageForRules(text);
+  const clarificationPatch = memory?.pendingClarification
+    ? applyPendingClarificationAnswer(normalizedTextForRules, memory)
+    : null;
+  const workingMemory = memoryWithClarificationPatch(memory, clarificationPatch);
   const greetingReply = assistantGreetingReply(normalizedTextForRules);
   if (greetingReply) {
     return buildAssistantResult({
@@ -2292,17 +2343,19 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       memory,
     });
   }
-  const memoryIntent = resolveIntentFromMemory(normalizedTextForRules, memory);
+  const memoryIntent = resolveIntentFromMemory(normalizedTextForRules, workingMemory);
   const effectiveText = enrichMessageWithMemory(
     normalizedTextForRules,
-    memory,
+    workingMemory,
     memoryIntent
   );
-  const clarificationIntent = clarificationIntentForMessage(
-    normalizedTextForRules,
-    intent,
-    memoryIntent
-  );
+  const clarificationIntent = workingMemory?.pendingClarification
+    ? null
+    : clarificationIntentForMessage(
+        normalizedTextForRules,
+        intent,
+        memoryIntent
+      );
   if (clarificationIntent) {
     const clarificationContext = emptyAssistantContext(
       parseAssistantDateRange(normalizedTextForRules)
@@ -2396,6 +2449,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   let provider = 'hrms';
   let plannedDateRange = parseAssistantDateRange(effectiveText);
   let plannedText = effectiveText;
+  let plannerExtraction = null;
 
   if (shouldAskAiForToolPlan({
     resolvedIntent,
@@ -2424,6 +2478,9 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     if (planned.normalizedQuestion) {
       plannedText = `${effectiveText} (${planned.normalizedQuestion})`;
     }
+    if (planned.extraction) {
+      plannerExtraction = planned.extraction;
+    }
   }
 
   const context = await loadEmployeeAssistantContext(pool, {
@@ -2431,6 +2488,22 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     message: plannedText,
     dateRange: plannedDateRange,
   });
+
+  const mergedExtraction = mergePlannerExtraction(
+    extractMessageEntities(plannedText, workingMemory),
+    plannerExtraction
+  );
+  const extractionMemory = memoryWithClarificationPatch(workingMemory, {
+    leaveType: mergedExtraction.leaveType,
+    locatorType: mergedExtraction.locatorType,
+    dateRange: mergedExtraction.dateRange,
+    leavePrefill: mergedExtraction.leavePrefill,
+    locatorPrefill: mergedExtraction.locatorPrefill,
+    pendingClarification: workingMemory?.pendingClarification ?? null,
+  });
+  if (mergedExtraction.dateRange?.startDate) {
+    context.date_range = mergedExtraction.dateRange;
+  }
 
   if (!resolvedIntent) {
     const classified = await classifyIntentWithLocalAi(plannedText, profile);
@@ -2478,6 +2551,101 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     });
   }
 
+  const guided = evaluateGuidedClarification({
+    intent: resolvedIntent,
+    text: plannedText,
+    context,
+    memory: extractionMemory,
+  });
+  if (guided?.content) {
+    setAssistantMemory(
+      scope.userId,
+      buildNextAssistantMemory(extractionMemory, {
+        intent: resolvedIntent,
+        text: plannedText,
+        dateRange: context.date_range,
+        leaveType:
+          guided.pendingClarification?.leaveType ||
+          mergedExtraction.leaveType ||
+          extractionMemory.leaveType,
+        locatorType:
+          guided.pendingClarification?.locatorType ||
+          mergedExtraction.locatorType ||
+          extractionMemory.locatorType,
+        pendingClarification: guided.pendingClarification,
+        modelProfile: profile.id,
+      })
+    );
+
+    return buildAssistantResult({
+      content: guided.content,
+      provider: 'hrms',
+      model: 'hrms-guided-clarification',
+      modelProfile: profile.id,
+      mode: scope.mode,
+      context,
+      intent: resolvedIntent,
+      intentConfidence: Math.max(intentConfidence, 0.85),
+      intentSource: 'guided_clarification',
+      attachments: [],
+      text: plannedText,
+      memory: getAssistantMemory(scope.userId),
+    });
+  }
+
+  const multi = detectMultipleIntents(effectiveText, { explicitIntent: intent });
+  if (multi.isMulti && multi.intents.length >= 2 && !workingMemory?.pendingClarification) {
+    const multiReplies = [];
+    for (const item of multi.intents) {
+      const segmentText = item.segment || plannedText;
+      const reply = buildFastEmployeeAssistantReply(segmentText, context, item.intent);
+      if (reply) {
+        multiReplies.push({ intent: item.intent, content: reply });
+      }
+    }
+    if (multiReplies.length >= 2) {
+      const combined = combineMultiIntentReplies(multiReplies, effectiveText);
+      const primaryIntent = multiReplies[0].intent;
+      setAssistantMemory(
+        scope.userId,
+        buildNextAssistantMemory(extractionMemory, {
+          intent: primaryIntent,
+          text: plannedText,
+          leaveType: memoryLeaveTypeForIntent(
+            primaryIntent,
+            plannedText,
+            context,
+            extractionMemory
+          ),
+          locatorType: memoryLocatorTypeForIntent(
+            primaryIntent,
+            plannedText,
+            extractionMemory
+          ),
+          dateRange: context.date_range,
+          toolData: { reason: 'multi_intent' },
+          modelProfile: profile.id,
+          pendingClarification: null,
+        })
+      );
+
+      return buildAssistantResult({
+        content: compactAssistantContent(combined),
+        provider: 'hrms',
+        model: 'hrms-multi-intent',
+        modelProfile: profile.id,
+        mode: scope.mode,
+        context,
+        intent: primaryIntent,
+        intentConfidence: Math.max(intentConfidence, 0.8),
+        intentSource: 'multi_intent',
+        attachments: [],
+        text: plannedText,
+        memory: getAssistantMemory(scope.userId),
+      });
+    }
+  }
+
   const fastReply = buildFastEmployeeAssistantReply(
     plannedText,
     context,
@@ -2496,14 +2664,24 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
           profile,
         });
 
-    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
+    setAssistantMemory(scope.userId, buildNextAssistantMemory(extractionMemory, {
       intent: resolvedIntent,
       text: plannedText,
-      leaveType: memoryLeaveTypeForIntent(resolvedIntent, plannedText, context, memory),
-      locatorType: memoryLocatorTypeForIntent(resolvedIntent, plannedText, memory),
+      leaveType: memoryLeaveTypeForIntent(
+        resolvedIntent,
+        plannedText,
+        context,
+        extractionMemory
+      ),
+      locatorType: memoryLocatorTypeForIntent(
+        resolvedIntent,
+        plannedText,
+        extractionMemory
+      ),
       dateRange: context.date_range,
       toolData,
       modelProfile: profile.id,
+      pendingClarification: null,
     }));
 
     return buildAssistantResult({
