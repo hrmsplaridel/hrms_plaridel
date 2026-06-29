@@ -26,6 +26,11 @@ const {
 const {
   buildAllLeaveGuidelines,
 } = require('../src/services/dtrAssistant/leaveFilingGuidelines');
+const {
+  applyPendingClarificationAnswer,
+  evaluateGuidedClarification,
+} = require('../src/services/dtrAssistant/dtrAssistantGuidedClarification');
+const { extractDayCount } = require('../src/services/dtrAssistant/dtrAssistantMessageExtraction');
 
 test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected intents', () => {
   const cases = [
@@ -2646,6 +2651,73 @@ test('DTR assistant regression: leave type answers continue the pending filing c
   assert.doesNotMatch(tagalogReply, /Dili pa limpyo/i);
 });
 
+test('DTR assistant regression: switching from sick to vacation leave does not reuse the sick reply', () => {
+  const context = {
+    date_range: { label: 'tomorrow', startDate: '2026-06-29', endDate: '2026-06-29' },
+    leave_types: [
+      {
+        name: 'sickLeave',
+        display_name: 'Sick Leave',
+        employee_can_file: true,
+        requires_attachment: false,
+      },
+      {
+        name: 'vacationLeave',
+        display_name: 'Vacation Leave',
+        employee_can_file: true,
+        requires_attachment: false,
+      },
+    ],
+    leave_balances: [
+      { leave_type: 'sickLeave', available_days: 0.75, remaining_days: 0.75, pending_days: 0 },
+      { leave_type: 'vacationLeave', available_days: 10, remaining_days: 10, pending_days: 0 },
+    ],
+    recent_leave_requests: [],
+  };
+
+  // First the employee files sick leave for 1 day tomorrow.
+  const sickMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_availability_check',
+    text: 'I want to file 1 day sick leave tomorrow',
+    leaveType: 'sick',
+    dateRange: context.date_range,
+    modelProfile: 'tools_ollama',
+  });
+  const sickReply = buildFastEmployeeAssistantReply(
+    'I want to file 1 day sick leave tomorrow',
+    context,
+    'leave_availability_check'
+  );
+  assert.match(sickReply, /sick leave/i);
+  assert.match(sickReply, /0\.75/);
+
+  // Then the employee changes their mind to vacation leave.
+  const vacationIntent = assistantServiceTest.resolveIntentFromMemory(
+    'vacation leave nalang',
+    sickMemory
+  );
+  assert.equal(vacationIntent, 'leave_availability_check');
+  const vacationMessage = assistantServiceTest.enrichMessageWithMemory(
+    'vacation leave nalang',
+    sickMemory,
+    vacationIntent
+  );
+  const vacationReply = buildFastEmployeeAssistantReply(
+    vacationMessage,
+    context,
+    vacationIntent
+  );
+  assert.match(vacationReply, /vacation leave/i);
+  assert.doesNotMatch(vacationReply, /sick leave/i);
+
+  // Entity extraction should also reflect the new leave type, not the stale one.
+  const extracted = require('../src/services/dtrAssistant/dtrAssistantMessageExtraction').extractMessageEntities(
+    'vacation leave nalang',
+    sickMemory
+  );
+  assert.equal(extracted.leaveType, 'vacation');
+});
+
 test('DTR assistant regression: compact follow-ups preserve intent across longer conversations', () => {
   const conversations = [
     {
@@ -2953,4 +3025,66 @@ test('DTR assistant regression: compact follow-ups produce useful answers with r
   assert.match(locatorReply, /Work From Home/i);
   assert.match(locatorReply, /no attachment required/i);
   assert.doesNotMatch(locatorReply, /locator request is approved/i);
+});
+
+test('DTR assistant regression: guided filing accepts Bisaya day-count follow-ups', () => {
+  assert.equal(extractDayCount('isa'), 1);
+  assert.equal(extractDayCount('isa ka adlaw'), 1);
+
+  const pendingDaysMemory = {
+    leaveType: 'sick',
+    dateRange: { label: 'tomorrow', startDate: '2026-06-29', endDate: '2026-06-29' },
+    pendingClarification: {
+      topic: 'leave',
+      intent: 'leave_availability_check',
+      field: 'days',
+      fieldsRemaining: [],
+      leaveType: 'sick',
+      locatorType: null,
+    },
+  };
+
+  const stuckPatch = applyPendingClarificationAnswer('isa', pendingDaysMemory);
+  assert.equal(stuckPatch.dayCount, 1);
+  assert.equal(stuckPatch.pendingClarification, null);
+
+  const completedMemory = {
+    ...pendingDaysMemory,
+    dayCount: 1,
+    pendingClarification: null,
+  };
+  const guided = evaluateGuidedClarification({
+    intent: 'leave_availability_check',
+    text: 'isa',
+    context: {
+      date_range: completedMemory.dateRange,
+      leave_balances: [{ leave_type: 'sickLeave', available_days: 3 }],
+    },
+    memory: completedMemory,
+  });
+  assert.equal(guided, null);
+
+  const filingMemory = assistantServiceTest.buildNextAssistantMemory(null, {
+    intent: 'leave_availability_check',
+    text: 'pwede ko mag file ug sick leave ugma?',
+    leaveType: 'sick',
+    dateRange: completedMemory.dateRange,
+    modelProfile: 'tools_ollama',
+  });
+  const daysIntent = assistantServiceTest.resolveIntentFromMemory('isa', {
+    ...filingMemory,
+    dayCount: 1,
+    pendingClarification: pendingDaysMemory.pendingClarification,
+  });
+  assert.equal(daysIntent, 'leave_availability_check');
+  const daysMessage = assistantServiceTest.enrichMessageWithMemory(
+    'isa',
+    {
+      ...filingMemory,
+      dayCount: 1,
+      pendingClarification: pendingDaysMemory.pendingClarification,
+    },
+    daysIntent
+  );
+  assert.match(daysMessage, /pwede ko mag file ug sick leave ugma/i);
 });
