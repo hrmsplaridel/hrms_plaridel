@@ -1,4 +1,5 @@
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
+const { scoreSemanticIntents } = require('./dtrAssistantSemanticIntent');
 const {
   isLeaveFormFieldHelpQuestion,
 } = require('./leaveFilingGuidelines');
@@ -606,11 +607,15 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
   }
 
   const fuzzy = scoreFuzzyIntents(message);
+  const semantic = scoreSemanticIntents(message);
   const ruleIntent = detectEmployeeAssistantIntentByRules(message, null);
   const top = fuzzy.top;
   const runnerUp = fuzzy.runnerUp;
+  const semanticTop = semantic.top;
   const ruleScore =
     fuzzy.scores.find((item) => item.intent === ruleIntent)?.confidence || 0;
+  const semanticScore =
+    semantic.scores.find((item) => item.intent === ruleIntent)?.confidence || 0;
 
   if (ruleIntent) {
     if (
@@ -630,13 +635,32 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
       };
     }
 
-    const confidence = Math.max(ruleScore, ruleScore >= 0.5 ? 0.84 : 0.74);
+    if (
+      semanticTop &&
+      semanticTop.intent !== ruleIntent &&
+      hasIntentDomainSignal(message, semanticTop.intent) &&
+      semanticTop.confidence >= 0.58 &&
+      semanticTop.confidence - Math.max(ruleScore, semanticScore) >= 0.12
+    ) {
+      return {
+        intent: semanticTop.intent,
+        confidence: semanticTop.confidence,
+        source: 'semantic_override',
+        needsAiPlan: semanticTop.confidence < 0.78,
+        fuzzy,
+        semantic,
+        ruleIntent,
+      };
+    }
+
+    const confidence = Math.max(ruleScore, semanticScore, ruleScore >= 0.5 ? 0.84 : 0.74);
     return {
       intent: ruleIntent,
       confidence,
-      source: ruleScore >= 0.5 ? 'rules_fuzzy' : 'rules',
+      source: semanticScore >= ruleScore ? 'rules_semantic' : ruleScore >= 0.5 ? 'rules_fuzzy' : 'rules',
       needsAiPlan: confidence < 0.78,
       fuzzy,
+      semantic,
       ruleIntent,
     };
   }
@@ -654,16 +678,34 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
       source: 'fuzzy',
       needsAiPlan: top.confidence < 0.72,
       fuzzy,
+      semantic,
+      ruleIntent: null,
+    };
+  }
+
+  if (
+    semanticTop &&
+    semanticTop.confidence >= 0.55 &&
+    hasIntentDomainSignal(message, semanticTop.intent)
+  ) {
+    return {
+      intent: semanticTop.intent,
+      confidence: semanticTop.confidence,
+      source: 'semantic',
+      needsAiPlan: semanticTop.confidence < 0.72,
+      fuzzy,
+      semantic,
       ruleIntent: null,
     };
   }
 
   return {
     intent: null,
-    confidence: top?.confidence || 0,
+    confidence: top?.confidence || semanticTop?.confidence || 0,
     source: 'unclear',
     needsAiPlan: true,
     fuzzy,
+    semantic,
     ruleIntent: null,
   };
 }
@@ -1436,6 +1478,7 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
 
 module.exports = {
   detectEmployeeAssistantIntent,
+  intentDomain,
   normalizeIntent,
   scoreEmployeeAssistantIntent,
   scoreFuzzyIntents,
