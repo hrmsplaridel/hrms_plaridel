@@ -33,6 +33,22 @@ class DtrAssistantMessage {
 
   bool get isUser => role == 'user';
 
+  Map<String, dynamic> toJson() {
+    return {
+      if (id != null) 'id': id,
+      'role': role,
+      'content': content,
+      'createdAt': createdAt.toIso8601String(),
+      if (intent != null) 'intent': intent,
+      if (intentConfidence != null) 'intentConfidence': intentConfidence,
+      if (intentSource != null) 'intentSource': intentSource,
+      if (provider != null) 'provider': provider,
+      if (model != null) 'model': model,
+      if (modelProfile != null) 'modelProfile': modelProfile,
+      if (promptPreview != null) 'promptPreview': promptPreview,
+    };
+  }
+
   factory DtrAssistantMessage.user(String content) {
     return DtrAssistantMessage(
       id: 'local-${DateTime.now().microsecondsSinceEpoch}',

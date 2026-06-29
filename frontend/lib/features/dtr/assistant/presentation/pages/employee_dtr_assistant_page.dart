@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -6,6 +7,7 @@ import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_api.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_session_storage.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_input_bar.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_message_bubble.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_prompt_chips.dart';
@@ -18,6 +20,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_main.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/responsive_leave_form_host.dart';
+import 'package:hrms_plaridel/features/dtr/locator/models/locator_slip_form_initial_values.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/employee_locator_slip_screen.dart'
     as locator;
 import 'package:hrms_plaridel/providers/auth_provider.dart';
@@ -37,16 +40,12 @@ class EmployeeDtrAssistantPage extends StatefulWidget {
 }
 
 class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
+  static const _welcomeMessageText =
+      'Hi. I am your HRMS Assistant. Ask me about your DTR, leave requests, leave balances, or locator slips.';
+
   late final DtrAssistantApi _api = widget._api ?? DtrAssistantApi();
   final _scrollController = ScrollController();
-  final _messages = <DtrAssistantMessage>[
-    DtrAssistantMessage(
-      role: 'assistant',
-      content:
-          'Hi. I am your HRMS Assistant. Ask me about your DTR, leave requests, leave balances, or locator slips.',
-      createdAt: DateTime.now(),
-    ),
-  ];
+  final _messages = <DtrAssistantMessage>[];
   final _feedbackByMessageId = <String, String>{};
   final _promptByMessageId = <String, String>{};
   final _autoExecutedActionKeys = <String>{};
@@ -63,6 +62,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   ];
   String _selectedModelProfile = 'tools_ollama';
   bool _sending = false;
+  bool _resettingChat = false;
+  bool _sessionLoaded = false;
   final _inputController = TextEditingController();
   CancelToken? _cancelToken;
 
@@ -70,6 +71,75 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   void initState() {
     super.initState();
     _loadModelProfiles();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_restoreSession());
+    });
+  }
+
+  DtrAssistantMessage _welcomeMessage() {
+    return DtrAssistantMessage(
+      role: 'assistant',
+      content: _welcomeMessageText,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  Future<void> _restoreSession() async {
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId == null || userId.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _messages
+          ..clear()
+          ..add(_welcomeMessage());
+        _sessionLoaded = true;
+      });
+      return;
+    }
+
+    final restored = await DtrAssistantSessionStorage.loadMessages(userId);
+    if (!mounted) return;
+    setState(() {
+      _messages
+        ..clear()
+        ..addAll(restored.isEmpty ? [_welcomeMessage()] : restored);
+      _sessionLoaded = true;
+    });
+    if (_messages.length > 1) {
+      _scrollToBottom();
+    }
+  }
+
+  Future<void> _persistSession() async {
+    if (!mounted || !_sessionLoaded) return;
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId == null || userId.isEmpty) return;
+    await DtrAssistantSessionStorage.saveMessages(userId, _messages);
+  }
+
+  Future<void> _startNewChat() async {
+    if (_sending || _resettingChat) return;
+    final userId = context.read<AuthProvider>().user?.id;
+    setState(() => _resettingChat = true);
+    try {
+      await _api.resetChat();
+    } catch (_) {
+      // Local reset still helps even if the backend reset fails.
+    }
+    if (userId != null && userId.isNotEmpty) {
+      await DtrAssistantSessionStorage.clearMessages(userId);
+    }
+    if (!mounted) return;
+    setState(() {
+      _messages
+        ..clear()
+        ..add(_welcomeMessage());
+      _feedbackByMessageId.clear();
+      _promptByMessageId.clear();
+      _autoExecutedActionKeys.clear();
+      _resettingChat = false;
+    });
+    _scrollToBottom();
   }
 
   @override
@@ -116,6 +186,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       _sending = true;
     });
     _scrollToBottom();
+    unawaited(_persistSession());
     _cancelToken = CancelToken();
 
     try {
@@ -133,6 +204,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
           _promptByMessageId[replyId] = text;
         }
       });
+      await _persistSession();
       _runAutoAction(reply);
     } on DioException catch (e) {
       if (!mounted) return;
@@ -160,6 +232,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     } finally {
       if (mounted) {
         setState(() => _sending = false);
+        await _persistSession();
         _scrollToBottom();
       }
     }
@@ -365,7 +438,12 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       case 'open_locator_form':
         _openStandalonePage(
           title: 'Locator Requests',
-          child: const _LocatorActionPage(openForm: true),
+          child: _LocatorActionPage(
+            openForm: true,
+            initialValues: LocatorSlipFormInitialValues.fromActionPayload(
+              action.payload,
+            ),
+          ),
         );
         return;
       case 'open_locator_page':
@@ -503,6 +581,11 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     final leaveType = _leaveTypeFromPayload(payload['leaveType']?.toString());
     final startDate = _dateFromPayload(payload['startDate']);
     final endDate = _dateFromPayload(payload['endDate']) ?? startDate;
+    final reason = payload['reason']?.toString().trim();
+    final locationDetails = payload['locationDetails']?.toString().trim();
+    final locationOption = _locationOptionFromPayload(
+      payload['locationOption']?.toString(),
+    );
     return LeaveRequest(
       userId: userId,
       leaveType: leaveType,
@@ -511,8 +594,25 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       startDate: startDate,
       endDate: endDate,
       workingDaysApplied: _calendarDayEstimate(startDate, endDate),
+      reason: reason != null && reason.isNotEmpty ? reason : null,
+      locationOption: locationOption,
+      locationDetails:
+          locationDetails != null && locationDetails.isNotEmpty
+              ? locationDetails
+              : null,
       status: LeaveRequestStatus.draft,
     );
+  }
+
+  LeaveLocationOption? _locationOptionFromPayload(String? value) {
+    if (value == null || value.trim().isEmpty) return null;
+    final normalized = value.trim().toLowerCase();
+    if (normalized == 'abroad') return LeaveLocationOption.abroad;
+    if (normalized == 'within_philippines' ||
+        normalized == 'withinphilippines') {
+      return LeaveLocationOption.withinPhilippines;
+    }
+    return leaveLocationOptionFromString(value);
   }
 
   LeaveType _leaveTypeFromPayload(String? value) {
@@ -546,6 +646,13 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         backgroundColor: AppTheme.dashPanelOf(context),
         foregroundColor: AppTheme.dashTextPrimaryOf(context),
         elevation: dark ? 0 : 1,
+        actions: [
+          IconButton(
+            tooltip: 'New chat',
+            onPressed: (_sending || _resettingChat) ? null : _startNewChat,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Column(
@@ -754,9 +861,13 @@ class _AssistantActionChips extends StatelessWidget {
 }
 
 class _LocatorActionPage extends StatefulWidget {
-  const _LocatorActionPage({required this.openForm});
+  const _LocatorActionPage({
+    required this.openForm,
+    this.initialValues,
+  });
 
   final bool openForm;
+  final LocatorSlipFormInitialValues? initialValues;
 
   @override
   State<_LocatorActionPage> createState() => _LocatorActionPageState();
@@ -773,7 +884,9 @@ class _LocatorActionPageState extends State<_LocatorActionPage> {
     _opened = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      await _locatorKey.currentState?.openCreateForm();
+      await _locatorKey.currentState?.openCreateForm(
+        initialValues: widget.initialValues,
+      );
     });
   }
 

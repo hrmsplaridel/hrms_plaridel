@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:hrms_plaridel/features/dtr/locator/models/locator_slip_form_initial_values.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/shared/pages/employee_locator_slip_content.dart';
 
 class EmployeeLocatorSlipMobilePage extends StatefulWidget {
@@ -14,8 +15,12 @@ class EmployeeLocatorSlipMobilePageState
   final GlobalKey<EmployeeLocatorSlipContentState> _contentKey =
       GlobalKey<EmployeeLocatorSlipContentState>();
 
-  Future<void> openCreateForm() async {
-    await _contentKey.currentState?.openCreateForm();
+  Future<void> openCreateForm({
+    LocatorSlipFormInitialValues? initialValues,
+  }) async {
+    await _contentKey.currentState?.openCreateForm(
+      initialValues: initialValues,
+    );
   }
 
   @override

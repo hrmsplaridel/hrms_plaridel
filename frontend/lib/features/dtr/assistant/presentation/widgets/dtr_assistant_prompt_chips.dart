@@ -21,8 +21,12 @@ class DtrAssistantPromptChips extends StatelessWidget {
       intent: 'missing_logs',
     ),
     DtrAssistantPrompt(
-      text: 'What is my leave balance?',
+      text: 'Pila akong sick leave balance?',
       intent: 'leave_balance',
+    ),
+    DtrAssistantPrompt(
+      text: 'Naa koy missing logs karong semanaha?',
+      intent: 'missing_logs',
     ),
     DtrAssistantPrompt(
       text: 'Can I file 1 day vacation leave tomorrow?',
@@ -39,6 +43,10 @@ class DtrAssistantPromptChips extends StatelessWidget {
     DtrAssistantPrompt(
       text: 'Na-approve na ba akong locator slip?',
       intent: 'latest_locator_request',
+    ),
+    DtrAssistantPrompt(
+      text: 'Pwede ko mag-file ug WFH ugma?',
+      intent: 'locator_availability_check',
     ),
   ];
 
