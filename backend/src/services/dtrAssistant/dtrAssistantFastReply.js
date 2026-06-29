@@ -595,17 +595,18 @@ function locatorPolicyLines(message, fallbackKeys, options = {}) {
 }
 
 function requestedLeaveType(message) {
-  const text = lower(message).replace(/[\s_-]+/g, '');
-  if (/\b(sick|sl|sickleave)\b/.test(lower(message)) || text.includes('sickleave')) {
-    return 'sick';
-  }
-  if (
-    /\b(vacation|vl|vacationleave)\b/.test(lower(message)) ||
-    text.includes('vacationleave')
-  ) {
-    return 'vacation';
-  }
-  return null;
+  const lowered = lower(message);
+  // Pick whichever leave type appears first so the employee's latest wording wins.
+  // Memory context is appended after the current message (e.g. "vacation leave (sick leave)"),
+  // so an earlier match reflects what the employee just asked for.
+  const sickMatch = lowered.match(/\b(sick\s*leave|sick|sl)\b/);
+  const vacationMatch = lowered.match(/\b(vacation\s*leave|vacation|vl)\b/);
+  const sickIndex = sickMatch ? sickMatch.index : -1;
+  const vacationIndex = vacationMatch ? vacationMatch.index : -1;
+  if (sickIndex === -1 && vacationIndex === -1) return null;
+  if (vacationIndex === -1) return 'sick';
+  if (sickIndex === -1) return 'vacation';
+  return sickIndex <= vacationIndex ? 'sick' : 'vacation';
 }
 
 function normalizedText(value) {
