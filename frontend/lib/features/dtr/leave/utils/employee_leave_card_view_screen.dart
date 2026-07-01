@@ -831,13 +831,13 @@ class _LeaveCardEntry {
     return _LeaveCardEntry(
       period: period,
       particulars: request.leaveTypeLabel,
-      vacEarned: earnedDays,
+      vacEarned: isVacation ? earnedDays : '',
       vacAbsWithPay: isVacation ? _fmtNum(withPayDays) : '',
-      vacBalance: _fmtNum(vacationBalanceDays),
+      vacBalance: isVacation ? _fmtNum(vacationBalanceDays) : '',
       vacAbsWithoutPay: isVacation ? _fmtNum(withoutPayDays) : '',
-      slEarned: earnedDays,
+      slEarned: isSick ? earnedDays : '',
       slAbsWithPay: isSick ? _fmtNum(withPayDays) : '',
-      slBalance: _fmtNum(sickBalanceDays),
+      slBalance: isSick ? _fmtNum(sickBalanceDays) : '',
       slAbsWithoutPay: isSick ? _fmtNum(withoutPayDays) : '',
       dateTakenOnApplication: actionDate != null ? _fmtDate(actionDate) : '',
     );
@@ -846,7 +846,6 @@ class _LeaveCardEntry {
   factory _LeaveCardEntry.fromForcedDeduction(
     LeaveBalanceLedgerEntry entry, {
     required double vacationBalanceDays,
-    required double sickBalanceDays,
     required double deductedDays,
   }) {
     final year =
@@ -862,9 +861,9 @@ class _LeaveCardEntry {
       vacAbsWithPay: _fmtNum(deductedDays),
       vacBalance: _fmtNum(vacationBalanceDays),
       vacAbsWithoutPay: '',
-      slEarned: earnedDays,
+      slEarned: '',
       slAbsWithPay: '',
-      slBalance: _fmtNum(sickBalanceDays),
+      slBalance: '',
       slAbsWithoutPay: '',
       dateTakenOnApplication: _fmtDate(entry.createdAt),
     );
@@ -945,7 +944,6 @@ List<_LeaveCardEntry> _buildLeaveCardEntries(
         return _LeaveCardEntry.fromForcedDeduction(
           entry,
           vacationBalanceDays: vacationBalance,
-          sickBalanceDays: sickBalance,
           deductedDays: deductedDays,
         );
       },

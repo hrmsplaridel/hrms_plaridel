@@ -495,13 +495,13 @@ class LeaveCardPrintView {
           return _LeaveCardRow(
             period: period,
             particulars: request.leaveTypeLabel,
-            vacEarned: earnedStr,
+            vacEarned: isVacation ? earnedStr : '',
             vacWithPay: isVacation ? _fmtNum(withPay) : '',
-            vacBalance: _fmtNum(vacationBalance),
+            vacBalance: isVacation ? _fmtNum(vacationBalance) : '',
             vacWithoutPay: isVacation ? _fmtNum(withoutPay) : '',
-            slEarned: earnedStr,
+            slEarned: isSick ? earnedStr : '',
             slWithPay: isSick ? _fmtNum(withPay) : '',
-            slBalance: _fmtNum(sickBalance),
+            slBalance: isSick ? _fmtNum(sickBalance) : '',
             slWithoutPay: isSick ? _fmtNum(withoutPay) : '',
             dateTakenOnApplication: actionDate != null
                 ? _fmtDate(actionDate)
@@ -522,9 +522,9 @@ class LeaveCardPrintView {
             vacWithPay: _fmtNum(deductedDays),
             vacBalance: _fmtNum(vacationBalance),
             vacWithoutPay: '',
-            slEarned: earnedStr,
+            slEarned: '',
             slWithPay: '',
-            slBalance: _fmtNum(sickBalance),
+            slBalance: '',
             slWithoutPay: '',
             dateTakenOnApplication: _fmtDate(entry.createdAt),
           );
