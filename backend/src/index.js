@@ -207,6 +207,16 @@ const server = app.listen(PORT, HOST, () => {
   }
 });
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `[error] Port ${PORT} is already in use. Stop the other server or run: npm run dev`,
+    );
+    process.exit(1);
+  }
+  throw err;
+});
+
 // Initialize WebSocket servers and route upgrade requests by path.
 const biometricWss = initWebSocket();
 const appEventsWss = initAppEventsWebSocket();

@@ -2406,38 +2406,49 @@ class _LdContentState extends State<_LdContent> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_ldSectionIndex != 0) ...[
-          TextButton.icon(
-            onPressed: () => setState(() => _ldSectionIndex = 0),
-            icon: const Icon(Icons.arrow_back_rounded, size: 20),
-            label: const Text('Back to L&D'),
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.primaryNavy,
-              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-            ),
-          ),
-          const SizedBox(height: 20),
-        ],
-        if (_ldSectionIndex == 0)
-          LdAdminHub(
-            onOpenSection: (index) => setState(() => _ldSectionIndex = index),
-          )
-        else if (_ldSectionIndex == 1)
-          const _TrainingNeedAnalysisSection()
-        else if (_ldSectionIndex == 2)
-          const _ActionBrainstormingSection()
-        else if (_ldSectionIndex == 3)
-          const _LdTrainingReportsSection()
-        else if (_ldSectionIndex == 4)
-          const IdpAdminSection()
-        else if (_ldSectionIndex == 5)
-          const LdTrainingRequirementsAdminSection()
-        else
-          const IdpAdminSection(),
-      ],
+    return SizedBox(
+      width: double.infinity,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_ldSectionIndex != 0) ...[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => setState(() => _ldSectionIndex = 0),
+                    icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                    label: const Text('Back to L&D'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.primaryNavy,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              if (_ldSectionIndex == 0)
+                LdAdminHub(
+                  onOpenSection: (index) =>
+                      setState(() => _ldSectionIndex = index),
+                )
+              else if (_ldSectionIndex == 1)
+                const _TrainingNeedAnalysisSection()
+              else if (_ldSectionIndex == 2)
+                const _ActionBrainstormingSection()
+              else if (_ldSectionIndex == 3)
+                const _LdTrainingReportsSection()
+              else if (_ldSectionIndex == 4)
+                const IdpAdminSection()
+              else if (_ldSectionIndex == 5)
+                const LdTrainingRequirementsAdminSection()
+              else
+                const IdpAdminSection(),
+            ],
+          );
+        },
+      ),
     );
   }
 }
