@@ -11,5 +11,8 @@
       ]
     }
   },
-  "terminal.integrated.defaultProfile.windows": "PowerShell"
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "files.associations": {
+    "**/build/reports/problems/*.html": "plaintext"
+  }
 }
