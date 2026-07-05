@@ -25,6 +25,10 @@ class TokenStorage {
     // inside a Dio interceptor). The default (false) still encrypts via the
     // Android Keystore but uses a non-blocking AES key derivation.
     aOptions: AndroidOptions(
+      // The `encryptedSharedPreferences` field is deprecated on some
+      // flutter_secure_storage versions; ignore the analyzer for now so the
+      // intent and behaviour remain explicit.
+      // ignore: deprecated_member_use
       encryptedSharedPreferences: false,
       // If old tokens were encrypted with a different scheme (e.g. after
       // switching encryptedSharedPreferences), BAD_DECRYPT will occur.

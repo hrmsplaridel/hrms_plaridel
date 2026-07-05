@@ -86,7 +86,9 @@ class _RspAdminContentState extends State<RspAdminContent> {
               else if (_rspSectionIndex == 1)
                 const _RspJobVacanciesForm()
               else if (_rspSectionIndex == 2)
-                const _RspApplicationsMonitor(view: _RspMonitorView.applications)
+                const _RspApplicationsMonitor(
+                  view: _RspMonitorView.applications,
+                )
               else if (_rspSectionIndex == 16)
                 const _RspApplicationsMonitor(view: _RspMonitorView.examResults)
               else if (_rspSectionIndex == 3)
@@ -444,6 +446,7 @@ Widget _rspMcqQuestionsPanel({
                   ),
                 ),
                 const SizedBox(height: 8),
+                // ignore: deprecated_member_use
                 RadioGroup<int>(
                   groupValue: item.correctIndex,
                   onChanged: (v) {
@@ -476,8 +479,10 @@ Widget _rspMcqQuestionsPanel({
                             0,
                             optCount - 1,
                           );
-                          final selected =
-                              item.optionControllers[safeIndex].text.trim();
+                          final selected = item
+                              .optionControllers[safeIndex]
+                              .text
+                              .trim();
                           if (selected.isEmpty) {
                             return 'Correct answer: Option ${safeIndex + 1}';
                           }
@@ -513,35 +518,36 @@ Widget _rspMcqQuestionsPanel({
                                           return SingleChildScrollView(
                                             child: Column(
                                               mainAxisSize: MainAxisSize.min,
-                                              children: List.generate(optCount, (
-                                                idx,
-                                              ) {
-                                                final txt = item
-                                                    .optionControllers[idx]
-                                                    .text
-                                                    .trim();
-                                                return RadioListTile<int>(
-                                                  value: idx,
-                                                  groupValue: selected,
-                                                  onChanged: (v) {
-                                                    if (v == null) return;
-                                                    setDialogState(
-                                                      () => selected = v,
-                                                    );
-                                                  },
-                                                  title: Text(
-                                                    txt.isEmpty
-                                                        ? 'Option ${idx + 1}'
-                                                        : txt,
-                                                    maxLines: 2,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  ),
-                                                  dense: true,
-                                                  contentPadding:
-                                                      EdgeInsets.zero,
-                                                );
-                                              }),
+                                              children: List.generate(
+                                                optCount,
+                                                (idx) {
+                                                  final txt = item
+                                                      .optionControllers[idx]
+                                                      .text
+                                                      .trim();
+                                                  return RadioListTile<int>(
+                                                    value: idx,
+                                                    groupValue: selected,
+                                                    onChanged: (v) {
+                                                      if (v == null) return;
+                                                      setDialogState(
+                                                        () => selected = v,
+                                                      );
+                                                    },
+                                                    title: Text(
+                                                      txt.isEmpty
+                                                          ? 'Option ${idx + 1}'
+                                                          : txt,
+                                                      maxLines: 2,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                    dense: true,
+                                                    contentPadding:
+                                                        EdgeInsets.zero,
+                                                  );
+                                                },
+                                              ),
                                             ),
                                           );
                                         },
@@ -549,9 +555,8 @@ Widget _rspMcqQuestionsPanel({
                                     ),
                                     actions: [
                                       TextButton(
-                                        onPressed: () => Navigator.of(
-                                          dialogContext,
-                                        ).pop(),
+                                        onPressed: () =>
+                                            Navigator.of(dialogContext).pop(),
                                         child: const Text('Cancel'),
                                       ),
                                       FilledButton(
@@ -1616,6 +1621,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                           ),
                         ),
                         const SizedBox(height: 6),
+                        // ignore: deprecated_member_use
                         RadioGroup<String>(
                           groupValue: _relationship,
                           onChanged: (v) => setState(() => _relationship = v!),
@@ -2055,7 +2061,8 @@ class _BiFormList extends StatelessWidget {
                 onView: () => showReadOnlySavedEntryDialog(
                   context,
                   title: 'BI form â€” ${e.applicantName}',
-                  subtitle: '${e.respondentName} Â· ${e.respondentRelationship}',
+                  subtitle:
+                      '${e.respondentName} Â· ${e.respondentRelationship}',
                   previewBuilder: () => _BiFormEditor(
                     readOnly: true,
                     entry: e,
@@ -2669,7 +2676,6 @@ class _PerformanceFormList extends StatelessWidget {
   }
 }
 
-
 /// RSP: Applicants Profile Ã¢â‚¬â€ job vacancy details + list of applicants.
 class _RspApplicantsProfileSection extends StatefulWidget {
   const _RspApplicantsProfileSection();
@@ -2725,10 +2731,12 @@ class _RspApplicantsProfileSectionState
 
   ApplicantsProfileEntry _buildAutoPrefilledProfile(
     JobVacancyAnnouncement announcement,
-    List<RecruitmentApplication> applications,
-    {String? preferredPosition}
-  ) {
-    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    List<RecruitmentApplication> applications, {
+    String? preferredPosition,
+  }) {
+    final pipelineApps = applications
+        .where((a) => a.isActiveInPipeline)
+        .toList();
     final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
     final preferred = preferredPosition?.trim();
 
@@ -2753,8 +2761,9 @@ class _RspApplicantsProfileSectionState
       }
       return null;
     }();
-    selectedVacancy ??=
-        announcement.vacancies.isNotEmpty ? announcement.vacancies.first : null;
+    selectedVacancy ??= announcement.vacancies.isNotEmpty
+        ? announcement.vacancies.first
+        : null;
 
     String? selectedPosition = preferred;
     if (selectedPosition == null || selectedPosition.isEmpty) {
@@ -2773,18 +2782,19 @@ class _RspApplicantsProfileSectionState
     final matchedApps = selectedPosition == null || selectedPosition.isEmpty
         ? sourceApps
         : sourceApps
-              .where((a) => _samePosition(a.positionAppliedFor, selectedPosition))
+              .where(
+                (a) => _samePosition(a.positionAppliedFor, selectedPosition),
+              )
               .toList();
-    matchedApps.sort(
-      (a, b) => _norm(a.fullName).compareTo(_norm(b.fullName)),
-    );
+    matchedApps.sort((a, b) => _norm(a.fullName).compareTo(_norm(b.fullName)));
 
     DateTime? postingDate;
-    final withCreatedAt = matchedApps
-        .where((a) => a.createdAt != null)
-        .map((a) => a.createdAt!)
-        .toList()
-      ..sort((a, b) => a.compareTo(b));
+    final withCreatedAt =
+        matchedApps
+            .where((a) => a.createdAt != null)
+            .map((a) => a.createdAt!)
+            .toList()
+          ..sort((a, b) => a.compareTo(b));
     if (withCreatedAt.isNotEmpty) {
       postingDate = withCreatedAt.first;
     } else {
@@ -2792,8 +2802,7 @@ class _RspApplicantsProfileSectionState
     }
 
     return ApplicantsProfileEntry(
-      positionAppliedFor:
-          (selectedPosition == null || selectedPosition.isEmpty)
+      positionAppliedFor: (selectedPosition == null || selectedPosition.isEmpty)
           ? null
           : selectedPosition,
       minimumRequirements: _requirementsFromVacancy(selectedVacancy),
@@ -2805,7 +2814,9 @@ class _RspApplicantsProfileSectionState
           .map(
             (a) => ApplicantsProfileApplicant(
               name: a.fullName.trim().isEmpty ? null : a.fullName.trim(),
-              course: a.course?.trim().isEmpty == true ? null : a.course?.trim(),
+              course: a.course?.trim().isEmpty == true
+                  ? null
+                  : a.course?.trim(),
               address: a.address?.trim().isEmpty == true
                   ? null
                   : a.address?.trim(),
@@ -2837,7 +2848,9 @@ class _RspApplicantsProfileSectionState
       addPosition(v.positionKey);
     }
 
-    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    final pipelineApps = applications
+        .where((a) => a.isActiveInPipeline)
+        .toList();
     final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
     for (final app in sourceApps) {
       addPosition(app.positionAppliedFor);
@@ -2850,8 +2863,11 @@ class _RspApplicantsProfileSectionState
     List<String> positions,
     List<RecruitmentApplication> applications,
   ) async {
-    if (positions.length <= 1) return positions.isEmpty ? null : positions.first;
-    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    if (positions.length <= 1)
+      return positions.isEmpty ? null : positions.first;
+    final pipelineApps = applications
+        .where((a) => a.isActiveInPipeline)
+        .toList();
     final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
 
     int countFor(String position) => sourceApps
@@ -2917,7 +2933,10 @@ class _RspApplicantsProfileSectionState
       final applications = await RecruitmentRepo.instance.listApplications();
       if (!mounted) return;
       final positions = _autofillPositions(announcement, applications);
-      final selectedPosition = await _pickAutofillPosition(positions, applications);
+      final selectedPosition = await _pickAutofillPosition(
+        positions,
+        applications,
+      );
       if (!mounted) return;
       setState(
         () => _editing = _buildAutoPrefilledProfile(
@@ -2931,6 +2950,7 @@ class _RspApplicantsProfileSectionState
       setState(() => _editing = const ApplicantsProfileEntry());
     }
   }
+
   void _edit(ApplicantsProfileEntry e) => setState(() => _editing = e);
   void _cancelEdit() => setState(() => _editing = null);
 
@@ -3464,13 +3484,26 @@ class _ApplicantsProfileFormEditorState
                   fontWeight: FontWeight.w700,
                 ),
                 columns: [
-                  DataColumn(label: Text('NAME', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('COURSE', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('ADDRESS', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('SEX', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('AGE', style: TextStyle(color: primary))),
                   DataColumn(
-                    label: Text('CIVIL STATUS', style: TextStyle(color: primary)),
+                    label: Text('NAME', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text('COURSE', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text('ADDRESS', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text('SEX', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text('AGE', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text(
+                      'CIVIL STATUS',
+                      style: TextStyle(color: primary),
+                    ),
                   ),
                   DataColumn(
                     label: Text(
@@ -3478,7 +3511,9 @@ class _ApplicantsProfileFormEditorState
                       style: TextStyle(color: primary),
                     ),
                   ),
-                  DataColumn(label: Text('', style: TextStyle(color: primary))),
+                  DataColumn(
+                    label: Text('', style: TextStyle(color: primary)),
+                  ),
                 ],
                 rows: List.generate(_currentPageRows.length, (i) {
                   final r = _currentPageRows[i];
@@ -6547,7 +6582,8 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
             : '(No position)';
         return SavedRecordListItem(
           title: pos,
-          subtitle: '${e.office ?? "â€”"} Â· ${e.applicants.length} applicant(s)',
+          subtitle:
+              '${e.office ?? "â€”"} Â· ${e.applicants.length} applicant(s)',
           detailDialogTitle: 'Turn-around time â€” $pos',
           previewContentWidth: 1200,
           previewBuilder: () => _TurnAroundTimeEditor(
@@ -8453,8 +8489,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   bool _exportingReport = false;
   String? _adminPassingApplicantId;
   final ScrollController _horizontalScrollController = ScrollController();
-  final ScrollController _scoreBreakdownVScrollController =
-      ScrollController();
+  final ScrollController _scoreBreakdownVScrollController = ScrollController();
 
   Set<String> get _positionFilterOptions {
     final out = <String>{};
@@ -8612,9 +8647,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Could not mark as passed. ${userFacingApiError(e)}',
-          ),
+          content: Text('Could not mark as passed. ${userFacingApiError(e)}'),
         ),
       );
     } finally {
@@ -8734,8 +8767,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     }
 
     return Tooltip(
-      message:
-          'Admin pass: choose perfect 100% or encode custom scores',
+      message: 'Admin pass: choose perfect 100% or encode custom scores',
       child: FilledButton.tonal(
         onPressed: () => _confirmAndAdminPassExam(app, exam),
         style: FilledButton.styleFrom(
@@ -9009,10 +9041,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                             exam: exam,
                             isPassing: isPassingThis,
                           )
-                        : _scoreBreakdownStatusPill(
-                            dialogContext,
-                            exam: exam,
-                          ),
+                        : _scoreBreakdownStatusPill(dialogContext, exam: exam),
                   ),
                   background: rowBg,
                   padding: const EdgeInsets.symmetric(
@@ -9330,25 +9359,26 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         final e = entries[i];
         final fileName = e['fileName']!;
         final kind = RspApplicationDocKind.fromStorageFileName(fileName);
-        final finalReqKind =
-            RspFinalRequirementDocKind.fromStorageFileName(fileName);
+        final finalReqKind = RspFinalRequirementDocKind.fromStorageFileName(
+          fileName,
+        );
         final bool ok;
         if (kind != null) {
           ok = await RecruitmentRepo.instance
               .setApplicationTypedAttachmentIfMissing(
-            e['applicationId']!,
-            e['path']!,
-            fileName,
-            kind,
-          );
+                e['applicationId']!,
+                e['path']!,
+                fileName,
+                kind,
+              );
         } else if (finalReqKind != null) {
           ok = await RecruitmentRepo.instance
               .setApplicationFinalRequirementIfMissing(
-            e['applicationId']!,
-            e['path']!,
-            fileName,
-            finalReqKind,
-          );
+                e['applicationId']!,
+                e['path']!,
+                fileName,
+                finalReqKind,
+              );
         } else {
           ok = await RecruitmentRepo.instance.setApplicationAttachmentIfMissing(
             e['applicationId']!,
@@ -9817,10 +9847,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 spacing: 10,
                 runSpacing: 10,
                 crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  generateReportBtn,
-                  if (isApplicationsView) syncBtn,
-                ],
+                children: [generateReportBtn, if (isApplicationsView) syncBtn],
               );
             },
           ),
@@ -10004,7 +10031,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                   4: const FixedColumnWidth(90), // Gender
                                   5: const FixedColumnWidth(150), // Course
                                   6: const FixedColumnWidth(70), // Age
-                                  7: const FixedColumnWidth(140), // Civil status
+                                  7: const FixedColumnWidth(
+                                    140,
+                                  ), // Civil status
                                   8: const FixedColumnWidth(
                                     170,
                                   ), // City / Municipality
@@ -10101,7 +10130,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                       ),
                                       _tableCell(
                                         150,
-                                        Text('Barangay', style: tableHeaderStyle),
+                                        Text(
+                                          'Barangay',
+                                          style: tableHeaderStyle,
+                                        ),
                                       ),
                                       _tableCell(
                                         180,
@@ -10200,8 +10232,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                     final gender = _displayOrNa(app.sex);
                                     final course = _displayOrNa(app.course);
                                     final age = _displayOrNa(app.age);
-                                    final civilStatus =
-                                        _displayOrNa(app.civilStatus);
+                                    final civilStatus = _displayOrNa(
+                                      app.civilStatus,
+                                    );
                                     final addr = _appAddressParts(app);
                                     final city = _displayOrNa(
                                       addr.city.isEmpty ? null : addr.city,
@@ -10581,10 +10614,7 @@ class _AdminPassChoice {
 }
 
 class _AdminExamBypassDialog extends StatefulWidget {
-  const _AdminExamBypassDialog({
-    required this.app,
-    required this.existing,
-  });
+  const _AdminExamBypassDialog({required this.app, required this.existing});
 
   final RecruitmentApplication app;
   final RecruitmentExamResult? existing;
@@ -10719,7 +10749,9 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(22),
+              ),
               child: Container(
                 height: 4,
                 decoration: const BoxDecoration(
@@ -10835,7 +10867,10 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                             const SizedBox(height: 2),
                             Text(
                               email,
-                              style: TextStyle(color: secondary, fontSize: 12.5),
+                              style: TextStyle(
+                                color: secondary,
+                                fontSize: 12.5,
+                              ),
                             ),
                           ],
                           if (position.isNotEmpty) ...[
@@ -10908,6 +10943,7 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // ignore: deprecated_member_use
                     RadioListTile<_AdminPassScoreMode>(
                       value: _AdminPassScoreMode.perfect,
                       groupValue: _mode,
@@ -10916,6 +10952,7 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                     ),
+                    // ignore: deprecated_member_use
                     RadioListTile<_AdminPassScoreMode>(
                       value: _AdminPassScoreMode.custom,
                       groupValue: _mode,
@@ -11011,9 +11048,9 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF8E1).withValues(
-                    alpha: dark ? 0.22 : 1,
-                  ),
+                  color: const Color(
+                    0xFFFFF8E1,
+                  ).withValues(alpha: dark ? 0.22 : 1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: const Color(0xFFFFB300).withValues(alpha: 0.45),
@@ -11121,48 +11158,7 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
   }
 }
 
-class _AdminBypassExamChip extends StatelessWidget {
-  const _AdminBypassExamChip({required this.label, required this.score});
-
-  final String label;
-  final String score;
-
-  @override
-  Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: accent.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            score,
-            style: TextStyle(
-              color: accent,
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// _AdminBypassExamChip was removed because it was not referenced anywhere.
 
 class _EditApplicantBasicDialog extends StatefulWidget {
   const _EditApplicantBasicDialog({required this.app});
