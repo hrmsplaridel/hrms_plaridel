@@ -6,30 +6,11 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dar
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
-/// Mandatory/forced leave has no separate balance row; it uses vacation credits (CSC).
+/// All balances returned by the backend are now shown.
+/// Annual-quota types (SPL, MFL, Paternity, etc.) are computed server-side.
 List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
-  const noCreditSystemTypes = {
-    'mandatoryForcedLeave',
-    'maternityLeave',
-    'paternityLeave',
-    'specialPrivilegeLeave',
-    'soloParentLeave',
-    'studyLeave',
-    'tenDayVawcLeave',
-    'rehabilitationPrivilege',
-    'specialLeaveBenefitsForWomen',
-    'specialEmergencyCalamityLeave',
-    'adoptionLeave',
-    'others',
-  };
-  return raw.where((b) {
-    final typeName = b.effectiveLeaveTypeName;
-    if (typeName == LeaveType.vacationLeave.value ||
-        typeName == LeaveType.sickLeave.value) {
-      return true;
-    }
-    return !noCreditSystemTypes.contains(typeName);
-  }).toList();
+  // Only exclude `others` and custom admin types with no meaningful quota.
+  return raw.where((b) => b.effectiveLeaveTypeName != 'others').toList();
 }
 
 class _LeaveCacheEntry<T> {

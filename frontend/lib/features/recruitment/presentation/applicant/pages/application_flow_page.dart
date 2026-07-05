@@ -2322,7 +2322,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Look up your record by email, then continue when the process allows it.',
+                            'Check status by email.',
                             style: TextStyle(
                               fontSize: kIsWeb ? 14.5 : 13.5,
                               height: 1.45,
@@ -2362,7 +2362,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'To start a new application, go back to the home page, open Job Vacancies, and tap Apply now on the position you want.',
+                              'For new applications, go to Job Vacancies and tap Apply now.',
                               style: TextStyle(
                                 fontSize: kIsWeb ? 14.5 : 14,
                                 height: 1.5,
@@ -2384,7 +2384,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'Enter the email you used when you applied, then tap Check status. Continue stays off until your application is loaded and you are allowed to proceed (for example, after HR approves your documents).',
+                              'Use your application email, then tap Check status.',
                               style: TextStyle(
                                 fontSize: kIsWeb ? 14.5 : 14,
                                 height: 1.5,
@@ -2674,7 +2674,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           if (showCheckStatusFirstHint) ...[
             const SizedBox(height: 14),
             hintBox(
-              'Tap Check status first so we can load your application. Continue stays off until we confirm your record and you are allowed to move forward (for example, after HR approves your documents).',
+              'Tap Check status first. Continue unlocks when your status allows it.',
             ),
           ],
           if (showBlockedHint) ...[
@@ -2738,8 +2738,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         const SizedBox(height: 12),
         Text(
           _isVacancyApplication
-              ? 'When you are ready to fill forms or take exams, tap Continue above to open your application at the correct step.'
-              : 'Tap Check status first to load your application. After HR approves your documents, Continue unlocks for exams. If you do not pass the exam, Continue stays off.',
+              ? 'Tap Continue to resume your application.'
+              : 'Tap Check status first. Continue unlocks when you are eligible.',
           style: TextStyle(
             fontSize: 13,
             height: 1.45,

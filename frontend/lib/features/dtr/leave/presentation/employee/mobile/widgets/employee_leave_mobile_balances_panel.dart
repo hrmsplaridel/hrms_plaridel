@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_days_card.dart';
 
 class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
   const EmployeeLeaveMobileBalancesPanel({
@@ -15,16 +16,24 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
   final bool loading;
   final VoidCallback onBalanceHistory;
 
+  static const _creditTypes = {'vacationLeave', 'sickLeave'};
+
   @override
   Widget build(BuildContext context) {
+    final creditBalances = balances
+        .where((b) => _creditTypes.contains(b.effectiveLeaveTypeName))
+        .toList();
+    final dayBalances = balances;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Credits section (Sick + Vacation) ────────────────────────────
         Row(
           children: [
             Expanded(
               child: Text(
-                'Leave Balances',
+                'Leave Credits',
                 style: TextStyle(
                   color: AppTheme.dashTextPrimaryOf(context),
                   fontSize: 17,
@@ -42,31 +51,68 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               child: const Text(
-                'Balance History',
+                'Credit History',
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        if (loading && balances.isEmpty)
-          const _MobileCenteredState(message: 'Loading leave balances...')
-        else if (balances.isEmpty)
+        if (loading && creditBalances.isEmpty)
+          const _MobileCenteredState(message: 'Loading leave credits...')
+        else if (creditBalances.isEmpty)
           const _MobileCenteredState(
-            message: 'No leave balances available yet.',
+            message: 'No leave credits available yet.',
           )
         else
           Column(
-            children: List.generate(balances.length, (index) {
-              final balance = balances[index];
+            children: List.generate(creditBalances.length, (index) {
+              final balance = creditBalances[index];
               return Padding(
                 padding: EdgeInsets.only(
-                  bottom: index == balances.length - 1 ? 0 : 12,
+                  bottom: index == creditBalances.length - 1 ? 0 : 12,
                 ),
                 child: _MobileLeaveBalanceCard(balance: balance),
               );
             }),
           ),
+
+        // ── Leave Remaining Days section ──────────────────────────────────
+        if (dayBalances.isNotEmpty || loading) ...[  
+          const SizedBox(height: 24),
+          Text(
+            'Leave Remaining Days',
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              height: 1.2,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Annual quota days remaining per leave type.',
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (loading && dayBalances.isEmpty)
+            const _MobileCenteredState(message: 'Loading leave days...')
+          else
+            Column(
+              children: List.generate(dayBalances.length, (index) {
+                final balance = dayBalances[index];
+                return Padding(
+                  padding: EdgeInsets.only(
+                    bottom: index == dayBalances.length - 1 ? 0 : 12,
+                  ),
+                  child: LeaveDaysCard(balance: balance),
+                );
+              }),
+            ),
+        ],
       ],
     );
   }

@@ -437,21 +437,19 @@ class JobVacanciesSection extends StatelessWidget {
                   if (i > 0) rows.add(const SizedBox(height: gap));
                   if (i + 1 < list.length) {
                     rows.add(
-                      IntrinsicHeight(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            SizedBox(
-                              width: cardFlexWidth,
-                              child: cardFor(list[i]),
-                            ),
-                            const SizedBox(width: gap),
-                            SizedBox(
-                              width: cardFlexWidth,
-                              child: cardFor(list[i + 1]),
-                            ),
-                          ],
-                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            width: cardFlexWidth,
+                            child: cardFor(list[i]),
+                          ),
+                          const SizedBox(width: gap),
+                          SizedBox(
+                            width: cardFlexWidth,
+                            child: cardFor(list[i + 1]),
+                          ),
+                        ],
                       ),
                     );
                   } else {

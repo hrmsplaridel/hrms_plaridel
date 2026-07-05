@@ -56,63 +56,79 @@ class _RspAdminContentState extends State<RspAdminContent> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_rspSectionIndex != 0) ...[
-          TextButton.icon(
-            onPressed: () => setState(() => _rspSectionIndex = 0),
-            icon: const Icon(Icons.arrow_back_rounded, size: 20),
-            label: const Text('Back to RSP'),
-            style: RspExamEditorUi.ghostAction(context),
-          ),
-          const SizedBox(height: 18),
-        ],
-        if (_rspSectionIndex == 0)
-          RspAdminHub(
-            onOpenSection: (index) => setState(() => _rspSectionIndex = index),
-          )
-        else if (_rspSectionIndex == 1)
-          const _RspJobVacanciesForm()
-        else if (_rspSectionIndex == 2)
-          const _RspApplicationsMonitor(view: _RspMonitorView.applications)
-        else if (_rspSectionIndex == 16)
-          const _RspApplicationsMonitor(view: _RspMonitorView.examResults)
-        else if (_rspSectionIndex == 3)
-          const _RspBeiQuestionsEditor()
-        else if (_rspSectionIndex == 4)
-          const _RspGeneralExamEditor()
-        else if (_rspSectionIndex == 5)
-          const _RspMathExamEditor()
-        else if (_rspSectionIndex == 6)
-          const _RspGeneralInfoExamEditor()
-        else if (_rspSectionIndex == 7)
-          const _RspBiFormSection()
-        else if (_rspSectionIndex == 8)
-          const _RspPerformanceEvaluationSection()
-        else if (_rspSectionIndex == 10)
-          const _RspApplicantsProfileSection()
-        else if (_rspSectionIndex == 11)
-          const _RspComparativeAssessmentSection()
-        else if (_rspSectionIndex == 12)
-          const _RspPromotionCertificationSection()
-        else if (_rspSectionIndex == 13)
-          const _RspSelectionLineupSection()
-        else if (_rspSectionIndex == 17)
-          const RspComputationOfPointsSection()
-        else if (_rspSectionIndex == 18)
-          const RspWorkExperienceSheetSection()
-        else if (_rspSectionIndex == 14)
-          const _RspTurnAroundTimeSection()
-        else if (_rspSectionIndex == 15)
-          const RspSchedulingSection()
-        else if (_rspSectionIndex == 19)
-          RspFinalRequirementsSection(
-            onGoToCreateAccount: widget.onOpenCreateAccount,
-          )
-        else
-          const SizedBox.shrink(),
-      ],
+    return SizedBox(
+      width: double.infinity,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_rspSectionIndex != 0) ...[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => setState(() => _rspSectionIndex = 0),
+                    icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                    label: const Text('Back to RSP'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.primaryNavy,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              if (_rspSectionIndex == 0)
+                RspAdminHub(
+                  onOpenSection: (index) =>
+                      setState(() => _rspSectionIndex = index),
+                )
+              else if (_rspSectionIndex == 1)
+                const _RspJobVacanciesForm()
+              else if (_rspSectionIndex == 2)
+                const _RspApplicationsMonitor(
+                  view: _RspMonitorView.applications,
+                )
+              else if (_rspSectionIndex == 16)
+                const _RspApplicationsMonitor(view: _RspMonitorView.examResults)
+              else if (_rspSectionIndex == 3)
+                const _RspBeiQuestionsEditor()
+              else if (_rspSectionIndex == 4)
+                const _RspGeneralExamEditor()
+              else if (_rspSectionIndex == 5)
+                const _RspMathExamEditor()
+              else if (_rspSectionIndex == 6)
+                const _RspGeneralInfoExamEditor()
+              else if (_rspSectionIndex == 7)
+                const _RspBiFormSection()
+              else if (_rspSectionIndex == 8)
+                const _RspPerformanceEvaluationSection()
+              else if (_rspSectionIndex == 10)
+                const _RspApplicantsProfileSection()
+              else if (_rspSectionIndex == 11)
+                const _RspComparativeAssessmentSection()
+              else if (_rspSectionIndex == 12)
+                const _RspPromotionCertificationSection()
+              else if (_rspSectionIndex == 13)
+                const _RspSelectionLineupSection()
+              else if (_rspSectionIndex == 17)
+                const RspComputationOfPointsSection()
+              else if (_rspSectionIndex == 18)
+                const RspWorkExperienceSheetSection()
+              else if (_rspSectionIndex == 14)
+                const _RspTurnAroundTimeSection()
+              else if (_rspSectionIndex == 15)
+                const RspSchedulingSection()
+              else if (_rspSectionIndex == 19)
+                RspFinalRequirementsSection(
+                  onGoToCreateAccount: widget.onOpenCreateAccount,
+                )
+              else
+                const SizedBox.shrink(),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -430,6 +446,7 @@ Widget _rspMcqQuestionsPanel({
                   ),
                 ),
                 const SizedBox(height: 8),
+                // ignore: deprecated_member_use
                 RadioGroup<int>(
                   groupValue: item.correctIndex,
                   onChanged: (v) {
@@ -450,6 +467,120 @@ Widget _rspMcqQuestionsPanel({
                       );
                     }),
                   ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        () {
+                          if (optCount == 0) return 'No options yet';
+                          final safeIndex = item.correctIndex.clamp(
+                            0,
+                            optCount - 1,
+                          );
+                          final selected = item
+                              .optionControllers[safeIndex]
+                              .text
+                              .trim();
+                          if (selected.isEmpty) {
+                            return 'Correct answer: Option ${safeIndex + 1}';
+                          }
+                          return 'Correct answer: ${selected.length > 72 ? '${selected.substring(0, 72)}...' : selected}';
+                        }(),
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: optCount < 2
+                          ? null
+                          : () async {
+                              var selected = item.correctIndex.clamp(
+                                0,
+                                optCount - 1,
+                              );
+                              final picked = await showDialog<int>(
+                                context: context,
+                                builder: (dialogContext) {
+                                  return AlertDialog(
+                                    title: const Text('Set Correct Answer'),
+                                    content: SizedBox(
+                                      width: 520,
+                                      child: StatefulBuilder(
+                                        builder: (context, setDialogState) {
+                                          return SingleChildScrollView(
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: List.generate(
+                                                optCount,
+                                                (idx) {
+                                                  final txt = item
+                                                      .optionControllers[idx]
+                                                      .text
+                                                      .trim();
+                                                  return RadioListTile<int>(
+                                                    value: idx,
+                                                    groupValue: selected,
+                                                    onChanged: (v) {
+                                                      if (v == null) return;
+                                                      setDialogState(
+                                                        () => selected = v,
+                                                      );
+                                                    },
+                                                    title: Text(
+                                                      txt.isEmpty
+                                                          ? 'Option ${idx + 1}'
+                                                          : txt,
+                                                      maxLines: 2,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                    dense: true,
+                                                    contentPadding:
+                                                        EdgeInsets.zero,
+                                                  );
+                                                },
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.of(dialogContext).pop(),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () => Navigator.of(
+                                          dialogContext,
+                                        ).pop(selected),
+                                        child: const Text('Apply'),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+                              if (picked == null) return;
+                              item.correctIndex = picked;
+                              onRefresh();
+                            },
+                      icon: const Icon(Icons.check_circle_outline_rounded),
+                      label: Text(
+                        optCount < 2
+                            ? 'Need 2+ options'
+                            : 'Set/Change Correct Answer',
+                      ),
+                    ),
+                  ],
                 ),
                 if (optCount < 6)
                   TextButton.icon(
@@ -1490,6 +1621,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                           ),
                         ),
                         const SizedBox(height: 6),
+                        // ignore: deprecated_member_use
                         RadioGroup<String>(
                           groupValue: _relationship,
                           onChanged: (v) => setState(() => _relationship = v!),
@@ -1929,7 +2061,8 @@ class _BiFormList extends StatelessWidget {
                 onView: () => showReadOnlySavedEntryDialog(
                   context,
                   title: 'BI form â€” ${e.applicantName}',
-                  subtitle: '${e.respondentName} Â· ${e.respondentRelationship}',
+                  subtitle:
+                      '${e.respondentName} Â· ${e.respondentRelationship}',
                   previewBuilder: () => _BiFormEditor(
                     readOnly: true,
                     entry: e,
@@ -2543,7 +2676,6 @@ class _PerformanceFormList extends StatelessWidget {
   }
 }
 
-
 /// RSP: Applicants Profile Ã¢â‚¬â€ job vacancy details + list of applicants.
 class _RspApplicantsProfileSection extends StatefulWidget {
   const _RspApplicantsProfileSection();
@@ -2599,10 +2731,12 @@ class _RspApplicantsProfileSectionState
 
   ApplicantsProfileEntry _buildAutoPrefilledProfile(
     JobVacancyAnnouncement announcement,
-    List<RecruitmentApplication> applications,
-    {String? preferredPosition}
-  ) {
-    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    List<RecruitmentApplication> applications, {
+    String? preferredPosition,
+  }) {
+    final pipelineApps = applications
+        .where((a) => a.isActiveInPipeline)
+        .toList();
     final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
     final preferred = preferredPosition?.trim();
 
@@ -2627,8 +2761,9 @@ class _RspApplicantsProfileSectionState
       }
       return null;
     }();
-    selectedVacancy ??=
-        announcement.vacancies.isNotEmpty ? announcement.vacancies.first : null;
+    selectedVacancy ??= announcement.vacancies.isNotEmpty
+        ? announcement.vacancies.first
+        : null;
 
     String? selectedPosition = preferred;
     if (selectedPosition == null || selectedPosition.isEmpty) {
@@ -2647,18 +2782,19 @@ class _RspApplicantsProfileSectionState
     final matchedApps = selectedPosition == null || selectedPosition.isEmpty
         ? sourceApps
         : sourceApps
-              .where((a) => _samePosition(a.positionAppliedFor, selectedPosition))
+              .where(
+                (a) => _samePosition(a.positionAppliedFor, selectedPosition),
+              )
               .toList();
-    matchedApps.sort(
-      (a, b) => _norm(a.fullName).compareTo(_norm(b.fullName)),
-    );
+    matchedApps.sort((a, b) => _norm(a.fullName).compareTo(_norm(b.fullName)));
 
     DateTime? postingDate;
-    final withCreatedAt = matchedApps
-        .where((a) => a.createdAt != null)
-        .map((a) => a.createdAt!)
-        .toList()
-      ..sort((a, b) => a.compareTo(b));
+    final withCreatedAt =
+        matchedApps
+            .where((a) => a.createdAt != null)
+            .map((a) => a.createdAt!)
+            .toList()
+          ..sort((a, b) => a.compareTo(b));
     if (withCreatedAt.isNotEmpty) {
       postingDate = withCreatedAt.first;
     } else {
@@ -2666,8 +2802,7 @@ class _RspApplicantsProfileSectionState
     }
 
     return ApplicantsProfileEntry(
-      positionAppliedFor:
-          (selectedPosition == null || selectedPosition.isEmpty)
+      positionAppliedFor: (selectedPosition == null || selectedPosition.isEmpty)
           ? null
           : selectedPosition,
       minimumRequirements: _requirementsFromVacancy(selectedVacancy),
@@ -2679,7 +2814,9 @@ class _RspApplicantsProfileSectionState
           .map(
             (a) => ApplicantsProfileApplicant(
               name: a.fullName.trim().isEmpty ? null : a.fullName.trim(),
-              course: a.course?.trim().isEmpty == true ? null : a.course?.trim(),
+              course: a.course?.trim().isEmpty == true
+                  ? null
+                  : a.course?.trim(),
               address: a.address?.trim().isEmpty == true
                   ? null
                   : a.address?.trim(),
@@ -2711,7 +2848,9 @@ class _RspApplicantsProfileSectionState
       addPosition(v.positionKey);
     }
 
-    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    final pipelineApps = applications
+        .where((a) => a.isActiveInPipeline)
+        .toList();
     final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
     for (final app in sourceApps) {
       addPosition(app.positionAppliedFor);
@@ -2724,8 +2863,11 @@ class _RspApplicantsProfileSectionState
     List<String> positions,
     List<RecruitmentApplication> applications,
   ) async {
-    if (positions.length <= 1) return positions.isEmpty ? null : positions.first;
-    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    if (positions.length <= 1)
+      return positions.isEmpty ? null : positions.first;
+    final pipelineApps = applications
+        .where((a) => a.isActiveInPipeline)
+        .toList();
     final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
 
     int countFor(String position) => sourceApps
@@ -2791,7 +2933,10 @@ class _RspApplicantsProfileSectionState
       final applications = await RecruitmentRepo.instance.listApplications();
       if (!mounted) return;
       final positions = _autofillPositions(announcement, applications);
-      final selectedPosition = await _pickAutofillPosition(positions, applications);
+      final selectedPosition = await _pickAutofillPosition(
+        positions,
+        applications,
+      );
       if (!mounted) return;
       setState(
         () => _editing = _buildAutoPrefilledProfile(
@@ -2805,6 +2950,7 @@ class _RspApplicantsProfileSectionState
       setState(() => _editing = const ApplicantsProfileEntry());
     }
   }
+
   void _edit(ApplicantsProfileEntry e) => setState(() => _editing = e);
   void _cancelEdit() => setState(() => _editing = null);
 
@@ -3338,13 +3484,26 @@ class _ApplicantsProfileFormEditorState
                   fontWeight: FontWeight.w700,
                 ),
                 columns: [
-                  DataColumn(label: Text('NAME', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('COURSE', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('ADDRESS', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('SEX', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('AGE', style: TextStyle(color: primary))),
                   DataColumn(
-                    label: Text('CIVIL STATUS', style: TextStyle(color: primary)),
+                    label: Text('NAME', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text('COURSE', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text('ADDRESS', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text('SEX', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text('AGE', style: TextStyle(color: primary)),
+                  ),
+                  DataColumn(
+                    label: Text(
+                      'CIVIL STATUS',
+                      style: TextStyle(color: primary),
+                    ),
                   ),
                   DataColumn(
                     label: Text(
@@ -3352,7 +3511,9 @@ class _ApplicantsProfileFormEditorState
                       style: TextStyle(color: primary),
                     ),
                   ),
-                  DataColumn(label: Text('', style: TextStyle(color: primary))),
+                  DataColumn(
+                    label: Text('', style: TextStyle(color: primary)),
+                  ),
                 ],
                 rows: List.generate(_currentPageRows.length, (i) {
                   final r = _currentPageRows[i];
@@ -6421,7 +6582,8 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
             : '(No position)';
         return SavedRecordListItem(
           title: pos,
-          subtitle: '${e.office ?? "â€”"} Â· ${e.applicants.length} applicant(s)',
+          subtitle:
+              '${e.office ?? "â€”"} Â· ${e.applicants.length} applicant(s)',
           detailDialogTitle: 'Turn-around time â€” $pos',
           previewContentWidth: 1200,
           previewBuilder: () => _TurnAroundTimeEditor(
@@ -8327,8 +8489,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   bool _exportingReport = false;
   String? _adminPassingApplicantId;
   final ScrollController _horizontalScrollController = ScrollController();
-  final ScrollController _scoreBreakdownVScrollController =
-      ScrollController();
+  final ScrollController _scoreBreakdownVScrollController = ScrollController();
 
   Set<String> get _positionFilterOptions {
     final out = <String>{};
@@ -8420,16 +8581,19 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     RecruitmentExamResult? existing,
   ) async {
     if (_adminPassingApplicantId != null) return;
-    final ok = await _AdminExamBypassDialog.show(
+    final choice = await _AdminExamBypassDialog.show(
       context,
       app: app,
       existing: existing,
     );
-    if (ok != true || !mounted) return;
-    await _adminPassExamPerfect(app);
+    if (choice == null || !mounted) return;
+    await _adminPassExamWithChoice(app, choice);
   }
 
-  Future<void> _adminPassExamPerfect(RecruitmentApplication app) async {
+  Future<void> _adminPassExamWithChoice(
+    RecruitmentApplication app,
+    _AdminPassChoice choice,
+  ) async {
     setState(() => _adminPassingApplicantId = app.id.toLowerCase());
     try {
       var beiCount = 8;
@@ -8438,13 +8602,31 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         if (beiQs.isNotEmpty) beiCount = beiQs.length;
       } catch (_) {}
 
-      final answersJson = RspScreeningScores.buildAdminExamBypassAnswersJson(
-        beiQuestionCount: beiCount,
-      );
+      final bool usePerfect = choice.mode == _AdminPassScoreMode.perfect;
+      final answersJson = usePerfect
+          ? RspScreeningScores.buildAdminExamBypassAnswersJson(
+              beiQuestionCount: beiCount,
+            )
+          : RspScreeningScores.buildAdminExamOverrideAnswersJson(
+              generalScore: choice.generalScore,
+              mathScore: choice.mathScore,
+              generalInfoScore: choice.generalInfoScore,
+              beiScore: choice.beiScore,
+              beiQuestionCount: beiCount,
+            );
+      final overall = usePerfect
+          ? 100.0
+          : RspScreeningScores.roundOverall(
+              (choice.generalScore +
+                      choice.mathScore +
+                      choice.generalInfoScore +
+                      choice.beiScore) /
+                  4.0,
+            );
 
       await RecruitmentRepo.instance.submitExamResult(
         applicationId: app.id,
-        scorePercent: 100.0,
+        scorePercent: overall,
         passed: true,
         answersJson: answersJson,
       );
@@ -8455,7 +8637,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${app.fullName.trim().isEmpty ? 'Applicant' : app.fullName.trim()} marked passed — 100% on all four exams.',
+            usePerfect
+                ? '${app.fullName.trim().isEmpty ? 'Applicant' : app.fullName.trim()} marked passed - 100% on all four exams.'
+                : '${app.fullName.trim().isEmpty ? 'Applicant' : app.fullName.trim()} marked passed with custom scores.',
           ),
         ),
       );
@@ -8463,9 +8647,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Could not mark as passed. ${userFacingApiError(e)}',
-          ),
+          content: Text('Could not mark as passed. ${userFacingApiError(e)}'),
         ),
       );
     } finally {
@@ -8585,8 +8767,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     }
 
     return Tooltip(
-      message:
-          'Admin bypass: mark passed with 100% on General, Math, Gen. info, and BEI',
+      message: 'Admin pass: choose perfect 100% or encode custom scores',
       child: FilledButton.tonal(
         onPressed: () => _confirmAndAdminPassExam(app, exam),
         style: FilledButton.styleFrom(
@@ -8860,10 +9041,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                             exam: exam,
                             isPassing: isPassingThis,
                           )
-                        : _scoreBreakdownStatusPill(
-                            dialogContext,
-                            exam: exam,
-                          ),
+                        : _scoreBreakdownStatusPill(dialogContext, exam: exam),
                   ),
                   background: rowBg,
                   padding: const EdgeInsets.symmetric(
@@ -9181,25 +9359,26 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         final e = entries[i];
         final fileName = e['fileName']!;
         final kind = RspApplicationDocKind.fromStorageFileName(fileName);
-        final finalReqKind =
-            RspFinalRequirementDocKind.fromStorageFileName(fileName);
+        final finalReqKind = RspFinalRequirementDocKind.fromStorageFileName(
+          fileName,
+        );
         final bool ok;
         if (kind != null) {
           ok = await RecruitmentRepo.instance
               .setApplicationTypedAttachmentIfMissing(
-            e['applicationId']!,
-            e['path']!,
-            fileName,
-            kind,
-          );
+                e['applicationId']!,
+                e['path']!,
+                fileName,
+                kind,
+              );
         } else if (finalReqKind != null) {
           ok = await RecruitmentRepo.instance
               .setApplicationFinalRequirementIfMissing(
-            e['applicationId']!,
-            e['path']!,
-            fileName,
-            finalReqKind,
-          );
+                e['applicationId']!,
+                e['path']!,
+                fileName,
+                finalReqKind,
+              );
         } else {
           ok = await RecruitmentRepo.instance.setApplicationAttachmentIfMissing(
             e['applicationId']!,
@@ -9387,7 +9566,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     final isApplicationsView = !isExamView;
     final pageTitle = isExamView ? 'Exam Results' : 'Applications';
     final pageSubtitle = isExamView
-        ? 'Section scores and pass/fail below. Use Mark passed in the Result column for admin bypass (100% on all 4 exams). Use Grade BEI to score real BEI responses.'
+        ? 'Section scores and pass/fail below. Use Mark passed in the Result column to choose perfect 100% or encode custom pass scores. Use Grade BEI to score real BEI responses.'
         : 'Monitor applicant submissions, attachments, and document review status.';
     final pageIcon = isExamView
         ? Icons.fact_check_outlined
@@ -9668,10 +9847,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 spacing: 10,
                 runSpacing: 10,
                 crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  generateReportBtn,
-                  if (isApplicationsView) syncBtn,
-                ],
+                children: [generateReportBtn, if (isApplicationsView) syncBtn],
               );
             },
           ),
@@ -9855,7 +10031,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                   4: const FixedColumnWidth(90), // Gender
                                   5: const FixedColumnWidth(150), // Course
                                   6: const FixedColumnWidth(70), // Age
-                                  7: const FixedColumnWidth(140), // Civil status
+                                  7: const FixedColumnWidth(
+                                    140,
+                                  ), // Civil status
                                   8: const FixedColumnWidth(
                                     170,
                                   ), // City / Municipality
@@ -9952,7 +10130,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                       ),
                                       _tableCell(
                                         150,
-                                        Text('Barangay', style: tableHeaderStyle),
+                                        Text(
+                                          'Barangay',
+                                          style: tableHeaderStyle,
+                                        ),
                                       ),
                                       _tableCell(
                                         180,
@@ -10051,8 +10232,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                     final gender = _displayOrNa(app.sex);
                                     final course = _displayOrNa(app.course);
                                     final age = _displayOrNa(app.age);
-                                    final civilStatus =
-                                        _displayOrNa(app.civilStatus);
+                                    final civilStatus = _displayOrNa(
+                                      app.civilStatus,
+                                    );
                                     final addr = _appAddressParts(app);
                                     final city = _displayOrNa(
                                       addr.city.isEmpty ? null : addr.city,
@@ -10407,24 +10589,100 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   }
 }
 
-class _AdminExamBypassDialog extends StatelessWidget {
-  const _AdminExamBypassDialog({
-    required this.app,
-    required this.existing,
-  });
+enum _AdminPassScoreMode { perfect, custom }
+
+class _AdminPassChoice {
+  const _AdminPassChoice.perfect()
+    : mode = _AdminPassScoreMode.perfect,
+      generalScore = 100,
+      mathScore = 100,
+      generalInfoScore = 100,
+      beiScore = 100;
+
+  const _AdminPassChoice.custom({
+    required this.generalScore,
+    required this.mathScore,
+    required this.generalInfoScore,
+    required this.beiScore,
+  }) : mode = _AdminPassScoreMode.custom;
+
+  final _AdminPassScoreMode mode;
+  final double generalScore;
+  final double mathScore;
+  final double generalInfoScore;
+  final double beiScore;
+}
+
+class _AdminExamBypassDialog extends StatefulWidget {
+  const _AdminExamBypassDialog({required this.app, required this.existing});
 
   final RecruitmentApplication app;
   final RecruitmentExamResult? existing;
 
-  static Future<bool?> show(
+  static Future<_AdminPassChoice?> show(
     BuildContext context, {
     required RecruitmentApplication app,
     required RecruitmentExamResult? existing,
   }) {
-    return showDialog<bool>(
+    return showDialog<_AdminPassChoice>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.48),
       builder: (ctx) => _AdminExamBypassDialog(app: app, existing: existing),
+    );
+  }
+
+  @override
+  State<_AdminExamBypassDialog> createState() => _AdminExamBypassDialogState();
+}
+
+class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
+  _AdminPassScoreMode _mode = _AdminPassScoreMode.perfect;
+  final _generalController = TextEditingController(text: '100');
+  final _mathController = TextEditingController(text: '100');
+  final _infoController = TextEditingController(text: '100');
+  final _beiController = TextEditingController(text: '100');
+
+  @override
+  void dispose() {
+    _generalController.dispose();
+    _mathController.dispose();
+    _infoController.dispose();
+    _beiController.dispose();
+    super.dispose();
+  }
+
+  double? _parseScore(TextEditingController c) {
+    final s = c.text.trim();
+    if (s.isEmpty) return null;
+    final v = double.tryParse(s);
+    if (v == null) return null;
+    if (v < 60 || v > 100) return null;
+    return v;
+  }
+
+  _AdminPassChoice? _buildChoiceOrShowError() {
+    if (_mode == _AdminPassScoreMode.perfect) {
+      return const _AdminPassChoice.perfect();
+    }
+    final g = _parseScore(_generalController);
+    final m = _parseScore(_mathController);
+    final i = _parseScore(_infoController);
+    final b = _parseScore(_beiController);
+    if (g == null || m == null || i == null || b == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Enter valid scores from 60 to 100 for General, Math, Gen. info, and BEI.',
+          ),
+        ),
+      );
+      return null;
+    }
+    return _AdminPassChoice.custom(
+      generalScore: g,
+      mathScore: m,
+      generalInfoScore: i,
+      beiScore: b,
     );
   }
 
@@ -10437,11 +10695,13 @@ class _AdminExamBypassDialog extends StatelessWidget {
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final dark = AppTheme.dashIsDark(context);
     final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
-    final alreadyPassed = existing?.passed == true;
-    final hasExam = existing != null;
-    final name = app.fullName.trim().isEmpty ? 'Unnamed applicant' : app.fullName.trim();
-    final position = (app.positionAppliedFor ?? '').trim();
-    final email = app.email.trim();
+    final alreadyPassed = widget.existing?.passed == true;
+    final hasExam = widget.existing != null;
+    final name = widget.app.fullName.trim().isEmpty
+        ? 'Unnamed applicant'
+        : widget.app.fullName.trim();
+    final position = (widget.app.positionAppliedFor ?? '').trim();
+    final email = widget.app.email.trim();
 
     String statusLabel;
     Color statusBg;
@@ -10489,7 +10749,9 @@ class _AdminExamBypassDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(22),
+              ),
               child: Container(
                 height: 4,
                 decoration: const BoxDecoration(
@@ -10559,7 +10821,7 @@ class _AdminExamBypassDialog extends StatelessWidget {
                   ),
                   IconButton(
                     tooltip: 'Close',
-                    onPressed: () => Navigator.of(context).pop(false),
+                    onPressed: () => Navigator.of(context).pop(),
                     icon: Icon(Icons.close_rounded, color: secondary),
                   ),
                 ],
@@ -10605,7 +10867,10 @@ class _AdminExamBypassDialog extends StatelessWidget {
                             const SizedBox(height: 2),
                             Text(
                               email,
-                              style: TextStyle(color: secondary, fontSize: 12.5),
+                              style: TextStyle(
+                                color: secondary,
+                                fontSize: 12.5,
+                              ),
                             ),
                           ],
                           if (position.isNotEmpty) ...[
@@ -10657,7 +10922,7 @@ class _AdminExamBypassDialog extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 16, 22, 0),
               child: Text(
-                'WILL BE RECORDED AS',
+                'SCORING MODE',
                 style: TextStyle(
                   color: secondary,
                   fontSize: 11,
@@ -10668,15 +10933,113 @@ class _AdminExamBypassDialog extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 10, 22, 0),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: const [
-                  _AdminBypassExamChip(label: 'General', score: '100%'),
-                  _AdminBypassExamChip(label: 'Math', score: '100%'),
-                  _AdminBypassExamChip(label: 'Gen. info', score: '100%'),
-                  _AdminBypassExamChip(label: 'BEI', score: '100%'),
-                ],
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: muted,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: hairline),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // ignore: deprecated_member_use
+                    RadioListTile<_AdminPassScoreMode>(
+                      value: _AdminPassScoreMode.perfect,
+                      groupValue: _mode,
+                      onChanged: (v) => setState(() => _mode = v!),
+                      title: const Text('Perfect score (100% on all sections)'),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    // ignore: deprecated_member_use
+                    RadioListTile<_AdminPassScoreMode>(
+                      value: _AdminPassScoreMode.custom,
+                      groupValue: _mode,
+                      onChanged: (v) => setState(() => _mode = v!),
+                      title: const Text(
+                        'Custom scores (admin manually encodes section scores)',
+                      ),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    if (_mode == _AdminPassScoreMode.custom) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Allowed range: 60 to 100 (Mark passed mode).',
+                        style: TextStyle(
+                          color: secondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _generalController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'General',
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: _mathController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'Math',
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _infoController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'Gen. info',
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: _beiController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'BEI',
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
             Padding(
@@ -10685,9 +11048,9 @@ class _AdminExamBypassDialog extends StatelessWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF8E1).withValues(
-                    alpha: dark ? 0.22 : 1,
-                  ),
+                  color: const Color(
+                    0xFFFFF8E1,
+                  ).withValues(alpha: dark ? 0.22 : 1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: const Color(0xFFFFB300).withValues(alpha: 0.45),
@@ -10706,7 +11069,7 @@ class _AdminExamBypassDialog extends StatelessWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'This is an HR admin override. The applicant is marked passed without completing the online screening exam. Application status will update to passed.',
+                        'This is an HR admin override. The applicant is marked passed and the chosen scores are saved to the screening result.',
                         style: TextStyle(
                           color: dark
                               ? const Color(0xFFFFE082)
@@ -10727,7 +11090,7 @@ class _AdminExamBypassDialog extends StatelessWidget {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => Navigator.of(context).pop(false),
+                      onPressed: () => Navigator.of(context).pop(),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: accent,
                         side: BorderSide(color: hairline),
@@ -10763,10 +11126,14 @@ class _AdminExamBypassDialog extends StatelessWidget {
                         ],
                       ),
                       child: FilledButton.icon(
-                        onPressed: () => Navigator.of(context).pop(true),
+                        onPressed: () {
+                          final choice = _buildChoiceOrShowError();
+                          if (choice == null) return;
+                          Navigator.of(context).pop(choice);
+                        },
                         icon: const Icon(Icons.check_circle_rounded, size: 20),
                         label: Text(
-                          alreadyPassed ? 'Replace with perfect' : 'Mark passed',
+                          alreadyPassed ? 'Replace result' : 'Mark passed',
                           style: const TextStyle(fontWeight: FontWeight.w800),
                         ),
                         style: FilledButton.styleFrom(
@@ -10791,48 +11158,7 @@ class _AdminExamBypassDialog extends StatelessWidget {
   }
 }
 
-class _AdminBypassExamChip extends StatelessWidget {
-  const _AdminBypassExamChip({required this.label, required this.score});
-
-  final String label;
-  final String score;
-
-  @override
-  Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: accent.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            score,
-            style: TextStyle(
-              color: accent,
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// _AdminBypassExamChip was removed because it was not referenced anywhere.
 
 class _EditApplicantBasicDialog extends StatefulWidget {
   const _EditApplicantBasicDialog({required this.app});

@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "dev": "node scripts/free-dev-port.js && node --watch src/index.js",
     "db:init": "psql -d $npm_config_db -f scripts/init-schema.sql",
     "leave:accrual": "node scripts/run-leave-monthly-accrual.js",
     "leave:accrual:dry": "node scripts/run-leave-monthly-accrual.js --dry-run",
@@ -25,14 +25,22 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "express-rate-limit": "^8.5.1",
-    "firebase-admin": "^13.0.0",
+    "firebase-admin": "^14.1.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "node-cron": "^4.2.1",
     "node-zklib": "^1.3.0",
-    "nodemailer": "^8.0.7",
+    "nodemailer": "^9.0.3",
     "pg": "^8.12.0",
     "uuid": "^11.1.1",
     "ws": "^8.20.0"
+  },
+  "overrides": {
+    "gaxios": {
+      "uuid": "^11.1.1"
+    },
+    "teeny-request": {
+      "uuid": "^11.1.1"
+    }
   }
 }

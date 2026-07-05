@@ -1,4 +1,18 @@
 {
   "java.configuration.updateBuildConfiguration": "interactive",
-  "python-envs.defaultEnvManager": "ms-python.python:system"
+  "python-envs.defaultEnvManager": "ms-python.python:system",
+  "terminal.integrated.profiles.windows": {
+    "PowerShell": {
+      "source": "PowerShell",
+      "args": [
+        "-NoExit",
+        "-Command",
+        "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
+      ]
+    }
+  },
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "files.associations": {
+    "**/build/reports/problems/*.html": "plaintext"
+  }
 }

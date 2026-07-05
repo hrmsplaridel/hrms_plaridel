@@ -117,4 +117,35 @@ class RspScreeningScores {
       },
     };
   }
+
+  /// Admin override with explicit section scores.
+  static Map<String, dynamic> buildAdminExamOverrideAnswersJson({
+    required double generalScore,
+    required double mathScore,
+    required double generalInfoScore,
+    required double beiScore,
+    int beiQuestionCount = 8,
+  }) {
+    final g = generalScore.clamp(0.0, 100.0).toDouble();
+    final m = mathScore.clamp(0.0, 100.0).toDouble();
+    final i = generalInfoScore.clamp(0.0, 100.0).toDouble();
+    final b = beiScore.clamp(0.0, 100.0).toDouble();
+    final n = beiQuestionCount < 1 ? 8 : beiQuestionCount;
+    Map<String, dynamic> mcq(double score) => <String, dynamic>{
+      'score': score,
+      'passed': true,
+      'admin_override': true,
+    };
+    return {
+      'general': mcq(g),
+      'math': mcq(m),
+      'general_info': mcq(i),
+      'bei': {
+        'questions': List<String>.filled(n, 'Admin override'),
+        'answers': List<String>.filled(n, 'Manually graded by HR'),
+        'scores': List<double>.filled(n, b),
+        'admin_override': true,
+      },
+    };
+  }
 }

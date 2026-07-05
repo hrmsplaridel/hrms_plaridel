@@ -39,9 +39,7 @@ class _EmployeeLeaveCardViewScreenState
   List<LeaveBalanceLedgerEntry> _forcedLeaveDeductions = const [];
   int _pageIndex = 0;
 
-  /// Current VL / SL totals from [leave_balances].
-  double _vacationEarnedDays = 0;
-  double _sickEarnedDays = 0;
+  /// Current VL / SL remaining totals from [leave_balances].
   double _vacationRemainingDays = 0;
   double _sickRemainingDays = 0;
   String _service = '';
@@ -100,8 +98,6 @@ class _EmployeeLeaveCardViewScreenState
       setState(() {
         _requests = cardRows;
         _forcedLeaveDeductions = ledger.rows;
-        _vacationEarnedDays = totals.vacationEarned;
-        _sickEarnedDays = totals.sickEarned;
         _vacationRemainingDays = totals.vacationRemaining;
         _sickRemainingDays = totals.sickRemaining;
         _service = profile.service;
@@ -168,8 +164,6 @@ class _EmployeeLeaveCardViewScreenState
         officeDepartment: office,
         firstDayOfService: _firstDayOfService,
         requests: _requests,
-        vacationEarnedDays: _vacationEarnedDays,
-        sickEarnedDays: _sickEarnedDays,
         vacationRemainingDays: _vacationRemainingDays,
         sickRemainingDays: _sickRemainingDays,
         balanceLedgerTypes: _balanceLedgerTypes,
@@ -230,8 +224,6 @@ class _EmployeeLeaveCardViewScreenState
   Widget _buildCardLayout(String office) {
     final entries = _buildLeaveCardEntries(
       _requests,
-      vacationEarnedDays: _vacationEarnedDays,
-      sickEarnedDays: _sickEarnedDays,
       vacationRemainingDays: _vacationRemainingDays,
       sickRemainingDays: _sickRemainingDays,
       balanceLedgerTypes: _balanceLedgerTypes,
@@ -764,6 +756,8 @@ class _LeaveCardGrid extends StatelessWidget {
   }
 }
 
+const double _leaveCardMonthlyEarnedDays = 1.25;
+
 class _GridCellSpec {
   const _GridCellSpec(
     this.text, {
@@ -818,8 +812,6 @@ class _LeaveCardEntry {
 
   factory _LeaveCardEntry.fromRequest(
     LeaveRequest request, {
-    required double vacationEarnedDays,
-    required double sickEarnedDays,
     required double vacationBalanceDays,
     required double sickBalanceDays,
     required double withPayDays,
@@ -834,17 +826,18 @@ class _LeaveCardEntry {
     final isSick = _isSickLedgerRequest(request, balanceLedgerTypes);
     final isVacation = _isVacationLedgerRequest(request, balanceLedgerTypes);
     final actionDate = request.reviewedAt ?? request.dateFiled;
+    final earnedDays = _fmtEarned(_leaveCardMonthlyEarnedDays);
 
     return _LeaveCardEntry(
       period: period,
       particulars: request.leaveTypeLabel,
-      vacEarned: _fmtNum(vacationEarnedDays),
+      vacEarned: isVacation ? earnedDays : '',
       vacAbsWithPay: isVacation ? _fmtNum(withPayDays) : '',
-      vacBalance: _fmtNum(vacationBalanceDays),
+      vacBalance: isVacation ? _fmtNum(vacationBalanceDays) : '',
       vacAbsWithoutPay: isVacation ? _fmtNum(withoutPayDays) : '',
-      slEarned: _fmtNum(sickEarnedDays),
+      slEarned: isSick ? earnedDays : '',
       slAbsWithPay: isSick ? _fmtNum(withPayDays) : '',
-      slBalance: _fmtNum(sickBalanceDays),
+      slBalance: isSick ? _fmtNum(sickBalanceDays) : '',
       slAbsWithoutPay: isSick ? _fmtNum(withoutPayDays) : '',
       dateTakenOnApplication: actionDate != null ? _fmtDate(actionDate) : '',
     );
@@ -852,26 +845,25 @@ class _LeaveCardEntry {
 
   factory _LeaveCardEntry.fromForcedDeduction(
     LeaveBalanceLedgerEntry entry, {
-    required double vacationEarnedDays,
-    required double sickEarnedDays,
     required double vacationBalanceDays,
-    required double sickBalanceDays,
     required double deductedDays,
   }) {
-    final year = entry.metadataJson?['year'] ?? entry.metadataJson?['deduction_year'];
+    final year =
+        entry.metadataJson?['year'] ?? entry.metadataJson?['deduction_year'];
     final period = year != null ? 'CY $year' : _fmtDate(entry.createdAt);
     final particulars = _forcedDeductionParticulars(entry);
+    final earnedDays = _fmtEarned(_leaveCardMonthlyEarnedDays);
 
     return _LeaveCardEntry(
       period: period,
       particulars: particulars,
-      vacEarned: _fmtNum(vacationEarnedDays),
+      vacEarned: earnedDays,
       vacAbsWithPay: _fmtNum(deductedDays),
       vacBalance: _fmtNum(vacationBalanceDays),
       vacAbsWithoutPay: '',
-      slEarned: _fmtNum(sickEarnedDays),
+      slEarned: '',
       slAbsWithPay: '',
-      slBalance: _fmtNum(sickBalanceDays),
+      slBalance: '',
       slAbsWithoutPay: '',
       dateTakenOnApplication: _fmtDate(entry.createdAt),
     );
@@ -880,8 +872,6 @@ class _LeaveCardEntry {
 
 List<_LeaveCardEntry> _buildLeaveCardEntries(
   List<LeaveRequest> requests, {
-  required double vacationEarnedDays,
-  required double sickEarnedDays,
   required double vacationRemainingDays,
   required double sickRemainingDays,
   required Map<String, String> balanceLedgerTypes,
@@ -908,8 +898,7 @@ List<_LeaveCardEntry> _buildLeaveCardEntries(
   final vacationUsedInRows =
       cardRequests
           .where(
-            (request) =>
-                _isVacationLedgerRequest(request, balanceLedgerTypes),
+            (request) => _isVacationLedgerRequest(request, balanceLedgerTypes),
           )
           .fold<double>(0, (sum, request) => sum + _withPayDays(request)) +
       deductionDaysTotal;
@@ -942,8 +931,6 @@ List<_LeaveCardEntry> _buildLeaveCardEntries(
         }
         return _LeaveCardEntry.fromRequest(
           request,
-          vacationEarnedDays: vacationEarnedDays,
-          sickEarnedDays: sickEarnedDays,
           vacationBalanceDays: vacationBalance,
           sickBalanceDays: sickBalance,
           withPayDays: withPayDays,
@@ -956,10 +943,7 @@ List<_LeaveCardEntry> _buildLeaveCardEntries(
         vacationBalance -= deductedDays;
         return _LeaveCardEntry.fromForcedDeduction(
           entry,
-          vacationEarnedDays: vacationEarnedDays,
-          sickEarnedDays: sickEarnedDays,
           vacationBalanceDays: vacationBalance,
-          sickBalanceDays: sickBalance,
           deductedDays: deductedDays,
         );
       },
@@ -1014,7 +998,8 @@ double _forcedDeductionDays(LeaveBalanceLedgerEntry entry) {
 }
 
 String _forcedDeductionParticulars(LeaveBalanceLedgerEntry entry) {
-  final year = entry.metadataJson?['year'] ?? entry.metadataJson?['deduction_year'];
+  final year =
+      entry.metadataJson?['year'] ?? entry.metadataJson?['deduction_year'];
   if (year != null) {
     return 'Year-end Mandatory Leave Deduction ($year)';
   }
@@ -1088,23 +1073,17 @@ double _withoutPayDays(LeaveRequest request) {
 }
 
 _LeaveCardTotals _vlSlTotalsFromBalances(List<LeaveBalance> balances) {
-  var vacationEarned = 0.0;
-  var sickEarned = 0.0;
   var vacationRemaining = 0.0;
   var sickRemaining = 0.0;
   for (final b in balances) {
     if (b.effectiveLeaveTypeName == LeaveType.vacationLeave.value) {
-      vacationEarned = b.earnedDays;
       vacationRemaining = b.remainingDays;
     }
     if (b.effectiveLeaveTypeName == LeaveType.sickLeave.value) {
-      sickEarned = b.earnedDays;
       sickRemaining = b.remainingDays;
     }
   }
   return _LeaveCardTotals(
-    vacationEarned: vacationEarned,
-    sickEarned: sickEarned,
     vacationRemaining: vacationRemaining,
     sickRemaining: sickRemaining,
   );
@@ -1112,14 +1091,10 @@ _LeaveCardTotals _vlSlTotalsFromBalances(List<LeaveBalance> balances) {
 
 class _LeaveCardTotals {
   const _LeaveCardTotals({
-    required this.vacationEarned,
-    required this.sickEarned,
     required this.vacationRemaining,
     required this.sickRemaining,
   });
 
-  final double vacationEarned;
-  final double sickEarned;
   final double vacationRemaining;
   final double sickRemaining;
 }
@@ -1187,6 +1162,8 @@ String _fmtNum(double value) {
   if (value == value.roundToDouble()) return value.toInt().toString();
   return value.toStringAsFixed(1);
 }
+
+String _fmtEarned(double value) => value.toStringAsFixed(3);
 
 String _fmtDate(DateTime value) {
   final mm = value.month.toString().padLeft(2, '0');

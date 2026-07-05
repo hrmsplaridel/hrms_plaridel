@@ -10,6 +10,8 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 class LeaveCardPrintView {
   LeaveCardPrintView._();
 
+  static const double _monthlyEarnedDays = 1.25;
+
   static final PdfPageFormat _legalPage = PdfPageFormat(
     612, // 8.5in * 72
     1008, // 14in * 72
@@ -25,8 +27,6 @@ class LeaveCardPrintView {
     required String officeDepartment,
     DateTime? firstDayOfService,
     required List<LeaveRequest> requests,
-    required double vacationEarnedDays,
-    required double sickEarnedDays,
     required double vacationRemainingDays,
     required double sickRemainingDays,
     Map<String, String> balanceLedgerTypes = const {},
@@ -41,8 +41,6 @@ class LeaveCardPrintView {
     final doc = pw.Document(title: "Employee's Leave Card");
     final rows = _buildRows(
       sorted,
-      vacationEarnedDays: vacationEarnedDays,
-      sickEarnedDays: sickEarnedDays,
       vacationRemainingDays: vacationRemainingDays,
       sickRemainingDays: sickRemainingDays,
       balanceLedgerTypes: balanceLedgerTypes,
@@ -421,8 +419,6 @@ class LeaveCardPrintView {
 
   static List<_LeaveCardRow> _buildRows(
     List<LeaveRequest> requests, {
-    required double vacationEarnedDays,
-    required double sickEarnedDays,
     required double vacationRemainingDays,
     required double sickRemainingDays,
     required Map<String, String> balanceLedgerTypes,
@@ -445,8 +441,7 @@ class LeaveCardPrintView {
     if (cardRequests.isEmpty && deductions.isEmpty) {
       return List.generate(16, (_) => const _LeaveCardRow.empty());
     }
-    final vacEarnedStr = _fmtNum(vacationEarnedDays);
-    final slEarnedStr = _fmtNum(sickEarnedDays);
+    final earnedStr = _fmtEarned(_monthlyEarnedDays);
     final deductionDaysTotal = deductions.fold<double>(
       0,
       (sum, entry) => sum + _forcedDeductionDays(entry),
@@ -500,13 +495,13 @@ class LeaveCardPrintView {
           return _LeaveCardRow(
             period: period,
             particulars: request.leaveTypeLabel,
-            vacEarned: vacEarnedStr,
+            vacEarned: isVacation ? earnedStr : '',
             vacWithPay: isVacation ? _fmtNum(withPay) : '',
-            vacBalance: _fmtNum(vacationBalance),
+            vacBalance: isVacation ? _fmtNum(vacationBalance) : '',
             vacWithoutPay: isVacation ? _fmtNum(withoutPay) : '',
-            slEarned: slEarnedStr,
+            slEarned: isSick ? earnedStr : '',
             slWithPay: isSick ? _fmtNum(withPay) : '',
-            slBalance: _fmtNum(sickBalance),
+            slBalance: isSick ? _fmtNum(sickBalance) : '',
             slWithoutPay: isSick ? _fmtNum(withoutPay) : '',
             dateTakenOnApplication: actionDate != null
                 ? _fmtDate(actionDate)
@@ -523,13 +518,13 @@ class LeaveCardPrintView {
           return _LeaveCardRow(
             period: period,
             particulars: _forcedDeductionParticulars(entry),
-            vacEarned: vacEarnedStr,
+            vacEarned: earnedStr,
             vacWithPay: _fmtNum(deductedDays),
             vacBalance: _fmtNum(vacationBalance),
             vacWithoutPay: '',
-            slEarned: slEarnedStr,
+            slEarned: '',
             slWithPay: '',
-            slBalance: _fmtNum(sickBalance),
+            slBalance: '',
             slWithoutPay: '',
             dateTakenOnApplication: _fmtDate(entry.createdAt),
           );
@@ -603,6 +598,8 @@ class LeaveCardPrintView {
     if (value == value.roundToDouble()) return value.toInt().toString();
     return value.toStringAsFixed(1);
   }
+
+  static String _fmtEarned(double value) => value.toStringAsFixed(3);
 
   static String _fmtDate(DateTime value) {
     final mm = value.month.toString().padLeft(2, '0');
