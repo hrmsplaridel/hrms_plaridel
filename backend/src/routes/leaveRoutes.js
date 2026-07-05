@@ -4148,8 +4148,7 @@ router.get('/balances/:userId', protect, async (req, res) => {
        ORDER BY lb.leave_type ASC`,
       [targetId]
     );
-    // Align response with Flutter LeaveBalance.fromJson keys.
-    res.json(rows.rows.map((r) => ({
+    const mappedBalances = rows.rows.map((r) => ({
       id: r.id,
       user_id: r.user_id,
       leave_type: r.leave_type,
@@ -4163,7 +4162,111 @@ router.get('/balances/:userId', protect, async (req, res) => {
       last_accrual_date: r.last_accrual_date ? String(r.last_accrual_date).slice(0, 10) : null,
       created_at: r.created_at,
       updated_at: r.updated_at,
-    })));
+    }));
+
+    // ── Synthetic balances for all annual-quota leave types ─────────────────
+    // These leave types reset every calendar year and do not use the accrual
+    // table. We compute used/pending from leave_requests for the current year.
+    const currentYear = new Date().getFullYear();
+    const startOfYear = `${currentYear}-01-01`;
+    const endOfYear = `${currentYear}-12-31`;
+
+    // Annual leave types to track, with their full-year quota.
+    // sex_eligibility is used later to skip types that don't apply.
+    const ANNUAL_QUOTA_TYPES = [
+      { name: 'specialPrivilegeLeave',         display: 'Special Privilege Leave',               quota: 3   },
+      { name: 'mandatoryForcedLeave',           display: 'Mandatory/Forced Leave',                quota: 5   },
+      { name: 'paternityLeave',                 display: 'Paternity Leave',                       quota: 7,   sex: 'male'   },
+      { name: 'maternityLeave',                 display: 'Maternity Leave',                       quota: 105, sex: 'female' },
+      { name: 'soloParentLeave',                display: 'Solo Parent Leave',                     quota: 7   },
+      { name: 'tenDayVawcLeave',                display: '10-Day VAWC Leave',                     quota: 10,  sex: 'female' },
+      { name: 'specialEmergencyCalamityLeave',  display: 'Special Emergency (Calamity) Leave',    quota: 5   },
+      { name: 'specialLeaveBenefitsForWomen',   display: 'Special Leave Benefits for Women',      quota: 60,  sex: 'female' },
+      { name: 'rehabilitationPrivilege',        display: 'Rehabilitation Privilege',              quota: 180 },
+      { name: 'studyLeave',                     display: 'Study Leave',                           quota: 180 },
+      { name: 'adoptionLeave',                  display: 'Adoption Leave',                        quota: null },
+    ].filter((t) => t.quota !== null); // skip types with no defined limit
+
+    // Skip sex-restricted types the employee cannot use
+    let employeeSex = null;
+    try {
+      const sexRow = await pool.query('SELECT sex FROM users WHERE id = $1::uuid LIMIT 1', [targetId]);
+      employeeSex = sexRow.rows[0]?.sex || null;
+    } catch (_) {}
+
+    const applicableTypes = ANNUAL_QUOTA_TYPES.filter((t) => {
+      if (!t.sex) return true;
+      if (!employeeSex) return true; // unknown sex: show anyway
+      return t.sex.toLowerCase() === employeeSex.toLowerCase();
+    });
+
+    const typeNames = applicableTypes.map((t) => t.name);
+
+    // Skip types already covered by a persistent balance row
+    const alreadyPresent = new Set(mappedBalances.map((b) => b.leave_type));
+    const synthTypes = applicableTypes.filter((t) => !alreadyPresent.has(t.name));
+
+    if (synthTypes.length > 0) {
+      const synthTypeNames = synthTypes.map((t) => t.name);
+      const usageQuery = await pool.query(
+        `SELECT lr.start_date, lr.end_date, lr.status, lt.name AS leave_type
+         FROM leave_requests lr
+         JOIN leave_types lt ON lt.id = lr.leave_type_id
+         WHERE (lr.user_id = $1::uuid OR lr.employee_id = $1::uuid)
+           AND lr.start_date <= $3::date
+           AND lr.end_date   >= $2::date
+           AND lt.name = ANY($4::text[])
+           AND lr.status IN ('pending', 'pending_department_head', 'pending_hr', 'approved')`,
+        [targetId, startOfYear, endOfYear, synthTypeNames]
+      );
+
+      // Build usage map per type
+      const usageMap = {};
+      for (const t of synthTypes) {
+        usageMap[t.name] = { used: 0, pending: 0 };
+      }
+
+      const client = await pool.connect();
+      try {
+        for (const row of usageQuery.rows) {
+          const startStr = toIsoDateStr(row.start_date);
+          const endStr = toIsoDateStr(row.end_date);
+          const days = await workingDaysWithinYear(client, targetId, startStr, endStr, currentYear);
+          if (days > 0 && usageMap[row.leave_type]) {
+            if (row.status === 'approved') {
+              usageMap[row.leave_type].used += days;
+            } else {
+              usageMap[row.leave_type].pending += days;
+            }
+          }
+        }
+      } finally {
+        client.release();
+      }
+
+      const employeeName = mappedBalances.length > 0 ? mappedBalances[0].employee_name : null;
+      const today = new Date().toISOString().slice(0, 10);
+
+      for (const t of synthTypes) {
+        mappedBalances.push({
+          id: `synth-${t.name}-${currentYear}`,
+          user_id: targetId,
+          leave_type: t.name,
+          leave_type_display_name: t.display,
+          employee_name: employeeName,
+          earned_days: t.quota,
+          used_days: usageMap[t.name].used,
+          pending_days: usageMap[t.name].pending,
+          adjusted_days: 0,
+          as_of_date: today,
+          last_accrual_date: null,
+          created_at: null,
+          updated_at: null,
+        });
+      }
+    }
+
+    res.json(mappedBalances);
   } catch (err) {
     console.error('[leave GET /balances/:userId]', err);
     res.status(500).json({ error: 'Failed to fetch leave balances' });
