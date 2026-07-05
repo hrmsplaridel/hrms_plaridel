@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_days_card.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
@@ -118,10 +119,11 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         provider.balances.isEmpty &&
         provider.requests.isEmpty;
 
-    final totalAvailable = provider.balances.fold<double>(
-      0,
-      (sum, item) => sum + item.availableDays,
-    );
+    // Only count accrual-based leaves (Sick + Vacation) for the credits summary.
+    const _creditTypes = {'vacationLeave', 'sickLeave'};
+    final totalAvailable = provider.balances
+        .where((b) => _creditTypes.contains(b.effectiveLeaveTypeName))
+        .fold<double>(0, (sum, item) => sum + item.availableDays);
     final totalPendingDays = provider.pendingRequests.fold<double>(
       0,
       (sum, item) => sum + (item.workingDaysApplied ?? 0),
@@ -222,7 +224,10 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
           Column(
             children: [
               _BalancesPanel(
-                balances: provider.balances,
+                balances: provider.balances
+                    .where((b) => b.effectiveLeaveTypeName == 'vacationLeave' ||
+                        b.effectiveLeaveTypeName == 'sickLeave')
+                    .toList(),
                 loading: provider.loading,
                 onBalanceHistory: () {
                   Navigator.of(context).push(
@@ -232,6 +237,11 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                     ),
                   );
                 },
+              ),
+              const SizedBox(height: 16),
+              _LeaveDaysPanel(
+                balances: provider.balances,
+                loading: provider.loading,
               ),
               const SizedBox(height: 16),
               EmployeeLeaveRequestsPanel(
@@ -445,18 +455,18 @@ class _BalancesPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _SectionCard(
-      title: 'Leave Balances',
-      subtitle: 'Available and pending credits per leave type.',
+      title: 'Leave Credits',
+      subtitle: 'Earned and available credits for Sick and Vacation Leave.',
       icon: Icons.account_balance_wallet_rounded,
       headerTrailing: OutlinedButton.icon(
         onPressed: onBalanceHistory,
         icon: const Icon(Icons.receipt_long_outlined, size: 18),
-        label: const Text('Balance History'),
+        label: const Text('Credit History'),
       ),
       child: loading && balances.isEmpty
-          ? const _CenteredState(message: 'Loading leave balances...')
+          ? const _CenteredState(message: 'Loading leave credits...')
           : balances.isEmpty
-          ? const _CenteredState(message: 'No leave balances available yet.')
+          ? const _CenteredState(message: 'No leave credits available yet.')
           : LayoutBuilder(
               builder: (context, constraints) {
                 final crossAxisCount = constraints.maxWidth < 600
@@ -473,6 +483,50 @@ class _BalancesPanel extends StatelessWidget {
                         (balance) => SizedBox(
                           width: cardWidth,
                           child: LeaveBalanceCard(balance: balance),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _LeaveDaysPanel extends StatelessWidget {
+  const _LeaveDaysPanel({
+    required this.balances,
+    required this.loading,
+  });
+
+  final List<LeaveBalance> balances;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!loading && balances.isEmpty) return const SizedBox.shrink();
+    return _SectionCard(
+      title: 'Leave Remaining Days',
+      subtitle: 'Annual quota days remaining per leave type.',
+      icon: Icons.calendar_today_rounded,
+      child: loading && balances.isEmpty
+          ? const _CenteredState(message: 'Loading leave days...')
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final crossAxisCount = constraints.maxWidth < 600
+                    ? 1
+                    : (constraints.maxWidth < 960 ? 2 : 3);
+                final cardWidth =
+                    (constraints.maxWidth - (crossAxisCount - 1) * 12) /
+                    crossAxisCount;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: balances
+                      .map(
+                        (balance) => SizedBox(
+                          width: cardWidth,
+                          child: LeaveDaysCard(balance: balance),
                         ),
                       )
                       .toList(),
