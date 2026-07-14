@@ -91,80 +91,89 @@ class AdminLeaveFilterBar extends StatelessWidget {
     BuildContext context,
     List<LeaveRequestStatus?> statusOptions,
   ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        HorizontalFilterChips<LeaveRequestStatus?>(
-          options: [
-            for (final value in statusOptions)
-              RequestFilterOption(
-                value: value,
-                label: _filterStatusLabel(value),
-              ),
-          ],
-          selectedValue: status,
-          onSelected: onStatusChanged,
-        ),
-        const SizedBox(height: 10),
-        if (isDepartmentHead)
-          Row(
-            children: [
-              Expanded(child: _leaveTypeDropdown(context, compact: true)),
-              const SizedBox(width: 8),
-              Expanded(child: _employeeDropdown(context, compact: true)),
-            ],
-          )
-        else ...[
-          _leaveTypeDropdown(context, compact: true),
-          const SizedBox(height: 8),
-          _departmentDropdown(context, compact: true),
-          const SizedBox(height: 8),
-          _employeeDropdown(context, compact: true),
-        ],
-        const SizedBox(height: 10),
-        Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stackDropdowns = constraints.maxWidth < 360;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: CompactFilterDateButton(
-                label: startDateFrom == null
-                    ? 'From'
-                    : RequestFiltersBar.defaultFormatDate(startDateFrom!),
-                onPressed: () => _pickDate(context, isFrom: true),
-              ),
+            HorizontalFilterChips<LeaveRequestStatus?>(
+              options: [
+                for (final value in statusOptions)
+                  RequestFilterOption(
+                    value: value,
+                    label: _filterStatusLabel(value),
+                  ),
+              ],
+              selectedValue: status,
+              onSelected: onStatusChanged,
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: CompactFilterDateButton(
-                label: startDateTo == null
-                    ? 'To'
-                    : RequestFiltersBar.defaultFormatDate(startDateTo!),
-                onPressed: () => _pickDate(context, isFrom: false),
+            const SizedBox(height: 10),
+            if (isDepartmentHead && !stackDropdowns)
+              Row(
+                children: [
+                  Expanded(child: _leaveTypeDropdown(context, compact: true)),
+                  const SizedBox(width: 8),
+                  Expanded(child: _employeeDropdown(context, compact: true)),
+                ],
+              )
+            else if (isDepartmentHead) ...[
+              _leaveTypeDropdown(context, compact: true),
+              const SizedBox(height: 8),
+              _employeeDropdown(context, compact: true),
+            ] else ...[
+              _leaveTypeDropdown(context, compact: true),
+              const SizedBox(height: 8),
+              _departmentDropdown(context, compact: true),
+              const SizedBox(height: 8),
+              _employeeDropdown(context, compact: true),
+            ],
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: CompactFilterDateButton(
+                    label: startDateFrom == null
+                        ? 'From'
+                        : RequestFiltersBar.defaultFormatDate(startDateFrom!),
+                    onPressed: () => _pickDate(context, isFrom: true),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: CompactFilterDateButton(
+                    label: startDateTo == null
+                        ? 'To'
+                        : RequestFiltersBar.defaultFormatDate(startDateTo!),
+                    onPressed: () => _pickDate(context, isFrom: false),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: onReset,
+                icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
+                label: const Text('Reset Filters'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.dashIsDark(context)
+                      ? AppTheme.primaryNavyLight
+                      : AppTheme.primaryNavy,
+                  textStyle: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  minimumSize: const Size(0, 36),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 4),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            onPressed: onReset,
-            icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
-            label: const Text('Reset Filters'),
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.dashIsDark(context)
-                  ? AppTheme.primaryNavyLight
-                  : AppTheme.primaryNavy,
-              textStyle: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              minimumSize: const Size(0, 36),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -335,7 +344,7 @@ class AdminLeaveFilterBar extends StatelessWidget {
       isDense: compact,
       contentPadding: EdgeInsets.symmetric(
         horizontal: compact ? 10 : 12,
-        vertical: compact ? 8 : 12,
+        vertical: 12,
       ),
       labelStyle: TextStyle(
         fontSize: compact ? 12 : 14,
@@ -540,33 +549,42 @@ class _AdminLeaveRequestQueuePanelState
           else ...[
             Container(
               width: double.infinity,
-              constraints: BoxConstraints(maxHeight: maxQueueHeight),
-              decoration: BoxDecoration(
-                border: Border.all(color: AppTheme.dashHairlineOf(context)),
-                borderRadius: BorderRadius.circular(12),
+              constraints: BoxConstraints(
+                maxHeight: isMobile ? double.infinity : maxQueueHeight,
               ),
-              clipBehavior: Clip.antiAlias,
+              decoration: isMobile
+                  ? null
+                  : BoxDecoration(
+                      border: Border.all(
+                        color: AppTheme.dashHairlineOf(context),
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+              clipBehavior: isMobile ? Clip.none : Clip.antiAlias,
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   if (isMobile) {
-                    return ListView.separated(
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.all(10),
-                      physics: const BouncingScrollPhysics(),
-                      itemCount: pageRequests.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        final request = pageRequests[index];
-                        return _AdminLeaveMobileRequestCard(
-                          request: request,
-                          highlighted: request.id == widget.selectedRequest?.id,
-                          statusLabel: adminLeaveStatusLabel(
-                            request.status,
-                            isDepartmentHead: widget.isDepartmentHead,
+                    return Column(
+                      children: [
+                        for (
+                          var index = 0;
+                          index < pageRequests.length;
+                          index++
+                        ) ...[
+                          if (index > 0) const SizedBox(height: 8),
+                          _AdminLeaveMobileRequestCard(
+                            request: pageRequests[index],
+                            highlighted:
+                                pageRequests[index].id ==
+                                widget.selectedRequest?.id,
+                            statusLabel: adminLeaveStatusLabel(
+                              pageRequests[index].status,
+                              isDepartmentHead: widget.isDepartmentHead,
+                            ),
+                            onTap: () => widget.onSelect(pageRequests[index]),
                           ),
-                          onTap: () => widget.onSelect(request),
-                        );
-                      },
+                        ],
+                      ],
                     );
                   }
 
@@ -660,7 +678,7 @@ class _AdminLeaveMobileRequestCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: borderColor),
@@ -689,7 +707,7 @@ class _AdminLeaveMobileRequestCard extends StatelessWidget {
                   LeaveStatusChip(status: request.status, label: statusLabel),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               Text(
                 request.officeDepartment?.trim().isNotEmpty == true
                     ? request.officeDepartment!.trim()
@@ -702,10 +720,10 @@ class _AdminLeaveMobileRequestCard extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
-                runSpacing: 8,
+                runSpacing: 6,
                 children: [
                   _AdminLeaveMobileInfoChip(
                     icon: Icons.event_note_rounded,
@@ -761,8 +779,8 @@ class _AdminLeaveMobileInfoChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(minHeight: 32),
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      constraints: const BoxConstraints(minHeight: 30),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(9),
