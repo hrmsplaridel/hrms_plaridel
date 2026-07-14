@@ -44,6 +44,17 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   static const int _maxAttachmentBytes = 10 * 1024 * 1024;
+  static const _annualQuotaTypes = {
+    'specialPrivilegeLeave',
+    'paternityLeave',
+    'maternityLeave',
+    'soloParentLeave',
+    'tenDayVawcLeave',
+    'specialEmergencyCalamityLeave',
+    'specialLeaveBenefitsForWomen',
+    'rehabilitationPrivilege',
+    'studyLeave',
+  };
 
   late LeaveType _leaveType;
   late String _leaveTypeName;
@@ -447,12 +458,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return null;
   }
 
-  double _specialPrivilegeUsedForYear(int year) {
+  double _annualUsageForYear(
+    String leaveTypeName,
+    int year, {
+    required bool pending,
+  }) {
     final currentId = (_savedRequest ?? widget.initialRequest)?.id;
     return _creditRequests
         .where((request) {
-          if (request.effectiveLeaveTypeName !=
-              LeaveType.specialPrivilegeLeave.value) {
+          if (request.effectiveLeaveTypeName != leaveTypeName) {
             return false;
           }
           if (currentId != null &&
@@ -460,8 +474,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               request.id == currentId) {
             return false;
           }
-          if (!(request.status.isPending ||
-              request.status == LeaveRequestStatus.approved)) {
+          final matchesStatus = pending
+              ? request.status.isPending
+              : request.status == LeaveRequestStatus.approved;
+          if (!matchesStatus) {
             return false;
           }
           final start = request.startDate;
@@ -1358,22 +1374,36 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Widget _buildCreditPolicyPanel() {
     final policy = _selectedCreditPolicy;
-    final isSpecialPrivilege =
-        _leaveTypeName == LeaveType.specialPrivilegeLeave.value;
+    final isAnnualQuota = _annualQuotaTypes.contains(_leaveTypeName);
 
     IconData icon = Icons.info_outline_rounded;
     String title = 'Credit handling';
     String message;
 
-    if (isSpecialPrivilege) {
+    if (isAnnualQuota) {
       final year = _startDate?.year ?? DateTime.now().year;
-      final used = _specialPrivilegeUsedForYear(year);
-      final remaining = (3 - used).clamp(0, 3).toDouble();
+      final balance = _balanceForBucket(_leaveTypeName);
+      final entitlement = balance?.earnedDays ?? _selectedMaxDays;
+      final approved = _annualUsageForYear(
+        _leaveTypeName,
+        year,
+        pending: false,
+      );
+      final pending = _annualUsageForYear(_leaveTypeName, year, pending: true);
+      final remaining = entitlement == null
+          ? null
+          : (entitlement - approved - pending).clamp(0, entitlement).toDouble();
       icon = Icons.event_available_outlined;
-      title = 'Special Privilege Leave';
+      title = _selectedLeaveTypeLabel;
       message = _loadingCreditContext
           ? 'Checking yearly entitlement...'
-          : '${_formatDays(remaining)} of 3 day(s) remaining for $year. This leave does not deduct VL or SL credits.';
+          : entitlement == null || remaining == null
+          ? 'No annual entitlement information is available for $year.'
+          : 'Annual entitlement: ${_formatDays(entitlement)} day(s) for $year. '
+                'Approved usage: ${_formatDays(approved)}. '
+                'Pending usage: ${_formatDays(pending)}. '
+                'Remaining entitlement: ${_formatDays(remaining)} day(s). '
+                'This leave does not deduct VL or SL credits.';
     } else if (policy == 'none') {
       icon = Icons.remove_done_outlined;
       message =
