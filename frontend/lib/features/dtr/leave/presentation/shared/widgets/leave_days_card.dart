@@ -22,12 +22,15 @@ class LeaveDaysCard extends StatelessWidget {
         balance.effectiveLeaveTypeName == 'mandatoryForcedLeave';
     final isCalamity =
         balance.effectiveLeaveTypeName == 'specialEmergencyCalamityLeave';
+    final displayedRemaining = isMandatory
+        ? (total - balance.usedDays).clamp(0, total).toDouble()
+        : remaining;
 
     // Color the remaining chip: green when plenty left, amber when low, red when zero
     Color accentColor;
-    if (remaining <= 0) {
+    if (displayedRemaining <= 0) {
       accentColor = const Color(0xFFD32F2F);
-    } else if (total > 0 && remaining / total <= 0.33) {
+    } else if (total > 0 && displayedRemaining / total <= 0.33) {
       accentColor = const Color(0xFFF57C00);
     } else {
       accentColor = const Color(0xFF2E7D32);
@@ -79,7 +82,7 @@ class LeaveDaysCard extends StatelessWidget {
                     ],
                     if (balance.pendingDays > 0)
                       _Pip(
-                        label: 'Pending',
+                        label: isMandatory ? 'Scheduled' : 'Pending',
                         value: _fmt(balance.pendingDays),
                         context: context,
                       ),
@@ -121,7 +124,9 @@ class LeaveDaysCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text(
-                  isCalamity ? 'Up to ${_fmt(total)}' : _fmt(remaining),
+                  isCalamity
+                      ? 'Up to ${_fmt(total)}'
+                      : _fmt(displayedRemaining),
                   style: TextStyle(
                     color: accentColor,
                     fontSize: 22,
@@ -132,7 +137,9 @@ class LeaveDaysCard extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   isMandatory
-                      ? (remaining == 1 ? 'day required' : 'days required')
+                      ? (displayedRemaining == 1
+                            ? 'day required'
+                            : 'days required')
                       : isCalamity
                       ? (total == 1 ? 'day' : 'days')
                       : (remaining == 1 ? 'day available' : 'days available'),
