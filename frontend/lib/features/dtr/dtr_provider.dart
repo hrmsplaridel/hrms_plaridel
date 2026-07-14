@@ -221,6 +221,7 @@ class EmployeeOption {
     required this.fullName,
     this.employeeNumber,
     this.departmentName,
+    this.shiftPunchMode = 'auto',
   });
   final String id;
   final String fullName;
@@ -230,6 +231,10 @@ class EmployeeOption {
 
   /// From `current_department_name` when [loadEmployees] runs (for analytics grouping).
   final String? departmentName;
+
+  /// Punch mode of the employee's current assigned shift.
+  /// Values: auto, full_day, am_only, pm_only, single_session.
+  final String shiftPunchMode;
 
   /// Display as EMP-001, EMP-002, etc., or "—" if null.
   String get displayEmployeeNo => employeeNumber != null
@@ -916,6 +921,7 @@ class DtrProvider extends ChangeNotifier {
               ? empNum
               : (empNum != null ? int.tryParse(empNum.toString()) : null),
           departmentName: m['current_department_name']?.toString(),
+          shiftPunchMode: m['current_shift_punch_mode']?.toString() ?? 'auto',
         );
       }).toList();
       _employeesCache[cacheKey] = _DtrCacheEntry<List<EmployeeOption>>(

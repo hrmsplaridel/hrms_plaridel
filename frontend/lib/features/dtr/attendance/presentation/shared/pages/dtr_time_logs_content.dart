@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart'
@@ -1628,277 +1629,380 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
 
     bool? updated;
     try {
-      updated = await showDialog<bool>(
+      updated = await openResponsiveRightSidePanel<bool>(
         context: context,
+        barrierLabel: 'Close add time entry',
+        breakpoint: 0,
+        minWidth: 520,
+        initialWidthFraction: 0.36,
         builder: (ctx) {
           return StatefulBuilder(
             builder: (ctx, setState) {
-              final hasAnyTime =
-                  timeIn != null ||
-                  breakOut != null ||
-                  breakIn != null ||
-                  timeOut != null;
-              final screenH = MediaQuery.sizeOf(ctx).height;
               final empList = dtr.employees;
               final String? employeeDropdownValue = empList.isEmpty
                   ? null
                   : (userId != null && empList.any((e) => e.id == userId))
                   ? userId
                   : empList.first.id;
+              final selectedEmployee = employeeDropdownValue == null
+                  ? null
+                  : empList
+                        .where(
+                          (employee) => employee.id == employeeDropdownValue,
+                        )
+                        .firstOrNull;
+              final punchMode = selectedEmployee?.shiftPunchMode ?? 'auto';
+              final isAmOnly = punchMode == 'am_only';
+              final isPmOnly = punchMode == 'pm_only';
+              final isSingleSession = punchMode == 'single_session';
+              final hasAnyTime = isAmOnly
+                  ? timeIn != null || breakOut != null
+                  : isPmOnly
+                  ? breakIn != null || timeOut != null
+                  : isSingleSession
+                  ? timeIn != null || timeOut != null
+                  : timeIn != null ||
+                        breakOut != null ||
+                        breakIn != null ||
+                        timeOut != null;
+              int? minutes(TimeOfDay? time) =>
+                  time == null ? null : (time.hour * 60) + time.minute;
+              final amInMinutes = minutes(timeIn);
+              final amOutMinutes = minutes(breakOut);
+              final pmInMinutes = minutes(breakIn);
+              final pmOutMinutes = minutes(timeOut);
+              String? validationMessage;
+              if (isAmOnly &&
+                  amInMinutes != null &&
+                  amOutMinutes != null &&
+                  amOutMinutes <= amInMinutes) {
+                validationMessage = 'AM Out must be later than AM In.';
+              } else if (isPmOnly &&
+                  pmInMinutes != null &&
+                  pmOutMinutes != null &&
+                  pmOutMinutes <= pmInMinutes) {
+                validationMessage = 'PM Out must be later than PM In.';
+              } else if (isSingleSession &&
+                  amInMinutes != null &&
+                  pmOutMinutes != null &&
+                  pmOutMinutes <= amInMinutes) {
+                validationMessage = 'Time Out must be later than Time In.';
+              } else if (!isAmOnly && !isPmOnly && !isSingleSession) {
+                if (amInMinutes != null &&
+                    amOutMinutes != null &&
+                    amOutMinutes <= amInMinutes) {
+                  validationMessage = 'AM Out must be later than AM In.';
+                } else if (pmInMinutes != null &&
+                    pmOutMinutes != null &&
+                    pmOutMinutes <= pmInMinutes) {
+                  validationMessage = 'PM Out must be later than PM In.';
+                } else if (amOutMinutes != null &&
+                    pmInMinutes != null &&
+                    pmInMinutes < amOutMinutes) {
+                  validationMessage =
+                      'PM In should not be earlier than AM Out.';
+                }
+              }
               final canSubmit =
                   !employeesLoading &&
                   employeeDropdownValue != null &&
-                  empList.isNotEmpty;
-              return Dialog(
-                backgroundColor: AppTheme.dashPanelOf(ctx),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: AppTheme.dashHairlineOf(ctx)),
-                ),
-                insetPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 24,
-                ),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: 440,
-                    maxHeight: screenH * 0.92,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryNavy.withValues(
-                                  alpha: 0.12,
+                  empList.isNotEmpty &&
+                  validationMessage == null;
+              return Material(
+                color: AppTheme.dashPanelOf(ctx),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: 0.12,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.edit_calendar_rounded,
+                              color: AppTheme.primaryNavy,
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Add time entry',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.dashTextPrimaryOf(ctx),
+                                  ),
                                 ),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(
-                                Icons.edit_calendar_rounded,
-                                color: AppTheme.primaryNavy,
-                                size: 24,
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Add time entry',
-                                    style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.dashTextPrimaryOf(ctx),
-                                    ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Department filters the list below (defaults to your Time Logs filter). One employee, one date; empty punches stay blank.',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    height: 1.35,
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      ctx,
+                                    ).withValues(alpha: 0.95),
                                   ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Department filters the list below (defaults to your Time Logs filter). One employee, one date; empty punches stay blank.',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      height: 1.35,
-                                      color: AppTheme.dashTextSecondaryOf(
-                                        ctx,
-                                      ).withValues(alpha: 0.95),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                      Flexible(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              DropdownButtonFormField<String?>(
-                                initialValue: addDeptId,
-                                isExpanded: true,
-                                dropdownColor: AppTheme.dashPanelOf(ctx),
-                                style: AppTheme.dashFieldTextStyle(ctx),
-                                decoration: AppTheme.dashInputDecoration(
-                                  ctx,
-                                  labelText: 'Department',
-                                  radius: 12,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 14,
+                    ),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            DropdownButtonFormField<String?>(
+                              initialValue: addDeptId,
+                              isExpanded: true,
+                              dropdownColor: AppTheme.dashPanelOf(ctx),
+                              style: AppTheme.dashFieldTextStyle(ctx),
+                              decoration: AppTheme.dashInputDecoration(
+                                ctx,
+                                labelText: 'Department',
+                                radius: 12,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                              ),
+                              items: [
+                                const DropdownMenuItem<String?>(
+                                  value: null,
+                                  child: Text('All departments'),
+                                ),
+                                ...dtr.departments.map(
+                                  (d) => DropdownMenuItem<String?>(
+                                    value: d.id,
+                                    child: Text(
+                                      d.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
                                 ),
-                                items: [
-                                  const DropdownMenuItem<String?>(
-                                    value: null,
-                                    child: Text('All departments'),
+                              ],
+                              onChanged: employeesLoading
+                                  ? null
+                                  : (v) async {
+                                      addDeptId = v;
+                                      setState(() => employeesLoading = true);
+                                      await dtr.loadEmployees(departmentId: v);
+                                      if (!ctx.mounted) return;
+                                      setState(() {
+                                        employeesLoading = false;
+                                        userId = _pickUserIdForEmployeeList(
+                                          dtr.employees,
+                                          userId,
+                                        );
+                                      });
+                                    },
+                            ),
+                            const SizedBox(height: 10),
+                            if (employeesLoading)
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 8),
+                                child: LinearProgressIndicator(minHeight: 3),
+                              ),
+                            if (!employeesLoading && empList.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Text(
+                                  'No employees in this department. Choose All departments or another office.',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.orange.shade800,
                                   ),
-                                  ...dtr.departments.map(
-                                    (d) => DropdownMenuItem<String?>(
-                                      value: d.id,
+                                ),
+                              ),
+                            DropdownButtonFormField<String>(
+                              initialValue: employeeDropdownValue,
+                              isExpanded: true,
+                              dropdownColor: AppTheme.dashPanelOf(ctx),
+                              style: AppTheme.dashFieldTextStyle(ctx),
+                              decoration: AppTheme.dashInputDecoration(
+                                ctx,
+                                labelText: 'Employee',
+                                radius: 12,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                              ),
+                              items: empList
+                                  .map(
+                                    (e) => DropdownMenuItem(
+                                      value: e.id,
                                       child: Text(
-                                        d.name,
+                                        e.fullName,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
-                                  ),
-                                ],
-                                onChanged: employeesLoading
-                                    ? null
-                                    : (v) async {
-                                        addDeptId = v;
-                                        setState(() => employeesLoading = true);
-                                        await dtr.loadEmployees(
-                                          departmentId: v,
-                                        );
-                                        if (!ctx.mounted) return;
+                                  )
+                                  .toList(),
+                              onChanged: employeesLoading || empList.isEmpty
+                                  ? null
+                                  : (v) {
+                                      if (v != null) {
                                         setState(() {
-                                          employeesLoading = false;
-                                          userId = _pickUserIdForEmployeeList(
-                                            dtr.employees,
-                                            userId,
-                                          );
+                                          userId = v;
+                                          final mode = empList
+                                              .where((e) => e.id == v)
+                                              .firstOrNull
+                                              ?.shiftPunchMode;
+                                          if (mode == 'am_only') {
+                                            breakIn = null;
+                                            timeOut = null;
+                                          } else if (mode == 'pm_only') {
+                                            timeIn = null;
+                                            breakOut = null;
+                                          } else if (mode == 'single_session') {
+                                            breakOut = null;
+                                            breakIn = null;
+                                          }
                                         });
-                                      },
-                              ),
-                              const SizedBox(height: 10),
-                              if (employeesLoading)
-                                const Padding(
-                                  padding: EdgeInsets.only(bottom: 8),
-                                  child: LinearProgressIndicator(minHeight: 3),
-                                ),
-                              if (!employeesLoading && empList.isEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: Text(
-                                    'No employees in this department. Choose All departments or another office.',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.orange.shade800,
-                                    ),
-                                  ),
-                                ),
-                              DropdownButtonFormField<String>(
-                                initialValue: employeeDropdownValue,
-                                isExpanded: true,
-                                dropdownColor: AppTheme.dashPanelOf(ctx),
-                                style: AppTheme.dashFieldTextStyle(ctx),
-                                decoration: AppTheme.dashInputDecoration(
-                                  ctx,
-                                  labelText: 'Employee',
-                                  radius: 12,
-                                  contentPadding: const EdgeInsets.symmetric(
+                                      }
+                                    },
+                            ),
+                            const SizedBox(height: 14),
+                            Material(
+                              color: AppTheme.dashInputFillOf(ctx),
+                              borderRadius: BorderRadius.circular(12),
+                              child: InkWell(
+                                onTap: () async {
+                                  final d = await showDatePicker(
+                                    context: ctx,
+                                    initialDate: recordDate,
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime(2030),
+                                  );
+                                  if (d != null) {
+                                    setState(() => recordDate = d);
+                                  }
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
                                     vertical: 14,
                                   ),
-                                ),
-                                items: empList
-                                    .map(
-                                      (e) => DropdownMenuItem(
-                                        value: e.id,
-                                        child: Text(
-                                          e.fullName,
-                                          overflow: TextOverflow.ellipsis,
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.calendar_today_rounded,
+                                        size: 20,
+                                        color: AppTheme.dashIsDark(ctx)
+                                            ? AppTheme.primaryNavyLight
+                                            : AppTheme.primaryNavy,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Date',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                                color:
+                                                    AppTheme.dashTextSecondaryOf(
+                                                      ctx,
+                                                    ),
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              _formatDateWithWeekday(
+                                                recordDate,
+                                              ),
+                                              style: TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w600,
+                                                color:
+                                                    AppTheme.dashTextPrimaryOf(
+                                                      ctx,
+                                                    ),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                    )
-                                    .toList(),
-                                onChanged: employeesLoading || empList.isEmpty
-                                    ? null
-                                    : (v) {
-                                        if (v != null) {
-                                          setState(() => userId = v);
-                                        }
-                                      },
-                              ),
-                              const SizedBox(height: 14),
-                              Material(
-                                color: AppTheme.dashInputFillOf(ctx),
-                                borderRadius: BorderRadius.circular(12),
-                                child: InkWell(
-                                  onTap: () async {
-                                    final d = await showDatePicker(
-                                      context: ctx,
-                                      initialDate: recordDate,
-                                      firstDate: DateTime(2020),
-                                      lastDate: DateTime(2030),
-                                    );
-                                    if (d != null) {
-                                      setState(() => recordDate = d);
-                                    }
-                                  },
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 14,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          Icons.calendar_today_rounded,
-                                          size: 20,
-                                          color: AppTheme.dashIsDark(ctx)
-                                              ? AppTheme.primaryNavyLight
-                                              : AppTheme.primaryNavy,
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Date',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w600,
-                                                  color:
-                                                      AppTheme.dashTextSecondaryOf(
-                                                        ctx,
-                                                      ),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                _formatDateWithWeekday(
-                                                  recordDate,
-                                                ),
-                                                style: TextStyle(
-                                                  fontSize: 15,
-                                                  fontWeight: FontWeight.w600,
-                                                  color:
-                                                      AppTheme.dashTextPrimaryOf(
-                                                        ctx,
-                                                      ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Icon(
-                                          Icons.chevron_right_rounded,
-                                          color: AppTheme.dashTextSecondaryOf(
-                                            ctx,
-                                          ).withValues(alpha: 0.7),
-                                        ),
-                                      ],
-                                    ),
+                                      Icon(
+                                        Icons.chevron_right_rounded,
+                                        color: AppTheme.dashTextSecondaryOf(
+                                          ctx,
+                                        ).withValues(alpha: 0.7),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 18),
+                            ),
+                            const SizedBox(height: 18),
+                            if (isAmOnly || isPmOnly || isSingleSession) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.08,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: AppTheme.primaryNavy.withValues(
+                                      alpha: 0.18,
+                                    ),
+                                  ),
+                                ),
+                                child: Text(
+                                  isAmOnly
+                                      ? 'AM-only shift — only morning punches apply.'
+                                      : isPmOnly
+                                      ? 'PM-only shift — only afternoon punches apply.'
+                                      : 'Single-session shift — no break; time in and time out only.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.dashIsDark(ctx)
+                                        ? AppTheme.primaryNavyLight
+                                        : AppTheme.primaryNavy,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                            ],
+                            if (validationMessage != null) ...[
                               Text(
-                                'Morning',
+                                validationMessage,
+                                style: TextStyle(
+                                  color: Colors.orange.shade900,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            if (!isPmOnly) ...[
+                              Text(
+                                isSingleSession ? 'Work Session' : 'Morning',
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
@@ -1911,7 +2015,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               const SizedBox(height: 8),
                               _manualEntryPunchTile(
                                 ctx,
-                                label: 'AM In (time in)',
+                                label: isSingleSession
+                                    ? 'Time In'
+                                    : 'AM In (time in)',
                                 value: timeIn,
                                 icon: Icons.wb_sunny_outlined,
                                 onTap: () async {
@@ -1922,50 +2028,62 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   if (t != null) setState(() => timeIn = t);
                                 },
                               ),
-                              const SizedBox(height: 8),
-                              _manualEntryPunchTile(
-                                ctx,
-                                label: 'AM Out (break out)',
-                                value: breakOut,
-                                icon: Icons.restaurant_outlined,
-                                onTap: () async {
-                                  final t = await showTimePicker(
-                                    context: ctx,
-                                    initialTime: breakOut ?? TimeOfDay.now(),
-                                  );
-                                  if (t != null) setState(() => breakOut = t);
-                                },
-                              ),
-                              const SizedBox(height: 18),
-                              Text(
-                                'Afternoon',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.4,
-                                  color: AppTheme.dashTextSecondaryOf(
-                                    ctx,
-                                  ).withValues(alpha: 0.9),
+                              if (!isSingleSession) ...[
+                                const SizedBox(height: 8),
+                                _manualEntryPunchTile(
+                                  ctx,
+                                  label: 'AM Out (break out)',
+                                  value: breakOut,
+                                  icon: Icons.restaurant_outlined,
+                                  onTap: () async {
+                                    final t = await showTimePicker(
+                                      context: ctx,
+                                      initialTime: breakOut ?? TimeOfDay.now(),
+                                    );
+                                    if (t != null) {
+                                      setState(() => breakOut = t);
+                                    }
+                                  },
                                 ),
-                              ),
-                              const SizedBox(height: 8),
+                              ],
+                            ],
+                            if (!isAmOnly) ...[
+                              SizedBox(height: isPmOnly ? 0 : 18),
+                              if (!isSingleSession) ...[
+                                Text(
+                                  'Afternoon',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.4,
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      ctx,
+                                    ).withValues(alpha: 0.9),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                _manualEntryPunchTile(
+                                  ctx,
+                                  label: 'PM In (break in)',
+                                  value: breakIn,
+                                  icon: Icons.nightlight_outlined,
+                                  onTap: () async {
+                                    final t = await showTimePicker(
+                                      context: ctx,
+                                      initialTime: breakIn ?? TimeOfDay.now(),
+                                    );
+                                    if (t != null) {
+                                      setState(() => breakIn = t);
+                                    }
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                              ],
                               _manualEntryPunchTile(
                                 ctx,
-                                label: 'PM In (break in)',
-                                value: breakIn,
-                                icon: Icons.nightlight_outlined,
-                                onTap: () async {
-                                  final t = await showTimePicker(
-                                    context: ctx,
-                                    initialTime: breakIn ?? TimeOfDay.now(),
-                                  );
-                                  if (t != null) setState(() => breakIn = t);
-                                },
-                              ),
-                              const SizedBox(height: 8),
-                              _manualEntryPunchTile(
-                                ctx,
-                                label: 'PM Out (time out)',
+                                label: isSingleSession
+                                    ? 'Time Out'
+                                    : 'PM Out (time out)',
                                 value: timeOut,
                                 icon: Icons.logout_rounded,
                                 onTap: () async {
@@ -1976,61 +2094,61 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   if (t != null) setState(() => timeOut = t);
                                 },
                               ),
-                              if (hasAnyTime) ...[
-                                const SizedBox(height: 8),
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: TextButton(
-                                    onPressed: () => setState(() {
-                                      timeIn = null;
-                                      breakOut = null;
-                                      breakIn = null;
-                                      timeOut = null;
-                                    }),
-                                    child: const Text('Clear all times'),
-                                  ),
-                                ),
-                              ],
                             ],
-                          ),
-                        ),
-                      ),
-                      Divider(height: 1, color: AppTheme.dashHairlineOf(ctx)),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('Cancel'),
-                            ),
-                            const SizedBox(width: 8),
-                            FilledButton(
-                              onPressed: !canSubmit
-                                  ? null
-                                  : () {
-                                      userId = employeeDropdownValue;
-                                      Navigator.pop(ctx, true);
-                                    },
-                              style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.primaryNavy,
-                                foregroundColor: AppTheme.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
+                            if (hasAnyTime) ...[
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () => setState(() {
+                                    timeIn = null;
+                                    breakOut = null;
+                                    breakIn = null;
+                                    timeOut = null;
+                                  }),
+                                  child: const Text('Clear all times'),
                                 ),
                               ),
-                              child: const Text('Add entry'),
-                            ),
+                            ],
                           ],
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    Divider(height: 1, color: AppTheme.dashHairlineOf(ctx)),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton(
+                            onPressed: !canSubmit
+                                ? null
+                                : () {
+                                    userId = employeeDropdownValue;
+                                    Navigator.pop(ctx, true);
+                                  },
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppTheme.primaryNavy,
+                              foregroundColor: AppTheme.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 12,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            child: const Text('Add entry'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               );
             },
@@ -2045,12 +2163,19 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
 
     final uid = userId;
     if (updated == true && uid != null && uid.isNotEmpty) {
+      final selectedPunchMode = dtr.employees
+          .where((employee) => employee.id == uid)
+          .firstOrNull
+          ?.shiftPunchMode;
+      final addIsAmOnly = selectedPunchMode == 'am_only';
+      final addIsPmOnly = selectedPunchMode == 'pm_only';
+      final addIsSingleSession = selectedPunchMode == 'single_session';
       final date = DateTime(recordDate.year, recordDate.month, recordDate.day);
       DateTime? tin;
       DateTime? bo;
       DateTime? bi;
       DateTime? tout;
-      if (timeIn != null) {
+      if (!addIsPmOnly && timeIn != null) {
         tin = DateTime(
           date.year,
           date.month,
@@ -2059,7 +2184,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
           timeIn!.minute,
         );
       }
-      if (breakOut != null) {
+      if (!addIsPmOnly && !addIsSingleSession && breakOut != null) {
         bo = DateTime(
           date.year,
           date.month,
@@ -2068,7 +2193,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
           breakOut!.minute,
         );
       }
-      if (breakIn != null) {
+      if (!addIsAmOnly && !addIsSingleSession && breakIn != null) {
         bi = DateTime(
           date.year,
           date.month,
@@ -2077,7 +2202,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
           breakIn!.minute,
         );
       }
-      if (timeOut != null) {
+      if (!addIsAmOnly && timeOut != null) {
         tout = DateTime(
           date.year,
           date.month,
@@ -2103,6 +2228,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         timeOut: tout,
         totalHours: hours,
         status: 'present',
+        shiftPunchMode: selectedPunchMode ?? 'auto',
       );
       await dtr.addManualEntry(record);
       if (context.mounted) {
@@ -2127,10 +2253,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     }
   }
 
-  Future<void> _showEditDialog(
-    DtrProvider dtr,
-    TimeRecord r,
-  ) async {
+  Future<void> _showEditDialog(DtrProvider dtr, TimeRecord r) async {
     final timeInLocal = r.timeIn?.toLocal();
     final breakOutLocal = r.breakOut?.toLocal();
     final breakInLocal = r.breakIn?.toLocal();
@@ -2161,8 +2284,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     final isSingleSession = punchMode == 'single_session';
 
     if (!mounted) return;
-    final updated = await showDialog<bool>(
+    final updated = await openResponsiveRightSidePanel<bool>(
       context: context,
+      barrierLabel: 'Close edit time entry',
+      breakpoint: 0,
+      minWidth: 520,
+      initialWidthFraction: 0.36,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setState) {
@@ -2249,306 +2376,324 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   timeOut != null;
             }
             final canSave = validationMessage == null;
-            final screenH = MediaQuery.sizeOf(ctx).height;
-
-            return Dialog(
-              backgroundColor: AppTheme.dashPanelOf(ctx),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: AppTheme.dashHairlineOf(ctx)),
-              ),
-              insetPadding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 24,
-              ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: 520,
-                  maxHeight: screenH * 0.92,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: AppTheme.primaryNavy.withValues(
-                                alpha: 0.12,
+            return Material(
+              color: AppTheme.dashPanelOf(ctx),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.edit_calendar_rounded,
+                            color: AppTheme.primaryNavy,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Edit time entry',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.dashTextPrimaryOf(ctx),
+                                ),
                               ),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(
-                              Icons.edit_calendar_rounded,
-                              color: AppTheme.primaryNavy,
-                              size: 24,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Edit time entry',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppTheme.dashTextPrimaryOf(ctx),
-                                  ),
+                              const SizedBox(height: 6),
+                              Text(
+                                r.employeeName ?? r.userId,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.35,
+                                  color: AppTheme.dashTextSecondaryOf(
+                                    ctx,
+                                  ).withValues(alpha: 0.95),
                                 ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  r.employeeName ?? r.userId,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    height: 1.35,
-                                    color: AppTheme.dashTextSecondaryOf(
-                                      ctx,
-                                    ).withValues(alpha: 0.95),
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
                           ),
-                          IconButton(
-                            tooltip: 'Close',
-                            onPressed: () => Navigator.pop(ctx, false),
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                        ],
-                      ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.pop(ctx, false),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
                     ),
-                    Flexible(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                _TimeEntryInfoChip(
-                                  icon: Icons.badge_outlined,
-                                  label: r.employeeName ?? r.userId,
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _TimeEntryInfoChip(
+                                icon: Icons.badge_outlined,
+                                label: r.employeeName ?? r.userId,
+                              ),
+                              _TimeEntryInfoChip(
+                                icon: Icons.calendar_today_rounded,
+                                label: _formatDateWithWeekday(recordDate),
+                              ),
+                              if (r.source != null && r.source!.isNotEmpty)
+                                AttendanceSourceBadge(
+                                  source: r.source,
+                                  compact: true,
                                 ),
-                                _TimeEntryInfoChip(
-                                  icon: Icons.calendar_today_rounded,
-                                  label: _formatDateWithWeekday(recordDate),
-                                ),
-                                if (r.source != null && r.source!.isNotEmpty)
-                                  AttendanceSourceBadge(
-                                    source: r.source,
-                                    compact: true,
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 14),
-                            Material(
-                              color: AppTheme.dashInputFillOf(ctx),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Material(
+                            color: AppTheme.dashInputFillOf(ctx),
+                            borderRadius: BorderRadius.circular(12),
+                            child: InkWell(
+                              onTap: () async {
+                                final d = await showDatePicker(
+                                  context: ctx,
+                                  initialDate: recordDate,
+                                  firstDate: DateTime(2020),
+                                  lastDate: DateTime(2030),
+                                );
+                                if (d != null) {
+                                  setState(() => recordDate = d);
+                                }
+                              },
                               borderRadius: BorderRadius.circular(12),
-                              child: InkWell(
-                                onTap: () async {
-                                  final d = await showDatePicker(
-                                    context: ctx,
-                                    initialDate: recordDate,
-                                    firstDate: DateTime(2020),
-                                    lastDate: DateTime(2030),
-                                  );
-                                  if (d != null) {
-                                    setState(() => recordDate = d);
-                                  }
-                                },
-                                borderRadius: BorderRadius.circular(12),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 14,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.calendar_today_rounded,
-                                        size: 20,
-                                        color: AppTheme.dashIsDark(ctx)
-                                            ? AppTheme.primaryNavyLight
-                                            : AppTheme.primaryNavy,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              'Correction date',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w600,
-                                                color:
-                                                    AppTheme.dashTextSecondaryOf(
-                                                      ctx,
-                                                    ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.calendar_today_rounded,
+                                      size: 20,
+                                      color: AppTheme.dashIsDark(ctx)
+                                          ? AppTheme.primaryNavyLight
+                                          : AppTheme.primaryNavy,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Correction date',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                              color:
+                                                  AppTheme.dashTextSecondaryOf(
+                                                    ctx,
+                                                  ),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            _formatDateWithWeekday(recordDate),
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                              color: AppTheme.dashTextPrimaryOf(
+                                                ctx,
                                               ),
                                             ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              _formatDateWithWeekday(
-                                                recordDate,
-                                              ),
-                                              style: TextStyle(
-                                                fontSize: 15,
-                                                fontWeight: FontWeight.w600,
-                                                color:
-                                                    AppTheme.dashTextPrimaryOf(
-                                                      ctx,
-                                                    ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                          ),
+                                        ],
                                       ),
-                                      Icon(
-                                        Icons.chevron_right_rounded,
-                                        color: AppTheme.dashTextSecondaryOf(
-                                          ctx,
-                                        ).withValues(alpha: 0.7),
-                                      ),
-                                    ],
-                                  ),
+                                    ),
+                                    Icon(
+                                      Icons.chevron_right_rounded,
+                                      color: AppTheme.dashTextSecondaryOf(
+                                        ctx,
+                                      ).withValues(alpha: 0.7),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 16),
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.sectionAltOf(ctx),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: AppTheme.dashHairlineOf(ctx),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.timer_outlined,
+                                  size: 20,
+                                  color: AppTheme.dashTextSecondaryOf(ctx),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    workedMinutes > 0
+                                        ? 'Estimated worked time: ${(workedMinutes / 60).toStringAsFixed(2)} hours'
+                                        : 'Set only the punches that should appear. Empty slots stay blank.',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: AppTheme.dashTextSecondaryOf(ctx),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (validationMessage != null) ...[
+                            const SizedBox(height: 10),
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: AppTheme.sectionAltOf(ctx),
+                                color: Colors.orange.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: AppTheme.dashHairlineOf(ctx),
+                                  color: Colors.orange.withValues(alpha: 0.25),
                                 ),
                               ),
                               child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Icon(
-                                    Icons.timer_outlined,
+                                    Icons.warning_amber_rounded,
                                     size: 20,
-                                    color: AppTheme.dashTextSecondaryOf(ctx),
+                                    color: Colors.orange.shade800,
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
-                                      workedMinutes > 0
-                                          ? 'Estimated worked time: ${(workedMinutes / 60).toStringAsFixed(2)} hours'
-                                          : 'Set only the punches that should appear. Empty slots stay blank.',
+                                      validationMessage,
                                       style: TextStyle(
                                         fontSize: 13,
-                                        color: AppTheme.dashTextSecondaryOf(
-                                          ctx,
-                                        ),
+                                        color: Colors.orange.shade900,
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                            if (validationMessage != null) ...[
-                              const SizedBox(height: 10),
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.orange.withValues(
-                                      alpha: 0.25,
-                                    ),
-                                  ),
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(
-                                      Icons.warning_amber_rounded,
-                                      size: 20,
-                                      color: Colors.orange.shade800,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        validationMessage,
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: Colors.orange.shade900,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                          ],
+                          const SizedBox(height: 18),
+                          // Shift-mode badge — shown when mode restricts fields.
+                          if (isAmOnly || isPmOnly || isSingleSession) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 7,
                               ),
-                            ],
-                            const SizedBox(height: 18),
-                            // Shift-mode badge — shown when mode restricts fields.
-                            if (isAmOnly || isPmOnly || isSingleSession) ...[
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 7,
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryNavy.withValues(
+                                  alpha: 0.08,
                                 ),
-                                decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
                                   color: AppTheme.primaryNavy.withValues(
-                                    alpha: 0.08,
+                                    alpha: 0.18,
                                   ),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: AppTheme.primaryNavy.withValues(
-                                      alpha: 0.18,
-                                    ),
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.schedule_rounded,
-                                      size: 16,
-                                      color: AppTheme.dashIsDark(ctx)
-                                          ? AppTheme.primaryNavyLight
-                                          : AppTheme.primaryNavy,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        isAmOnly
-                                            ? 'AM-only shift — only morning punches apply.'
-                                            : isPmOnly
-                                            ? 'PM-only shift — only afternoon punches apply.'
-                                            : 'Single-session shift — no break; time in and time out only.',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: AppTheme.dashIsDark(ctx)
-                                              ? AppTheme.primaryNavyLight
-                                              : AppTheme.primaryNavy,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
                                 ),
                               ),
-                              const SizedBox(height: 14),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.schedule_rounded,
+                                    size: 16,
+                                    color: AppTheme.dashIsDark(ctx)
+                                        ? AppTheme.primaryNavyLight
+                                        : AppTheme.primaryNavy,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      isAmOnly
+                                          ? 'AM-only shift — only morning punches apply.'
+                                          : isPmOnly
+                                          ? 'PM-only shift — only afternoon punches apply.'
+                                          : 'Single-session shift — no break; time in and time out only.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppTheme.dashIsDark(ctx)
+                                            ? AppTheme.primaryNavyLight
+                                            : AppTheme.primaryNavy,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                          // Morning section
+                          if (!isPmOnly) ...[
+                            Text(
+                              isSingleSession ? 'Work Session' : 'Morning',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.4,
+                                color: AppTheme.dashTextSecondaryOf(
+                                  ctx,
+                                ).withValues(alpha: 0.9),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            _manualEntryPunchTile(
+                              ctx,
+                              label: isSingleSession
+                                  ? 'Time In'
+                                  : 'AM In (time in)',
+                              value: timeIn,
+                              icon: Icons.wb_sunny_outlined,
+                              onTap: () =>
+                                  pickTime(timeIn, (value) => timeIn = value),
+                              onClear: () => setState(() => timeIn = null),
+                            ),
+                            if (!isSingleSession) ...[
+                              const SizedBox(height: 8),
+                              _manualEntryPunchTile(
+                                ctx,
+                                label: 'AM Out (break out)',
+                                value: breakOut,
+                                icon: Icons.restaurant_outlined,
+                                onTap: () => pickTime(
+                                  breakOut,
+                                  (value) => breakOut = value,
+                                ),
+                                onClear: () => setState(() => breakOut = null),
+                              ),
                             ],
-                            // Morning section
-                            if (!isPmOnly) ...[
+                          ],
+                          // Afternoon section
+                          if (!isAmOnly) ...[
+                            SizedBox(height: isPmOnly ? 0 : 18),
+                            if (!isSingleSession) ...[
                               Text(
-                                isSingleSession ? 'Work Session' : 'Morning',
+                                'Afternoon',
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
@@ -2561,148 +2706,99 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               const SizedBox(height: 8),
                               _manualEntryPunchTile(
                                 ctx,
-                                label: isSingleSession
-                                    ? 'Time In'
-                                    : 'AM In (time in)',
-                                value: timeIn,
-                                icon: Icons.wb_sunny_outlined,
+                                label: 'PM In (break in)',
+                                value: breakIn,
+                                icon: Icons.nightlight_outlined,
                                 onTap: () => pickTime(
-                                  timeIn,
-                                  (value) => timeIn = value,
+                                  breakIn,
+                                  (value) => breakIn = value,
                                 ),
-                                onClear: () => setState(() => timeIn = null),
+                                onClear: () => setState(() => breakIn = null),
                               ),
-                              if (!isSingleSession) ...[
-                                const SizedBox(height: 8),
-                                _manualEntryPunchTile(
-                                  ctx,
-                                  label: 'AM Out (break out)',
-                                  value: breakOut,
-                                  icon: Icons.restaurant_outlined,
-                                  onTap: () => pickTime(
-                                    breakOut,
-                                    (value) => breakOut = value,
-                                  ),
-                                  onClear: () =>
-                                      setState(() => breakOut = null),
-                                ),
-                              ],
-                            ],
-                            // Afternoon section
-                            if (!isAmOnly) ...[
-                              SizedBox(height: isPmOnly ? 0 : 18),
-                              if (!isSingleSession) ...[
-                                Text(
-                                  'Afternoon',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.4,
-                                    color: AppTheme.dashTextSecondaryOf(
-                                      ctx,
-                                    ).withValues(alpha: 0.9),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                _manualEntryPunchTile(
-                                  ctx,
-                                  label: 'PM In (break in)',
-                                  value: breakIn,
-                                  icon: Icons.nightlight_outlined,
-                                  onTap: () => pickTime(
-                                    breakIn,
-                                    (value) => breakIn = value,
-                                  ),
-                                  onClear: () =>
-                                      setState(() => breakIn = null),
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                              _manualEntryPunchTile(
-                                ctx,
-                                label: isSingleSession
-                                    ? 'Time Out'
-                                    : 'PM Out (time out)',
-                                value: timeOut,
-                                icon: Icons.logout_rounded,
-                                onTap: () => pickTime(
-                                  timeOut,
-                                  (value) => timeOut = value,
-                                ),
-                                onClear: () => setState(() => timeOut = null),
-                              ),
-                            ],
-                            if (hasAnyTime) ...[
                               const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton.icon(
-                                  onPressed: () => setState(() {
-                                    if (!isPmOnly) timeIn = null;
-                                    if (!isPmOnly && !isSingleSession) {
-                                      breakOut = null;
-                                    }
-                                    if (!isAmOnly && !isSingleSession) {
-                                      breakIn = null;
-                                    }
-                                    if (!isAmOnly) timeOut = null;
-                                  }),
-                                  icon: const Icon(
-                                    Icons.cleaning_services_rounded,
-                                    size: 18,
-                                  ),
-                                  label: const Text('Clear all times'),
-                                ),
-                              ),
                             ],
+                            _manualEntryPunchTile(
+                              ctx,
+                              label: isSingleSession
+                                  ? 'Time Out'
+                                  : 'PM Out (time out)',
+                              value: timeOut,
+                              icon: Icons.logout_rounded,
+                              onTap: () =>
+                                  pickTime(timeOut, (value) => timeOut = value),
+                              onClear: () => setState(() => timeOut = null),
+                            ),
                           ],
-                        ),
-                      ),
-                    ),
-                    Divider(height: 1, color: AppTheme.dashHairlineOf(ctx)),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                      child: Row(
-                        children: [
-                          TextButton(
-                            onPressed: () => setState(() {
-                              recordDate = originalRecordDate;
-                              timeIn = originalTimeIn;
-                              breakOut = originalBreakOut;
-                              breakIn = originalBreakIn;
-                              timeOut = originalTimeOut;
-                            }),
-                            child: const Text('Reset'),
-                          ),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Cancel'),
-                          ),
-                          const SizedBox(width: 8),
-                          FilledButton.icon(
-                            onPressed: canSave
-                                ? () => Navigator.pop(ctx, true)
-                                : null,
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppTheme.primaryNavy,
-                              foregroundColor: AppTheme.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 18,
-                                vertical: 12,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                          if (hasAnyTime) ...[
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: () => setState(() {
+                                  if (!isPmOnly) timeIn = null;
+                                  if (!isPmOnly && !isSingleSession) {
+                                    breakOut = null;
+                                  }
+                                  if (!isAmOnly && !isSingleSession) {
+                                    breakIn = null;
+                                  }
+                                  if (!isAmOnly) timeOut = null;
+                                }),
+                                icon: const Icon(
+                                  Icons.cleaning_services_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text('Clear all times'),
                               ),
                             ),
-                            icon: const Icon(Icons.save_rounded, size: 18),
-                            label: const Text('Save changes'),
-                          ),
+                          ],
                         ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  Divider(height: 1, color: AppTheme.dashHairlineOf(ctx)),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                    child: Row(
+                      children: [
+                        TextButton(
+                          onPressed: () => setState(() {
+                            recordDate = originalRecordDate;
+                            timeIn = originalTimeIn;
+                            breakOut = originalBreakOut;
+                            breakIn = originalBreakIn;
+                            timeOut = originalTimeOut;
+                          }),
+                          child: const Text('Reset'),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          onPressed: canSave
+                              ? () => Navigator.pop(ctx, true)
+                              : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.primaryNavy,
+                            foregroundColor: AppTheme.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          icon: const Icon(Icons.save_rounded, size: 18),
+                          label: const Text('Save changes'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             );
           },
@@ -2772,9 +2868,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         final removed = await dtr.deleteEntry(r.id!);
         if (!mounted) return;
         if (!removed) {
-          _showTimeLogSnack(
-            dtr.error ?? 'Unable to remove this time entry.',
-          );
+          _showTimeLogSnack(dtr.error ?? 'Unable to remove this time entry.');
         }
         return;
       }
@@ -2817,10 +2911,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     }
   }
 
-  Future<void> _confirmDelete(
-    DtrProvider dtr,
-    TimeRecord r,
-  ) async {
+  Future<void> _confirmDelete(DtrProvider dtr, TimeRecord r) async {
     if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
