@@ -47,6 +47,10 @@ class _AdminLocatorManagementScreenState
 
   _LocatorAdminQueue _queue = _LocatorAdminQueue.all;
   LocatorRequestType? _requestTypeFilter;
+  String? _departmentFilter;
+  String? _employeeFilter;
+  DateTime? _fromDate;
+  DateTime? _toDate;
   bool _loading = false;
   String? _error;
   List<LocatorRequestType> _locatorTypes = LocatorRequestType.values;
@@ -90,6 +94,7 @@ class _AdminLocatorManagementScreenState
 
   @override
   Widget build(BuildContext context) {
+    final visibleItems = _visibleItems;
     _clampPage();
     final screenHeight = MediaQuery.sizeOf(context).height;
     final screenWidth = MediaQuery.sizeOf(context).width;
@@ -99,8 +104,8 @@ class _AdminLocatorManagementScreenState
         ? (screenHeight * 0.5).clamp(320.0, 560.0)
         : (screenHeight * 0.58).clamp(380.0, 700.0);
     final pageStart = _page * _rowsPerPage;
-    final pageEnd = (pageStart + _rowsPerPage).clamp(0, _items.length);
-    final pageItems = _items.sublist(pageStart, pageEnd);
+    final pageEnd = (pageStart + _rowsPerPage).clamp(0, visibleItems.length);
+    final pageItems = visibleItems.sublist(pageStart, pageEnd);
     final useScrollableList = pageItems.length > 3;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -128,78 +133,7 @@ class _AdminLocatorManagementScreenState
           ),
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _LocatorAdminQueue.values
-              .map(
-                (queue) => ChoiceChip(
-                  selected: _queue == queue,
-                  label: Text(queue.label),
-                  onSelected: (_) {
-                    if (_queue == queue) return;
-                    setState(() {
-                      _queue = queue;
-                      _selectedItemId = null;
-                      _page = 0;
-                    });
-                    _load();
-                  },
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Type',
-              style: TextStyle(
-                color: _mutedColor(context),
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 190,
-              child: DropdownButtonFormField<LocatorRequestType?>(
-                initialValue: _requestTypeFilter,
-                decoration: AppTheme.dashInputDecoration(
-                  context,
-                  radius: 10,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                ),
-                isExpanded: true,
-                items: [
-                  const DropdownMenuItem<LocatorRequestType?>(
-                    value: null,
-                    child: Text('All types'),
-                  ),
-                  ..._locatorTypes.map(
-                    (type) => DropdownMenuItem<LocatorRequestType?>(
-                      value: type,
-                      child: Text(type.shortLabel),
-                    ),
-                  ),
-                ],
-                onChanged: (type) {
-                  if (_requestTypeFilter == type) return;
-                  setState(() {
-                    _requestTypeFilter = type;
-                    _selectedItemId = null;
-                    _page = 0;
-                  });
-                  _load();
-                },
-              ),
-            ),
-          ],
-        ),
+        _buildFilterPanel(context),
         const SizedBox(height: 16),
         Container(
           width: double.infinity,
@@ -247,7 +181,7 @@ class _AdminLocatorManagementScreenState
                     style: TextStyle(color: Colors.red.shade900, fontSize: 12),
                   ),
                 ),
-              if (_items.isEmpty && !_loading)
+              if (visibleItems.isEmpty && !_loading)
                 Text(
                   'No locator request records in this queue.',
                   style: TextStyle(
@@ -267,20 +201,22 @@ class _AdminLocatorManagementScreenState
                         maxHeight: maxListHeight,
                         useScrollableList: useScrollableList,
                       ),
-                      const SizedBox(height: 12),
-                      _LocatorPaginationBar(
-                        page: _page,
-                        pageCount: _pageCount,
-                        pageStart: pageStart,
-                        pageEnd: pageEnd,
-                        total: _items.length,
-                        onPrevious: _page > 0
-                            ? () => _goToPage(_page - 1)
-                            : null,
-                        onNext: _page < _pageCount - 1
-                            ? () => _goToPage(_page + 1)
-                            : null,
-                      ),
+                      if (visibleItems.length > _rowsPerPage) ...[
+                        const SizedBox(height: 12),
+                        _LocatorPaginationBar(
+                          page: _page,
+                          pageCount: _pageCount,
+                          pageStart: pageStart,
+                          pageEnd: pageEnd,
+                          total: visibleItems.length,
+                          onPrevious: _page > 0
+                              ? () => _goToPage(_page - 1)
+                              : null,
+                          onNext: _page < _pageCount - 1
+                              ? () => _goToPage(_page + 1)
+                              : null,
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -289,6 +225,256 @@ class _AdminLocatorManagementScreenState
         ),
       ],
     );
+  }
+
+  List<_LocatorAdminRecord> get _visibleItems {
+    return _items.where((item) {
+      if (_departmentFilter != null &&
+          item.departmentName != _departmentFilter) {
+        return false;
+      }
+      if (_employeeFilter != null && item.employeeName != _employeeFilter) {
+        return false;
+      }
+      final date = item.slipDateValue;
+      if ((_fromDate != null || _toDate != null) && date == null) {
+        return false;
+      }
+      if (_fromDate != null && date!.isBefore(_dateOnly(_fromDate!))) {
+        return false;
+      }
+      if (_toDate != null && date!.isAfter(_dateOnly(_toDate!))) {
+        return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  DateTime _dateOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  Widget _buildFilterPanel(BuildContext context) {
+    final departments =
+        _items
+            .map((item) => item.departmentName.trim())
+            .where((name) => name.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    final employees =
+        _items
+            .where(
+              (item) =>
+                  _departmentFilter == null ||
+                  item.departmentName == _departmentFilter,
+            )
+            .map((item) => item.employeeName.trim())
+            .where((name) => name.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+
+    InputDecoration decoration(String label) => AppTheme.dashInputDecoration(
+      context,
+      labelText: label,
+      radius: 12,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SizedBox(
+            width: 200,
+            child: DropdownButtonFormField<_LocatorAdminQueue>(
+              key: ValueKey(_queue),
+              initialValue: _queue,
+              decoration: decoration('Status'),
+              isExpanded: true,
+              items: _LocatorAdminQueue.values
+                  .map(
+                    (queue) => DropdownMenuItem(
+                      value: queue,
+                      child: Text(queue.label),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (queue) {
+                if (queue == null || queue == _queue) return;
+                setState(() {
+                  _queue = queue;
+                  _selectedItemId = null;
+                  _page = 0;
+                });
+                _load();
+              },
+            ),
+          ),
+          SizedBox(
+            width: 220,
+            child: DropdownButtonFormField<LocatorRequestType?>(
+              key: ValueKey(_requestTypeFilter),
+              initialValue: _requestTypeFilter,
+              decoration: decoration('Request Type'),
+              isExpanded: true,
+              items: [
+                const DropdownMenuItem<LocatorRequestType?>(
+                  value: null,
+                  child: Text('All request types'),
+                ),
+                ..._locatorTypes.map(
+                  (type) => DropdownMenuItem<LocatorRequestType?>(
+                    value: type,
+                    child: Text(type.shortLabel),
+                  ),
+                ),
+              ],
+              onChanged: (type) {
+                if (_requestTypeFilter == type) return;
+                setState(() {
+                  _requestTypeFilter = type;
+                  _selectedItemId = null;
+                  _page = 0;
+                });
+                _load();
+              },
+            ),
+          ),
+          SizedBox(
+            width: 220,
+            child: DropdownButtonFormField<String?>(
+              key: ValueKey(_departmentFilter),
+              initialValue: _departmentFilter,
+              decoration: decoration('Department'),
+              isExpanded: true,
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('All departments'),
+                ),
+                ...departments.map(
+                  (name) => DropdownMenuItem<String?>(
+                    value: name,
+                    child: Text(name, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ],
+              onChanged: (value) => setState(() {
+                _departmentFilter = value;
+                _employeeFilter = null;
+                _selectedItemId = null;
+                _page = 0;
+              }),
+            ),
+          ),
+          SizedBox(
+            width: 240,
+            child: DropdownButtonFormField<String?>(
+              key: ValueKey('employee-$_departmentFilter-$_employeeFilter'),
+              initialValue: employees.contains(_employeeFilter)
+                  ? _employeeFilter
+                  : null,
+              decoration: decoration('Employee'),
+              isExpanded: true,
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('All employees'),
+                ),
+                ...employees.map(
+                  (name) => DropdownMenuItem<String?>(
+                    value: name,
+                    child: Text(name, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ],
+              onChanged: (value) => setState(() {
+                _employeeFilter = value;
+                _selectedItemId = null;
+                _page = 0;
+              }),
+            ),
+          ),
+          _locatorDateFilterButton(
+            context,
+            label: 'From',
+            value: _fromDate,
+            onSelected: (date) => setState(() {
+              _fromDate = date;
+              _page = 0;
+            }),
+          ),
+          _locatorDateFilterButton(
+            context,
+            label: 'To',
+            value: _toDate,
+            onSelected: (date) => setState(() {
+              _toDate = date;
+              _page = 0;
+            }),
+          ),
+          TextButton.icon(
+            onPressed: _resetFilters,
+            icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
+            label: const Text('Reset Filters'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _locatorDateFilterButton(
+    BuildContext context, {
+    required String label,
+    required DateTime? value,
+    required ValueChanged<DateTime?> onSelected,
+  }) {
+    final text = value == null
+        ? label
+        : '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+    return OutlinedButton.icon(
+      onPressed: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: value ?? DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2035),
+        );
+        if (picked != null) onSelected(picked);
+      },
+      onLongPress: value == null ? null : () => onSelected(null),
+      icon: const Icon(Icons.calendar_today_outlined, size: 18),
+      label: Text(text),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(106, 48),
+        side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  void _resetFilters() {
+    setState(() {
+      _queue = _LocatorAdminQueue.all;
+      _requestTypeFilter = null;
+      _departmentFilter = null;
+      _employeeFilter = null;
+      _fromDate = null;
+      _toDate = null;
+      _selectedItemId = null;
+      _page = 0;
+    });
+    _load();
   }
 
   Widget _adminItemsTable({
@@ -356,8 +542,9 @@ class _AdminLocatorManagementScreenState
   }
 
   int get _pageCount {
-    if (_items.isEmpty) return 1;
-    return (_items.length / _rowsPerPage).ceil();
+    final count = _visibleItems.length;
+    if (count == 0) return 1;
+    return (count / _rowsPerPage).ceil();
   }
 
   void _clampPage() {
