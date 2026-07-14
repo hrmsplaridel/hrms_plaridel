@@ -129,6 +129,7 @@ function mapEmployeeListRow(r) {
     current_department_name: r.current_department_name ?? null,
     current_position_id: r.current_position_id ?? null,
     current_position_name: r.current_position_name ?? null,
+    current_shift_punch_mode: r.current_shift_punch_mode ?? 'auto',
     ...(r.office_id !== undefined ? { office_id: r.office_id ?? null } : {}),
   };
 }
@@ -137,10 +138,12 @@ function employeeListLateralCurSql() {
   return `
        LEFT JOIN LATERAL (
          SELECT d.id AS current_department_id, d.name AS current_department_name,
-                p.id AS current_position_id, p.name AS current_position_name
+                p.id AS current_position_id, p.name AS current_position_name,
+                COALESCE(s.punch_mode, 'auto') AS current_shift_punch_mode
          FROM assignments a
          LEFT JOIN departments d ON d.id = a.department_id
          LEFT JOIN positions p ON p.id = a.position_id
+         LEFT JOIN shifts s ON s.id = a.shift_id
          WHERE a.employee_id = u.id
            AND (a.is_active IS NULL OR a.is_active = true)
            AND a.effective_from <= CURRENT_DATE
@@ -272,7 +275,8 @@ router.get('/', protect, async (req, res) => {
                   u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
                   u.civil_status, u.nationality,
                   u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
-                  cur.current_department_name, cur.current_position_name
+                  cur.current_department_name, cur.current_position_name,
+                  cur.current_shift_punch_mode
            FROM users u
            ${employeeListLateralCurSql()}
            WHERE u.biometric_user_id = ANY($1::text[])
@@ -329,7 +333,8 @@ router.get('/', protect, async (req, res) => {
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
               u.civil_status, u.nationality,
               u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
-              cur.current_department_name, cur.current_position_name
+              cur.current_department_name, cur.current_position_name,
+              cur.current_shift_punch_mode
        ${fromSql}
        ORDER BY ${orderBy}${limitSql}`,
       dataParams
@@ -458,7 +463,8 @@ router.get('/:id', protect, async (req, res) => {
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
               u.civil_status, u.nationality,
               u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
-              cur.current_department_name, cur.current_position_name
+              cur.current_department_name, cur.current_position_name,
+              cur.current_shift_punch_mode
        FROM users u
        ${employeeListLateralCurSql()}
        WHERE u.id = $1`,
