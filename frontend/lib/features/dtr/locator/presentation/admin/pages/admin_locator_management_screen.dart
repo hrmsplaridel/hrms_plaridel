@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -542,31 +543,62 @@ class _AdminLocatorManagementScreenState
     final canShowHistory = !isPending;
     final canPrint = normalizedStatus == 'approved';
     final showFooter = canShowHistory || canReview || canPrint;
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => Dialog(
-        backgroundColor: AppTheme.dashPanelOf(dialogContext),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
+    unawaited(
+      openResponsiveRightSidePanel<void>(
+        context: context,
+        barrierLabel: 'Close locator request details',
+        breakpoint: 0,
+        minWidth: 620,
+        initialWidthFraction: 0.45,
+        builder: (dialogContext) => Material(
+          color: AppTheme.dashPanelOf(dialogContext),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 8, 12),
+                padding: const EdgeInsets.fromLTRB(24, 18, 10, 16),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        'Request Details',
-                        style: TextStyle(
-                          color: _headingColor(dialogContext),
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                        ),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.location_on_outlined,
+                        color: AppTheme.primaryNavy,
+                        size: 24,
                       ),
                     ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Locator Request Details',
+                            style: TextStyle(
+                              color: _headingColor(dialogContext),
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${item.employeeName} • ${item.slipDate}',
+                            style: TextStyle(
+                              color: _mutedColor(dialogContext),
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _statusPill(item),
+                    const SizedBox(width: 6),
                     IconButton(
                       tooltip: 'Close',
                       onPressed: () => Navigator.of(dialogContext).pop(),
@@ -581,33 +613,130 @@ class _AdminLocatorManagementScreenState
               Divider(height: 1, color: AppTheme.dashHairlineOf(dialogContext)),
               Flexible(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _detailTile('Employee', item.employeeName),
-                      _detailTile('Department', item.departmentName),
-                      _detailTile('Date', item.slipDate),
-                      _detailTile('Type', item.requestType.label),
-                      _detailTile(item.requestType.locationLabel, item.office),
-                      _detailTile('Status', item.statusLabel),
-                      _detailTile('Segments', item.segmentText),
-                      _detailTile(
-                        'Department Head',
-                        item.deptHeadReviewerName ?? '—',
+                      _locatorDetailsSection(
+                        dialogContext,
+                        title: 'Request information',
+                        icon: Icons.description_outlined,
+                        child: _locatorDetailsGrid(dialogContext, [
+                          MapEntry('Department', item.departmentName),
+                          MapEntry('Date', item.slipDate),
+                          MapEntry('Type', item.requestType.label),
+                          MapEntry(item.requestType.locationLabel, item.office),
+                        ]),
                       ),
-                      _detailTile('HR Reviewer', item.hrReviewerName ?? '—'),
-                      _detailTile('Attachment', item.attachmentName ?? '—'),
-                      _detailTile('Reason/Purpose', item.reason, wide: true),
-                      if ((item.deptHeadRemarks ?? '').trim().isNotEmpty)
-                        _detailTile(
-                          'Department Head Remarks',
-                          item.deptHeadRemarks!,
-                          wide: true,
+                      const SizedBox(height: 16),
+                      _locatorDetailsSection(
+                        dialogContext,
+                        title: 'Covered DTR segments',
+                        icon: Icons.schedule_outlined,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: item.segmentText
+                              .split(',')
+                              .map((segment) => segment.trim())
+                              .where((segment) => segment.isNotEmpty)
+                              .map(
+                                (segment) => Chip(
+                                  label: Text(segment),
+                                  visualDensity: VisualDensity.compact,
+                                  side: BorderSide(
+                                    color: AppTheme.dashHairlineOf(
+                                      dialogContext,
+                                    ),
+                                  ),
+                                  backgroundColor: AppTheme.dashMutedSurfaceOf(
+                                    dialogContext,
+                                  ),
+                                ),
+                              )
+                              .toList(),
                         ),
-                      if ((item.hrRemarks ?? '').trim().isNotEmpty)
-                        _detailTile('HR Remarks', item.hrRemarks!, wide: true),
+                      ),
+                      const SizedBox(height: 16),
+                      _locatorDetailsSection(
+                        dialogContext,
+                        title: 'Reason / Purpose',
+                        icon: Icons.notes_rounded,
+                        child: Text(
+                          item.reason.trim().isEmpty ? '—' : item.reason.trim(),
+                          style: TextStyle(
+                            color: _headingColor(dialogContext),
+                            fontSize: 14,
+                            height: 1.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _locatorDetailsSection(
+                        dialogContext,
+                        title: 'Review information',
+                        icon: Icons.fact_check_outlined,
+                        child: Column(
+                          children: [
+                            _locatorDetailsGrid(dialogContext, [
+                              MapEntry(
+                                'Department Head',
+                                item.deptHeadReviewerName ?? '—',
+                              ),
+                              MapEntry(
+                                'HR Reviewer',
+                                item.hrReviewerName ?? '—',
+                              ),
+                            ]),
+                            if ((item.deptHeadRemarks ?? '').trim().isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: _locatorDetailField(
+                                  dialogContext,
+                                  'Department Head Remarks',
+                                  item.deptHeadRemarks!,
+                                ),
+                              ),
+                            if ((item.hrRemarks ?? '').trim().isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: _locatorDetailField(
+                                  dialogContext,
+                                  'HR Remarks',
+                                  item.hrRemarks!,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _locatorDetailsSection(
+                        dialogContext,
+                        title: 'Supporting document',
+                        icon: Icons.attach_file_rounded,
+                        child: Row(
+                          children: [
+                            Icon(
+                              item.attachmentName == null
+                                  ? Icons.insert_drive_file_outlined
+                                  : Icons.description_outlined,
+                              color: _mutedColor(dialogContext),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                item.attachmentName ??
+                                    'No attachment submitted',
+                                style: TextStyle(
+                                  color: _headingColor(dialogContext),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -872,34 +1001,98 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  Widget _detailTile(String label, String value, {bool wide = false}) {
-    return SizedBox(
-      width: wide ? 640 : 205,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppTheme.dashMutedSurfaceOf(context),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppTheme.dashHairlineOf(context)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: _mutedColor(context),
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
+  Widget _locatorDetailsSection(
+    BuildContext context, {
+    required String title,
+    required IconData icon,
+    required Widget child,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: AppTheme.primaryNavy),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: TextStyle(
+                  color: _headingColor(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _locatorDetailsGrid(
+    BuildContext context,
+    List<MapEntry<String, String>> entries,
+  ) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 520 ? 2 : 1;
+        final width = columns == 2
+            ? (constraints.maxWidth - 12) / 2
+            : constraints.maxWidth;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: entries
+              .map(
+                (entry) => SizedBox(
+                  width: width,
+                  child: _locatorDetailField(context, entry.key, entry.value),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+
+  Widget _locatorDetailField(BuildContext context, String label, String value) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: _mutedColor(context),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
             ),
-            const SizedBox(height: 5),
-            Text(
-              value.trim().isEmpty ? '—' : value.trim(),
-              style: TextStyle(color: _headingColor(context), fontSize: 13),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value.trim().isEmpty ? '—' : value.trim(),
+            style: TextStyle(
+              color: _headingColor(context),
+              fontSize: 13,
+              height: 1.35,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
