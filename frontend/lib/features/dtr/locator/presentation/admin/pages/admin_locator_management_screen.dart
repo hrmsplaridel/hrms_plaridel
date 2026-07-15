@@ -1417,16 +1417,13 @@ class _AdminLocatorManagementScreenState
   }
 
   Future<void> _openTypeManagement() async {
-    await showDialog<void>(
+    await openResponsiveRightSidePanel<void>(
       context: context,
-      builder: (_) => Dialog(
-        insetPadding: const EdgeInsets.all(24),
-        child: const SizedBox(
-          width: 1120,
-          height: 720,
-          child: LocatorTypeManagementScreen(),
-        ),
-      ),
+      barrierLabel: 'Close locator type management',
+      breakpoint: 0,
+      minWidth: 820,
+      initialWidthFraction: 0.72,
+      builder: (_) => const LocatorTypeManagementScreen(),
     );
     if (!mounted) return;
     LocatorSlipDataCache.instance.invalidateAll();
