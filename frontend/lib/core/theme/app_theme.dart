@@ -204,7 +204,7 @@ class AppTheme {
   ];
 
   // Typography
-  static const String fontFamily = 'Roboto';
+  static const String fontFamily = 'NotoSans';
   static const double heroTitleSize = 32.0;
   static const double sectionTitleSize = 24.0;
   static const double cardTitleSize = 18.0;
