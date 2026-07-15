@@ -4200,14 +4200,22 @@ router.get('/balances/:userId', protect, async (req, res) => {
       return t.sex.toLowerCase() === employeeSex.toLowerCase();
     });
 
-    const typeNames = applicableTypes.map((t) => t.name);
-
     // Skip types already covered by a persistent balance row
     const alreadyPresent = new Set(mappedBalances.map((b) => b.leave_type));
     const synthTypes = applicableTypes.filter((t) => !alreadyPresent.has(t.name));
 
     if (synthTypes.length > 0) {
       const synthTypeNames = synthTypes.map((t) => t.name);
+      const usageTypeNames = [...synthTypeNames];
+      // Any approved/pending Vacation Leave also counts toward the employee's
+      // five-day mandatory-leave compliance. Mandatory Leave is not a separate
+      // credit wallet; both request types are charged against VL credits.
+      if (
+        synthTypeNames.includes('mandatoryForcedLeave') &&
+        !usageTypeNames.includes('vacationLeave')
+      ) {
+        usageTypeNames.push('vacationLeave');
+      }
       const usageQuery = await pool.query(
         `SELECT lr.start_date, lr.end_date, lr.status, lt.name AS leave_type
          FROM leave_requests lr
@@ -4217,7 +4225,7 @@ router.get('/balances/:userId', protect, async (req, res) => {
            AND lr.end_date   >= $2::date
            AND lt.name = ANY($4::text[])
            AND lr.status IN ('pending', 'pending_department_head', 'pending_hr', 'approved')`,
-        [targetId, startOfYear, endOfYear, synthTypeNames]
+        [targetId, startOfYear, endOfYear, usageTypeNames]
       );
 
       // Build usage map per type
@@ -4232,11 +4240,16 @@ router.get('/balances/:userId', protect, async (req, res) => {
           const startStr = toIsoDateStr(row.start_date);
           const endStr = toIsoDateStr(row.end_date);
           const days = await workingDaysWithinYear(client, targetId, startStr, endStr, currentYear);
-          if (days > 0 && usageMap[row.leave_type]) {
+          const usageKey =
+            row.leave_type === 'vacationLeave' &&
+            usageMap.mandatoryForcedLeave
+              ? 'mandatoryForcedLeave'
+              : row.leave_type;
+          if (days > 0 && usageMap[usageKey]) {
             if (row.status === 'approved') {
-              usageMap[row.leave_type].used += days;
+              usageMap[usageKey].used += days;
             } else {
-              usageMap[row.leave_type].pending += days;
+              usageMap[usageKey].pending += days;
             }
           }
         }
@@ -4246,8 +4259,24 @@ router.get('/balances/:userId', protect, async (req, res) => {
 
       const employeeName = mappedBalances.length > 0 ? mappedBalances[0].employee_name : null;
       const today = new Date().toISOString().slice(0, 10);
+      const vacationBalance = mappedBalances.find(
+        (balance) => balance.leave_type === 'vacationLeave'
+      );
+      const vacationRemaining = vacationBalance
+        ? Number(vacationBalance.earned_days || 0) -
+          Number(vacationBalance.used_days || 0) +
+          Number(vacationBalance.adjusted_days || 0)
+        : 0;
+      // Re-add VL already taken this year so employees who started the year
+      // subject to the rule do not disappear from compliance after using VL.
+      const mandatoryUsage = usageMap.mandatoryForcedLeave?.used || 0;
+      const subjectToMandatoryLeave =
+        vacationRemaining + mandatoryUsage >= 10;
 
       for (const t of synthTypes) {
+        if (t.name === 'mandatoryForcedLeave' && !subjectToMandatoryLeave) {
+          continue;
+        }
         mappedBalances.push({
           id: `synth-${t.name}-${currentYear}`,
           user_id: targetId,

@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -655,10 +658,10 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
                 ),
                 TextButton.icon(
                   onPressed: requestId != null && requestId!.isNotEmpty
-                      ? () => _openOrDownloadAttachment(context)
+                      ? () => _previewAttachment(context)
                       : null,
-                  icon: const Icon(Icons.download_rounded, size: 18),
-                  label: const Text('View'),
+                  icon: const Icon(Icons.visibility_rounded, size: 18),
+                  label: const Text('Preview'),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     minimumSize: Size.zero,
@@ -672,7 +675,7 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
     );
   }
 
-  Future<void> _openOrDownloadAttachment(BuildContext context) async {
+  Future<void> _previewAttachment(BuildContext context) async {
     if (requestId == null || requestId!.isEmpty) return;
 
     final provider = context.read<LeaveProvider>();
@@ -680,7 +683,7 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
 
     try {
       snackbar.showSnackBar(
-        const SnackBar(content: Text('Downloading attachment...')),
+        const SnackBar(content: Text('Loading attachment preview...')),
       );
       final bytes = await provider.getAttachmentBytes(requestId!);
       if (!context.mounted) return;
@@ -692,17 +695,14 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
       }
 
       snackbar.clearSnackBars();
-      snackbar.showSnackBar(
-        const SnackBar(content: Text('Opening attachment...')),
-      );
-
       final name = attachmentName ?? 'attachment';
-      await open_attachment.openAttachmentBytes(bytes, name);
-      if (context.mounted) {
-        snackbar.showSnackBar(
-          const SnackBar(content: Text('Attachment opened.')),
-        );
-      }
+      await showDialog<void>(
+        context: context,
+        builder: (_) => _AdminAttachmentPreviewDialog(
+          bytes: Uint8List.fromList(bytes),
+          filename: name,
+        ),
+      );
     } catch (e) {
       if (context.mounted) {
         snackbar.showSnackBar(
@@ -710,5 +710,134 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
         );
       }
     }
+  }
+}
+
+class _AdminAttachmentPreviewDialog extends StatelessWidget {
+  const _AdminAttachmentPreviewDialog({
+    required this.bytes,
+    required this.filename,
+  });
+
+  final Uint8List bytes;
+  final String filename;
+
+  bool get _isPdf => filename.toLowerCase().endsWith('.pdf');
+
+  bool get _isImage {
+    final lower = filename.toLowerCase();
+    return lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.png');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return Dialog(
+      insetPadding: const EdgeInsets.all(20),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: size.width.clamp(320, 1100).toDouble(),
+        height: size.height.clamp(420, 820).toDouble(),
+        child: Column(
+          children: [
+            Material(
+              color: AppTheme.dashPanelOf(context),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 10, 8, 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.description_outlined, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        filename,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () =>
+                          open_attachment.openAttachmentBytes(bytes, filename),
+                      icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                      label: const Text('Open externally'),
+                    ),
+                    IconButton(
+                      tooltip: 'Close preview',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(child: _buildPreview(context)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreview(BuildContext context) {
+    if (_isPdf) {
+      return PdfPreview(
+        build: (_) async => bytes,
+        pdfFileName: filename,
+        allowPrinting: false,
+        allowSharing: false,
+        canChangeOrientation: false,
+        canChangePageFormat: false,
+        canDebug: false,
+      );
+    }
+    if (_isImage) {
+      return ColoredBox(
+        color: Colors.black.withValues(alpha: 0.04),
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 5,
+          child: Center(
+            child: Image.memory(
+              bytes,
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => const _AttachmentPreviewMessage(
+                message: 'This image could not be displayed.',
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return const _AttachmentPreviewMessage(
+      message:
+          'Preview is unavailable for this file type. Use Open externally.',
+    );
+  }
+}
+
+class _AttachmentPreviewMessage extends StatelessWidget {
+  const _AttachmentPreviewMessage({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+        ),
+      ),
+    );
   }
 }

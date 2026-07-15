@@ -17,13 +17,23 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
   final VoidCallback onBalanceHistory;
 
   static const _creditTypes = {'vacationLeave', 'sickLeave'};
+  static const _annualEntitlementTypes = {
+    'specialPrivilegeLeave',
+    'mandatoryForcedLeave',
+    'soloParentLeave',
+    'specialEmergencyCalamityLeave',
+  };
 
   @override
   Widget build(BuildContext context) {
     final creditBalances = balances
         .where((b) => _creditTypes.contains(b.effectiveLeaveTypeName))
         .toList();
-    final dayBalances = balances;
+    final dayBalances = balances
+        .where(
+          (b) => _annualEntitlementTypes.contains(b.effectiveLeaveTypeName),
+        )
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -61,9 +71,7 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
         if (loading && creditBalances.isEmpty)
           const _MobileCenteredState(message: 'Loading leave credits...')
         else if (creditBalances.isEmpty)
-          const _MobileCenteredState(
-            message: 'No leave credits available yet.',
-          )
+          const _MobileCenteredState(message: 'No leave credits available yet.')
         else
           Column(
             children: List.generate(creditBalances.length, (index) {
@@ -78,10 +86,10 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
           ),
 
         // ── Leave Remaining Days section ──────────────────────────────────
-        if (dayBalances.isNotEmpty || loading) ...[  
+        if (dayBalances.isNotEmpty || loading) ...[
           const SizedBox(height: 24),
           Text(
-            'Leave Remaining Days',
+            'Annual Leave Entitlements',
             style: TextStyle(
               color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 17,
@@ -91,7 +99,7 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Annual quota days remaining per leave type.',
+            'Quota-based leave only. Eligibility and approval rules apply.',
             style: TextStyle(
               color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 12,

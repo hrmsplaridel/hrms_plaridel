@@ -120,9 +120,9 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         provider.requests.isEmpty;
 
     // Only count accrual-based leaves (Sick + Vacation) for the credits summary.
-    const _creditTypes = {'vacationLeave', 'sickLeave'};
+    const creditTypes = {'vacationLeave', 'sickLeave'};
     final totalAvailable = provider.balances
-        .where((b) => _creditTypes.contains(b.effectiveLeaveTypeName))
+        .where((b) => creditTypes.contains(b.effectiveLeaveTypeName))
         .fold<double>(0, (sum, item) => sum + item.availableDays);
     final totalPendingDays = provider.pendingRequests.fold<double>(
       0,
@@ -225,8 +225,11 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
             children: [
               _BalancesPanel(
                 balances: provider.balances
-                    .where((b) => b.effectiveLeaveTypeName == 'vacationLeave' ||
-                        b.effectiveLeaveTypeName == 'sickLeave')
+                    .where(
+                      (b) =>
+                          b.effectiveLeaveTypeName == 'vacationLeave' ||
+                          b.effectiveLeaveTypeName == 'sickLeave',
+                    )
                     .toList(),
                 loading: provider.loading,
                 onBalanceHistory: () {
@@ -494,22 +497,33 @@ class _BalancesPanel extends StatelessWidget {
 }
 
 class _LeaveDaysPanel extends StatelessWidget {
-  const _LeaveDaysPanel({
-    required this.balances,
-    required this.loading,
-  });
+  const _LeaveDaysPanel({required this.balances, required this.loading});
 
   final List<LeaveBalance> balances;
   final bool loading;
 
+  static const _annualEntitlementTypes = {
+    'specialPrivilegeLeave',
+    'mandatoryForcedLeave',
+    'soloParentLeave',
+    'specialEmergencyCalamityLeave',
+  };
+
   @override
   Widget build(BuildContext context) {
-    if (!loading && balances.isEmpty) return const SizedBox.shrink();
+    final entitlementBalances = balances
+        .where(
+          (b) => _annualEntitlementTypes.contains(b.effectiveLeaveTypeName),
+        )
+        .toList();
+    if (!loading && entitlementBalances.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return _SectionCard(
-      title: 'Leave Remaining Days',
-      subtitle: 'Annual quota days remaining per leave type.',
+      title: 'Annual Leave Entitlements',
+      subtitle: 'Quota-based leave only. Eligibility and approval rules apply.',
       icon: Icons.calendar_today_rounded,
-      child: loading && balances.isEmpty
+      child: loading && entitlementBalances.isEmpty
           ? const _CenteredState(message: 'Loading leave days...')
           : LayoutBuilder(
               builder: (context, constraints) {
@@ -522,7 +536,7 @@ class _LeaveDaysPanel extends StatelessWidget {
                 return Wrap(
                   spacing: 12,
                   runSpacing: 12,
-                  children: balances
+                  children: entitlementBalances
                       .map(
                         (balance) => SizedBox(
                           width: cardWidth,

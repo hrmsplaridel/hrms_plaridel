@@ -1013,9 +1013,12 @@ class EmployeeLocatorSlipContentState
     required double maxHeight,
     required bool useScrollableList,
   }) {
-    final list = EmployeeLocatorMobileRequestList(
+    // Keep the approval cards in the page's primary scroll view on mobile.
+    // A second, height-limited list makes the last cards sit behind the FAB.
+    return EmployeeLocatorMobileRequestList(
       maxHeight: maxHeight,
-      useScrollableList: useScrollableList,
+      useScrollableList: false,
+      gap: 8,
       children: [
         for (final item in items)
           EmployeeLocatorMobileRequestCard(
@@ -1030,13 +1033,6 @@ class EmployeeLocatorSlipContentState
             onTap: () => _openApprovalDetails(item),
           ),
       ],
-    );
-
-    if (!useScrollableList) return list;
-
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: maxHeight),
-      child: list,
     );
   }
 
@@ -1264,15 +1260,13 @@ class EmployeeLocatorSlipContentState
     if (isMobile) {
       created = await Navigator.of(context, rootNavigator: true)
           .push<_LocatorSlipDraft>(
-        MaterialPageRoute<_LocatorSlipDraft>(builder: (_) => form),
-      );
+            MaterialPageRoute<_LocatorSlipDraft>(builder: (_) => form),
+          );
     } else {
       created = await showDialog<_LocatorSlipDraft>(
         context: context,
-        builder: (_) => EmployeeHrmsAssistantOverlay(
-          initialBottom: 92,
-          child: form,
-        ),
+        builder: (_) =>
+            EmployeeHrmsAssistantOverlay(initialBottom: 92, child: form),
       );
     }
     if (!mounted || created == null) return;
@@ -1770,9 +1764,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         _requestType = widget.requestTypes.firstWhere(
           (type) => type.code == code,
           orElse: () => widget.requestTypes.firstWhere(
-            (type) =>
-                type.code ==
-                LocatorRequestType.fromCode(code).code,
+            (type) => type.code == LocatorRequestType.fromCode(code).code,
             orElse: () => widget.requestTypes.first,
           ),
         );
@@ -2546,9 +2538,10 @@ class _InfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(isMobile ? 16 : 20),
       decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: child,
     );

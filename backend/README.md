@@ -2,7 +2,7 @@
 
 Node.js + Express + PostgreSQL API for the HRMS Plaridel Flutter app.
 
-Implements the full backend from `docs/BACKEND_MIGRATION_GUIDE.md`:
+Implements the HRMS backend API:
 
 - **Auth:** JWT, bcrypt, register, login, `/auth/me`, change password, SMS OTP forgot-password
 - **RBAC:** Middleware for admin-only routes
@@ -155,4 +155,4 @@ backend/
 
 ## Next: Flutter migration
 
-See `docs/BACKEND_MIGRATION_GUIDE.md` section **2. Flutter App Changes** to switch the Flutter app from Supabase to this API.
+Private backend migration instructions are maintained locally under the ignored `docs/private/` directory.

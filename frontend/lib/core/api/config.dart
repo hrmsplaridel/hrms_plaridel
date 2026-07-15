@@ -3,7 +3,7 @@
 /// To switch between localhost and LAN deployment, use ONE of:
 /// - Edit config/api_base_url.txt, then run via scripts/run_flutter.bat (or .sh)
 /// - flutter run --dart-define=API_BASE_URL=http://192.168.1.100:3000
-/// See docs/LAN_DEPLOYMENT.md for full setup.
+/// Private deployment instructions are kept outside version control.
 class ApiConfig {
   ApiConfig._();
 
