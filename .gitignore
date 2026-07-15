@@ -15,6 +15,43 @@ flutter_analyze.txt
 .swiftpm/
 migrate_working_dir/
 
+# Local environment files and runtime secrets
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+
+# Server credentials and private cryptographic material
+**/*service-account*.json
+**/*firebase-adminsdk*.json
+**/firebase-admin-key*.json
+**/credentials.json
+**/.cloudflared/
+**/cloudflared/cert.pem
+**/cloudflared/*.json
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.crt
+**/*.cer
+
+# Android signing secrets
+**/key.properties
+**/*.keystore
+**/*.jks
+
+# Database exports, backups, and local user uploads
+**/*.sql.gz
+**/*.dump
+**/*.backup
+**/backups/
+**/uploads/
+
+# Local process-manager state and diagnostic output
+**/.pm2/
+firebase-debug.log
+
 # IntelliJ related
 *.iml
 *.ipr
