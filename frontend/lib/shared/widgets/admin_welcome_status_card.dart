@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/shared/services/local_weather_service.dart';
 import 'package:hrms_plaridel/shared/widgets/weather_location_picker_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shimmer/shimmer.dart';
 
 const _kClock12hrKey = 'dtr_clock_12hr';
 
@@ -222,12 +223,16 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
               children: [
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: timeBlock(compact: true)),
-                  ],
+                  children: [Expanded(child: timeBlock(compact: true))],
                 ),
                 const SizedBox(height: 8),
-                _buildWeatherBlock(context, secondary, primary, dark, compact: true),
+                _buildWeatherBlock(
+                  context,
+                  secondary,
+                  primary,
+                  dark,
+                  compact: true,
+                ),
                 const SizedBox(height: 8),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -243,7 +248,9 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
                     _WelcomeActionButton(
                       icon: Icons.refresh_rounded,
                       tooltip: 'Refresh weather',
-                      onTap: _weatherLoading ? null : () => _loadWeather(force: true),
+                      onTap: _weatherLoading
+                          ? null
+                          : () => _loadWeather(force: true),
                       loading: _weatherLoading,
                     ),
                   ],
@@ -285,7 +292,9 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
                   _WelcomeActionButton(
                     icon: Icons.refresh_rounded,
                     tooltip: 'Refresh weather',
-                    onTap: _weatherLoading ? null : () => _loadWeather(force: true),
+                    onTap: _weatherLoading
+                        ? null
+                        : () => _loadWeather(force: true),
                     loading: _weatherLoading,
                   ),
                 ],
@@ -301,13 +310,39 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
     BuildContext context,
     Color secondary,
     Color primary,
-    bool dark,
-    {required bool compact}
-  ) {
+    bool dark, {
+    required bool compact,
+  }) {
     if (_weatherLoading && _weather == null) {
-      return Text(
-        'Loading weather…',
-        style: TextStyle(fontSize: compact ? 10 : 10.5, color: secondary),
+      return Shimmer.fromColors(
+        baseColor: dark
+            ? const Color(0xFF2A3140)
+            : AppTheme.lightGray.withValues(alpha: 0.55),
+        highlightColor: dark ? const Color(0xFF3D4451) : AppTheme.white,
+        period: const Duration(milliseconds: 1200),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: compact ? 72 : 88,
+              height: compact ? 17 : 20,
+              decoration: BoxDecoration(
+                color: AppTheme.dashMutedSurfaceOf(context),
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Container(
+              width: compact ? 94 : 112,
+              height: 9,
+              decoration: BoxDecoration(
+                color: AppTheme.dashMutedSurfaceOf(context),
+                borderRadius: BorderRadius.circular(5),
+              ),
+            ),
+          ],
+        ),
       );
     }
 
@@ -339,106 +374,112 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Icon(weather.icon, size: 14, color: const Color(0xFF1565C0)),
-            const SizedBox(width: 4),
-            Text(
-              weather.temperatureLabel,
-              style: TextStyle(
-                fontSize: compact ? 17 : 20,
-                fontWeight: FontWeight.w800,
-                color: primary,
-                height: 1.0,
-              ),
-            ),
-            if (!compact) ...[
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(weather.icon, size: 14, color: const Color(0xFF1565C0)),
               const SizedBox(width: 4),
-              Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    weather.condition,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: compact ? 9.5 : 10,
-                      fontWeight: FontWeight.w700,
-                      color: secondary,
-                    ),
-                  ),
+              Text(
+                weather.temperatureLabel,
+                style: TextStyle(
+                  fontSize: compact ? 17 : 20,
+                  fontWeight: FontWeight.w800,
+                  color: primary,
+                  height: 1.0,
                 ),
               ),
-            ],
-          ],
-        ),
-        if (compact) ...[
-          const SizedBox(height: 2),
-          Text(
-            weather.condition,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: secondary,
-            ),
-          ),
-        ],
-        const SizedBox(height: 3),
-        Tooltip(
-          message: locationHint,
-          child: InkWell(
-            onTap: _changeLocation,
-            borderRadius: BorderRadius.circular(4),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 1),
-              child: Row(
-                children: [
-                  Icon(
-                    isDefaultLocation
-                        ? Icons.add_location_alt_outlined
-                        : Icons.location_on_outlined,
-                    size: 12,
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.8),
-                  ),
-                  const SizedBox(width: 3),
-                  Flexible(
+              if (!compact) ...[
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
                     child: Text(
-                      isDefaultLocation ? 'Set location' : weather.locationLabel,
-                      maxLines: compact ? 2 : 1,
+                      weather.condition,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: compact ? 10 : 10.5,
-                        fontWeight: FontWeight.w600,
+                        fontSize: compact ? 9.5 : 10,
+                        fontWeight: FontWeight.w700,
                         color: secondary,
-                        decoration: TextDecoration.underline,
-                        decorationColor: secondary.withValues(alpha: 0.45),
                       ),
                     ),
                   ),
-                  if (!compact) ...[
-                    const SizedBox(width: 2),
+                ),
+              ],
+            ],
+          ),
+          if (compact) ...[
+            const SizedBox(height: 2),
+            Text(
+              weather.condition,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: secondary,
+              ),
+            ),
+          ],
+          const SizedBox(height: 3),
+          Tooltip(
+            message: locationHint,
+            child: InkWell(
+              onTap: _changeLocation,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: Row(
+                  children: [
                     Icon(
-                      Icons.edit_location_alt_outlined,
+                      isDefaultLocation
+                          ? Icons.add_location_alt_outlined
+                          : Icons.location_on_outlined,
                       size: 12,
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.8),
                     ),
+                    const SizedBox(width: 3),
+                    Flexible(
+                      child: Text(
+                        isDefaultLocation
+                            ? 'Set location'
+                            : weather.locationLabel,
+                        maxLines: compact ? 2 : 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: compact ? 10 : 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: secondary,
+                          decoration: TextDecoration.underline,
+                          decorationColor: secondary.withValues(alpha: 0.45),
+                        ),
+                      ),
+                    ),
+                    if (!compact) ...[
+                      const SizedBox(width: 2),
+                      Icon(
+                        Icons.edit_location_alt_outlined,
+                        size: 12,
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
-        ),
-      ],
-    ));
+        ],
+      ),
+    );
   }
 }
 
