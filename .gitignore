@@ -52,6 +52,9 @@ migrate_working_dir/
 **/.pm2/
 firebase-debug.log
 
+# Private infrastructure and deployment documentation
+docs/private/
+
 # IntelliJ related
 *.iml
 *.ipr
