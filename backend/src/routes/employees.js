@@ -10,8 +10,6 @@ const router = express.Router();
 const protect = [authMiddleware];
 
 const SALT_ROUNDS = 10;
-const EMPLOYEE_ID_MIN = 100000;
-const EMPLOYEE_ID_MAX = 999999;
 
 function employeeAccountEmailText({ name, email, password, role }) {
   const displayName = String(name || '').trim() || 'Employee';
@@ -51,26 +49,20 @@ function generateTemporaryPassword(length = 12) {
   return chars.join('');
 }
 
-function randomEmployeeNumber() {
-  return (
-    Math.floor(Math.random() * (EMPLOYEE_ID_MAX - EMPLOYEE_ID_MIN + 1)) +
-    EMPLOYEE_ID_MIN
-  );
-}
-
 async function allocateEmployeeNumber() {
-  // Try a few times to avoid collisions; fall back to sequence if needed.
-  for (let attempt = 0; attempt < 12; attempt++) {
-    const candidate = randomEmployeeNumber();
+  // Allocate stable, ascending employee numbers. Keep advancing if an older
+  // record already occupies a sequence value (for example after data import).
+  while (true) {
+    const seq = await pool.query(
+      "SELECT nextval('users_employee_number_seq') AS n"
+    );
+    const candidate = parseInt(seq.rows[0].n, 10);
     const exists = await pool.query(
       'SELECT 1 FROM users WHERE employee_number = $1 LIMIT 1',
       [candidate]
     );
     if (exists.rowCount === 0) return candidate;
   }
-  // last resort: keep system running even if random keeps colliding
-  const seq = await pool.query("SELECT nextval('users_employee_number_seq') AS n");
-  return parseInt(seq.rows[0].n, 10);
 }
 
 const MAX_PAGE_SIZE = 100;

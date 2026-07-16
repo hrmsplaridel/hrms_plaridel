@@ -367,18 +367,18 @@ router.post('/:id/import-user', protect, requireAdmin, async (req, res) => {
     const name = (full_name || 'Imported User').trim();
 
     async function allocateEmployeeNumber() {
-      const min = 100000;
-      const max = 999999;
-      for (let attempt = 0; attempt < 12; attempt++) {
-        const candidate = Math.floor(Math.random() * (max - min + 1)) + min;
+      // Use the same stable sequence as manually created employees.
+      while (true) {
+        const seq = await pool.query(
+          "SELECT nextval('users_employee_number_seq') AS n"
+        );
+        const candidate = parseInt(seq.rows[0].n, 10);
         const exists = await pool.query(
           'SELECT 1 FROM users WHERE employee_number = $1 LIMIT 1',
           [candidate]
         );
         if (exists.rowCount === 0) return candidate;
       }
-      const seq = await pool.query("SELECT nextval('users_employee_number_seq') AS n");
-      return parseInt(seq.rows[0].n, 10);
     }
     const empNo = await allocateEmployeeNumber();
     
