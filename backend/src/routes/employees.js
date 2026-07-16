@@ -205,6 +205,8 @@ function buildEmployeeListFromSql(req, options = {}) {
       u.full_name ILIKE $${i} OR
       u.email ILIKE $${i} OR
       CAST(u.employee_number AS TEXT) ILIKE $${i} OR
+      LPAD(CAST(u.employee_number AS TEXT), 3, '0') ILIKE $${i} OR
+      ('EMP-' || LPAD(CAST(u.employee_number AS TEXT), 3, '0')) ILIKE $${i} OR
       COALESCE(cur.current_department_name, '') ILIKE $${i} OR
       COALESCE(cur.current_position_name, '') ILIKE $${i} OR
       COALESCE(u.employment_status, '') ILIKE $${i} OR
