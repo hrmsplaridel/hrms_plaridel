@@ -66,6 +66,8 @@ class _DashboardContentNavigatorState extends State<DashboardContentNavigator> {
   final Map<Object, _DashboardHomeEntry> _homeCache =
       <Object, _DashboardHomeEntry>{};
   int _homeCacheClock = 0;
+  bool _homeRefreshScheduled = false;
+  bool _settingsRefreshScheduled = false;
 
   @override
   void didUpdateWidget(covariant DashboardContentNavigator oldWidget) {
@@ -73,12 +75,32 @@ class _DashboardContentNavigatorState extends State<DashboardContentNavigator> {
     if (oldWidget.homeCacheKey != widget.homeCacheKey ||
         oldWidget.homeRefreshKey != widget.homeRefreshKey ||
         oldWidget.homeScrollPadding != widget.homeScrollPadding) {
-      _homeVersion.value++;
+      _scheduleHomeRefresh();
     }
     if (oldWidget.settingsPanel != widget.settingsPanel ||
         oldWidget.settingsScrollPadding != widget.settingsScrollPadding) {
-      _settingsVersion.value++;
+      _scheduleSettingsRefresh();
     }
+  }
+
+  void _scheduleHomeRefresh() {
+    if (_homeRefreshScheduled) return;
+    _homeRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _homeRefreshScheduled = false;
+      if (!mounted) return;
+      _homeVersion.value++;
+    });
+  }
+
+  void _scheduleSettingsRefresh() {
+    if (_settingsRefreshScheduled) return;
+    _settingsRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _settingsRefreshScheduled = false;
+      if (!mounted) return;
+      _settingsVersion.value++;
+    });
   }
 
   @override
