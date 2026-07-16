@@ -613,9 +613,12 @@ class MockLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(int year) async {
+  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(
+    int year,
+  ) async {
     return YearEndForcedLeaveComplianceResult(
       year: year,
+      yearClosed: year < DateTime.now().year,
       requiredDays: 5,
       employees: const [],
       summary: const YearEndForcedLeaveSummary(

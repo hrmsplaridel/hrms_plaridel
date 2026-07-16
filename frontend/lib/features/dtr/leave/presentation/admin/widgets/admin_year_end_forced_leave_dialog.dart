@@ -38,7 +38,6 @@ class _AdminYearEndForcedLeaveDialogState
   int _currentPage = 0;
   static const int _pageSize = 10;
 
-
   @override
   void initState() {
     super.initState();
@@ -86,7 +85,9 @@ class _AdminYearEndForcedLeaveDialogState
   Future<void> _loadCompliance() async {
     final year = _parsedYear();
     if (year == null) {
-      setState(() => _error = 'Enter a valid year (e.g. ${DateTime.now().year})');
+      setState(
+        () => _error = 'Enter a valid year (e.g. ${DateTime.now().year})',
+      );
       return;
     }
     setState(() {
@@ -96,12 +97,16 @@ class _AdminYearEndForcedLeaveDialogState
       _applyResult = null;
       _currentPage = 0;
     });
-    final result = await context.read<LeaveProvider>().getYearEndForcedLeaveCompliance(year);
+    final result = await context
+        .read<LeaveProvider>()
+        .getYearEndForcedLeaveCompliance(year);
     if (!mounted) return;
     setState(() {
       _loadingCompliance = false;
       if (result == null) {
-        _error = context.read<LeaveProvider>().error ?? 'Failed to load compliance data.';
+        _error =
+            context.read<LeaveProvider>().error ??
+            'Failed to load compliance data.';
       } else {
         _compliance = result;
       }
@@ -116,15 +121,17 @@ class _AdminYearEndForcedLeaveDialogState
       _error = null;
       _applyResult = null;
     });
-    final result = await context.read<LeaveProvider>().applyYearEndForcedLeaveDeductions(
-      YearEndForcedLeaveApplyInput(
-        year: year,
-        dryRun: true,
-        remarks: _remarksController.text.trim().isEmpty
-            ? null
-            : _remarksController.text.trim(),
-      ),
-    );
+    final result = await context
+        .read<LeaveProvider>()
+        .applyYearEndForcedLeaveDeductions(
+          YearEndForcedLeaveApplyInput(
+            year: year,
+            dryRun: true,
+            remarks: _remarksController.text.trim().isEmpty
+                ? null
+                : _remarksController.text.trim(),
+          ),
+        );
     if (!mounted) return;
     setState(() {
       _previewing = false;
@@ -145,15 +152,17 @@ class _AdminYearEndForcedLeaveDialogState
       _applying = true;
       _error = null;
     });
-    final result = await context.read<LeaveProvider>().applyYearEndForcedLeaveDeductions(
-      YearEndForcedLeaveApplyInput(
-        year: year,
-        dryRun: false,
-        remarks: _remarksController.text.trim().isEmpty
-            ? null
-            : _remarksController.text.trim(),
-      ),
-    );
+    final result = await context
+        .read<LeaveProvider>()
+        .applyYearEndForcedLeaveDeductions(
+          YearEndForcedLeaveApplyInput(
+            year: year,
+            dryRun: false,
+            remarks: _remarksController.text.trim().isEmpty
+                ? null
+                : _remarksController.text.trim(),
+          ),
+        );
     if (!mounted) return;
     setState(() {
       _applying = false;
@@ -171,7 +180,8 @@ class _AdminYearEndForcedLeaveDialogState
   }
 
   Future<bool?> _confirmDialog(int year) {
-    final pendingCount = _compliance?.summary.pendingDeduction ??
+    final pendingCount =
+        _compliance?.summary.pendingDeduction ??
         (_applyResult?.summary.wouldApply ?? 0);
     return showDialog<bool>(
       context: context,
@@ -189,9 +199,7 @@ class _AdminYearEndForcedLeaveDialogState
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red.shade700,
-            ),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
             child: const Text('Apply Deductions'),
           ),
         ],
@@ -200,7 +208,7 @@ class _AdminYearEndForcedLeaveDialogState
   }
 
   List<String> get _availableDepartments {
-    final source = _applyResult?.results ?? _compliance?.employees ?? const [];
+    final source = _compliance?.employees ?? const [];
     return source
         .map((e) => e.departmentName)
         .whereType<String>()
@@ -213,19 +221,22 @@ class _AdminYearEndForcedLeaveDialogState
     if (_statusFilter == 'all') return true;
     final s = e.applyStatus ?? e.status;
     return switch (_statusFilter) {
-      'pending'   => s == 'pending' || s == 'would_apply' || s == 'applied',
+      'pending' => s == 'pending' || s == 'would_apply' || s == 'applied',
+      'monitoring' => s == 'monitoring',
       'compliant' => s == 'compliant',
-      'deducted'  => s == 'deducted' || s == 'already_deducted',
-      _           => true,
+      'deducted' => s == 'deducted' || s == 'already_deducted',
+      _ => true,
     };
   }
 
   List<YearEndForcedLeaveEmployee> get _filteredRows {
-    final source = _applyResult?.results ?? _compliance?.employees ?? const [];
+    final source = _compliance?.employees ?? const [];
     final q = _employeeSearch.toLowerCase();
     return source.where((e) {
       if (!_matchesStatusFilter(e)) return false;
-      if (_departmentFilter != null && e.departmentName != _departmentFilter) return false;
+      if (_departmentFilter != null && e.departmentName != _departmentFilter) {
+        return false;
+      }
       if (q.isNotEmpty &&
           !e.fullName.toLowerCase().contains(q) &&
           !(e.employeeNumber?.toLowerCase().contains(q) ?? false)) {
@@ -235,7 +246,8 @@ class _AdminYearEndForcedLeaveDialogState
     }).toList();
   }
 
-  int get _pageCount => (_filteredRows.length / _pageSize).ceil().clamp(1, 99999);
+  int get _pageCount =>
+      (_filteredRows.length / _pageSize).ceil().clamp(1, 99999);
 
   List<YearEndForcedLeaveEmployee> get _displayRows {
     final filtered = _filteredRows;
@@ -245,7 +257,11 @@ class _AdminYearEndForcedLeaveDialogState
     return filtered.sublist(start, end);
   }
 
-  void _setFilter({String? status, String? Function()? department, String? employeeSearch}) {
+  void _setFilter({
+    String? status,
+    String? Function()? department,
+    String? employeeSearch,
+  }) {
     setState(() {
       if (status != null) _statusFilter = status;
       if (department != null) _departmentFilter = department();
@@ -258,8 +274,13 @@ class _AdminYearEndForcedLeaveDialogState
   Widget build(BuildContext context) {
     final busy = _loadingCompliance || _previewing || _applying;
     final summary = _compliance?.summary;
-    final canPreview = !busy && _compliance != null && summary!.pendingDeduction > 0;
-    final canApply = !busy && _compliance != null && summary!.pendingDeduction > 0;
+    final actionable =
+        (summary?.pendingDeduction ?? 0) + (summary?.partial ?? 0);
+    final selectedYear = _parsedYear();
+    final yearClosed =
+        selectedYear != null && selectedYear < DateTime.now().year;
+    final canPreview = !busy && _compliance != null && actionable > 0;
+    final canApply = canPreview && yearClosed;
 
     return Scaffold(
       backgroundColor: Theme.of(context).canvasColor,
@@ -300,8 +321,8 @@ class _AdminYearEndForcedLeaveDialogState
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Employees who did not take 5 mandatory days will have the shortfall '
-                          'deducted from their Vacation Leave balance.',
+                          'Review qualifying vacation leave, eligibility, and the actual capped '
+                          'deduction. Current-year records are preview-only.',
                           style: TextStyle(
                             color: AppTheme.dashTextSecondaryOf(context),
                             fontSize: 13,
@@ -333,23 +354,29 @@ class _AdminYearEndForcedLeaveDialogState
                       keyboardType: TextInputType.number,
                       decoration: adminLeaveInputDecoration(context, 'Year')
                           .copyWith(
-                        prefixIcon: const Icon(Icons.calendar_today_outlined),
-                        hintText: DateTime.now().year.toString(),
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.refresh_rounded),
-                          tooltip: 'Reload',
-                          onPressed: busy ? null : _loadCompliance,
-                        ),
-                      ),
+                            prefixIcon: const Icon(
+                              Icons.calendar_today_outlined,
+                            ),
+                            hintText: DateTime.now().year.toString(),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.refresh_rounded),
+                              tooltip: 'Reload',
+                              onPressed: busy ? null : _loadCompliance,
+                            ),
+                          ),
                     ),
                     TextFormField(
                       controller: _remarksController,
                       enabled: !busy,
-                      decoration: adminLeaveInputDecoration(context, 'Remarks (optional)')
-                          .copyWith(
-                        prefixIcon: const Icon(Icons.comment_outlined),
-                        hintText: 'e.g. Year-end CSC forced leave compliance',
-                      ),
+                      decoration:
+                          adminLeaveInputDecoration(
+                            context,
+                            'Remarks (optional)',
+                          ).copyWith(
+                            prefixIcon: const Icon(Icons.comment_outlined),
+                            hintText:
+                                'e.g. Year-end CSC forced leave compliance',
+                          ),
                     ),
                   ];
                   if (constraints.maxWidth < 560) {
@@ -396,7 +423,9 @@ class _AdminYearEndForcedLeaveDialogState
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.search_rounded, size: 18),
-                    label: Text(_previewing ? 'Previewing...' : 'Preview Deductions'),
+                    label: Text(
+                      _previewing ? 'Previewing...' : 'Preview Deductions',
+                    ),
                   ),
                   const SizedBox(width: 8),
                   FilledButton.icon(
@@ -413,8 +442,17 @@ class _AdminYearEndForcedLeaveDialogState
                               color: Colors.white,
                             ),
                           )
-                        : const Icon(Icons.check_circle_outline_rounded, size: 18),
-                    label: Text(_applying ? 'Applying...' : 'Apply All Deductions'),
+                        : const Icon(
+                            Icons.check_circle_outline_rounded,
+                            size: 18,
+                          ),
+                    label: Text(
+                      _applying
+                          ? 'Applying...'
+                          : yearClosed
+                          ? 'Apply Eligible Deductions'
+                          : 'Available after year close',
+                    ),
                   ),
                 ],
               ),
@@ -480,6 +518,7 @@ class _AdminYearEndForcedLeaveDialogState
               _StatusFilterBar(
                 selected: _statusFilter,
                 pendingCount: _compliance!.summary.pendingDeduction,
+                monitoringCount: _compliance!.summary.monitoring,
                 compliantCount: _compliance!.summary.compliant,
                 deductedCount: _compliance!.summary.alreadyDeducted,
                 onChanged: (v) => _setFilter(status: v),
@@ -509,16 +548,21 @@ class _AdminYearEndForcedLeaveDialogState
                       icon: Icons.check_circle_outline_rounded,
                       message: _filteredRows.isEmpty
                           ? (_statusFilter == 'all' &&
-                                  _departmentFilter == null &&
-                                  _employeeSearch.isEmpty
-                              ? 'No active employees found.'
-                              : 'No employees match the current filters.')
+                                    _departmentFilter == null &&
+                                    _employeeSearch.isEmpty
+                                ? 'No active employees found.'
+                                : 'No employees match the current filters.')
                           : 'No employees on this page.',
                     ),
                   )
                 : _ComplianceTable(
                     rows: _displayRows,
-                    onCustomDeduct: busy ? null : _customDeductEmployee,
+                    onCustomDeduct:
+                        busy ||
+                            (_parsedYear() ?? DateTime.now().year) >=
+                                DateTime.now().year
+                        ? null
+                        : _customDeductEmployee,
                   ),
           ),
         ),
@@ -560,16 +604,21 @@ class _SummaryRow extends StatelessWidget {
       runSpacing: 8,
       children: [
         _SummaryChip(label: 'Year', value: year.toString()),
-        _SummaryChip(
-          label: 'Total employees',
-          value: summary.total.toString(),
-        ),
-        _SummaryChip(
-          label: 'Need deduction',
-          value: summary.pendingDeduction.toString(),
-          highlight: summary.pendingDeduction > 0,
-          highlightColor: Colors.orange.shade700,
-        ),
+        _SummaryChip(label: 'Total employees', value: summary.total.toString()),
+        if (summary.pendingDeduction > 0)
+          _SummaryChip(
+            label: 'Need deduction',
+            value: summary.pendingDeduction.toString(),
+            highlight: true,
+            highlightColor: Colors.orange.shade700,
+          ),
+        if (summary.monitoring > 0)
+          _SummaryChip(
+            label: 'Monitoring',
+            value: summary.monitoring.toString(),
+            highlight: true,
+            highlightColor: Colors.orange.shade700,
+          ),
         _SummaryChip(
           label: 'Compliant',
           value: summary.compliant.toString(),
@@ -580,6 +629,13 @@ class _SummaryRow extends StatelessWidget {
           label: 'Already deducted',
           value: summary.alreadyDeducted.toString(),
         ),
+        if (summary.optionalReview > 0)
+          _SummaryChip(
+            label: 'Optional / review',
+            value: summary.optionalReview.toString(),
+            highlight: true,
+            highlightColor: Colors.blueGrey.shade700,
+          ),
         if (isApplyResult && summary.applied > 0)
           _SummaryChip(
             label: 'Applied',
@@ -621,8 +677,9 @@ class _SummaryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color =
-        highlight && highlightColor != null ? highlightColor! : AppTheme.primaryNavy;
+    final color = highlight && highlightColor != null
+        ? highlightColor!
+        : AppTheme.primaryNavy;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
@@ -631,7 +688,10 @@ class _SummaryChip extends StatelessWidget {
       ),
       child: RichText(
         text: TextSpan(
-          style: TextStyle(color: AppTheme.dashTextPrimaryOf(context), fontSize: 13),
+          style: TextStyle(
+            color: AppTheme.dashTextPrimaryOf(context),
+            fontSize: 13,
+          ),
           children: [
             TextSpan(
               text: '$label: ',
@@ -657,6 +717,7 @@ class _StatusFilterBar extends StatelessWidget {
   const _StatusFilterBar({
     required this.selected,
     required this.pendingCount,
+    required this.monitoringCount,
     required this.compliantCount,
     required this.deductedCount,
     required this.onChanged,
@@ -664,6 +725,7 @@ class _StatusFilterBar extends StatelessWidget {
 
   final String selected;
   final int pendingCount;
+  final int monitoringCount;
   final int compliantCount;
   final int deductedCount;
   final ValueChanged<String> onChanged;
@@ -672,7 +734,8 @@ class _StatusFilterBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final tabs = [
       ('all', 'All'),
-      ('pending', 'Need deduction ($pendingCount)'),
+      if (pendingCount > 0) ('pending', 'Need deduction ($pendingCount)'),
+      if (monitoringCount > 0) ('monitoring', 'Monitoring ($monitoringCount)'),
       ('compliant', 'Compliant ($compliantCount)'),
       ('deducted', 'Already deducted ($deductedCount)'),
     ];
@@ -694,8 +757,8 @@ class _StatusFilterBar extends StatelessWidget {
               labelStyle: TextStyle(
                 color: active
                     ? AppTheme.dashIsDark(context)
-                        ? AppTheme.primaryNavyLight
-                        : AppTheme.primaryNavy
+                          ? AppTheme.primaryNavyLight
+                          : AppTheme.primaryNavy
                     : AppTheme.dashTextSecondaryOf(context),
                 fontWeight: active ? FontWeight.w700 : FontWeight.w400,
               ),
@@ -730,56 +793,70 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final compact = constraints.maxWidth < 560;
-      final deptField = DropdownButtonFormField<String>(
-        initialValue: selectedDepartment,
-        decoration: adminLeaveInputDecoration(context, 'Department')
-            .copyWith(
-          prefixIcon: const Icon(Icons.business_outlined, size: 18),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        ),
-        items: [
-          const DropdownMenuItem(value: null, child: Text('All departments')),
-          ...departments.map(
-            (d) => DropdownMenuItem(value: d, child: Text(d, overflow: TextOverflow.ellipsis)),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 560;
+        final deptField = DropdownButtonFormField<String>(
+          initialValue: selectedDepartment,
+          decoration: adminLeaveInputDecoration(context, 'Department').copyWith(
+            prefixIcon: const Icon(Icons.business_outlined, size: 18),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 12,
+            ),
           ),
-        ],
-        onChanged: enabled ? (v) => onDepartmentChanged(v) : null,
-        isExpanded: true,
-      );
+          items: [
+            const DropdownMenuItem(value: null, child: Text('All departments')),
+            ...departments.map(
+              (d) => DropdownMenuItem(
+                value: d,
+                child: Text(d, overflow: TextOverflow.ellipsis),
+              ),
+            ),
+          ],
+          onChanged: enabled ? (v) => onDepartmentChanged(v) : null,
+          isExpanded: true,
+        );
 
-      final empField = TextField(
-        controller: employeeSearchController,
-        enabled: enabled,
-        onChanged: onEmployeeSearchChanged,
-        decoration: adminLeaveInputDecoration(context, 'Search employee')
-            .copyWith(
-          prefixIcon: const Icon(Icons.search_rounded, size: 18),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          suffixIcon: employeeSearchController.text.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear_rounded, size: 16),
-                  onPressed: enabled
-                      ? () {
-                          employeeSearchController.clear();
-                          onEmployeeSearchChanged('');
-                        }
-                      : null,
-                )
-              : null,
-        ),
-      );
+        final empField = TextField(
+          controller: employeeSearchController,
+          enabled: enabled,
+          onChanged: onEmployeeSearchChanged,
+          decoration: adminLeaveInputDecoration(context, 'Search employee')
+              .copyWith(
+                prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+                suffixIcon: employeeSearchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded, size: 16),
+                        onPressed: enabled
+                            ? () {
+                                employeeSearchController.clear();
+                                onEmployeeSearchChanged('');
+                              }
+                            : null,
+                      )
+                    : null,
+              ),
+        );
 
-      if (compact) {
-        return Column(children: [deptField, const SizedBox(height: 8), empField]);
-      }
-      return Row(children: [
-        Expanded(child: deptField),
-        const SizedBox(width: 10),
-        Expanded(child: empField),
-      ]);
-    });
+        if (compact) {
+          return Column(
+            children: [deptField, const SizedBox(height: 8), empField],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: deptField),
+            const SizedBox(width: 10),
+            Expanded(child: empField),
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -821,7 +898,9 @@ class _PaginationBar extends StatelessWidget {
           children: [
             IconButton(
               icon: const Icon(Icons.chevron_left_rounded),
-              onPressed: currentPage > 0 ? () => onPageChanged(currentPage - 1) : null,
+              onPressed: currentPage > 0
+                  ? () => onPageChanged(currentPage - 1)
+                  : null,
               tooltip: 'Previous page',
               visualDensity: VisualDensity.compact,
               iconSize: 20,
@@ -860,10 +939,7 @@ class _PaginationBar extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ComplianceTable extends StatefulWidget {
-  const _ComplianceTable({
-    required this.rows,
-    this.onCustomDeduct,
-  });
+  const _ComplianceTable({required this.rows, this.onCustomDeduct});
 
   final List<YearEndForcedLeaveEmployee> rows;
   final void Function(YearEndForcedLeaveEmployee)? onCustomDeduct;
@@ -896,8 +972,9 @@ class _ComplianceTableState extends State<_ComplianceTable> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: AppTheme.primaryNavy.withValues(alpha: 0.07),
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(11)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(11),
+              ),
               border: Border(
                 bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
               ),
@@ -906,8 +983,8 @@ class _ComplianceTableState extends State<_ComplianceTable> {
               children: [
                 _HeaderCell('Employee', flex: 3),
                 _HeaderCell('Department', flex: 2),
-                _HeaderCell('Used', flex: 1, align: TextAlign.center),
-                _HeaderCell('Required', flex: 1, align: TextAlign.center),
+                _HeaderCell('Qualifying VL', flex: 1, align: TextAlign.center),
+                _HeaderCell('Eligibility', flex: 1, align: TextAlign.center),
                 _HeaderCell('VL Balance', flex: 1, align: TextAlign.center),
                 _HeaderCell('Deduct', flex: 1, align: TextAlign.center),
                 _HeaderCell('Status', flex: 2, align: TextAlign.center),
@@ -940,7 +1017,11 @@ class _ComplianceTableState extends State<_ComplianceTable> {
 }
 
 class _HeaderCell extends StatelessWidget {
-  const _HeaderCell(this.text, {required this.flex, this.align = TextAlign.start});
+  const _HeaderCell(
+    this.text, {
+    required this.flex,
+    this.align = TextAlign.start,
+  });
 
   final String text;
   final int flex;
@@ -984,22 +1065,57 @@ class _ComplianceRow extends StatelessWidget {
     return switch (_effectiveStatus) {
       'compliant' => ('Compliant', Colors.green.shade700, Colors.green.shade50),
       'deducted' => ('Deducted', Colors.blue.shade700, Colors.blue.shade50),
-      'already_deducted' => ('Already deducted', Colors.blue.shade700, Colors.blue.shade50),
+      'already_deducted' => (
+        'Already deducted',
+        Colors.blue.shade700,
+        Colors.blue.shade50,
+      ),
       'applied' => ('Applied', Colors.green.shade700, Colors.green.shade50),
-      'would_apply' => ('Will deduct', Colors.orange.shade800, Colors.orange.shade50),
-      'insufficient_balance' => ('Low VL balance', Colors.red.shade700, Colors.red.shade50),
+      'would_apply' => (
+        'Will deduct',
+        Colors.orange.shade800,
+        Colors.orange.shade50,
+      ),
+      'would_partially_apply' => (
+        'Partial',
+        Colors.orange.shade800,
+        Colors.orange.shade50,
+      ),
+      'partially_applied' => (
+        'Partially applied',
+        Colors.orange.shade800,
+        Colors.orange.shade50,
+      ),
+      'partial' => ('Partial', Colors.orange.shade800, Colors.orange.shade50),
+      'monitoring' => (
+        'Monitoring',
+        Colors.orange.shade800,
+        Colors.orange.shade50,
+      ),
+      'optional_below_threshold' => (
+        'Optional / review',
+        Colors.blueGrey.shade700,
+        Colors.blueGrey.shade50,
+      ),
+      'insufficient_balance' => (
+        'Low VL balance',
+        Colors.red.shade700,
+        Colors.red.shade50,
+      ),
       'error' => ('Error', Colors.red.shade700, Colors.red.shade50),
       _ => ('Pending', Colors.orange.shade800, Colors.orange.shade50),
     };
   }
 
   double get _deductionDays =>
-      employee.daysToDeduct ?? employee.suggestedDeduction;
+      employee.daysToDeduct ?? employee.actualDeduction;
 
   @override
   Widget build(BuildContext context) {
     final (label, fgColor, bgColor) = _statusBadge;
-    final dim = _effectiveStatus == 'compliant' || _effectiveStatus == 'already_deducted';
+    final dim =
+        _effectiveStatus == 'compliant' ||
+        _effectiveStatus == 'already_deducted';
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -1061,15 +1177,20 @@ class _ComplianceRow extends StatelessWidget {
               ),
             ),
           ),
-          // Required
+          // Eligibility
           Expanded(
             flex: 1,
-            child: Text(
-              _fmtDays(employee.requiredDays),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: AppTheme.dashTextSecondaryOf(context),
+            child: Tooltip(
+              message: employee.eligibilityReason,
+              child: Text(
+                employee.eligible ? 'Required' : 'Optional',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: employee.eligible
+                      ? AppTheme.dashTextPrimaryOf(context)
+                      : Colors.blueGrey.shade700,
+                ),
               ),
             ),
           ),
@@ -1081,7 +1202,8 @@ class _ComplianceRow extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
-                color: employee.vlAvailable < _deductionDays && _deductionDays > 0
+                color:
+                    employee.vlAvailable < _deductionDays && _deductionDays > 0
                     ? Colors.red.shade700
                     : AppTheme.dashTextPrimaryOf(context),
               ),
@@ -1096,7 +1218,9 @@ class _ComplianceRow extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: _deductionDays > 0 ? Colors.red.shade700 : Colors.green.shade700,
+                color: _deductionDays > 0
+                    ? Colors.red.shade700
+                    : Colors.green.shade700,
               ),
             ),
           ),
@@ -1174,8 +1298,8 @@ class _CustomDeductDialogState extends State<_CustomDeductDialog> {
     final suggested = widget.employee.suggestedDeduction;
     final text = suggested > 0
         ? (suggested == suggested.roundToDouble()
-            ? suggested.toInt().toString()
-            : suggested.toStringAsFixed(2))
+              ? suggested.toInt().toString()
+              : suggested.toStringAsFixed(2))
         : '';
     _daysController = TextEditingController(text: text);
   }
@@ -1204,13 +1328,15 @@ class _CustomDeductDialogState extends State<_CustomDeductDialog> {
       _applying = true;
       _error = null;
     });
-    final result = await context.read<LeaveProvider>().applyForcedLeaveDeduction(
-      ForcedLeaveDeductionInput(
-        userId: widget.employee.userId,
-        daysToDeduct: days,
-        remarks: remarks,
-      ),
-    );
+    final result = await context
+        .read<LeaveProvider>()
+        .applyForcedLeaveDeduction(
+          ForcedLeaveDeductionInput(
+            userId: widget.employee.userId,
+            daysToDeduct: days,
+            remarks: remarks,
+          ),
+        );
     if (!mounted) return;
     if (result == null) {
       setState(() {
@@ -1297,25 +1423,29 @@ class _CustomDeductDialogState extends State<_CustomDeductDialog> {
               TextFormField(
                 controller: _daysController,
                 enabled: !_applying,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                 ],
                 decoration: adminLeaveInputDecoration(context, 'Days to deduct')
                     .copyWith(
-                  prefixIcon: const Icon(Icons.remove_circle_outline_rounded),
-                  hintText: '0.00',
-                ),
+                      prefixIcon: const Icon(
+                        Icons.remove_circle_outline_rounded,
+                      ),
+                      hintText: '0.00',
+                    ),
                 validator: _validateDays,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _remarksController,
                 enabled: !_applying,
-                decoration: adminLeaveInputDecoration(context, 'Remarks (optional)')
-                    .copyWith(
-                  prefixIcon: const Icon(Icons.comment_outlined),
-                ),
+                decoration: adminLeaveInputDecoration(
+                  context,
+                  'Remarks (optional)',
+                ).copyWith(prefixIcon: const Icon(Icons.comment_outlined)),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 12),
@@ -1395,7 +1525,11 @@ class _InfoChip extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StatusPanel extends StatelessWidget {
-  const _StatusPanel({required this.icon, required this.message, this.warning = false});
+  const _StatusPanel({
+    required this.icon,
+    required this.message,
+    this.warning = false,
+  });
 
   final IconData icon;
   final String message;
@@ -1403,9 +1537,15 @@ class _StatusPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = warning ? Colors.red.shade700 : AppTheme.dashTextSecondaryOf(context);
-    final bg = warning ? Colors.red.shade50 : AppTheme.dashMutedSurfaceOf(context);
-    final border = warning ? Colors.red.shade100 : AppTheme.dashHairlineOf(context);
+    final color = warning
+        ? Colors.red.shade700
+        : AppTheme.dashTextSecondaryOf(context);
+    final bg = warning
+        ? Colors.red.shade50
+        : AppTheme.dashMutedSurfaceOf(context);
+    final border = warning
+        ? Colors.red.shade100
+        : AppTheme.dashHairlineOf(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -1420,7 +1560,10 @@ class _StatusPanel extends StatelessWidget {
           Icon(icon, size: 18, color: color),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(message, style: TextStyle(color: color, fontSize: 12.5, height: 1.35)),
+            child: Text(
+              message,
+              style: TextStyle(color: color, fontSize: 12.5, height: 1.35),
+            ),
           ),
         ],
       ),
