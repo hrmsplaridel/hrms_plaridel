@@ -2195,11 +2195,15 @@ class _DtrContent extends StatefulWidget {
 }
 
 class _DtrContentState extends State<_DtrContent> {
+  static const int _maxCachedFeatures = 4;
+
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
   /// 12 = Locator Slip Management
   int _dtrSectionIndex = 0;
+  final Map<int, _DtrFeatureCacheEntry> _featureCache = {};
+  int _featureCacheClock = 0;
 
   /// When opening **Assignment** from Employees, pre-select this employee once.
   String? _prefillAssignmentEmployeeId;
@@ -2218,6 +2222,8 @@ class _DtrContentState extends State<_DtrContent> {
     if (!mounted) return;
     setState(() {
       _prefillAssignmentEmployeeId = employeeId;
+      // Assignment must be rebuilt so the new one-time prefill reaches it.
+      _featureCache.remove(4);
     });
     _openDtrSection(4);
   }
@@ -2232,6 +2238,71 @@ class _DtrContentState extends State<_DtrContent> {
     }
     if (_dtrSectionIndex == index) return;
     setState(() => _dtrSectionIndex = index);
+  }
+
+  Widget _buildDtrFeature(int index) {
+    if (index == 1) return DtrMain(section: DtrSection.timeLogs);
+    if (index == 2) return DtrMain(section: DtrSection.reports);
+    if (index == 8) return const LeaveMain(isAdmin: true);
+    if (index == 11) return const ManageBiometricDevices();
+    if (index == 12) return const AdminLocatorManagementScreen();
+    return _ManageContent(
+      subIndex: index - 3,
+      onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
+      prefillAssignmentEmployeeId: index == 4
+          ? _prefillAssignmentEmployeeId
+          : null,
+      onPrefillAssignmentConsumed: () {
+        if (_prefillAssignmentEmployeeId != null) {
+          setState(() => _prefillAssignmentEmployeeId = null);
+        }
+      },
+    );
+  }
+
+  void _ensureActiveFeatureCached() {
+    final index = _dtrSectionIndex;
+    if (index == 0) return;
+    final existing = _featureCache[index];
+    if (existing != null) {
+      existing.lastUsed = ++_featureCacheClock;
+      return;
+    }
+    _featureCache[index] = _DtrFeatureCacheEntry(
+      index: index,
+      child: KeyedSubtree(
+        key: ValueKey<String>('dtr_feature_$index'),
+        child: _buildDtrFeature(index),
+      ),
+      lastUsed: ++_featureCacheClock,
+    );
+    if (_featureCache.length <= _maxCachedFeatures) return;
+    final removable =
+        _featureCache.values.where((entry) => entry.index != index).toList()
+          ..sort((a, b) => a.lastUsed.compareTo(b.lastUsed));
+    while (_featureCache.length > _maxCachedFeatures && removable.isNotEmpty) {
+      _featureCache.remove(removable.removeAt(0).index);
+    }
+  }
+
+  Widget _buildCachedFeatureStack() {
+    _ensureActiveFeatureCached();
+    final entries = _featureCache.values.toList()
+      ..sort((a, b) => a.lastUsed.compareTo(b.lastUsed));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final entry in entries)
+          Offstage(
+            offstage: entry.index != _dtrSectionIndex,
+            child: TickerMode(
+              enabled: entry.index == _dtrSectionIndex,
+              child: entry.child,
+            ),
+          ),
+      ],
+    );
   }
 
   @override
@@ -2373,35 +2444,26 @@ class _DtrContentState extends State<_DtrContent> {
                     ),
                   ],
                 ),
-              ] else if (_dtrSectionIndex == 1)
-                DtrMain(section: DtrSection.timeLogs)
-              else if (_dtrSectionIndex == 2)
-                DtrMain(section: DtrSection.reports)
-              else if (_dtrSectionIndex == 8)
-                const LeaveMain(isAdmin: true)
-              else if (_dtrSectionIndex == 11)
-                const ManageBiometricDevices()
-              else if (_dtrSectionIndex == 12)
-                const AdminLocatorManagementScreen()
-              else
-                _ManageContent(
-                  subIndex: _dtrSectionIndex - 3,
-                  onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
-                  prefillAssignmentEmployeeId: _dtrSectionIndex == 4
-                      ? _prefillAssignmentEmployeeId
-                      : null,
-                  onPrefillAssignmentConsumed: () {
-                    if (_prefillAssignmentEmployeeId != null) {
-                      setState(() => _prefillAssignmentEmployeeId = null);
-                    }
-                  },
-                ),
+              ] else
+                _buildCachedFeatureStack(),
             ],
           );
         },
       ),
     );
   }
+}
+
+class _DtrFeatureCacheEntry {
+  _DtrFeatureCacheEntry({
+    required this.index,
+    required this.child,
+    required this.lastUsed,
+  });
+
+  final int index;
+  final Widget child;
+  int lastUsed;
 }
 
 /// Create Account: full form displayed directly (single place for adding employees).
