@@ -91,6 +91,9 @@ class _EmployeeProfile {
     if (employeeNumber == null) return '—';
     return 'EMP-${employeeNumber!.toString().padLeft(3, '0')}';
   }
+
+  String get compactEmployeeNo =>
+      employeeNumber != null ? employeeNumber!.toString().padLeft(3, '0') : '—';
 }
 
 /// Default initial passwords for legacy import / recruitment helper dialogs.
@@ -1285,7 +1288,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   int _totalCount = 0;
 
   /// API `sort` param (whitelist on server).
-  String _sortField = 'full_name';
+  String _sortField = 'employee_number';
   bool _sortAscending = true;
   bool _exportingCsv = false;
 
@@ -2531,7 +2534,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                   )
                 : const SizedBox.shrink(),
           ),
-          _sortableHeaderCell('No.', 'employee_number'),
+          _sortableHeaderCell('EMP ID', 'employee_number'),
           _sortableHeaderCell('Name', 'full_name'),
           _sortableHeaderCell('Assignment', 'department'),
           _sortableHeaderCell('Status', 'is_active'),
@@ -2636,14 +2639,17 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                         horizontal: 12,
                         vertical: 10,
                       ),
-                      child: Text(
-                        e.displayEmployeeNo,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _mutedColor(context),
+                      child: Tooltip(
+                        message: e.displayEmployeeNo,
+                        child: Text(
+                          e.compactEmployeeNo,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _mutedColor(context),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
                       ),
                     ),
                   ),
@@ -5215,7 +5221,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                                       columns: [
                                         DataColumn(
                                           label: Text(
-                                            'No.',
+                                            'EMP ID',
                                             style: tableHeadingStyle,
                                           ),
                                         ),
@@ -5244,9 +5250,12 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                                         return DataRow(
                                           cells: [
                                             DataCell(
-                                              Text(
-                                                e.displayEmployeeNo,
-                                                style: tableCellStyle,
+                                              Tooltip(
+                                                message: e.displayEmployeeNo,
+                                                child: Text(
+                                                  e.compactEmployeeNo,
+                                                  style: tableCellStyle,
+                                                ),
                                               ),
                                             ),
                                             DataCell(

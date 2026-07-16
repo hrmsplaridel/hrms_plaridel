@@ -825,7 +825,39 @@ class _DtrReportsState extends State<DtrReports> {
         .map((id) => byId[id])
         .whereType<EmployeeOption>()
         .toList()
-      ..sort((a, b) => a.fullName.compareTo(b.fullName));
+      ..sort(_compareEmployeesByNumber);
+  }
+
+  int _compareEmployeesByNumber(EmployeeOption a, EmployeeOption b) {
+    int compareNatural(String left, String right) {
+      final leftParts = RegExp(r'\d+|\D+').allMatches(left.toUpperCase());
+      final rightParts = RegExp(r'\d+|\D+').allMatches(right.toUpperCase());
+      final leftValues = leftParts.map((match) => match.group(0)!).toList();
+      final rightValues = rightParts.map((match) => match.group(0)!).toList();
+      final count = leftValues.length < rightValues.length
+          ? leftValues.length
+          : rightValues.length;
+      for (var i = 0; i < count; i++) {
+        final leftNumber = int.tryParse(leftValues[i]);
+        final rightNumber = int.tryParse(rightValues[i]);
+        final comparison = leftNumber != null && rightNumber != null
+            ? leftNumber.compareTo(rightNumber)
+            : leftValues[i].compareTo(rightValues[i]);
+        if (comparison != 0) return comparison;
+      }
+      return leftValues.length.compareTo(rightValues.length);
+    }
+
+    final byNumber = compareNatural(a.displayEmployeeNo, b.displayEmployeeNo);
+    if (byNumber != 0) return byNumber;
+    return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
+  }
+
+  String _compactEmployeeNo(String employeeNo) {
+    return employeeNo.replaceFirst(
+      RegExp(r'^EMP[-\s]*', caseSensitive: false),
+      '',
+    );
   }
 
   Future<DtrExportItem> _prepareDtrExportItem(EmployeeOption employee) async {
@@ -958,11 +990,16 @@ class _DtrReportsState extends State<DtrReports> {
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
     final search = _searchController.text.toLowerCase();
-    final employees = search.isEmpty
-        ? dtr.employees
-        : dtr.employees
-              .where((e) => e.fullName.toLowerCase().contains(search))
-              .toList();
+    final employees =
+        dtr.employees
+            .where(
+              (e) =>
+                  search.isEmpty ||
+                  e.fullName.toLowerCase().contains(search) ||
+                  e.displayEmployeeNo.toLowerCase().contains(search),
+            )
+            .toList()
+          ..sort(_compareEmployeesByNumber);
     final selectedList = employees
         .where((e) => e.id == _selectedEmployeeId)
         .toList();
@@ -1237,7 +1274,7 @@ class _DtrReportsState extends State<DtrReports> {
             style: AppTheme.dashFieldTextStyle(context),
             decoration: AppTheme.dashInputDecoration(
               context,
-              hintText: 'Search name...',
+              hintText: 'Search name or ID...',
               prefixIcon: const Icon(Icons.search_rounded, size: 20),
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,
@@ -1794,9 +1831,9 @@ class _DtrReportsState extends State<DtrReports> {
               children: [
                 if (_multiSelectMode) const SizedBox(width: 32),
                 SizedBox(
-                  width: 58,
+                  width: 60,
                   child: Text(
-                    'No.',
+                    'EMP ID',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
@@ -1864,14 +1901,18 @@ class _DtrReportsState extends State<DtrReports> {
                           const SizedBox(width: 4),
                         ],
                         SizedBox(
-                          width: 58,
-                          child: Text(
-                            e.displayEmployeeNo,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.dashTextPrimaryOf(ctx),
+                          width: 60,
+                          child: Tooltip(
+                            message: e.displayEmployeeNo,
+                            child: Text(
+                              _compactEmployeeNo(e.displayEmployeeNo),
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.dashTextPrimaryOf(ctx),
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         Expanded(
@@ -2598,9 +2639,9 @@ class _DtrReportsState extends State<DtrReports> {
               children: [
                 if (_multiSelectMode) const SizedBox(width: 32),
                 SizedBox(
-                  width: 58,
+                  width: 60,
                   child: Text(
-                    'No.',
+                    'EMP ID',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
@@ -2666,14 +2707,18 @@ class _DtrReportsState extends State<DtrReports> {
                           const SizedBox(width: 4),
                         ],
                         SizedBox(
-                          width: 58,
-                          child: Text(
-                            e.displayEmployeeNo,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.dashTextPrimaryOf(ctx),
+                          width: 60,
+                          child: Tooltip(
+                            message: e.displayEmployeeNo,
+                            child: Text(
+                              _compactEmployeeNo(e.displayEmployeeNo),
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.dashTextPrimaryOf(ctx),
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         Expanded(
