@@ -60,6 +60,7 @@ class LeaveProvider extends ChangeNotifier {
   bool _submitting = false;
   bool _reviewing = false;
   String? _error;
+  int _requestLoadGeneration = 0;
 
   LeaveRequestStatus? _filterStatus;
   LeaveType? _filterLeaveType;
@@ -295,6 +296,7 @@ class LeaveProvider extends ChangeNotifier {
     LeaveRequestQuery query = const LeaveRequestQuery(),
     bool forceRefresh = false,
   }) async {
+    final generation = ++_requestLoadGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -306,18 +308,22 @@ class LeaveProvider extends ChangeNotifier {
           ? null
           : _readListCache(_requestCache, key, _requestCacheTtl);
       if (cached != null) {
-        _requests = cached;
+        if (generation == _requestLoadGeneration) _requests = cached;
       } else {
         final fresh = await _repository.listRequests(query: query);
         _writeListCache(_requestCache, key, fresh);
-        _requests = List<LeaveRequest>.from(fresh);
+        if (generation == _requestLoadGeneration) {
+          _requests = List<LeaveRequest>.from(fresh);
+        }
       }
     } catch (e) {
-      _requests = [];
-      _error = e.toString();
+      if (generation == _requestLoadGeneration) _error = e.toString();
+    } finally {
+      if (generation == _requestLoadGeneration) {
+        _loading = false;
+        notifyListeners();
+      }
     }
-    _loading = false;
-    notifyListeners();
   }
 
   Future<void> loadPendingRequests({bool forceRefresh = false}) async {
@@ -689,7 +695,9 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  Future<YearEndForcedLeaveComplianceResult?> getYearEndForcedLeaveCompliance(int year) async {
+  Future<YearEndForcedLeaveComplianceResult?> getYearEndForcedLeaveCompliance(
+    int year,
+  ) async {
     _reviewing = true;
     _error = null;
     notifyListeners();
@@ -853,6 +861,7 @@ class LeaveProvider extends ChangeNotifier {
     LeaveRequestQuery query = const LeaveRequestQuery(),
     bool forceRefresh = false,
   }) async {
+    final generation = ++_requestLoadGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -864,20 +873,24 @@ class LeaveProvider extends ChangeNotifier {
           ? null
           : _readListCache(_requestCache, key, _requestCacheTtl);
       if (cached != null) {
-        _requests = cached;
+        if (generation == _requestLoadGeneration) _requests = cached;
       } else {
         final fresh = await _repository.listDepartmentHeadRequests(
           query: query,
         );
         _writeListCache(_requestCache, key, fresh);
-        _requests = List<LeaveRequest>.from(fresh);
+        if (generation == _requestLoadGeneration) {
+          _requests = List<LeaveRequest>.from(fresh);
+        }
       }
     } catch (e) {
-      _requests = [];
-      _error = e.toString();
+      if (generation == _requestLoadGeneration) _error = e.toString();
+    } finally {
+      if (generation == _requestLoadGeneration) {
+        _loading = false;
+        notifyListeners();
+      }
     }
-    _loading = false;
-    notifyListeners();
   }
 
   Future<LeaveRequest?> departmentHeadApprove(
