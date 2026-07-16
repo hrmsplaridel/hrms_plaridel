@@ -2783,11 +2783,14 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               ),
             ],
           ),
-          IconButton(
-            tooltip: 'Previous page',
-            icon: const Icon(Icons.chevron_left_rounded),
-            onPressed: _pageIndex > 0 ? () => _goToPage(_pageIndex - 1) : null,
-          ),
+          if (maxPage > 0)
+            IconButton(
+              tooltip: 'Previous page',
+              icon: const Icon(Icons.chevron_left_rounded),
+              onPressed: _pageIndex > 0
+                  ? () => _goToPage(_pageIndex - 1)
+                  : null,
+            ),
           Text(
             'Page ${_pageIndex + 1} / ${maxPage + 1}',
             style: TextStyle(
@@ -2796,13 +2799,14 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               fontWeight: FontWeight.w500,
             ),
           ),
-          IconButton(
-            tooltip: 'Next page',
-            icon: const Icon(Icons.chevron_right_rounded),
-            onPressed: _pageIndex < maxPage
-                ? () => _goToPage(_pageIndex + 1)
-                : null,
-          ),
+          if (maxPage > 0)
+            IconButton(
+              tooltip: 'Next page',
+              icon: const Icon(Icons.chevron_right_rounded),
+              onPressed: _pageIndex < maxPage
+                  ? () => _goToPage(_pageIndex + 1)
+                  : null,
+            ),
         ],
       ),
     );
@@ -5246,31 +5250,32 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                       ),
                     ),
                   ),
-                  Wrap(
-                    spacing: 4,
-                    children: [
-                      TextButton.icon(
-                        onPressed: _pageIndex <= 0 || _loading
-                            ? null
-                            : () {
-                                setState(() => _pageIndex--);
-                                _load();
-                              },
-                        icon: const Icon(Icons.chevron_left_rounded),
-                        label: const Text('Previous'),
-                      ),
-                      TextButton.icon(
-                        onPressed: _pageIndex >= _totalPages - 1 || _loading
-                            ? null
-                            : () {
-                                setState(() => _pageIndex++);
-                                _load();
-                              },
-                        label: const Text('Next'),
-                        icon: const Icon(Icons.chevron_right_rounded),
-                      ),
-                    ],
-                  ),
+                  if (_totalPages > 1)
+                    Wrap(
+                      spacing: 4,
+                      children: [
+                        TextButton.icon(
+                          onPressed: _pageIndex <= 0 || _loading
+                              ? null
+                              : () {
+                                  setState(() => _pageIndex--);
+                                  _load();
+                                },
+                          icon: const Icon(Icons.chevron_left_rounded),
+                          label: const Text('Previous'),
+                        ),
+                        TextButton.icon(
+                          onPressed: _pageIndex >= _totalPages - 1 || _loading
+                              ? null
+                              : () {
+                                  setState(() => _pageIndex++);
+                                  _load();
+                                },
+                          label: const Text('Next'),
+                          icon: const Icon(Icons.chevron_right_rounded),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),

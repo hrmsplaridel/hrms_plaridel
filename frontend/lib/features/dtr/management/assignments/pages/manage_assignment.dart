@@ -1779,13 +1779,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               ),
             ],
           ),
-          IconButton(
-            tooltip: 'Previous page',
-            icon: const Icon(Icons.chevron_left_rounded),
-            onPressed: _pageIndex > 0
-                ? () => _goToEmployeePage(_pageIndex - 1)
-                : null,
-          ),
+          if (maxPage > 0)
+            IconButton(
+              tooltip: 'Previous page',
+              icon: const Icon(Icons.chevron_left_rounded),
+              onPressed: _pageIndex > 0
+                  ? () => _goToEmployeePage(_pageIndex - 1)
+                  : null,
+            ),
           Text(
             'Page ${_pageIndex + 1} / ${maxPage + 1}',
             style: TextStyle(
@@ -1794,13 +1795,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               fontWeight: FontWeight.w500,
             ),
           ),
-          IconButton(
-            tooltip: 'Next page',
-            icon: const Icon(Icons.chevron_right_rounded),
-            onPressed: _pageIndex < maxPage
-                ? () => _goToEmployeePage(_pageIndex + 1)
-                : null,
-          ),
+          if (maxPage > 0)
+            IconButton(
+              tooltip: 'Next page',
+              icon: const Icon(Icons.chevron_right_rounded),
+              onPressed: _pageIndex < maxPage
+                  ? () => _goToEmployeePage(_pageIndex + 1)
+                  : null,
+            ),
         ],
       ),
     );
