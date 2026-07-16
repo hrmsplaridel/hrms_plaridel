@@ -4,8 +4,8 @@
  * CSC rule: All employees must take at least 5 working days of forced/vacation
  * leave annually. If unused by year-end, HR deducts the shortfall from VL credits.
  *
- * Only leave requests of type `mandatoryForcedLeave` count toward the 5-day
- * requirement. Regular vacation leave usage does NOT satisfy it.
+ * Approved mandatory/forced leave and qualifying vacation leave both count
+ * toward the five-day requirement (CSC Form No. 6 / Section 25).
  */
 
 const { insertLeaveBalanceLedger } = require('./leaveBalanceLedger');
@@ -36,6 +36,7 @@ function manilaYearNow() {
  */
 async function getYearEndForcedLeaveCompliance(pool, { year }) {
   const yearStr = String(year);
+  const yearClosed = year < manilaYearNow();
 
   const { rows } = await pool.query(
     `
@@ -49,6 +50,13 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
       COALESCE(fl.forced_days, 0)::numeric                   AS forced_leave_days_used,
 
       /* Current VL available balance */
+      GREATEST(
+        COALESCE(vl.earned_days, 0)
+          - COALESCE(vl.used_days, 0)
+          + COALESCE(vl.adjusted_days, 0),
+        0
+      )::numeric                                             AS vl_accumulated,
+
       GREATEST(
         COALESCE(vl.earned_days, 0)
           - COALESCE(vl.used_days, 0)
@@ -78,14 +86,14 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
       LIMIT 1
     ) cur ON true
 
-    /* Forced leave days used (approved requests of mandatoryForcedLeave) */
+    /* Qualifying approved mandatory/forced leave and vacation leave */
     LEFT JOIN (
       SELECT
         COALESCE(lr.user_id, lr.employee_id) AS uid,
         COALESCE(SUM(COALESCE(lr.number_of_days, lr.total_days, 0)), 0) AS forced_days
       FROM   leave_requests lr
       JOIN   leave_types lt ON lt.id = lr.leave_type_id
-      WHERE  lt.name = 'mandatoryForcedLeave'
+      WHERE  lt.name IN ('mandatoryForcedLeave', 'vacationLeave')
         AND  lr.status = 'approved'
         AND  EXTRACT(YEAR FROM lr.start_date) = $1::int
       GROUP BY COALESCE(lr.user_id, lr.employee_id)
@@ -118,15 +126,30 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
 
   const employees = rows.map((r) => {
     const forcedUsed = parseFloat(r.forced_leave_days_used || 0);
+    const vlAccumulated = parseFloat(r.vl_accumulated || 0);
     const vlAvailable = parseFloat(r.vl_available || 0);
     const alreadyDeducted = !!r.deduction_ledger_id;
-    const suggestedDeduction = alreadyDeducted
+    const shortfall = alreadyDeducted
       ? 0
       : parseFloat(Math.max(0, REQUIRED_FORCED_DAYS - forcedUsed).toFixed(4));
+    // Employees below ten accumulated VL credits are optional under Section
+    // 25 and must not be included in automatic bulk deductions. Monetization
+    // exceptions require HR review because that history is not yet stored.
+    const eligible = vlAccumulated >= 10;
+    const actualDeduction = alreadyDeducted || !eligible || !yearClosed
+      ? 0
+      : parseFloat(Math.min(shortfall, vlAvailable).toFixed(4));
+    const unresolvedShortfall = parseFloat(
+      Math.max(0, shortfall - actualDeduction).toFixed(4),
+    );
 
     let status;
     if (alreadyDeducted) status = 'deducted';
     else if (forcedUsed >= REQUIRED_FORCED_DAYS) status = 'compliant';
+    else if (!eligible) status = 'optional_below_threshold';
+    else if (!yearClosed) status = 'monitoring';
+    else if (actualDeduction <= 0) status = 'insufficient_balance';
+    else if (actualDeduction < shortfall) status = 'partial';
     else status = 'pending';
 
     return {
@@ -136,13 +159,21 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
       current_department_name: r.current_department_name || null,
       forced_leave_days_used: forcedUsed,
       required_days: REQUIRED_FORCED_DAYS,
-      suggested_deduction: suggestedDeduction,
+      suggested_deduction: shortfall,
+      actual_deduction: actualDeduction,
+      unresolved_shortfall: unresolvedShortfall,
       vl_available: vlAvailable,
+      vl_accumulated: vlAccumulated,
+      eligible,
+      eligibility_status: eligible ? 'required' : 'optional_below_threshold',
+      eligibility_reason: eligible
+        ? 'At least 10 VL credits at assessment'
+        : 'Below 10 VL credits; forced leave is optional and requires HR review',
       already_deducted: alreadyDeducted,
       deducted_days: alreadyDeducted ? parseFloat(r.deducted_days || 0) : null,
       deducted_at: r.deducted_at || null,
       deduction_remarks: r.deduction_remarks || null,
-      can_apply: !alreadyDeducted && suggestedDeduction > 0,
+      can_apply: yearClosed && !alreadyDeducted && eligible && actualDeduction > 0,
       status,
     };
   });
@@ -151,10 +182,20 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
     total: employees.length,
     compliant: employees.filter((e) => e.status === 'compliant').length,
     pending_deduction: employees.filter((e) => e.status === 'pending').length,
+    monitoring: employees.filter((e) => e.status === 'monitoring').length,
+    partial: employees.filter((e) => e.status === 'partial').length,
+    optional_review: employees.filter((e) => e.status === 'optional_below_threshold').length,
+    insufficient_balance: employees.filter((e) => e.status === 'insufficient_balance').length,
     already_deducted: employees.filter((e) => e.status === 'deducted').length,
   };
 
-  return { year, required_days: REQUIRED_FORCED_DAYS, employees, summary };
+  return {
+    year,
+    year_closed: yearClosed,
+    required_days: REQUIRED_FORCED_DAYS,
+    employees,
+    summary,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -231,10 +272,12 @@ async function applyYearEndForcedLeaveDeductions(pool, {
       full_name: emp.full_name,
       current_department_name: emp.current_department_name,
       forced_leave_days_used: emp.forced_leave_days_used,
-      days_to_deduct: emp.suggested_deduction,
+      days_to_deduct: emp.actual_deduction,
       vl_available: emp.vl_available,
-      vl_sufficient: emp.vl_available >= emp.suggested_deduction,
-      apply_status: 'would_apply',
+      vl_sufficient: emp.actual_deduction >= emp.suggested_deduction,
+      apply_status: emp.actual_deduction < emp.suggested_deduction
+        ? 'would_partially_apply'
+        : 'would_apply',
       error: null,
       applied_at: null,
     }));
@@ -297,7 +340,10 @@ async function applyYearEndForcedLeaveDeductions(pool, {
       );
       const bal = balQ.rows[0] || null;
       const vlRemaining = bal
-        ? parseFloat(bal.earned_days || 0) - parseFloat(bal.used_days || 0) + parseFloat(bal.adjusted_days || 0)
+        ? parseFloat(bal.earned_days || 0)
+          - parseFloat(bal.used_days || 0)
+          + parseFloat(bal.adjusted_days || 0)
+          - parseFloat(bal.pending_days || 0)
         : 0;
       const beforeUsed = bal ? parseFloat(bal.used_days || 0) : 0;
 
@@ -360,12 +406,15 @@ async function applyYearEndForcedLeaveDeductions(pool, {
       });
 
       await client.query('COMMIT');
+      const fullySatisfied = daysToDeduct >= emp.suggested_deduction;
       appliedResults.push({
         user_id: emp.user_id, employee_number: emp.employee_number,
         full_name: emp.full_name, current_department_name: emp.current_department_name,
         forced_leave_days_used: emp.forced_leave_days_used,
-        days_to_deduct: daysToDeduct, vl_available: emp.vl_available, vl_sufficient: true,
-        apply_status: 'applied', error: null, applied_at: new Date().toISOString(),
+        days_to_deduct: daysToDeduct, vl_available: emp.vl_available,
+        vl_sufficient: fullySatisfied,
+        apply_status: fullySatisfied ? 'applied' : 'partially_applied',
+        error: null, applied_at: new Date().toISOString(),
       });
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
@@ -390,6 +439,7 @@ async function applyYearEndForcedLeaveDeductions(pool, {
     summary: {
       total_eligible: targets.length,
       applied: appliedResults.filter((r) => r.apply_status === 'applied').length,
+      partially_applied: appliedResults.filter((r) => r.apply_status === 'partially_applied').length,
       already_deducted: appliedResults.filter((r) => r.apply_status === 'already_deducted').length + skippedDeducted.length,
       insufficient_balance: appliedResults.filter((r) => r.apply_status === 'insufficient_balance').length,
       errors: appliedResults.filter((r) => r.apply_status === 'error').length,

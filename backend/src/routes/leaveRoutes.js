@@ -2808,6 +2808,11 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
   if (!Number.isInteger(year) || year < 1900 || year > maxAllowedYear) {
     return res.status(400).json({ error: `year must be between 1900 and ${maxAllowedYear}` });
   }
+  if (year >= yearEndManilaYearNow()) {
+    return res.status(409).json({
+      error: `Year-end deductions for ${year} cannot be applied until that calendar year has closed.`,
+    });
+  }
 
   const client = await pool.connect();
   try {
@@ -2917,6 +2922,7 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
       req.body?.dry_run === true ||
       req.query?.dry_run === '1' ||
       req.query?.dry_run === 'true';
+
     const rawMax = req.body?.max_catch_up_months ?? req.query?.max_catch_up_months;
     const maxCatchUpMonths =
       rawMax != null && rawMax !== '' ? parseInt(String(rawMax), 10) : undefined;
@@ -4697,6 +4703,12 @@ router.post('/admin/year-end-forced-leave/apply', protect, requireAdminOrHr, asy
       req.query?.dry_run === '1' ||
       req.query?.dry_run === 'true';
 
+    if (!dryRun && year >= yearEndManilaYearNow()) {
+      return res.status(409).json({
+        error: `Year-end deductions for ${year} cannot be applied until that calendar year has closed. Preview remains available.`,
+      });
+    }
+
     const rawIds = req.body?.employee_ids ?? req.body?.employeeIds;
     const employeeIds = Array.isArray(rawIds) && rawIds.length > 0
       ? rawIds.map((id) => String(id).trim()).filter(Boolean)
@@ -4712,12 +4724,15 @@ router.post('/admin/year-end-forced-leave/apply', protect, requireAdminOrHr, asy
       remarks,
     });
 
-    if (!dryRun && result.summary?.applied > 0) {
+    const appliedCount =
+      (result.summary?.applied || 0) +
+      (result.summary?.partially_applied || 0);
+    if (!dryRun && appliedCount > 0) {
       broadcastAppEvent('leave_updated', {
         action: 'forced_leave_deduction',
         source: 'year_end_bulk',
         year,
-        applied: result.summary.applied,
+        applied: appliedCount,
       });
     }
 
