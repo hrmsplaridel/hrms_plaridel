@@ -72,6 +72,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   bool _isScreenActive = true;
   bool _automaticRefreshInFlight = false;
   bool _automaticRefreshQueued = false;
+  Future<void>? _requestLoadInFlight;
+  bool _requestReloadQueued = false;
+  bool _queuedForceRefresh = false;
 
   Future<({String name, String? title})> _loadReviewerSignatureInfo(
     AuthProvider auth,
@@ -600,6 +603,31 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _loadRequests({bool forceRefresh = false}) async {
+    final inFlight = _requestLoadInFlight;
+    if (inFlight != null) {
+      _requestReloadQueued = true;
+      _queuedForceRefresh = _queuedForceRefresh || forceRefresh;
+      return inFlight;
+    }
+
+    final completer = Completer<void>();
+    _requestLoadInFlight = completer.future;
+    var nextForceRefresh = forceRefresh;
+    try {
+      do {
+        _requestReloadQueued = false;
+        final currentForceRefresh = nextForceRefresh || _queuedForceRefresh;
+        _queuedForceRefresh = false;
+        await _performLoadRequests(forceRefresh: currentForceRefresh);
+        nextForceRefresh = false;
+      } while (_requestReloadQueued && mounted && _isScreenActive);
+    } finally {
+      _requestLoadInFlight = null;
+      completer.complete();
+    }
+  }
+
+  Future<void> _performLoadRequests({bool forceRefresh = false}) async {
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
     final query = LeaveRequestQuery(

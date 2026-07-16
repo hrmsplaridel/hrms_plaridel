@@ -60,7 +60,6 @@ class LeaveProvider extends ChangeNotifier {
   bool _submitting = false;
   bool _reviewing = false;
   String? _error;
-  int _requestLoadGeneration = 0;
 
   LeaveRequestStatus? _filterStatus;
   LeaveType? _filterLeaveType;
@@ -296,7 +295,6 @@ class LeaveProvider extends ChangeNotifier {
     LeaveRequestQuery query = const LeaveRequestQuery(),
     bool forceRefresh = false,
   }) async {
-    final generation = ++_requestLoadGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -308,21 +306,18 @@ class LeaveProvider extends ChangeNotifier {
           ? null
           : _readListCache(_requestCache, key, _requestCacheTtl);
       if (cached != null) {
-        if (generation == _requestLoadGeneration) _requests = cached;
+        _requests = cached;
       } else {
         final fresh = await _repository.listRequests(query: query);
         _writeListCache(_requestCache, key, fresh);
-        if (generation == _requestLoadGeneration) {
-          _requests = List<LeaveRequest>.from(fresh);
-        }
+        _requests = List<LeaveRequest>.from(fresh);
       }
     } catch (e) {
-      if (generation == _requestLoadGeneration) _error = e.toString();
+      // Keep the currently displayed queue if a background refresh fails.
+      _error = e.toString();
     } finally {
-      if (generation == _requestLoadGeneration) {
-        _loading = false;
-        notifyListeners();
-      }
+      _loading = false;
+      notifyListeners();
     }
   }
 
@@ -861,7 +856,6 @@ class LeaveProvider extends ChangeNotifier {
     LeaveRequestQuery query = const LeaveRequestQuery(),
     bool forceRefresh = false,
   }) async {
-    final generation = ++_requestLoadGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -873,23 +867,20 @@ class LeaveProvider extends ChangeNotifier {
           ? null
           : _readListCache(_requestCache, key, _requestCacheTtl);
       if (cached != null) {
-        if (generation == _requestLoadGeneration) _requests = cached;
+        _requests = cached;
       } else {
         final fresh = await _repository.listDepartmentHeadRequests(
           query: query,
         );
         _writeListCache(_requestCache, key, fresh);
-        if (generation == _requestLoadGeneration) {
-          _requests = List<LeaveRequest>.from(fresh);
-        }
+        _requests = List<LeaveRequest>.from(fresh);
       }
     } catch (e) {
-      if (generation == _requestLoadGeneration) _error = e.toString();
+      // Keep the currently displayed queue if a background refresh fails.
+      _error = e.toString();
     } finally {
-      if (generation == _requestLoadGeneration) {
-        _loading = false;
-        notifyListeners();
-      }
+      _loading = false;
+      notifyListeners();
     }
   }
 
