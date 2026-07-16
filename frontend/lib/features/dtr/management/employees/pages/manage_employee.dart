@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
 
 import 'package:dio/dio.dart';
@@ -1229,17 +1228,6 @@ _EmployeeProfile _employeeProfileFromJson(Map<String, dynamic> m) {
   );
 }
 
-String _csvEscapeForExport(String? val) {
-  if (val == null || val.isEmpty) return '';
-  if (val.contains(',') ||
-      val.contains('"') ||
-      val.contains('\n') ||
-      val.contains('\r')) {
-    return '"${val.replaceAll('"', '""')}"';
-  }
-  return val;
-}
-
 /// Employees management screen: list with filters and detail panel.
 /// Matches reference: search, Privilege/Status filters, ID/Name/Privilege columns,
 /// right panel with avatar, Add/Edit/Deactivate buttons.
@@ -1253,12 +1241,7 @@ class ManageEmployee extends StatefulWidget {
   State<ManageEmployee> createState() => _ManageEmployeeState();
 }
 
-enum _EmployeeToolbarAction {
-  importFromDevice,
-  biometricRoster,
-  exportAllCsv,
-  exportPageCsv,
-}
+enum _EmployeeToolbarAction { importFromDevice, biometricRoster, exportAllCsv }
 
 class _ManageEmployeeState extends State<ManageEmployee> {
   static const _kSearchDebounceMs = 350;
@@ -1601,69 +1584,6 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       }
     } finally {
       if (mounted) setState(() => _exportingCsv = false);
-    }
-  }
-
-  Future<void> _exportCsvPageOnly() async {
-    if (!mounted) return;
-    if (_employees.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No rows on this page to export.')),
-      );
-      return;
-    }
-    const header = [
-      'Employee No',
-      'Full Name',
-      'Email',
-      'Department',
-      'Position',
-      'Privilege',
-      'Account Active',
-      'Employment Status',
-      'Biometric ID',
-    ];
-    final lines = <String>[header.map(_csvEscapeForExport).join(',')];
-    for (final e in _employees) {
-      final empNo = e.employeeNumber != null
-          ? 'EMP-${e.employeeNumber!.toString().padLeft(3, '0')}'
-          : '';
-      final priv = e.role == 'admin' ? 'Admin' : 'Employee';
-      final acct = e.isActive ? 'Active' : 'Inactive';
-      lines.add(
-        [
-          _csvEscapeForExport(empNo),
-          _csvEscapeForExport(e.fullName),
-          _csvEscapeForExport(e.email ?? ''),
-          _csvEscapeForExport(e.departmentName ?? ''),
-          _csvEscapeForExport(e.positionName ?? ''),
-          _csvEscapeForExport(priv),
-          _csvEscapeForExport(acct),
-          _csvEscapeForExport(e.employmentStatus ?? ''),
-          _csvEscapeForExport(e.biometricUserId ?? ''),
-        ].join(','),
-      );
-    }
-    final csv = '\uFEFF${lines.join('\n')}';
-    final bytes = Uint8List.fromList(utf8.encode(csv));
-    final day = DateTime.now().toIso8601String().split('T').first;
-    try {
-      await shareOrDownloadFile(
-        bytes,
-        'employees_page${_pageIndex + 1}_$day.csv',
-        'text/csv',
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('This page export downloaded.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
-      }
     }
   }
 
@@ -2205,8 +2125,6 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 _showBiometricRosterDialog(context);
               case _EmployeeToolbarAction.exportAllCsv:
                 _exportCsv();
-              case _EmployeeToolbarAction.exportPageCsv:
-                _exportCsvPageOnly();
             }
           },
           itemBuilder: (context) => [
@@ -2231,14 +2149,6 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               child: _toolbarMenuItem(
                 icon: Icons.file_download_outlined,
                 label: _exportingCsv ? 'Exporting CSV...' : 'Export CSV',
-              ),
-            ),
-            PopupMenuItem(
-              value: _EmployeeToolbarAction.exportPageCsv,
-              enabled: !_exportingCsv,
-              child: _toolbarMenuItem(
-                icon: Icons.download_for_offline_outlined,
-                label: 'Export current page',
               ),
             ),
           ],
