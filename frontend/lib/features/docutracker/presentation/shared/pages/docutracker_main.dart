@@ -13,13 +13,23 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 /// DocuTracker alerts are opened from the dashboard top bar (document icon + badge)
 /// when this module is selected.
 class DocuTrackerMain extends StatefulWidget {
-  const DocuTrackerMain({super.key, this.section, this.isAdmin = false});
+  const DocuTrackerMain({
+    super.key,
+    this.section,
+    this.isAdmin = false,
+    this.tutorialHeaderKey,
+    this.tutorialNavigationKey,
+    this.tutorialContentKey,
+  });
 
   /// Active section when driven by sidebar; null uses internal tabs.
   final DocuTrackerSection? section;
 
   /// Whether current user is admin (shows Admin section).
   final bool isAdmin;
+  final GlobalKey? tutorialHeaderKey;
+  final GlobalKey? tutorialNavigationKey;
+  final GlobalKey? tutorialContentKey;
 
   @override
   State<DocuTrackerMain> createState() => _DocuTrackerMainState();
@@ -42,18 +52,27 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            DocuTrackerModuleHeader(
-              title: 'DocuTracker',
-              subtitle: useSidebarNav
-                  ? 'Multi-step routing, selected assignees per step, and full audit history.'
-                  : 'Workflow documents, deadlines, and actions — pick a view below.',
+            KeyedSubtree(
+              key: widget.tutorialHeaderKey,
+              child: DocuTrackerModuleHeader(
+                title: 'DocuTracker',
+                subtitle: useSidebarNav
+                    ? 'Multi-step routing, selected assignees per step, and full audit history.'
+                    : 'Workflow documents, deadlines, and actions — pick a view below.',
+              ),
             ),
             if (!useSidebarNav) ...[
               const SizedBox(height: 20),
-              _buildSectionNav(),
+              KeyedSubtree(
+                key: widget.tutorialNavigationKey,
+                child: _buildSectionNav(),
+              ),
             ],
             const SizedBox(height: 20),
-            _buildContent(),
+            KeyedSubtree(
+              key: widget.tutorialContentKey,
+              child: _buildContent(),
+            ),
           ],
         ),
       ),

@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/wi
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_drawer.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_nav_items.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dashboard_layout_metrics.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_tutorial_controller.dart';
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_content_navigator.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
@@ -28,6 +29,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
     required this.onFileLeave,
     required this.onFileLocator,
     required this.onHrmsAssistant,
+    required this.onTutorial,
   });
 
   final double width;
@@ -48,6 +50,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
   final VoidCallback onFileLeave;
   final VoidCallback onFileLocator;
   final VoidCallback onHrmsAssistant;
+  final VoidCallback onTutorial;
 
   bool get _useMobileLeaveFab => width < 600 && selectedIndex == 2;
   bool get _useMobileLocatorFab => selectedIndex == 3;
@@ -89,11 +92,17 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
                   showNotifications: false,
                   onViewAllNotifications: onViewAllNotifications,
                   onNotificationTap: onNotificationTap,
-                  trailing: DashboardAccountMenuButton(
-                    avatarPath: avatarPath,
-                    compact: width < 600,
-                    tooltip: displayName,
-                    onProfile: onProfile,
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      EmployeeTutorialButton(onPressed: onTutorial),
+                      DashboardAccountMenuButton(
+                        avatarPath: avatarPath,
+                        compact: width < 600,
+                        tooltip: displayName,
+                        onProfile: onProfile,
+                      ),
+                    ],
                   ),
                 ),
                 Expanded(
@@ -136,11 +145,16 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
           if (_buildFileActionButton() case final actionButton?)
             Positioned(right: 16, bottom: 16, child: actionButton),
           if (_showAssistantFab)
-            DraggableDtrAssistantLauncher(
-              onPressed: onHrmsAssistant,
-              initialBottom: _useMobileLeaveFab || _useMobileLocatorFab
-                  ? 108
-                  : 16,
+            ValueListenableBuilder<bool>(
+              valueListenable: EmployeeTutorialController.coachActive,
+              builder: (context, coachActive, _) => coachActive
+                  ? const SizedBox.shrink()
+                  : DraggableDtrAssistantLauncher(
+                      onPressed: onHrmsAssistant,
+                      initialBottom: _useMobileLeaveFab || _useMobileLocatorFab
+                          ? 108
+                          : 16,
+                    ),
             ),
         ],
       ),

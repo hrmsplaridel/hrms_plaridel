@@ -39,7 +39,14 @@ const _locatorApprovalFilterOptions = <RequestFilterOption<String>>[
 ];
 
 class EmployeeLocatorSlipContent extends StatefulWidget {
-  const EmployeeLocatorSlipContent({super.key});
+  const EmployeeLocatorSlipContent({
+    super.key,
+    this.tutorialHeaderKey,
+    this.tutorialRequestsKey,
+  });
+
+  final GlobalKey? tutorialHeaderKey;
+  final GlobalKey? tutorialRequestsKey;
 
   @override
   State<EmployeeLocatorSlipContent> createState() =>
@@ -196,10 +203,13 @@ class EmployeeLocatorSlipContentState
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _LocatorHeader(
-              employeeName: displayName,
-              onCreatePressed: () => _openCreateForm(context, displayName),
-              showCreateAction: width >= 1024,
+            KeyedSubtree(
+              key: widget.tutorialHeaderKey,
+              child: _LocatorHeader(
+                employeeName: displayName,
+                onCreatePressed: () => _openCreateForm(context, displayName),
+                showCreateAction: width >= 1024,
+              ),
             ),
             if (isDepartmentHead) ...[
               const SizedBox(height: 16),
@@ -215,7 +225,10 @@ class EmployeeLocatorSlipContentState
             ],
             const SizedBox(height: 16),
             if (_currentSection == _LocatorSection.requests)
-              _buildMyRequests(width: width, compact: compact),
+              KeyedSubtree(
+                key: widget.tutorialRequestsKey,
+                child: _buildMyRequests(width: width, compact: compact),
+              ),
             if (_currentSection == _LocatorSection.approvals)
               _buildApprovalsView(),
           ],
