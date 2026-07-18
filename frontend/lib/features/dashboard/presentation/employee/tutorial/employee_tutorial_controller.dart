@@ -192,7 +192,6 @@ class _EmployeeDashboardCoachState extends State<_EmployeeDashboardCoach> {
     }
     setState(() {
       _index++;
-      _targetRect = null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _focusTarget());
   }
@@ -212,8 +211,13 @@ class _EmployeeDashboardCoachState extends State<_EmployeeDashboardCoach> {
       child: Stack(
         children: [
           Positioned.fill(
-            child: CustomPaint(
-              painter: _TutorialSpotlightPainter(target: rect),
+            child: TweenAnimationBuilder<Rect?>(
+              tween: RectTween(end: rect),
+              duration: const Duration(milliseconds: 360),
+              curve: Curves.easeInOutCubic,
+              builder: (context, animatedRect, _) => CustomPaint(
+                painter: _TutorialSpotlightPainter(target: animatedRect),
+              ),
             ),
           ),
           if (rect != null)
@@ -277,12 +281,29 @@ class _EmployeeDashboardCoachState extends State<_EmployeeDashboardCoach> {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: _TutorialSpeechBubble(
-                      title: _target.title,
-                      body: _target.body,
-                      current: _index + 1,
-                      total: widget.targets.length,
-                      onNext: _advance,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(
+                          position:
+                              Tween<Offset>(
+                                begin: const Offset(0.04, 0),
+                                end: Offset.zero,
+                              ).animate(animation),
+                          child: child,
+                        ),
+                      ),
+                      child: _TutorialSpeechBubble(
+                        key: ValueKey(_index),
+                        title: _target.title,
+                        body: _target.body,
+                        current: _index + 1,
+                        total: widget.targets.length,
+                        onNext: _advance,
+                      ),
                     ),
                   ),
                 ],
@@ -297,6 +318,7 @@ class _EmployeeDashboardCoachState extends State<_EmployeeDashboardCoach> {
 
 class _TutorialSpeechBubble extends StatelessWidget {
   const _TutorialSpeechBubble({
+    super.key,
     required this.title,
     required this.body,
     required this.current,
