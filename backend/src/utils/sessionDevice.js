@@ -110,6 +110,17 @@ function buildDeviceInfoPayload(ua, clientHint) {
 }
 
 /**
+ * Returns true when the request came from the native mobile app or a mobile
+ * browser. The explicit Flutter device hint takes precedence because Dio's
+ * user-agent is not consistent across Android/iOS versions.
+ */
+function isMobileClient(ua, clientHint) {
+  const hint = clientHint ? String(clientHint).trim() : '';
+  if (/^(Android device|iPhone or iPad)\b/i.test(hint)) return true;
+  return ['mobile', 'tablet'].includes(parseUserAgent(ua).type);
+}
+
+/**
  * @param {string|null} deviceInfo - JSON blob or legacy raw User-Agent
  */
 function resolveSessionDevice(deviceInfo) {
@@ -156,6 +167,7 @@ module.exports = {
   parseUserAgent,
   ipToLocationLabel,
   buildDeviceInfoPayload,
+  isMobileClient,
   resolveSessionDevice,
   enrichSessionRow,
 };

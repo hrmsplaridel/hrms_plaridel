@@ -16,6 +16,7 @@ const {
 const {
   buildDeviceInfoPayload,
   enrichSessionRow,
+  isMobileClient,
 } = require('../utils/sessionDevice');
 const {
   normalizePhilippinesMobileNumber,
@@ -300,6 +301,17 @@ router.post('/login', authLoginLimiter, async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    const normalizedRole = String(user.role || '').toLowerCase();
+    const privileged = normalizedRole === 'admin' || normalizedRole === 'hr';
+    if (
+      privileged &&
+      isMobileClient(req.get('user-agent'), req.get('x-hrms-device'))
+    ) {
+      return res.status(403).json({
+        error: 'Admin and HR accounts can only sign in on a desktop computer.',
+      });
+    }
+
     const { accessToken, refreshToken } = await issueTokensForUser(user, req);
 
     res.json({
@@ -375,6 +387,18 @@ router.post('/refresh', authTokenLimiter, async (req, res) => {
     if (!user || !user.is_active) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Account is deactivated' });
+    }
+
+    const normalizedRole = String(user.role || '').toLowerCase();
+    const privileged = normalizedRole === 'admin' || normalizedRole === 'hr';
+    if (
+      privileged &&
+      isMobileClient(req.get('user-agent'), req.get('x-hrms-device'))
+    ) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'Admin and HR accounts can only sign in on a desktop computer.',
+      });
     }
 
     await client.query(
