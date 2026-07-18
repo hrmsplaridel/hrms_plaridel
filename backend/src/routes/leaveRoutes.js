@@ -4030,6 +4030,7 @@ router.get('/ledger', protect, async (req, res) => {
   const filterUserId = (req.query?.user_id || '').toString().trim() || null;
   const leaveType = (req.query?.leave_type || '').toString().trim() || null;
   const action = (req.query?.action || '').toString().trim() || null;
+  const affectedBucket = (req.query?.affected_bucket || '').toString().trim().toLowerCase() || null;
   const from = (req.query?.from || req.query?.created_from || '').toString().trim() || null;
   const to = (req.query?.to || req.query?.created_to || '').toString().trim() || null;
 
@@ -4067,6 +4068,19 @@ router.get('/ledger', protect, async (req, res) => {
     params.push(from);
     p += 1;
   }
+
+  // Summary remains stable while the user switches activity buckets.
+  const summaryWhereSql = where.length > 0 ? where.join(' AND ') : 'true';
+  const summaryParams = [...params];
+
+  if (affectedBucket) {
+    if (!['earned', 'used', 'pending'].includes(affectedBucket)) {
+      return res.status(400).json({ error: 'Invalid affected_bucket filter' });
+    }
+    where.push(`LOWER(l.affected_bucket) = $${p}`);
+    params.push(affectedBucket);
+    p += 1;
+  }
   if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
     where.push(`l.created_at < ($${p}::date + interval '1 day')`);
     params.push(to);
@@ -4076,11 +4090,30 @@ router.get('/ledger', protect, async (req, res) => {
   const whereSql = where.length > 0 ? where.join(' AND ') : 'true';
 
   try {
-    const countQ = await pool.query(
-      `SELECT count(*)::int AS c FROM leave_balance_ledger l WHERE ${whereSql}`,
-      params
-    );
+    const [countQ, summaryQ] = await Promise.all([
+      pool.query(
+        `SELECT count(*)::int AS c FROM leave_balance_ledger l WHERE ${whereSql}`,
+        params
+      ),
+      pool.query(
+        `SELECT
+           COALESCE(SUM(CASE
+             WHEN l.days_changed > 0 AND
+                  (LOWER(l.affected_bucket) = 'earned' OR LOWER(l.action) = 'monthly_accrual')
+             THEN l.days_changed ELSE 0 END), 0)::float8 AS earned,
+           GREATEST(COALESCE(SUM(CASE
+             WHEN LOWER(l.affected_bucket) = 'used'
+             THEN l.days_changed ELSE 0 END), 0), 0)::float8 AS used,
+           GREATEST(COALESCE(SUM(CASE
+             WHEN LOWER(l.affected_bucket) = 'pending'
+             THEN l.days_changed ELSE 0 END), 0), 0)::float8 AS pending
+         FROM leave_balance_ledger l
+         WHERE ${summaryWhereSql}`,
+        summaryParams
+      ),
+    ]);
     const total = countQ.rows[0]?.c ?? 0;
+    const summary = summaryQ.rows[0] || {};
 
     const listParams = [...params, limit, offset];
     const limIdx = p;
@@ -4101,6 +4134,11 @@ router.get('/ledger', protect, async (req, res) => {
       total,
       limit,
       offset,
+      summary: {
+        earned: Number(summary.earned || 0),
+        used: Number(summary.used || 0),
+        pending: Number(summary.pending || 0),
+      },
       rows: list.rows.map((r) => ({
         id: r.id,
         user_id: r.user_id,
