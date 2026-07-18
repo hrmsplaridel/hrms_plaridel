@@ -976,18 +976,22 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
             'Page ${page + 1} of $pageCount',
             style: TextStyle(fontSize: 12, color: _mutedColor(context)),
           ),
-          const SizedBox(width: 12),
-          OutlinedButton(
-            onPressed: page > 0 ? () => setState(() => _page = page - 1) : null,
-            child: const Text('Previous'),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton(
-            onPressed: page < pageCount - 1
-                ? () => setState(() => _page = page + 1)
-                : null,
-            child: const Text('Next'),
-          ),
+          if (pageCount > 1) ...[
+            const SizedBox(width: 12),
+            OutlinedButton(
+              onPressed: page > 0
+                  ? () => setState(() => _page = page - 1)
+                  : null,
+              child: const Text('Previous'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: page < pageCount - 1
+                  ? () => setState(() => _page = page + 1)
+                  : null,
+              child: const Text('Next'),
+            ),
+          ],
         ],
       ),
     );

@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
-const { requireAdmin } = require('../middleware/rbac');
+const { requireAdmin, requireAdminOrSupervisor } = require('../middleware/rbac');
 const {
   expandNonRecurringToWindow,
   expandRecurringToWindow,
@@ -849,6 +849,11 @@ router.get('/', protect, async (req, res) => {
     const params = [];
     const conditions = [];
     let i = 1;
+    const privileged = ['admin', 'hr', 'supervisor'].includes(req.user?.role);
+    if (!privileged) {
+      conditions.push(`d.employee_id = $${i++}`);
+      params.push(req.user.id);
+    }
     if (start_date) {
       conditions.push(`d.attendance_date >= $${i++}`);
       params.push(start_date);
@@ -857,7 +862,7 @@ router.get('/', protect, async (req, res) => {
       conditions.push(`d.attendance_date <= $${i++}`);
       params.push(end_date);
     }
-    if (employee_id) {
+    if (employee_id && privileged) {
       conditions.push(`d.employee_id = $${i++}`);
       params.push(employee_id);
     }
@@ -1347,7 +1352,7 @@ router.get('/', protect, async (req, res) => {
 });
 
 // GET /api/dtr-daily-summary/summary - counts for dashboard (DTR + leave pipeline)
-router.get('/summary', protect, async (req, res) => {
+router.get('/summary', protect, requireAdminOrSupervisor, async (req, res) => {
   try {
     const today = todayInHrmsTimezone();
     const present = await pool.query(

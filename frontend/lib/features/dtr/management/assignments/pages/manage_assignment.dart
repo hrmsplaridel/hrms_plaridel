@@ -35,6 +35,9 @@ class _EmployeeSummary {
   String get displayEmployeeNo => employeeNumber != null
       ? 'EMP-${employeeNumber!.toString().padLeft(3, '0')}'
       : '—';
+
+  String get compactEmployeeNo =>
+      employeeNumber != null ? employeeNumber!.toString().padLeft(3, '0') : '—';
 }
 
 /// Assignment record for display/CRUD (Schema v2: effective_from/to, override times).
@@ -237,7 +240,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     final query = <String, dynamic>{
       'status': status,
       'role': 'All',
-      'sort': 'full_name',
+      'sort': 'employee_number',
       'order': 'asc',
     };
     final departmentId = _employeeDepartmentFilterId?.trim();
@@ -1602,7 +1605,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                 SizedBox(
                   width: 88,
                   child: Text(
-                    'No.',
+                    'EMP ID',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
@@ -1683,14 +1686,17 @@ class _ManageAssignmentState extends State<ManageAssignment> {
                       children: [
                         SizedBox(
                           width: 88,
-                          child: Text(
-                            e.displayEmployeeNo,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: _mutedColor(context),
+                          child: Tooltip(
+                            message: e.displayEmployeeNo,
+                            child: Text(
+                              e.compactEmployeeNo,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _mutedColor(context),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
                           ),
                         ),
                         Expanded(
@@ -1773,13 +1779,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               ),
             ],
           ),
-          IconButton(
-            tooltip: 'Previous page',
-            icon: const Icon(Icons.chevron_left_rounded),
-            onPressed: _pageIndex > 0
-                ? () => _goToEmployeePage(_pageIndex - 1)
-                : null,
-          ),
+          if (maxPage > 0)
+            IconButton(
+              tooltip: 'Previous page',
+              icon: const Icon(Icons.chevron_left_rounded),
+              onPressed: _pageIndex > 0
+                  ? () => _goToEmployeePage(_pageIndex - 1)
+                  : null,
+            ),
           Text(
             'Page ${_pageIndex + 1} / ${maxPage + 1}',
             style: TextStyle(
@@ -1788,13 +1795,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               fontWeight: FontWeight.w500,
             ),
           ),
-          IconButton(
-            tooltip: 'Next page',
-            icon: const Icon(Icons.chevron_right_rounded),
-            onPressed: _pageIndex < maxPage
-                ? () => _goToEmployeePage(_pageIndex + 1)
-                : null,
-          ),
+          if (maxPage > 0)
+            IconButton(
+              tooltip: 'Next page',
+              icon: const Icon(Icons.chevron_right_rounded),
+              onPressed: _pageIndex < maxPage
+                  ? () => _goToEmployeePage(_pageIndex + 1)
+                  : null,
+            ),
         ],
       ),
     );

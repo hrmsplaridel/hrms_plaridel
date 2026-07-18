@@ -69,6 +69,12 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   DateTime? _startDateTo;
   Timer? _autoRefreshTimer;
   StreamSubscription<AppRealtimeEvent>? _leaveRealtimeSub;
+  bool _isScreenActive = true;
+  bool _automaticRefreshInFlight = false;
+  bool _automaticRefreshQueued = false;
+  Future<void>? _requestLoadInFlight;
+  bool _requestReloadQueued = false;
+  bool _queuedForceRefresh = false;
 
   Future<({String name, String? title})> _loadReviewerSignatureInfo(
     AuthProvider auth,
@@ -137,20 +143,39 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_initialized) return;
+    final isScreenActive = TickerMode.of(context);
+    if (_initialized) {
+      if (_isScreenActive == isScreenActive) return;
+      _isScreenActive = isScreenActive;
+      if (_isScreenActive) {
+        _startAutoRefresh();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _isScreenActive) {
+            unawaited(_safeAutoRefresh(forceRefresh: true));
+          }
+        });
+      } else {
+        _autoRefreshTimer?.cancel();
+        _autoRefreshTimer = null;
+      }
+      return;
+    }
     _initialized = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
+    _isScreenActive = isScreenActive;
+    if (_isScreenActive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
+    }
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _loadLeaveTypeFilterOptions(),
     );
     WidgetsBinding.instance.addObserver(this);
-    _startAutoRefresh();
+    if (_isScreenActive) _startAutoRefresh();
     final leaveProvider = context.read<LeaveProvider>();
     _leaveRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
       event,
     ) {
       if (event.name != 'leave_updated') return;
-      if (!mounted) return;
+      if (!mounted || !_isScreenActive) return;
       leaveProvider.invalidateCachedLeaveData();
       unawaited(_safeAutoRefresh(forceRefresh: true));
     });
@@ -166,8 +191,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _safeAutoRefresh(forceRefresh: true);
+    if (state == AppLifecycleState.resumed && _isScreenActive) {
+      unawaited(_safeAutoRefresh(forceRefresh: true));
     }
   }
 
@@ -354,10 +379,23 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _safeAutoRefresh({bool forceRefresh = false}) async {
-    if (!mounted) return;
+    if (!mounted || !_isScreenActive) return;
     final provider = context.read<LeaveProvider>();
     if (provider.reviewing || provider.submitting) return;
-    await _loadRequests(forceRefresh: forceRefresh);
+    if (_automaticRefreshInFlight) {
+      _automaticRefreshQueued = true;
+      return;
+    }
+    _automaticRefreshInFlight = true;
+    try {
+      await _loadRequests(forceRefresh: forceRefresh);
+    } finally {
+      _automaticRefreshInFlight = false;
+      if (_automaticRefreshQueued && mounted && _isScreenActive) {
+        _automaticRefreshQueued = false;
+        unawaited(_safeAutoRefresh(forceRefresh: true));
+      }
+    }
   }
 
   @override
@@ -478,7 +516,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           onForcedLeaveDeduction: widget.isDepartmentHead
               ? null
               : _applyForcedLeaveDeduction,
-          onYearEndForcedLeave: widget.isDepartmentHead ? null : _yearEndForcedLeaveDeduction,
+          onYearEndForcedLeave: widget.isDepartmentHead
+              ? null
+              : _yearEndForcedLeaveDeduction,
           onMonthlyAccrual: widget.isDepartmentHead ? null : _runMonthlyAccrual,
           onManualBalanceAdjustment: widget.isDepartmentHead
               ? null
@@ -563,6 +603,31 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _loadRequests({bool forceRefresh = false}) async {
+    final inFlight = _requestLoadInFlight;
+    if (inFlight != null) {
+      _requestReloadQueued = true;
+      _queuedForceRefresh = _queuedForceRefresh || forceRefresh;
+      return inFlight;
+    }
+
+    final completer = Completer<void>();
+    _requestLoadInFlight = completer.future;
+    var nextForceRefresh = forceRefresh;
+    try {
+      do {
+        _requestReloadQueued = false;
+        final currentForceRefresh = nextForceRefresh || _queuedForceRefresh;
+        _queuedForceRefresh = false;
+        await _performLoadRequests(forceRefresh: currentForceRefresh);
+        nextForceRefresh = false;
+      } while (_requestReloadQueued && mounted && _isScreenActive);
+    } finally {
+      _requestLoadInFlight = null;
+      completer.complete();
+    }
+  }
+
+  Future<void> _performLoadRequests({bool forceRefresh = false}) async {
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
     final query = LeaveRequestQuery(
@@ -936,10 +1001,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _runMonthlyAccrual() async {
-    final result = await openResponsiveRightSidePanel<MonthlyLeaveAccrualResult>(
-      context: context,
-      builder: (_) => const AdminMonthlyAccrualDialog(),
-    );
+    final result =
+        await openResponsiveRightSidePanel<MonthlyLeaveAccrualResult>(
+          context: context,
+          builder: (_) => const AdminMonthlyAccrualDialog(),
+        );
     if (!mounted || result == null) return;
     _showMessage(
       result.rowsUpdated > 0
@@ -950,10 +1016,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   Future<void> _yearEndForcedLeaveDeduction() async {
-    final result = await openResponsiveRightSidePanel<YearEndForcedLeaveApplyResult>(
-      context: context,
-      builder: (_) => const AdminYearEndForcedLeaveDialog(),
-    );
+    final result =
+        await openResponsiveRightSidePanel<YearEndForcedLeaveApplyResult>(
+          context: context,
+          builder: (_) => const AdminYearEndForcedLeaveDialog(),
+        );
     if (!mounted) return;
     if (result != null) {
       final applied = result.summary.applied;
@@ -2304,7 +2371,9 @@ class _ManualBalanceAdjustmentDialogState
                   IconButton(
                     icon: const Icon(Icons.close_rounded),
                     tooltip: 'Close',
-                    onPressed: saving ? null : () => Navigator.of(context).pop(),
+                    onPressed: saving
+                        ? null
+                        : () => Navigator.of(context).pop(),
                   ),
                 ],
               ),
@@ -2332,7 +2401,9 @@ class _ManualBalanceAdjustmentDialogState
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: saving ? null : () => Navigator.of(context).pop(),
+                    onPressed: saving
+                        ? null
+                        : () => Navigator.of(context).pop(),
                     child: const Text('Cancel'),
                   ),
                   const SizedBox(width: 8),
@@ -2381,192 +2452,172 @@ class _ManualBalanceAdjustmentDialogState
             message: 'No active departments are available for adjustment.',
           )
         else ...[
-                  _sectionHeader(
-                    icon: Icons.person_search_outlined,
-                    title: 'Employee and Leave Type',
+          _sectionHeader(
+            icon: Icons.person_search_outlined,
+            title: 'Employee and Leave Type',
+          ),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(
+            key: ValueKey(
+              'manual-balance-department-${_selectedDepartment ?? ''}',
+            ),
+            initialValue: _selectedDepartment,
+            isExpanded: true,
+            menuMaxHeight: 360,
+            decoration: adminLeaveInputDecoration(
+              context,
+              'Department',
+            ).copyWith(prefixIcon: const Icon(Icons.apartment_outlined)),
+            items: _departments
+                .map(
+                  (department) => DropdownMenuItem<String>(
+                    value: department,
+                    child: Text(department),
                   ),
-                  const SizedBox(height: 10),
-                  DropdownButtonFormField<String>(
-                    key: ValueKey(
-                      'manual-balance-department-${_selectedDepartment ?? ''}',
-                    ),
-                    initialValue: _selectedDepartment,
-                    isExpanded: true,
-                    menuMaxHeight: 360,
-                    decoration: adminLeaveInputDecoration(context, 'Department')
-                        .copyWith(
-                          prefixIcon: const Icon(Icons.apartment_outlined),
-                        ),
-                    items: _departments
-                        .map(
-                          (department) => DropdownMenuItem<String>(
-                            value: department,
-                            child: Text(department),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: saving ? null : _onDepartmentChanged,
-                    validator: (v) =>
-                        (v == null || v.isEmpty) ? 'Select a department' : null,
+                )
+                .toList(),
+            onChanged: saving ? null : _onDepartmentChanged,
+            validator: (v) =>
+                (v == null || v.isEmpty) ? 'Select a department' : null,
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            key: ValueKey(
+              'manual-balance-employee-${_selectedDepartment ?? ''}-${_selectedUserId ?? ''}',
+            ),
+            initialValue: _selectedUserId,
+            isExpanded: true,
+            menuMaxHeight: 360,
+            decoration: adminLeaveInputDecoration(context, 'Employee').copyWith(
+              prefixIcon: const Icon(Icons.person_outline),
+              hintText: _selectedDepartment == null
+                  ? 'Select department first'
+                  : (hasEmployees
+                        ? 'Select employee'
+                        : 'No employees in this department'),
+            ),
+            items: _filteredEmployees
+                .map(
+                  (e) => DropdownMenuItem<String>(
+                    value: e['id'],
+                    child: Text(e['name']!),
                   ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    key: ValueKey(
-                      'manual-balance-employee-${_selectedDepartment ?? ''}-${_selectedUserId ?? ''}',
-                    ),
-                    initialValue: _selectedUserId,
-                    isExpanded: true,
-                    menuMaxHeight: 360,
-                    decoration: adminLeaveInputDecoration(context, 'Employee')
-                        .copyWith(
-                          prefixIcon: const Icon(Icons.person_outline),
-                          hintText: _selectedDepartment == null
-                              ? 'Select department first'
-                              : (hasEmployees
-                                    ? 'Select employee'
-                                    : 'No employees in this department'),
-                        ),
-                    items: _filteredEmployees
-                        .map(
-                          (e) => DropdownMenuItem<String>(
-                            value: e['id'],
-                            child: Text(e['name']!),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: saving || _selectedDepartment == null
-                        ? null
-                        : (v) {
-                            if (v != null) unawaited(_onEmployeeChanged(v));
-                          },
-                    validator: (v) =>
-                        (v == null || v.isEmpty) ? 'Select an employee' : null,
-                  ),
-                  if (_selectedDepartment != null && !hasEmployees) ...[
+                )
+                .toList(),
+            onChanged: saving || _selectedDepartment == null
+                ? null
+                : (v) {
+                    if (v != null) unawaited(_onEmployeeChanged(v));
+                  },
+            validator: (v) =>
+                (v == null || v.isEmpty) ? 'Select an employee' : null,
+          ),
+          if (_selectedDepartment != null && !hasEmployees) ...[
+            const SizedBox(height: 12),
+            _statusPanel(
+              icon: Icons.person_off_outlined,
+              message: 'No active employees found for this department.',
+            ),
+          ],
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final narrow = constraints.maxWidth < 560;
+              final leaveTypeField = DropdownButtonFormField<LeaveType>(
+                initialValue: _selectedLeaveType,
+                isExpanded: true,
+                menuMaxHeight: 360,
+                decoration: adminLeaveInputDecoration(
+                  context,
+                  'Leave type',
+                ).copyWith(prefixIcon: const Icon(Icons.event_note_outlined)),
+                items: LeaveType.values
+                    .map(
+                      (t) => DropdownMenuItem<LeaveType>(
+                        value: t,
+                        child: Text(t.displayName),
+                      ),
+                    )
+                    .toList(),
+                onChanged: saving || _loadingBalances
+                    ? null
+                    : (v) {
+                        if (v == null) return;
+                        setState(() => _selectedLeaveType = v);
+                        _applyBalanceToFields();
+                      },
+              );
+              final asOfField = _asOfDateField(saving || !hasSelectedEmployee);
+              if (narrow) {
+                return Column(
+                  children: [
+                    leaveTypeField,
                     const SizedBox(height: 12),
-                    _statusPanel(
-                      icon: Icons.person_off_outlined,
-                      message: 'No active employees found for this department.',
-                    ),
+                    asOfField,
                   ],
-                  const SizedBox(height: 12),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final narrow = constraints.maxWidth < 560;
-                      final leaveTypeField = DropdownButtonFormField<LeaveType>(
-                        initialValue: _selectedLeaveType,
-                        isExpanded: true,
-                        menuMaxHeight: 360,
-                        decoration:
-                            adminLeaveInputDecoration(
-                              context,
-                              'Leave type',
-                            ).copyWith(
-                              prefixIcon: const Icon(Icons.event_note_outlined),
-                            ),
-                        items: LeaveType.values
-                            .map(
-                              (t) => DropdownMenuItem<LeaveType>(
-                                value: t,
-                                child: Text(t.displayName),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: saving || _loadingBalances
-                            ? null
-                            : (v) {
-                                if (v == null) return;
-                                setState(() => _selectedLeaveType = v);
-                                _applyBalanceToFields();
-                              },
-                      );
-                      final asOfField = _asOfDateField(
-                        saving || !hasSelectedEmployee,
-                      );
-                      if (narrow) {
-                        return Column(
-                          children: [
-                            leaveTypeField,
-                            const SizedBox(height: 12),
-                            asOfField,
-                          ],
-                        );
-                      }
-                      return Row(
-                        children: [
-                          Expanded(child: leaveTypeField),
-                          const SizedBox(width: 12),
-                          SizedBox(width: 210, child: asOfField),
-                        ],
-                      );
-                    },
-                  ),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    child: _loadingBalances
-                        ? const Padding(
-                            key: ValueKey('balance-loading'),
-                            padding: EdgeInsets.only(top: 12),
-                            child: LinearProgressIndicator(minHeight: 2),
-                          )
-                        : const SizedBox(
-                            key: ValueKey('balance-idle'),
-                            height: 12,
-                          ),
-                  ),
-                  _balancePreviewPanel(
-                    current: _selectedBalance,
-                    draft: _draftBalance,
-                  ),
-                  const SizedBox(height: 18),
-                  _sectionHeader(
-                    icon: Icons.tune_outlined,
-                    title: 'Balance Buckets',
-                    trailing: IconButton(
-                      onPressed: saving || _loadingBalances
-                          ? null
-                          : _applyBalanceToFields,
-                      icon: const Icon(Icons.restore_rounded),
-                      tooltip: 'Reset loaded values',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _balanceFieldGrid(
-                    enabled:
-                        !saving && !_loadingBalances && hasSelectedEmployee,
-                  ),
-                  const SizedBox(height: 16),
-                  _sectionHeader(
-                    icon: Icons.history_edu_outlined,
-                    title: 'Audit Note',
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _remarksController,
-                    enabled: !saving && hasSelectedEmployee,
-                    minLines: 2,
-                    maxLines: 4,
-                    decoration:
-                        adminLeaveInputDecoration(
-                          context,
-                          'Reason / remarks',
-                        ).copyWith(
-                          alignLabelWithHint: true,
-                          prefixIcon: const Icon(Icons.notes_outlined),
-                          hintText:
-                              'Example: Corrected imported opening balance',
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  _statusPanel(
-                    icon: _draftBalance.availableDays < 0
-                        ? Icons.warning_amber_rounded
-                        : Icons.info_outline_rounded,
-                    message: _draftBalance.availableDays < 0
-                        ? 'Resulting available balance is negative. Save only if this reflects the intended HR correction.'
-                        : 'Approvals continue to update used and pending days automatically after this adjustment.',
-                    warning: _draftBalance.availableDays < 0,
-                  ),
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: leaveTypeField),
+                  const SizedBox(width: 12),
+                  SizedBox(width: 210, child: asOfField),
+                ],
+              );
+            },
+          ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: _loadingBalances
+                ? const Padding(
+                    key: ValueKey('balance-loading'),
+                    padding: EdgeInsets.only(top: 12),
+                    child: LinearProgressIndicator(minHeight: 2),
+                  )
+                : const SizedBox(key: ValueKey('balance-idle'), height: 12),
+          ),
+          _balancePreviewPanel(current: _selectedBalance, draft: _draftBalance),
+          const SizedBox(height: 18),
+          _sectionHeader(
+            icon: Icons.tune_outlined,
+            title: 'Balance Buckets',
+            trailing: IconButton(
+              onPressed: saving || _loadingBalances
+                  ? null
+                  : _applyBalanceToFields,
+              icon: const Icon(Icons.restore_rounded),
+              tooltip: 'Reset loaded values',
+            ),
+          ),
+          const SizedBox(height: 10),
+          _balanceFieldGrid(
+            enabled: !saving && !_loadingBalances && hasSelectedEmployee,
+          ),
+          const SizedBox(height: 16),
+          _sectionHeader(icon: Icons.history_edu_outlined, title: 'Audit Note'),
+          const SizedBox(height: 10),
+          TextFormField(
+            controller: _remarksController,
+            enabled: !saving && hasSelectedEmployee,
+            minLines: 2,
+            maxLines: 4,
+            decoration: adminLeaveInputDecoration(context, 'Reason / remarks')
+                .copyWith(
+                  alignLabelWithHint: true,
+                  prefixIcon: const Icon(Icons.notes_outlined),
+                  hintText: 'Example: Corrected imported opening balance',
+                ),
+          ),
+          const SizedBox(height: 12),
+          _statusPanel(
+            icon: _draftBalance.availableDays < 0
+                ? Icons.warning_amber_rounded
+                : Icons.info_outline_rounded,
+            message: _draftBalance.availableDays < 0
+                ? 'Resulting available balance is negative. Save only if this reflects the intended HR correction.'
+                : 'Approvals continue to update used and pending days automatically after this adjustment.',
+            warning: _draftBalance.availableDays < 0,
+          ),
         ],
       ],
     );

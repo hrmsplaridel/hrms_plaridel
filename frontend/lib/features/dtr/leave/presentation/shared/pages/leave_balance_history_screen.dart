@@ -42,6 +42,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   LeaveLedgerResult? _result;
   static const int _pageSize = 25;
   int _currentPage = 0; // 0-indexed
+  String? _employeeBucketFilter;
 
   /// Admin: active filter state (changes trigger an immediate reload).
   String? _draftEmployeeId;
@@ -99,7 +100,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
         if (!event.affectsUser(_currentUserId)) return;
       }
       leaveProvider.invalidateCachedLeaveData();
-      unawaited(_refreshFromRealtime()); 
+      unawaited(_refreshFromRealtime());
     });
   }
 
@@ -120,10 +121,9 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       _employeesError = null;
     });
     try {
-      final deptParam =
-          departmentId != null && departmentId.isNotEmpty
-              ? '&department_id=$departmentId'
-              : '';
+      final deptParam = departmentId != null && departmentId.isNotEmpty
+          ? '&department_id=$departmentId'
+          : '';
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employees?status=Active$deptParam',
       );
@@ -205,6 +205,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
                   ? _draftLeaveType
                   : null)
             : null,
+        affectedBucket: widget.isAdmin ? null : _employeeBucketFilter,
         limit: _pageSize,
         offset: _currentPage * _pageSize,
       );
@@ -225,7 +226,6 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       });
     }
   }
-
 
   int get _totalPages {
     final total = _result?.total ?? 0;
@@ -299,12 +299,20 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       );
     }
 
-    final stats = _ledgerSummaryStats(r.rows);
+    final stats = _ledgerSummaryStatsFromResult(r);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _EmployeeSummaryBand(stats: stats),
+        _EmployeeLedgerFilter(
+          selected: _employeeBucketFilter,
+          onSelected: (value) {
+            if (_employeeBucketFilter == value) return;
+            setState(() => _employeeBucketFilter = value);
+            _load(resetPage: true, forceRefresh: true);
+          },
+        ),
         Expanded(
           child: r.rows.isEmpty
               ? const _EmployeeEmptyState()
@@ -566,11 +574,10 @@ class _EmployeeSummaryBand extends StatelessWidget {
       width: double.infinity,
       color: AppTheme.sectionAltOf(context),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final narrow = constraints.maxWidth < 400;
-          final chips = [
-            _EmployeeSummaryChip(
+      child: Row(
+        children: [
+          Expanded(
+            child: _EmployeeSummaryChip(
               amountLabel: _fmtDays(stats.totalEarned),
               caption: 'Earned',
               icon: Icons.arrow_upward_rounded,
@@ -579,7 +586,10 @@ class _EmployeeSummaryBand extends StatelessWidget {
                   : const Color(0xFFE8F5E9),
               iconColor: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
             ),
-            _EmployeeSummaryChip(
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _EmployeeSummaryChip(
               amountLabel: _fmtDays(stats.totalUsed),
               caption: 'Used',
               icon: Icons.arrow_downward_rounded,
@@ -588,7 +598,10 @@ class _EmployeeSummaryBand extends StatelessWidget {
                   : const Color(0xFFFFEBEE),
               iconColor: dark ? Colors.red.shade300 : const Color(0xFFC62828),
             ),
-            _EmployeeSummaryChip(
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _EmployeeSummaryChip(
               amountLabel: _fmtDays(stats.totalPending),
               caption: 'Pending',
               icon: Icons.schedule_rounded,
@@ -599,27 +612,8 @@ class _EmployeeSummaryBand extends StatelessWidget {
                   ? Colors.blueGrey.shade300
                   : const Color(0xFF607D8B),
             ),
-          ];
-          if (narrow) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < chips.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 10),
-                  chips[i],
-                ],
-              ],
-            );
-          }
-          return Row(
-            children: [
-              for (var i = 0; i < chips.length; i++) ...[
-                if (i > 0) const SizedBox(width: 10),
-                Expanded(child: chips[i]),
-              ],
-            ],
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -780,8 +774,18 @@ class _EmployeeLedgerRow extends StatelessWidget {
   final LeaveBalanceLedgerEntry entry;
 
   static const List<String> _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
   String _shortDate(DateTime d) =>
@@ -867,15 +871,24 @@ class _EmployeeLedgerRow extends StatelessWidget {
   String _actionTitle(String raw) {
     final a = raw.toLowerCase();
     switch (a) {
-      case 'monthly_accrual':   return 'Monthly Accrual';
-      case 'leave_approved':    return 'Leave Approved';
-      case 'admin_adjustment':  return 'Balance Adjustment';
-      case 'leave_submitted':   return 'Leave Filed';
-      case 'forced_leave_deduction': return 'Forced Leave Deduction';
-      case 'leave_cancelled':   return 'Leave Cancelled';
-      case 'leave_rejected':    return 'Leave Not Approved';
-      case 'leave_returned':    return 'Leave Returned';
-      case 'leave_revoked':     return 'Approval Revoked';
+      case 'monthly_accrual':
+        return 'Monthly Accrual';
+      case 'leave_approved':
+        return 'Leave Approved';
+      case 'admin_adjustment':
+        return 'Balance Adjustment';
+      case 'leave_submitted':
+        return 'Leave Filed';
+      case 'forced_leave_deduction':
+        return 'Forced Leave Deduction';
+      case 'leave_cancelled':
+        return 'Leave Cancelled';
+      case 'leave_rejected':
+        return 'Leave Not Approved';
+      case 'leave_returned':
+        return 'Leave Returned';
+      case 'leave_revoked':
+        return 'Approval Revoked';
       default:
         if (raw.isEmpty) return 'Activity';
         return raw
@@ -894,15 +907,27 @@ class _EmployeeLedgerRow extends StatelessWidget {
     final meta = entry.metadataJson ?? {};
 
     if (a == 'monthly_accrual') {
-      final ym = meta['target_year_month']?.toString() ??
+      final ym =
+          meta['target_year_month']?.toString() ??
           meta['targetYearMonth']?.toString();
       final months = meta['months_credited'];
       if (ym != null && ym.length == 7) {
         final parts = ym.split('-');
         final mIdx = int.tryParse(parts[1]) ?? 0;
         const mNames = [
-          '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+          '',
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
         ];
         final mName = mIdx >= 1 && mIdx <= 12 ? mNames[mIdx] : parts[1];
         final suffix = months != null && months != 1
@@ -987,10 +1012,10 @@ class _EmployeeLedgerRow extends StatelessWidget {
     final amountColor = effective > 0
         ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
         : effective < 0
-            ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
-            : (dark
-                ? AppTheme.dashTextSecondaryOf(context)
-                : AppTheme.dashTextSecondaryOf(context));
+        ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
+        : (dark
+              ? AppTheme.dashTextSecondaryOf(context)
+              : AppTheme.dashTextSecondaryOf(context));
     final lt = _leaveTypeLabel(entry.leaveType);
     final subtitle = _subtitle();
 
@@ -1034,8 +1059,9 @@ class _EmployeeLedgerRow extends StatelessWidget {
                       _shortDate(_displayDate()),
                       style: TextStyle(
                         fontSize: 11,
-                        color: AppTheme.dashTextSecondaryOf(context)
-                            .withValues(alpha: 0.8),
+                        color: AppTheme.dashTextSecondaryOf(
+                          context,
+                        ).withValues(alpha: 0.8),
                       ),
                     ),
                   ],
@@ -1060,8 +1086,9 @@ class _EmployeeLedgerRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
-                      color: AppTheme.dashTextSecondaryOf(context)
-                          .withValues(alpha: 0.85),
+                      color: AppTheme.dashTextSecondaryOf(
+                        context,
+                      ).withValues(alpha: 0.85),
                       height: 1.3,
                     ),
                   ),
@@ -1111,19 +1138,67 @@ _LedgerSummaryStats _ledgerSummaryStats(List<LeaveBalanceLedgerEntry> rows) {
     if (d > 0 && (b == 'earned' || a == 'monthly_accrual')) {
       earned += d;
     }
-    if (d < 0 && b == 'used') {
-      used += -d;
+    if (b == 'used') {
+      used += d;
     }
     if (b == 'pending') {
-      pending += d.abs();
+      pending += d;
     }
   }
 
   return _LedgerSummaryStats(
     totalEarned: earned,
-    totalUsed: used,
-    totalPending: pending,
+    totalUsed: used < 0 ? 0 : used,
+    totalPending: pending < 0 ? 0 : pending,
   );
+}
+
+_LedgerSummaryStats _ledgerSummaryStatsFromResult(LeaveLedgerResult result) {
+  return _LedgerSummaryStats(
+    totalEarned: result.summaryEarned,
+    totalUsed: result.summaryUsed,
+    totalPending: result.summaryPending,
+  );
+}
+
+class _EmployeeLedgerFilter extends StatelessWidget {
+  const _EmployeeLedgerFilter({
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final String? selected;
+  final ValueChanged<String?> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    const options = <(String?, String)>[
+      (null, 'All'),
+      ('earned', 'Earned'),
+      ('used', 'Used'),
+      ('pending', 'Pending'),
+    ];
+    return Container(
+      color: AppTheme.sectionAltOf(context),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (var i = 0; i < options.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              ChoiceChip(
+                label: Text(options[i].$2),
+                selected: selected == options[i].$1,
+                onSelected: (_) => onSelected(options[i].$1),
+                showCheckmark: false,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _AdminSummaryChips extends StatelessWidget {
@@ -1182,7 +1257,9 @@ class _AdminSummaryChips extends StatelessWidget {
               iconBoxColor: dark
                   ? AppTheme.primaryNavy.withValues(alpha: 0.35)
                   : const Color(0xFFE8EAF6),
-              iconColor: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
+              iconColor: dark
+                  ? AppTheme.primaryNavyLight
+                  : AppTheme.primaryNavy,
               valueColor: AppTheme.dashTextPrimaryOf(context),
             ),
         ];
@@ -1268,7 +1345,11 @@ class _SummaryChip extends StatelessWidget {
 }
 
 class _EmployeeOption {
-  const _EmployeeOption({required this.id, required this.name, this.departmentId});
+  const _EmployeeOption({
+    required this.id,
+    required this.name,
+    this.departmentId,
+  });
 
   final String id;
   final String name;
@@ -1400,10 +1481,7 @@ class _AdminFilterCard extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
             const SizedBox(width: 10),
-            Text(
-              'Loading…',
-              style: AppTheme.dashFieldTextStyle(context),
-            ),
+            Text('Loading…', style: AppTheme.dashFieldTextStyle(context)),
           ],
         ),
       );
@@ -1548,8 +1626,9 @@ class _PaginationBar extends StatelessWidget {
         IconButton(
           icon: const Icon(Icons.chevron_left_rounded, size: 20),
           tooltip: 'Previous',
-          onPressed:
-              (loading || currentPage == 0) ? null : () => onPage(currentPage - 1),
+          onPressed: (loading || currentPage == 0)
+              ? null
+              : () => onPage(currentPage - 1),
           color: AppTheme.primaryNavy,
         ),
         const SizedBox(width: 4),
@@ -1592,10 +1671,7 @@ class _PaginationBar extends StatelessWidget {
           SizedBox(
             width: 14,
             height: 14,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: labelColor,
-            ),
+            child: CircularProgressIndicator(strokeWidth: 2, color: labelColor),
           ),
         ],
       ],
@@ -1660,8 +1736,19 @@ class _AdminLedgerTile extends StatelessWidget {
 
   String _fmtDt(DateTime d) {
     const mNames = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${mNames[d.month]} ${d.day}, ${d.year}';
   }
@@ -1733,15 +1820,24 @@ class _AdminLedgerTile extends StatelessWidget {
   String _actionTitle(String raw) {
     final a = raw.toLowerCase();
     switch (a) {
-      case 'monthly_accrual':        return 'Monthly Accrual';
-      case 'leave_approved':         return 'Leave Approved';
-      case 'admin_adjustment':       return 'Balance Adjustment';
-      case 'leave_submitted':        return 'Leave Filed';
-      case 'forced_leave_deduction': return 'Forced Leave Deduction';
-      case 'leave_cancelled':        return 'Leave Cancelled';
-      case 'leave_rejected':         return 'Leave Not Approved';
-      case 'leave_returned':         return 'Leave Returned';
-      case 'leave_revoked':          return 'Approval Revoked';
+      case 'monthly_accrual':
+        return 'Monthly Accrual';
+      case 'leave_approved':
+        return 'Leave Approved';
+      case 'admin_adjustment':
+        return 'Balance Adjustment';
+      case 'leave_submitted':
+        return 'Leave Filed';
+      case 'forced_leave_deduction':
+        return 'Forced Leave Deduction';
+      case 'leave_cancelled':
+        return 'Leave Cancelled';
+      case 'leave_rejected':
+        return 'Leave Not Approved';
+      case 'leave_returned':
+        return 'Leave Returned';
+      case 'leave_revoked':
+        return 'Approval Revoked';
       default:
         if (raw.isEmpty) return 'Ledger Entry';
         return raw
@@ -1760,15 +1856,27 @@ class _AdminLedgerTile extends StatelessWidget {
     final meta = entry.metadataJson ?? {};
 
     if (a == 'monthly_accrual') {
-      final ym = meta['target_year_month']?.toString() ??
+      final ym =
+          meta['target_year_month']?.toString() ??
           meta['targetYearMonth']?.toString();
       final months = meta['months_credited'];
       if (ym != null && ym.length == 7) {
         final parts = ym.split('-');
         final year = parts[0];
         const mNames = [
-          '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+          '',
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
         ];
         final mIdx = int.tryParse(parts[1]) ?? 0;
         final mName = mIdx >= 1 && mIdx <= 12 ? mNames[mIdx] : parts[1];
@@ -1853,8 +1961,8 @@ class _AdminLedgerTile extends StatelessWidget {
     final amountColor = effective > 0
         ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
         : effective < 0
-            ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
-            : AppTheme.dashTextSecondaryOf(context);
+        ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
+        : AppTheme.dashTextSecondaryOf(context);
 
     final subtitle = _subtitle();
     final employeeName = entry.employeeName?.trim() ?? '';
@@ -1898,8 +2006,9 @@ class _AdminLedgerTile extends StatelessWidget {
                     Text(
                       _fmtDt(_displayDate()),
                       style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context)
-                            .withValues(alpha: 0.8),
+                        color: AppTheme.dashTextSecondaryOf(
+                          context,
+                        ).withValues(alpha: 0.8),
                         fontSize: 11,
                       ),
                     ),
@@ -1925,8 +2034,9 @@ class _AdminLedgerTile extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context)
-                          .withValues(alpha: 0.85),
+                      color: AppTheme.dashTextSecondaryOf(
+                        context,
+                      ).withValues(alpha: 0.85),
                       fontSize: 12,
                       height: 1.3,
                     ),

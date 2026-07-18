@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/app/providers.dart';
 import 'package:hrms_plaridel/app/route_observer.dart';
@@ -112,7 +113,9 @@ class _StartupGateState extends State<_StartupGate> {
             subtitle: 'Loading HRMS Plaridel',
           );
         }
-        return _initialHome(widget.auth);
+        final view = WidgetsBinding.instance.platformDispatcher.views.first;
+        final logicalWidth = view.physicalSize.width / view.devicePixelRatio;
+        return _initialHome(widget.auth, logicalWidth: logicalWidth);
       },
     );
   }
@@ -147,6 +150,14 @@ class _RestrictedMobileRouteScreen extends StatelessWidget {
                     : 'Route blocked: $attemptedRoute',
                 textAlign: TextAlign.center,
               ),
+              if (attemptedRoute.isEmpty) ...[
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: () => performDashboardSignOut(context),
+                  icon: const Icon(Icons.logout_rounded),
+                  label: const Text('Return to login'),
+                ),
+              ],
             ],
           ),
         ),
@@ -155,10 +166,19 @@ class _RestrictedMobileRouteScreen extends StatelessWidget {
   }
 }
 
-Widget _initialHome(AuthProvider auth) {
+Widget _initialHome(AuthProvider auth, {required double logicalWidth}) {
   if (auth.user != null) {
-    final role = auth.user!.role ?? 'employee';
+    final role = (auth.user!.role ?? 'employee').toLowerCase();
     final isPrivileged = role == 'admin' || role == 'hr';
+    final isNativeMobile =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
+    final isMobile =
+        isNativeMobile || DocuTrackerAccessPolicy.isMobileWidth(logicalWidth);
+    if (isPrivileged && isMobile) {
+      return const _RestrictedMobileRouteScreen(attemptedRoute: '');
+    }
     return isPrivileged ? const AdminDashboard() : const EmployeeDashboard();
   }
 

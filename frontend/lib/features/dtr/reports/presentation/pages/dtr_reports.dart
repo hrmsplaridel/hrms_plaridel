@@ -553,6 +553,128 @@ class _DtrReportsState extends State<DtrReports> {
     }
   }
 
+  Future<PdfPageFormat?> _chooseDtrPaperSize(BuildContext context) {
+    final choices = <(String, String, PdfPageFormat)>[
+      ('A4', '210 × 297 mm', PdfPageFormat.a4),
+      ('Short / Letter', '8.5 × 11 in', PdfPageFormat.letter),
+      (
+        'Long',
+        '8.5 × 13 in',
+        PdfPageFormat(8.5 * PdfPageFormat.inch, 13 * PdfPageFormat.inch),
+      ),
+      ('Legal', '8.5 × 14 in', PdfPageFormat.legal),
+    ];
+    return showDialog<PdfPageFormat>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        titlePadding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
+        contentPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        title: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: const Icon(
+                Icons.print_rounded,
+                color: AppTheme.primaryNavy,
+                size: 21,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Print setup',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Select the paper loaded in your printer',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        children: [
+          for (var index = 0; index < choices.length; index++)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialogContext, choices[index].$3),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: index == 0
+                      ? AppTheme.primaryNavy.withValues(alpha: 0.06)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(
+                      alpha: index == 0 ? 0.28 : 0.1,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.description_outlined,
+                      color: index == 0
+                          ? AppTheme.primaryNavy
+                          : AppTheme.dashTextSecondaryOf(dialogContext),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            choices[index].$1,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            choices[index].$2,
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(
+                                dialogContext,
+                              ),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right_rounded, size: 20),
+                  ],
+                ),
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Print DTR report: open system print dialog when supported; otherwise share PDF.
   Future<void> _printDtrReport(
     BuildContext context, {
@@ -563,6 +685,8 @@ class _DtrReportsState extends State<DtrReports> {
     String? department,
     String? position,
   }) async {
+    final pageFormat = await _chooseDtrPaperSize(context);
+    if (pageFormat == null || !context.mounted) return;
     final baseName =
         'DTR_${selectedName.replaceAll(' ', '_')}_${_months[_selectedMonth - 1]}_$_selectedYear';
     if (!context.mounted) return;
@@ -570,24 +694,24 @@ class _DtrReportsState extends State<DtrReports> {
       context,
     ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
     try {
-      final bytes = await DtrExport.generatePdf(
-        employeeName: selectedName,
-        year: _selectedYear,
-        month: _selectedMonth,
-        start: start,
-        end: end,
-        recordsByDate: recordsByDate,
-        department: department,
-        position: position,
-        officialHours: _shiftOfficialHours,
-        workingDays: _shiftWorkingDays,
-        assignmentEffectiveFrom: _assignmentEffectiveFrom,
-        assignmentEffectiveTo: _assignmentEffectiveTo,
-      );
-      if (!context.mounted) return;
       await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => bytes,
+        onLayout: (_) => DtrExport.generatePdf(
+          employeeName: selectedName,
+          year: _selectedYear,
+          month: _selectedMonth,
+          start: start,
+          end: end,
+          recordsByDate: recordsByDate,
+          department: department,
+          position: position,
+          officialHours: _shiftOfficialHours,
+          workingDays: _shiftWorkingDays,
+          assignmentEffectiveFrom: _assignmentEffectiveFrom,
+          assignmentEffectiveTo: _assignmentEffectiveTo,
+          pageFormat: pageFormat,
+        ),
         name: baseName,
+        format: pageFormat,
       );
       if (!context.mounted) return;
       ScaffoldMessenger.of(
@@ -610,6 +734,7 @@ class _DtrReportsState extends State<DtrReports> {
           workingDays: _shiftWorkingDays,
           assignmentEffectiveFrom: _assignmentEffectiveFrom,
           assignmentEffectiveTo: _assignmentEffectiveTo,
+          pageFormat: pageFormat,
         );
         await shareOrDownloadPdf(bytes, '$baseName.pdf');
         if (!context.mounted) return;
@@ -700,7 +825,39 @@ class _DtrReportsState extends State<DtrReports> {
         .map((id) => byId[id])
         .whereType<EmployeeOption>()
         .toList()
-      ..sort((a, b) => a.fullName.compareTo(b.fullName));
+      ..sort(_compareEmployeesByNumber);
+  }
+
+  int _compareEmployeesByNumber(EmployeeOption a, EmployeeOption b) {
+    int compareNatural(String left, String right) {
+      final leftParts = RegExp(r'\d+|\D+').allMatches(left.toUpperCase());
+      final rightParts = RegExp(r'\d+|\D+').allMatches(right.toUpperCase());
+      final leftValues = leftParts.map((match) => match.group(0)!).toList();
+      final rightValues = rightParts.map((match) => match.group(0)!).toList();
+      final count = leftValues.length < rightValues.length
+          ? leftValues.length
+          : rightValues.length;
+      for (var i = 0; i < count; i++) {
+        final leftNumber = int.tryParse(leftValues[i]);
+        final rightNumber = int.tryParse(rightValues[i]);
+        final comparison = leftNumber != null && rightNumber != null
+            ? leftNumber.compareTo(rightNumber)
+            : leftValues[i].compareTo(rightValues[i]);
+        if (comparison != 0) return comparison;
+      }
+      return leftValues.length.compareTo(rightValues.length);
+    }
+
+    final byNumber = compareNatural(a.displayEmployeeNo, b.displayEmployeeNo);
+    if (byNumber != 0) return byNumber;
+    return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
+  }
+
+  String _compactEmployeeNo(String employeeNo) {
+    return employeeNo.replaceFirst(
+      RegExp(r'^EMP[-\s]*', caseSensitive: false),
+      '',
+    );
   }
 
   Future<DtrExportItem> _prepareDtrExportItem(EmployeeOption employee) async {
@@ -745,7 +902,10 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  Future<Uint8List> _buildSelectedDtrPdf(DtrProvider dtr) async {
+  Future<Uint8List> _buildSelectedDtrPdf(
+    DtrProvider dtr, {
+    PdfPageFormat pageFormat = PdfPageFormat.legal,
+  }) async {
     final selected = _selectedEmployeesForBulk(dtr);
     if (selected.length < 2) {
       throw StateError('Select at least two employees first.');
@@ -761,6 +921,7 @@ class _DtrReportsState extends State<DtrReports> {
       start: _rangeStartDate(),
       end: _rangeEndDate(),
       reportTitle: 'Daily Time Record Report',
+      pageFormat: pageFormat,
     );
   }
 
@@ -771,15 +932,18 @@ class _DtrReportsState extends State<DtrReports> {
       _showReportSnack('Select at least two employees to bulk print.');
       return;
     }
+    final pageFormat = await _chooseDtrPaperSize(context);
+    if (pageFormat == null || !context.mounted) return;
     setState(() => _bulkExportBusy = true);
     Uint8List? bytes;
     try {
       _showReportSnack('Preparing $selectedCount selected DTRs...');
-      bytes = await _buildSelectedDtrPdf(dtr);
+      bytes = await _buildSelectedDtrPdf(dtr, pageFormat: pageFormat);
       if (!context.mounted) return;
       await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => bytes!,
+        onLayout: (_) async => bytes!,
         name: 'DTR_Selected_${_months[_selectedMonth - 1]}_$_selectedYear',
+        format: pageFormat,
       );
       if (!context.mounted) return;
       _showReportSnack('Selected DTRs sent to print.');
@@ -826,11 +990,16 @@ class _DtrReportsState extends State<DtrReports> {
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
     final search = _searchController.text.toLowerCase();
-    final employees = search.isEmpty
-        ? dtr.employees
-        : dtr.employees
-              .where((e) => e.fullName.toLowerCase().contains(search))
-              .toList();
+    final employees =
+        dtr.employees
+            .where(
+              (e) =>
+                  search.isEmpty ||
+                  e.fullName.toLowerCase().contains(search) ||
+                  e.displayEmployeeNo.toLowerCase().contains(search),
+            )
+            .toList()
+          ..sort(_compareEmployeesByNumber);
     final selectedList = employees
         .where((e) => e.id == _selectedEmployeeId)
         .toList();
@@ -1105,7 +1274,7 @@ class _DtrReportsState extends State<DtrReports> {
             style: AppTheme.dashFieldTextStyle(context),
             decoration: AppTheme.dashInputDecoration(
               context,
-              hintText: 'Search name...',
+              hintText: 'Search name or ID...',
               prefixIcon: const Icon(Icons.search_rounded, size: 20),
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,
@@ -1662,9 +1831,9 @@ class _DtrReportsState extends State<DtrReports> {
               children: [
                 if (_multiSelectMode) const SizedBox(width: 32),
                 SizedBox(
-                  width: 58,
+                  width: 60,
                   child: Text(
-                    'No.',
+                    'EMP ID',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
@@ -1732,14 +1901,18 @@ class _DtrReportsState extends State<DtrReports> {
                           const SizedBox(width: 4),
                         ],
                         SizedBox(
-                          width: 58,
-                          child: Text(
-                            e.displayEmployeeNo,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.dashTextPrimaryOf(ctx),
+                          width: 60,
+                          child: Tooltip(
+                            message: e.displayEmployeeNo,
+                            child: Text(
+                              _compactEmployeeNo(e.displayEmployeeNo),
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.dashTextPrimaryOf(ctx),
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         Expanded(
@@ -2466,9 +2639,9 @@ class _DtrReportsState extends State<DtrReports> {
               children: [
                 if (_multiSelectMode) const SizedBox(width: 32),
                 SizedBox(
-                  width: 58,
+                  width: 60,
                   child: Text(
-                    'No.',
+                    'EMP ID',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
@@ -2534,14 +2707,18 @@ class _DtrReportsState extends State<DtrReports> {
                           const SizedBox(width: 4),
                         ],
                         SizedBox(
-                          width: 58,
-                          child: Text(
-                            e.displayEmployeeNo,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.dashTextPrimaryOf(ctx),
+                          width: 60,
+                          child: Tooltip(
+                            message: e.displayEmployeeNo,
+                            child: Text(
+                              _compactEmployeeNo(e.displayEmployeeNo),
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.dashTextPrimaryOf(ctx),
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         Expanded(

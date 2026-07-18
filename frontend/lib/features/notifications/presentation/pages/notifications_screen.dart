@@ -34,8 +34,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     ]);
   }
 
-  bool _isNarrow(BuildContext context) =>
-      MediaQuery.sizeOf(context).width < 400;
+  bool _isMobileLayout(BuildContext context) =>
+      MediaQuery.sizeOf(context).width < 600;
 
   bool _docuTrackerAdmin(BuildContext context) {
     final role = context.read<AuthProvider>().user?.role?.toLowerCase();
@@ -64,6 +64,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final totalUnread = np.unreadCount + doc.unreadNotificationsCount;
     final isDocuAdmin = _docuTrackerAdmin(context);
     final loadError = np.loadError ?? doc.error;
+    final isMobileLayout = _isMobileLayout(context);
 
     return Scaffold(
       backgroundColor: AppTheme.sectionAltOf(context),
@@ -75,10 +76,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         shadowColor: Colors.black.withValues(alpha: 0.08),
         leading: IconButton(
           icon: Icon(
-            Icons.close_rounded,
+            isMobileLayout ? Icons.arrow_back_rounded : Icons.close_rounded,
             color: AppTheme.dashTextPrimaryOf(context),
           ),
-          tooltip: 'Close',
+          tooltip: isMobileLayout ? 'Back' : 'Close',
           style: IconButton.styleFrom(
             backgroundColor: AppTheme.dashMutedSurfaceOf(context),
             shape: RoundedRectangleBorder(
@@ -123,14 +124,27 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           if (totalUnread > 0)
             Padding(
               padding: const EdgeInsets.only(right: 4),
-              child: _isNarrow(context)
-                  ? IconButton(
-                      onPressed: () => _markAllRead(np, doc),
-                      tooltip: 'Mark all read',
-                      style: IconButton.styleFrom(
-                        foregroundColor: AppTheme.primaryNavy,
-                      ),
-                      icon: const Icon(Icons.done_all_rounded, size: 20),
+              child: isMobileLayout
+                  ? PopupMenuButton<String>(
+                      tooltip: 'More options',
+                      icon: const Icon(Icons.more_vert_rounded),
+                      onSelected: (value) {
+                        if (value == 'mark_all_read') {
+                          _markAllRead(np, doc);
+                        }
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem<String>(
+                          value: 'mark_all_read',
+                          child: Row(
+                            children: [
+                              Icon(Icons.done_all_rounded, size: 20),
+                              SizedBox(width: 12),
+                              Text('Mark all as read'),
+                            ],
+                          ),
+                        ),
+                      ],
                     )
                   : TextButton.icon(
                       onPressed: () => _markAllRead(np, doc),

@@ -8,7 +8,18 @@ import 'package:hrms_plaridel/features/learning_development/models/ld_training_r
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dash_ui.dart';
 
 class LdTrainingRequirementsEmployeeScreen extends StatefulWidget {
-  const LdTrainingRequirementsEmployeeScreen({super.key});
+  const LdTrainingRequirementsEmployeeScreen({
+    super.key,
+    this.tutorialHeaderKey,
+    this.tutorialProgramKey,
+    this.tutorialPreTrainingKey,
+    this.tutorialPostTrainingKey,
+  });
+
+  final GlobalKey? tutorialHeaderKey;
+  final GlobalKey? tutorialProgramKey;
+  final GlobalKey? tutorialPreTrainingKey;
+  final GlobalKey? tutorialPostTrainingKey;
 
   @override
   State<LdTrainingRequirementsEmployeeScreen> createState() =>
@@ -49,9 +60,9 @@ class _LdTrainingRequirementsEmployeeScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(userFacingApiError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
     }
   }
 
@@ -65,14 +76,14 @@ class _LdTrainingRequirementsEmployeeScreenState
       );
       if (!mounted) return;
       setState(() => _record = r);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Training title saved.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Training title saved.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(userFacingApiError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
     } finally {
       if (mounted) setState(() => _savingTitle = false);
     }
@@ -106,14 +117,14 @@ class _LdTrainingRequirementsEmployeeScreenState
       setState(() => _picked.remove(kind));
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Document uploaded.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Document uploaded.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(userFacingApiError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -125,10 +136,8 @@ class _LdTrainingRequirementsEmployeeScreenState
     final path = r.docPath(kind);
     final name = r.docDisplayName(kind);
     if (path == null || path.isEmpty) return;
-    final url = await LdTrainingRequirementRepo.instance.getAttachmentDownloadUrl(
-      path,
-      fileName: name,
-    );
+    final url = await LdTrainingRequirementRepo.instance
+        .getAttachmentDownloadUrl(path, fileName: name);
     if (url == null || !mounted) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -171,7 +180,9 @@ class _LdTrainingRequirementsEmployeeScreenState
     final uploaded = _uploadedCount(record, kinds);
     if (uploaded >= kinds.length) return _PhaseStatus.awaitingReview;
     if (uploaded > 0) return _PhaseStatus.inProgress;
-    return isPreTraining ? _PhaseStatus.actionNeeded : _PhaseStatus.actionNeeded;
+    return isPreTraining
+        ? _PhaseStatus.actionNeeded
+        : _PhaseStatus.actionNeeded;
   }
 
   @override
@@ -216,6 +227,7 @@ class _LdTrainingRequirementsEmployeeScreenState
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Container(
+                    key: widget.tutorialHeaderKey,
                     padding: EdgeInsets.all(wide ? 28 : 22),
                     decoration: EmployeeDashUi.welcomeBanner(context),
                     child: Column(
@@ -234,24 +246,32 @@ class _LdTrainingRequirementsEmployeeScreenState
                     ),
                   ),
                   const SizedBox(height: 20),
-                  _TrainingTitleCard(
-                    controller: _trainingTitleController,
-                    saving: _savingTitle,
-                    savedTitle: r.trainingTitle,
-                    onSave: _saveTrainingTitle,
+                  KeyedSubtree(
+                    key: widget.tutorialProgramKey,
+                    child: _TrainingTitleCard(
+                      controller: _trainingTitleController,
+                      saving: _savingTitle,
+                      savedTitle: r.trainingTitle,
+                      onSave: _saveTrainingTitle,
+                    ),
                   ),
                   const SizedBox(height: 20),
                   _PhaseCard(
+                    key: widget.tutorialPreTrainingKey,
                     step: 1,
                     title: 'Pre-training requirements',
                     description:
                         'Upload your invitation letter for training travel, approved by the mayor. '
                         'HR must approve this before you can submit post-training documents.',
-                    kinds: const [LdTrainingRequirementDocKind.invitationLetter],
+                    kinds: const [
+                      LdTrainingRequirementDocKind.invitationLetter,
+                    ],
                     record: r,
                     status: _phaseStatus(
                       record: r,
-                      kinds: const [LdTrainingRequirementDocKind.invitationLetter],
+                      kinds: const [
+                        LdTrainingRequirementDocKind.invitationLetter,
+                      ],
                       approved: r.preRequirementsApproved,
                       locked: false,
                       isPreTraining: true,
@@ -267,6 +287,7 @@ class _LdTrainingRequirementsEmployeeScreenState
                   ),
                   const SizedBox(height: 16),
                   _PhaseCard(
+                    key: widget.tutorialPostTrainingKey,
                     step: 2,
                     title: 'Post-training requirements',
                     description:
@@ -307,13 +328,7 @@ class _LdTrainingRequirementsEmployeeScreenState
   }
 }
 
-enum _PhaseStatus {
-  locked,
-  actionNeeded,
-  inProgress,
-  awaitingReview,
-  approved,
-}
+enum _PhaseStatus { locked, actionNeeded, inProgress, awaitingReview, approved }
 
 class _ProgressSteps extends StatelessWidget {
   const _ProgressSteps({required this.record});
@@ -368,7 +383,9 @@ class _ProgressSteps extends StatelessWidget {
                 fontSize: 10.5,
                 fontWeight: FontWeight.w700,
                 height: 1.2,
-                color: done || active ? AppTheme.dashTextPrimaryOf(context) : secondary,
+                color: done || active
+                    ? AppTheme.dashTextPrimaryOf(context)
+                    : secondary,
               ),
             ),
           ],
@@ -433,7 +450,11 @@ class _TrainingTitleCard extends StatelessWidget {
                   color: _accent.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.edit_note_rounded, color: _accent, size: 20),
+                child: const Icon(
+                  Icons.edit_note_rounded,
+                  color: _accent,
+                  size: 20,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -501,7 +522,10 @@ class _TrainingTitleCard extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.primaryNavy,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -517,6 +541,7 @@ class _TrainingTitleCard extends StatelessWidget {
 
 class _PhaseCard extends StatelessWidget {
   const _PhaseCard({
+    super.key,
     required this.step,
     required this.title,
     required this.description,
@@ -552,11 +577,10 @@ class _PhaseCard extends StatelessWidget {
 
   static const _accent = Color(0xFFE85D04);
 
-  int get _uploaded =>
-      kinds.where((k) {
-        final p = record.docPath(k);
-        return p != null && p.trim().isNotEmpty;
-      }).length;
+  int get _uploaded => kinds.where((k) {
+    final p = record.docPath(k);
+    return p != null && p.trim().isNotEmpty;
+  }).length;
 
   @override
   Widget build(BuildContext context) {
@@ -653,7 +677,11 @@ class _PhaseCard extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(Icons.lock_outline_rounded, size: 16, color: Colors.grey.shade700),
+                Icon(
+                  Icons.lock_outline_rounded,
+                  size: 16,
+                  color: Colors.grey.shade700,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -677,9 +705,7 @@ class _PhaseCard extends StatelessWidget {
                 .map(
                   (k) => Expanded(
                     child: Padding(
-                      padding: EdgeInsets.only(
-                        right: k != kinds.last ? 10 : 0,
-                      ),
+                      padding: EdgeInsets.only(right: k != kinds.last ? 10 : 0),
                       child: _DocTile(
                         kind: k,
                         record: record,
@@ -726,12 +752,13 @@ class _PhaseCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(height: 4, color: accentColor.withValues(alpha: locked ? 0.25 : 0.85)),
+          Container(
+            height: 4,
+            color: accentColor.withValues(alpha: locked ? 0.25 : 0.85),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-            child: locked
-                ? Opacity(opacity: 0.55, child: content)
-                : content,
+            child: locked ? Opacity(opacity: 0.55, child: content) : content,
           ),
         ],
       ),
@@ -752,7 +779,11 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color, icon) = switch (status) {
-      _PhaseStatus.locked => ('Locked', Colors.grey.shade700, Icons.lock_rounded),
+      _PhaseStatus.locked => (
+        'Locked',
+        Colors.grey.shade700,
+        Icons.lock_rounded,
+      ),
       _PhaseStatus.approved => (
         'Approved',
         const Color(0xFF2E7D32),
@@ -901,7 +932,11 @@ class _DocTile extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.check_circle_rounded, size: 18, color: Colors.green.shade800),
+                  Icon(
+                    Icons.check_circle_rounded,
+                    size: 18,
+                    color: Colors.green.shade800,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -936,14 +971,21 @@ class _DocTile extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.picture_as_pdf_rounded, size: 18, color: Colors.red.shade700),
+                  Icon(
+                    Icons.picture_as_pdf_rounded,
+                    size: 18,
+                    color: Colors.red.shade700,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       picked!.name,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   IconButton(
@@ -962,7 +1004,10 @@ class _DocTile extends StatelessWidget {
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.cloud_upload_rounded, size: 18),
               label: Text(uploading ? 'Uploading…' : 'Upload PDF'),
@@ -970,11 +1015,12 @@ class _DocTile extends StatelessWidget {
                 backgroundColor: navy,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
-          ]
-          else
+          ] else
             OutlinedButton.icon(
               onPressed: disabled ? null : onPick,
               icon: const Icon(Icons.upload_file_rounded, size: 18),
@@ -983,7 +1029,9 @@ class _DocTile extends StatelessWidget {
                 foregroundColor: navy,
                 side: BorderSide(color: navy.withValues(alpha: 0.35)),
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
         ],

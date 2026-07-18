@@ -597,6 +597,7 @@ class DtrExport {
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
     DtrExportSignatories? signatories,
+    PdfPageFormat pageFormat = PdfPageFormat.legal,
   }) async {
     final policy = await _loadDefaultAttendancePolicy();
     final exportSignatories = signatories ?? await resolveSignatories();
@@ -642,15 +643,26 @@ class DtrExport {
     final doc = pw.Document(theme: await _resolvePdfTheme());
     doc.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat.legal,
+        pageFormat: pageFormat,
         margin: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        build: (context) => pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Expanded(child: buildCopy()),
-            pw.SizedBox(width: 8),
-            pw.Expanded(child: buildCopy()),
-          ],
+        build: (context) => pw.SizedBox(
+          width: pageFormat.width - _dtrHorizontalMargins,
+          height: pageFormat.height - _dtrVerticalMargins,
+          child: pw.FittedBox(
+            fit: pw.BoxFit.contain,
+            alignment: pw.Alignment.topCenter,
+            child: pw.SizedBox(
+              width: _dtrPairWidth,
+              child: pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(child: buildCopy()),
+                  pw.SizedBox(width: _dtrCopyGap),
+                  pw.Expanded(child: buildCopy()),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -666,6 +678,7 @@ class DtrExport {
     required DateTime end,
     String? reportTitle,
     DtrExportSignatories? signatories,
+    PdfPageFormat pageFormat = PdfPageFormat.legal,
   }) async {
     if (items.isEmpty) {
       throw ArgumentError.value(
@@ -720,15 +733,26 @@ class DtrExport {
 
       doc.addPage(
         pw.Page(
-          pageFormat: PdfPageFormat.legal,
+          pageFormat: pageFormat,
           margin: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          build: (context) => pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Expanded(child: buildCopy()),
-              pw.SizedBox(width: 8),
-              pw.Expanded(child: buildCopy()),
-            ],
+          build: (context) => pw.SizedBox(
+            width: pageFormat.width - _dtrHorizontalMargins,
+            height: pageFormat.height - _dtrVerticalMargins,
+            child: pw.FittedBox(
+              fit: pw.BoxFit.contain,
+              alignment: pw.Alignment.topCenter,
+              child: pw.SizedBox(
+                width: _dtrPairWidth,
+                child: pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Expanded(child: buildCopy()),
+                    pw.SizedBox(width: _dtrCopyGap),
+                    pw.Expanded(child: buildCopy()),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       );
@@ -811,6 +835,12 @@ class DtrExport {
   static const double _wPmOut = 45;
   static const double _wHours = 21;
   static const double _wMin = 21;
+  static const double _dtrCopyGap = 8;
+  static const double _dtrHorizontalMargins = 28;
+  static const double _dtrVerticalMargins = 24;
+  static const double _dtrPairWidth =
+      2 * (_wDate + _wAmIn + _wAmOut + _wPmIn + _wPmOut + _wHours + _wMin) +
+      _dtrCopyGap;
 
   static const double _headerFontSize = 5.0;
   static const pw.BorderSide _headerBorder = pw.BorderSide(

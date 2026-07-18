@@ -2808,6 +2808,11 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
   if (!Number.isInteger(year) || year < 1900 || year > maxAllowedYear) {
     return res.status(400).json({ error: `year must be between 1900 and ${maxAllowedYear}` });
   }
+  if (year >= yearEndManilaYearNow()) {
+    return res.status(409).json({
+      error: `Year-end deductions for ${year} cannot be applied until that calendar year has closed.`,
+    });
+  }
 
   const client = await pool.connect();
   try {
@@ -2917,6 +2922,7 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
       req.body?.dry_run === true ||
       req.query?.dry_run === '1' ||
       req.query?.dry_run === 'true';
+
     const rawMax = req.body?.max_catch_up_months ?? req.query?.max_catch_up_months;
     const maxCatchUpMonths =
       rawMax != null && rawMax !== '' ? parseInt(String(rawMax), 10) : undefined;
@@ -4024,6 +4030,7 @@ router.get('/ledger', protect, async (req, res) => {
   const filterUserId = (req.query?.user_id || '').toString().trim() || null;
   const leaveType = (req.query?.leave_type || '').toString().trim() || null;
   const action = (req.query?.action || '').toString().trim() || null;
+  const affectedBucket = (req.query?.affected_bucket || '').toString().trim().toLowerCase() || null;
   const from = (req.query?.from || req.query?.created_from || '').toString().trim() || null;
   const to = (req.query?.to || req.query?.created_to || '').toString().trim() || null;
 
@@ -4061,6 +4068,19 @@ router.get('/ledger', protect, async (req, res) => {
     params.push(from);
     p += 1;
   }
+
+  // Summary remains stable while the user switches activity buckets.
+  const summaryWhereSql = where.length > 0 ? where.join(' AND ') : 'true';
+  const summaryParams = [...params];
+
+  if (affectedBucket) {
+    if (!['earned', 'used', 'pending'].includes(affectedBucket)) {
+      return res.status(400).json({ error: 'Invalid affected_bucket filter' });
+    }
+    where.push(`LOWER(l.affected_bucket) = $${p}`);
+    params.push(affectedBucket);
+    p += 1;
+  }
   if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
     where.push(`l.created_at < ($${p}::date + interval '1 day')`);
     params.push(to);
@@ -4070,11 +4090,30 @@ router.get('/ledger', protect, async (req, res) => {
   const whereSql = where.length > 0 ? where.join(' AND ') : 'true';
 
   try {
-    const countQ = await pool.query(
-      `SELECT count(*)::int AS c FROM leave_balance_ledger l WHERE ${whereSql}`,
-      params
-    );
+    const [countQ, summaryQ] = await Promise.all([
+      pool.query(
+        `SELECT count(*)::int AS c FROM leave_balance_ledger l WHERE ${whereSql}`,
+        params
+      ),
+      pool.query(
+        `SELECT
+           COALESCE(SUM(CASE
+             WHEN l.days_changed > 0 AND
+                  (LOWER(l.affected_bucket) = 'earned' OR LOWER(l.action) = 'monthly_accrual')
+             THEN l.days_changed ELSE 0 END), 0)::float8 AS earned,
+           GREATEST(COALESCE(SUM(CASE
+             WHEN LOWER(l.affected_bucket) = 'used'
+             THEN l.days_changed ELSE 0 END), 0), 0)::float8 AS used,
+           GREATEST(COALESCE(SUM(CASE
+             WHEN LOWER(l.affected_bucket) = 'pending'
+             THEN l.days_changed ELSE 0 END), 0), 0)::float8 AS pending
+         FROM leave_balance_ledger l
+         WHERE ${summaryWhereSql}`,
+        summaryParams
+      ),
+    ]);
     const total = countQ.rows[0]?.c ?? 0;
+    const summary = summaryQ.rows[0] || {};
 
     const listParams = [...params, limit, offset];
     const limIdx = p;
@@ -4095,6 +4134,11 @@ router.get('/ledger', protect, async (req, res) => {
       total,
       limit,
       offset,
+      summary: {
+        earned: Number(summary.earned || 0),
+        used: Number(summary.used || 0),
+        pending: Number(summary.pending || 0),
+      },
       rows: list.rows.map((r) => ({
         id: r.id,
         user_id: r.user_id,
@@ -4697,6 +4741,12 @@ router.post('/admin/year-end-forced-leave/apply', protect, requireAdminOrHr, asy
       req.query?.dry_run === '1' ||
       req.query?.dry_run === 'true';
 
+    if (!dryRun && year >= yearEndManilaYearNow()) {
+      return res.status(409).json({
+        error: `Year-end deductions for ${year} cannot be applied until that calendar year has closed. Preview remains available.`,
+      });
+    }
+
     const rawIds = req.body?.employee_ids ?? req.body?.employeeIds;
     const employeeIds = Array.isArray(rawIds) && rawIds.length > 0
       ? rawIds.map((id) => String(id).trim()).filter(Boolean)
@@ -4712,12 +4762,15 @@ router.post('/admin/year-end-forced-leave/apply', protect, requireAdminOrHr, asy
       remarks,
     });
 
-    if (!dryRun && result.summary?.applied > 0) {
+    const appliedCount =
+      (result.summary?.applied || 0) +
+      (result.summary?.partially_applied || 0);
+    if (!dryRun && appliedCount > 0) {
       broadcastAppEvent('leave_updated', {
         action: 'forced_leave_deduction',
         source: 'year_end_bulk',
         year,
-        applied: result.summary.applied,
+        applied: appliedCount,
       });
     }
 

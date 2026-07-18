@@ -10,8 +10,6 @@ const router = express.Router();
 const protect = [authMiddleware];
 
 const SALT_ROUNDS = 10;
-const EMPLOYEE_ID_MIN = 100000;
-const EMPLOYEE_ID_MAX = 999999;
 
 function employeeAccountEmailText({ name, email, password, role }) {
   const displayName = String(name || '').trim() || 'Employee';
@@ -51,26 +49,20 @@ function generateTemporaryPassword(length = 12) {
   return chars.join('');
 }
 
-function randomEmployeeNumber() {
-  return (
-    Math.floor(Math.random() * (EMPLOYEE_ID_MAX - EMPLOYEE_ID_MIN + 1)) +
-    EMPLOYEE_ID_MIN
-  );
-}
-
 async function allocateEmployeeNumber() {
-  // Try a few times to avoid collisions; fall back to sequence if needed.
-  for (let attempt = 0; attempt < 12; attempt++) {
-    const candidate = randomEmployeeNumber();
+  // Allocate stable, ascending employee numbers. Keep advancing if an older
+  // record already occupies a sequence value (for example after data import).
+  while (true) {
+    const seq = await pool.query(
+      "SELECT nextval('users_employee_number_seq') AS n"
+    );
+    const candidate = parseInt(seq.rows[0].n, 10);
     const exists = await pool.query(
       'SELECT 1 FROM users WHERE employee_number = $1 LIMIT 1',
       [candidate]
     );
     if (exists.rowCount === 0) return candidate;
   }
-  // last resort: keep system running even if random keeps colliding
-  const seq = await pool.query("SELECT nextval('users_employee_number_seq') AS n");
-  return parseInt(seq.rows[0].n, 10);
 }
 
 const MAX_PAGE_SIZE = 100;
@@ -213,6 +205,8 @@ function buildEmployeeListFromSql(req, options = {}) {
       u.full_name ILIKE $${i} OR
       u.email ILIKE $${i} OR
       CAST(u.employee_number AS TEXT) ILIKE $${i} OR
+      LPAD(CAST(u.employee_number AS TEXT), 3, '0') ILIKE $${i} OR
+      ('EMP-' || LPAD(CAST(u.employee_number AS TEXT), 3, '0')) ILIKE $${i} OR
       COALESCE(cur.current_department_name, '') ILIKE $${i} OR
       COALESCE(cur.current_position_name, '') ILIKE $${i} OR
       COALESCE(u.employment_status, '') ILIKE $${i} OR
@@ -256,6 +250,18 @@ function csvEscape(val) {
   return s;
 }
 
+function employeeRowsForRequester(rows, requester) {
+  const privileged = ['admin', 'hr', 'supervisor'].includes(requester?.role);
+  if (privileged) return rows;
+  return rows.map((row) => ({
+    id: row.id,
+    full_name: row.full_name,
+    avatar_path: row.avatar_path,
+    current_department_name: row.current_department_name,
+    current_position_name: row.current_position_name,
+  }));
+}
+
 // GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid, ?biometric_user_ids=id1,id2,id3)
 // Optional: ?biometric_device_id=<uuid> — admin only; restrict to employees whose biometric_user_id is enrolled on that ZKTeco (reads device live)
 // Optional: ?biometric_filter=set|has|missing|none — filter by whether biometric_user_id is set (set/has = non-empty; missing/none = empty)
@@ -284,7 +290,7 @@ router.get('/', protect, async (req, res) => {
           [ids]
         );
         const rows = result.rows.map(mapEmployeeListRow);
-        return res.json(rows);
+        return res.json(employeeRowsForRequester(rows, req.user));
       }
     }
 
@@ -340,7 +346,7 @@ router.get('/', protect, async (req, res) => {
       dataParams
     );
 
-    const rows = result.rows.map(mapEmployeeListRow);
+    const rows = employeeRowsForRequester(result.rows.map(mapEmployeeListRow), req.user);
     if (usePaging) {
       return res.json({ employees: rows, total });
     }
@@ -352,7 +358,7 @@ router.get('/', protect, async (req, res) => {
 });
 
 // GET /api/employees/export/csv — same filters/search/sort as list; max MAX_EXPORT_ROWS rows (413 if exceeded).
-router.get('/export/csv', protect, async (req, res) => {
+router.get('/export/csv', protect, requireAdmin, async (req, res) => {
   try {
     let deviceBiometricIds = null;
     const bioDeviceRaw =
@@ -472,6 +478,17 @@ router.get('/:id', protect, async (req, res) => {
     );
     const r = result.rows[0];
     if (!r) return res.status(404).json({ error: 'Employee not found' });
+
+    const privileged = ['admin', 'hr', 'supervisor'].includes(req.user?.role);
+    if (!privileged && String(req.user?.id) !== String(r.id)) {
+      return res.json({
+        id: r.id,
+        full_name: r.full_name ?? 'Unknown',
+        avatar_path: r.avatar_path,
+        current_department_name: r.current_department_name ?? null,
+        current_position_name: r.current_position_name ?? null,
+      });
+    }
 
     res.json({
       id: r.id,

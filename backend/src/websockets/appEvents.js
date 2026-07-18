@@ -25,7 +25,7 @@ function parseUserFromRequest(req) {
 function initAppEventsWebSocket() {
   if (wss) return wss;
 
-  wss = new WebSocket.Server({ noServer: true });
+  wss = new WebSocket.Server({ noServer: true, maxPayload: 64 * 1024 });
 
   wss.on('connection', (ws, req) => {
     const user = parseUserFromRequest(req);

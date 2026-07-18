@@ -39,6 +39,8 @@ class LeaveMain extends StatefulWidget {
     this.adminApprovalsContent,
     this.onFileLeavePressed,
     this.hideEmployeeFileLeaveAction = false,
+    this.tutorialHeaderKey,
+    this.tutorialContentKey,
   });
 
   /// Active section when controlled by sidebar navigation.
@@ -68,6 +70,8 @@ class LeaveMain extends StatefulWidget {
 
   /// Hide the in-page File Leave button when the parent shell shows its own.
   final bool hideEmployeeFileLeaveAction;
+  final GlobalKey? tutorialHeaderKey;
+  final GlobalKey? tutorialContentKey;
 
   @override
   State<LeaveMain> createState() => _LeaveMainState();
@@ -108,22 +112,30 @@ class _LeaveMainState extends State<LeaveMain> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (!hideMobileEmployeeChrome) ...[
-          Text(
-            'Leave Management',
-            style: TextStyle(
-              color: AppTheme.dashTextPrimaryOf(context),
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            (widget.isAdmin || widget.isDepartmentHead)
-                ? 'Review employee leave requests, balances, and approvals.'
-                : 'View leave balances, file requests, and track approvals.',
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 14,
+          KeyedSubtree(
+            key: widget.tutorialHeaderKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Leave Management',
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  (widget.isAdmin || widget.isDepartmentHead)
+                      ? 'Review employee leave requests, balances, and approvals.'
+                      : 'View leave balances, file requests, and track approvals.',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 14,
+                  ),
+                ),
+              ],
             ),
           ),
           if (!useSidebarNav) ...[
@@ -132,7 +144,7 @@ class _LeaveMainState extends State<LeaveMain> {
           ],
           const SizedBox(height: 24),
         ],
-        _buildContent(),
+        KeyedSubtree(key: widget.tutorialContentKey, child: _buildContent()),
       ],
     );
   }

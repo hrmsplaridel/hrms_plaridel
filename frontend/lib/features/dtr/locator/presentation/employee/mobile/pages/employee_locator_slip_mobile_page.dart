@@ -3,7 +3,14 @@ import 'package:hrms_plaridel/features/dtr/locator/models/locator_slip_form_init
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/shared/pages/employee_locator_slip_content.dart';
 
 class EmployeeLocatorSlipMobilePage extends StatefulWidget {
-  const EmployeeLocatorSlipMobilePage({super.key});
+  const EmployeeLocatorSlipMobilePage({
+    super.key,
+    this.tutorialHeaderKey,
+    this.tutorialRequestsKey,
+  });
+
+  final GlobalKey? tutorialHeaderKey;
+  final GlobalKey? tutorialRequestsKey;
 
   @override
   State<EmployeeLocatorSlipMobilePage> createState() =>
@@ -25,6 +32,10 @@ class EmployeeLocatorSlipMobilePageState
 
   @override
   Widget build(BuildContext context) {
-    return EmployeeLocatorSlipContent(key: _contentKey);
+    return EmployeeLocatorSlipContent(
+      key: _contentKey,
+      tutorialHeaderKey: widget.tutorialHeaderKey,
+      tutorialRequestsKey: widget.tutorialRequestsKey,
+    );
   }
 }

@@ -9,7 +9,16 @@ import 'package:hrms_plaridel/shared/widgets/rsp_form_header_footer.dart';
 import 'package:hrms_plaridel/shared/widgets/training_daily_report_read_only_view.dart';
 
 class TrainingDailyReportEmployeeScreen extends StatefulWidget {
-  const TrainingDailyReportEmployeeScreen({super.key});
+  const TrainingDailyReportEmployeeScreen({
+    super.key,
+    this.tutorialHeaderKey,
+    this.tutorialFormKey,
+    this.tutorialHistoryKey,
+  });
+
+  final GlobalKey? tutorialHeaderKey;
+  final GlobalKey? tutorialFormKey;
+  final GlobalKey? tutorialHistoryKey;
 
   @override
   State<TrainingDailyReportEmployeeScreen> createState() =>
@@ -1070,23 +1079,37 @@ class _TrainingDailyReportEmployeeScreenState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildPageHeader(context),
-        const SizedBox(height: 22),
-        _buildFormCard(context),
-        const SizedBox(height: 28),
-        EmployeeSectionHeader(
-          title: 'My previous reports$countLabel',
-          icon: Icons.history_rounded,
-          subtitle: _filterByDate != null
-              ? 'Showing reports submitted on ${_formatDateOnly(_filterByDate!)}.'
-              : 'Pick a date below or open any row to see the full entry you submitted.',
+        KeyedSubtree(
+          key: widget.tutorialHeaderKey,
+          child: _buildPageHeader(context),
         ),
-        if (!_loading && _reports.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          _buildDateFilterBar(context),
-        ],
-        const SizedBox(height: 14),
-        _buildReportsList(context),
+        const SizedBox(height: 22),
+        KeyedSubtree(
+          key: widget.tutorialFormKey,
+          child: _buildFormCard(context),
+        ),
+        const SizedBox(height: 28),
+        KeyedSubtree(
+          key: widget.tutorialHistoryKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              EmployeeSectionHeader(
+                title: 'My previous reports$countLabel',
+                icon: Icons.history_rounded,
+                subtitle: _filterByDate != null
+                    ? 'Showing reports submitted on ${_formatDateOnly(_filterByDate!)}.'
+                    : 'Pick a date below or open any row to see the full entry you submitted.',
+              ),
+              if (!_loading && _reports.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                _buildDateFilterBar(context),
+              ],
+              const SizedBox(height: 14),
+              _buildReportsList(context),
+            ],
+          ),
+        ),
       ],
     );
   }

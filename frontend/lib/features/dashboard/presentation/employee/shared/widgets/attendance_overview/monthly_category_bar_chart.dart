@@ -138,8 +138,8 @@ class MonthlyCategoryBarChart extends StatelessWidget {
 List<MonthlyCategoryBarDatum> summaryToBarData(MonthlyAttendanceSummary s) {
   return [
     MonthlyCategoryBarDatum(
-      label: 'Present',
-      shortLabel: 'Present',
+      label: 'On time',
+      shortLabel: 'On time',
       count: s.present,
       color: AttendanceOverviewColors.present,
     ),

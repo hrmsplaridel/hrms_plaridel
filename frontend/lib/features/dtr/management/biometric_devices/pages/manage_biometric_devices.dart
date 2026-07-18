@@ -44,7 +44,9 @@ Widget _buildVendorBadge(String vendor) {
     decoration: BoxDecoration(
       color: const Color(0xFFF3E5F5),
       borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: const Color(0xFF7B1FA2).withValues(alpha: 0.35)),
+      border: Border.all(
+        color: const Color(0xFF7B1FA2).withValues(alpha: 0.35),
+      ),
     ),
     child: Text(
       label,
@@ -888,18 +890,22 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
             'Page ${page + 1} of $pageCount',
             style: TextStyle(fontSize: 12, color: _mutedColor(context)),
           ),
-          const SizedBox(width: 12),
-          OutlinedButton(
-            onPressed: page > 0 ? () => setState(() => _page = page - 1) : null,
-            child: const Text('Previous'),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton(
-            onPressed: page < pageCount - 1
-                ? () => setState(() => _page = page + 1)
-                : null,
-            child: const Text('Next'),
-          ),
+          if (pageCount > 1) ...[
+            const SizedBox(width: 12),
+            OutlinedButton(
+              onPressed: page > 0
+                  ? () => setState(() => _page = page - 1)
+                  : null,
+              child: const Text('Previous'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: page < pageCount - 1
+                  ? () => setState(() => _page = page + 1)
+                  : null,
+              child: const Text('Next'),
+            ),
+          ],
         ],
       ),
     );

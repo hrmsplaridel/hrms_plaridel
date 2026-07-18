@@ -6,6 +6,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/config.dart';
+import 'package:hrms_plaridel/core/api/token_storage.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/api_leave_repository.dart';
@@ -269,12 +270,25 @@ class DtrProvider extends ChangeNotifier {
     _initWebSocket();
   }
 
-  void _initWebSocket() {
+  Future<void> _initWebSocket() async {
     if (_disposed) return;
     _wsReconnectTimer?.cancel();
     try {
-      final wsUrl =
-          '${ApiConfig.baseUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://')}/ws/biometrics';
+      final token = await TokenStorage.instance.getToken();
+      if (_disposed) return;
+      if (token == null || token.isEmpty) {
+        _scheduleWebSocketReconnect();
+        return;
+      }
+      final base = Uri.parse(ApiConfig.baseUrl);
+      final wsUrl = base
+          .replace(
+            scheme: base.scheme == 'https' ? 'wss' : 'ws',
+            path:
+                '${base.path.endsWith('/') ? base.path.substring(0, base.path.length - 1) : base.path}/ws/biometrics',
+            queryParameters: {...base.queryParameters, 'token': token},
+          )
+          .toString();
       _closeWebSocket();
       final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       _wsChannel = channel;

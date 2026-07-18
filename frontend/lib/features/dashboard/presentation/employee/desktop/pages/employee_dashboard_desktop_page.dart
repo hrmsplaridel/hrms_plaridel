@@ -35,6 +35,15 @@ import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/wi
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_attendance_mobile_list.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_shell.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_summary_mobile_layout.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_dashboard_tutorial.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_attendance_tutorial.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_leave_tutorial.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_locator_tutorial.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_tutorial_controller.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_training_reports_tutorial.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_training_requirements_tutorial.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_docutracker_tutorial.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_profile_settings_tutorial.dart';
 import 'package:hrms_plaridel/shared/screens/profile_page.dart'
     show DashboardProfilePanel;
 import 'package:hrms_plaridel/shared/widgets/dashboard_content_navigator.dart';
@@ -78,9 +87,37 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
   final GlobalKey<State<StatefulWidget>> _locatorSlipKey =
       GlobalKey<State<StatefulWidget>>();
+  final GlobalKey _dashboardWelcomeKey = GlobalKey();
+  final GlobalKey _dashboardAttendanceKey = GlobalKey();
+  final GlobalKey _dashboardDocumentsKey = GlobalKey();
+  final GlobalKey _attendanceHeaderKey = GlobalKey();
+  final GlobalKey _attendanceFiltersKey = GlobalKey();
+  final GlobalKey _attendanceRecordsKey = GlobalKey();
+  final GlobalKey _leaveHeaderKey = GlobalKey();
+  final GlobalKey _leaveContentKey = GlobalKey();
+  final GlobalKey _locatorHeaderKey = GlobalKey();
+  final GlobalKey _locatorRequestsKey = GlobalKey();
+  final GlobalKey _trainingReportsHeaderKey = GlobalKey();
+  final GlobalKey _trainingReportsFormKey = GlobalKey();
+  final GlobalKey _trainingReportsHistoryKey = GlobalKey();
+  final GlobalKey _trainingRequirementsHeaderKey = GlobalKey();
+  final GlobalKey _trainingRequirementsProgramKey = GlobalKey();
+  final GlobalKey _trainingRequirementsPreKey = GlobalKey();
+  final GlobalKey _trainingRequirementsPostKey = GlobalKey();
+  final GlobalKey _docuTrackerHeaderKey = GlobalKey();
+  final GlobalKey _docuTrackerNavigationKey = GlobalKey();
+  final GlobalKey _docuTrackerContentKey = GlobalKey();
+  final GlobalKey _profileHeroKey = GlobalKey();
+  final GlobalKey _profileTabsKey = GlobalKey();
+  final GlobalKey _profileContentKey = GlobalKey();
 
-  Widget _settingsPanel() =>
-      DashboardProfilePanel(key: _settingsPanelKey, onBack: _closeMyProfile);
+  Widget _settingsPanel() => DashboardProfilePanel(
+    key: _settingsPanelKey,
+    onBack: _closeMyProfile,
+    tutorialHeroKey: _profileHeroKey,
+    tutorialTabsKey: _profileTabsKey,
+    tutorialContentKey: _profileContentKey,
+  );
 
   @override
   void initState() {
@@ -89,11 +126,174 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<NotificationProvider>().refreshUnreadCount();
+      EmployeeTutorialController.showDashboardCoachIfNeeded(
+        context,
+        userId: context.read<AuthProvider>().user?.id,
+        targets: _dashboardTutorialTargets,
+      );
       _notificationPollTimer?.cancel();
       _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted) return;
         context.read<NotificationProvider>().refreshUnreadCount();
       });
+    });
+  }
+
+  void _openDashboardTutorial() {
+    if (_selectedNavIndex == 0) {
+      EmployeeTutorialController.showDashboardCoach(
+        context,
+        userId: context.read<AuthProvider>().user?.id,
+        targets: _dashboardTutorialTargets,
+      );
+      return;
+    }
+    if (_selectedNavIndex == 1) {
+      EmployeeTutorialController.showCoach(
+        context,
+        userId: context.read<AuthProvider>().user?.id,
+        section: EmployeeTutorialSection.attendance,
+        targets: _attendanceTutorialTargets,
+      );
+      return;
+    }
+    if (_selectedNavIndex == 2 || _selectedNavIndex == 3) {
+      final isLeave = _selectedNavIndex == 2;
+      EmployeeTutorialController.showCoach(
+        context,
+        userId: context.read<AuthProvider>().user?.id,
+        section: isLeave
+            ? EmployeeTutorialSection.leave
+            : EmployeeTutorialSection.locator,
+        targets: isLeave ? _leaveTutorialTargets : _locatorTutorialTargets,
+      );
+      return;
+    }
+    if (_selectedNavIndex >= 4 && _selectedNavIndex <= 6) {
+      EmployeeTutorialController.showCoach(
+        context,
+        userId: context.read<AuthProvider>().user?.id,
+        section: _tutorialSectionForIndex(_selectedNavIndex),
+        targets: _guidedTargetsForIndex(_selectedNavIndex),
+      );
+      return;
+    }
+    if (_selectedNavIndex == _profileNavIndex) {
+      EmployeeTutorialController.showCoach(
+        context,
+        userId: context.read<AuthProvider>().user?.id,
+        section: EmployeeTutorialSection.profileSettings,
+        targets: _profileTutorialTargets,
+      );
+      return;
+    }
+    EmployeeTutorialController.show(
+      context,
+      userId: context.read<AuthProvider>().user?.id,
+      section: _tutorialSectionForIndex(_selectedNavIndex),
+    );
+  }
+
+  List<EmployeeTutorialTarget> get _dashboardTutorialTargets =>
+      EmployeeDashboardTutorial.targets(
+        welcomeKey: _dashboardWelcomeKey,
+        attendanceKey: _dashboardAttendanceKey,
+        documentsKey: _dashboardDocumentsKey,
+      );
+
+  List<EmployeeTutorialTarget> get _attendanceTutorialTargets =>
+      EmployeeAttendanceTutorial.targets(
+        headerKey: _attendanceHeaderKey,
+        filtersKey: _attendanceFiltersKey,
+        recordsKey: _attendanceRecordsKey,
+      );
+
+  List<EmployeeTutorialTarget> get _leaveTutorialTargets =>
+      EmployeeLeaveTutorial.targets(
+        showHeader: MediaQuery.sizeOf(context).width >= 600,
+        headerKey: _leaveHeaderKey,
+        contentKey: _leaveContentKey,
+      );
+
+  List<EmployeeTutorialTarget> get _locatorTutorialTargets =>
+      EmployeeLocatorTutorial.targets(
+        headerKey: _locatorHeaderKey,
+        requestsKey: _locatorRequestsKey,
+      );
+
+  List<EmployeeTutorialTarget> get _trainingReportsTutorialTargets =>
+      EmployeeTrainingReportsTutorial.targets(
+        headerKey: _trainingReportsHeaderKey,
+        formKey: _trainingReportsFormKey,
+        historyKey: _trainingReportsHistoryKey,
+      );
+
+  List<EmployeeTutorialTarget> get _trainingRequirementsTutorialTargets =>
+      EmployeeTrainingRequirementsTutorial.targets(
+        headerKey: _trainingRequirementsHeaderKey,
+        programKey: _trainingRequirementsProgramKey,
+        preTrainingKey: _trainingRequirementsPreKey,
+        postTrainingKey: _trainingRequirementsPostKey,
+      );
+
+  List<EmployeeTutorialTarget> get _docuTrackerTutorialTargets =>
+      EmployeeDocuTrackerTutorial.targets(
+        headerKey: _docuTrackerHeaderKey,
+        navigationKey: _docuTrackerNavigationKey,
+        contentKey: _docuTrackerContentKey,
+      );
+
+  List<EmployeeTutorialTarget> get _profileTutorialTargets =>
+      EmployeeProfileSettingsTutorial.targets(
+        heroKey: _profileHeroKey,
+        tabsKey: _profileTabsKey,
+        contentKey: _profileContentKey,
+      );
+
+  List<EmployeeTutorialTarget> _guidedTargetsForIndex(int index) =>
+      switch (index) {
+        1 => _attendanceTutorialTargets,
+        2 => _leaveTutorialTargets,
+        3 => _locatorTutorialTargets,
+        4 => _trainingReportsTutorialTargets,
+        5 => _trainingRequirementsTutorialTargets,
+        6 => _docuTrackerTutorialTargets,
+        _ => _dashboardTutorialTargets,
+      };
+
+  EmployeeTutorialSection _tutorialSectionForIndex(int index) {
+    return switch (index) {
+      1 => EmployeeTutorialSection.attendance,
+      2 => EmployeeTutorialSection.leave,
+      3 => EmployeeTutorialSection.locator,
+      4 => EmployeeTutorialSection.trainingReports,
+      5 => EmployeeTutorialSection.trainingRequirements,
+      6 => EmployeeTutorialSection.docuTracker,
+      _profileNavIndex => EmployeeTutorialSection.profileSettings,
+      _ => EmployeeTutorialSection.dashboard,
+    };
+  }
+
+  void _showTutorialIfNeeded(int index) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (index >= 1 && index <= _profileNavIndex) {
+        final section = _tutorialSectionForIndex(index);
+        EmployeeTutorialController.showCoachIfNeeded(
+          context,
+          userId: context.read<AuthProvider>().user?.id,
+          section: section,
+          targets: index == _profileNavIndex
+              ? _profileTutorialTargets
+              : _guidedTargetsForIndex(index),
+        );
+      } else {
+        EmployeeTutorialController.showIfNeeded(
+          context,
+          userId: context.read<AuthProvider>().user?.id,
+          section: _tutorialSectionForIndex(index),
+        );
+      }
     });
   }
 
@@ -171,6 +371,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     }
     setState(() => _selectedNavIndex = _profileNavIndex);
     DashboardContentNavigator.openSettings(_contentNavKey);
+    _showTutorialIfNeeded(_profileNavIndex);
   }
 
   void _closeMyProfile() {
@@ -194,10 +395,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       _contentNavKey.currentState,
     );
     if (_selectedNavIndex == index && !settingsOnTop) return;
-    if (_selectedNavIndex != index) {
+    final changed = _selectedNavIndex != index;
+    if (changed) {
       setState(() => _selectedNavIndex = index);
     }
     DashboardContentNavigator.showHome(_contentNavKey);
+    if (changed) _showTutorialIfNeeded(index);
   }
 
   void _openLeaveRequestsFromDashboard() {
@@ -301,24 +504,51 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
           displayName: displayName,
           onViewAttendance: () => setState(() => _selectedNavIndex = 1),
           onViewLeave: _openLeaveRequestsFromDashboard,
+          welcomeKey: _dashboardWelcomeKey,
+          attendanceKey: _dashboardAttendanceKey,
+          documentsKey: _dashboardDocumentsKey,
         );
       case 1:
-        return const _EmployeeAttendanceContent();
+        return _EmployeeAttendanceContent(
+          headerKey: _attendanceHeaderKey,
+          filtersKey: _attendanceFiltersKey,
+          recordsKey: _attendanceRecordsKey,
+        );
       case 2:
         return _EmployeeLeaveMainEntry(
           key: ValueKey(_leaveNavKey),
           initialSection: _leaveInitialSection,
           onFileLeavePressed: _openEmployeeLeaveRequestForm,
           hideFileLeaveAction: useMobileLeaveFab,
+          tutorialHeaderKey: _leaveHeaderKey,
+          tutorialContentKey: _leaveContentKey,
         );
       case 3:
-        return EmployeeLocatorSlipScreen(key: _locatorSlipKey);
+        return EmployeeLocatorSlipScreen(
+          key: _locatorSlipKey,
+          tutorialHeaderKey: _locatorHeaderKey,
+          tutorialRequestsKey: _locatorRequestsKey,
+        );
       case 4:
-        return const TrainingDailyReportEmployeeScreen();
+        return TrainingDailyReportEmployeeScreen(
+          tutorialHeaderKey: _trainingReportsHeaderKey,
+          tutorialFormKey: _trainingReportsFormKey,
+          tutorialHistoryKey: _trainingReportsHistoryKey,
+        );
       case 5:
-        return const LdTrainingRequirementsEmployeeScreen();
+        return LdTrainingRequirementsEmployeeScreen(
+          tutorialHeaderKey: _trainingRequirementsHeaderKey,
+          tutorialProgramKey: _trainingRequirementsProgramKey,
+          tutorialPreTrainingKey: _trainingRequirementsPreKey,
+          tutorialPostTrainingKey: _trainingRequirementsPostKey,
+        );
       case 6:
-        return const DocuTrackerMain(isAdmin: false);
+        return DocuTrackerMain(
+          isAdmin: false,
+          tutorialHeaderKey: _docuTrackerHeaderKey,
+          tutorialNavigationKey: _docuTrackerNavigationKey,
+          tutorialContentKey: _docuTrackerContentKey,
+        );
       case _profileNavIndex:
         return const SizedBox.shrink();
       default:
@@ -371,6 +601,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         onFileLeave: _openEmployeeLeaveRequestForm,
         onFileLocator: _openEmployeeLocatorRequestForm,
         onHrmsAssistant: _openHrmsAssistant,
+        onTutorial: _openDashboardTutorial,
       );
     }
 
@@ -407,11 +638,19 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
                         compactActions: width < 600,
                         onViewAllNotifications: _handleOpenNotifications,
                         onNotificationTap: _applyNotificationTapResult,
-                        trailing: DashboardAccountMenuButton(
-                          avatarPath: avatarPath,
-                          compact: width < 600,
-                          tooltip: displayName,
-                          onProfile: () => _openMyProfile(),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            EmployeeTutorialButton(
+                              onPressed: _openDashboardTutorial,
+                            ),
+                            DashboardAccountMenuButton(
+                              avatarPath: avatarPath,
+                              compact: width < 600,
+                              tooltip: displayName,
+                              onProfile: () => _openMyProfile(),
+                            ),
+                          ],
                         ),
                       ),
                       Expanded(
@@ -452,10 +691,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
             ),
           ),
           if (_showHrmsAssistantFab)
-            DraggableDtrAssistantLauncher(
-              onPressed: _openHrmsAssistant,
-              initialRight: 24,
-              initialBottom: 24,
+            ValueListenableBuilder<bool>(
+              valueListenable: EmployeeTutorialController.coachActive,
+              builder: (context, coachActive, _) => coachActive
+                  ? const SizedBox.shrink()
+                  : DraggableDtrAssistantLauncher(
+                      onPressed: _openHrmsAssistant,
+                      initialRight: 24,
+                      initialBottom: 24,
+                    ),
             ),
         ],
       ),
@@ -605,11 +849,15 @@ class _EmployeeLeaveMainEntry extends StatefulWidget {
     this.initialSection,
     this.onFileLeavePressed,
     this.hideFileLeaveAction = false,
+    this.tutorialHeaderKey,
+    this.tutorialContentKey,
   });
 
   final LeaveSection? initialSection;
   final VoidCallback? onFileLeavePressed;
   final bool hideFileLeaveAction;
+  final GlobalKey? tutorialHeaderKey;
+  final GlobalKey? tutorialContentKey;
 
   @override
   State<_EmployeeLeaveMainEntry> createState() =>
@@ -660,6 +908,8 @@ class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
           initialSection: widget.initialSection,
           onFileLeavePressed: widget.onFileLeavePressed,
           hideEmployeeFileLeaveAction: widget.hideFileLeaveAction,
+          tutorialHeaderKey: widget.tutorialHeaderKey,
+          tutorialContentKey: widget.tutorialContentKey,
         );
       },
     );
@@ -920,11 +1170,17 @@ class _EmployeeDashboardContent extends StatefulWidget {
     required this.displayName,
     this.onViewAttendance,
     this.onViewLeave,
+    required this.welcomeKey,
+    required this.attendanceKey,
+    required this.documentsKey,
   });
 
   final String displayName;
   final VoidCallback? onViewAttendance;
   final VoidCallback? onViewLeave;
+  final GlobalKey welcomeKey;
+  final GlobalKey attendanceKey;
+  final GlobalKey documentsKey;
 
   @override
   State<_EmployeeDashboardContent> createState() =>
@@ -983,20 +1239,26 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        EmployeeWelcomeBanner(
-          displayName: widget.displayName,
-          isNarrow: isNarrow,
+        KeyedSubtree(
+          key: widget.welcomeKey,
+          child: EmployeeWelcomeBanner(
+            displayName: widget.displayName,
+            isNarrow: isNarrow,
+          ),
         ),
         SizedBox(height: isNarrow ? 14 : 28),
-        EmployeeAttendanceOverviewCard(
-          onViewMore: widget.onViewAttendance,
-          summaryCards: _EmployeeSummaryCards(
-            isNarrow: isNarrow,
-            onViewAttendance: widget.onViewAttendance,
-          ),
-          upcomingLeave: _EmployeeUpcomingLeaveCard(
-            embedded: true,
-            onViewMore: widget.onViewLeave,
+        KeyedSubtree(
+          key: widget.attendanceKey,
+          child: EmployeeAttendanceOverviewCard(
+            onViewMore: widget.onViewAttendance,
+            summaryCards: _EmployeeSummaryCards(
+              isNarrow: isNarrow,
+              onViewAttendance: widget.onViewAttendance,
+            ),
+            upcomingLeave: _EmployeeUpcomingLeaveCard(
+              embedded: true,
+              onViewMore: widget.onViewLeave,
+            ),
           ),
         ),
         SizedBox(height: isNarrow ? 18 : 28),
@@ -1006,15 +1268,18 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
           subtitle: 'Your documents and routing status',
         ),
         SizedBox(height: isNarrow ? 10 : 14),
-        Container(
-          padding: EdgeInsets.all(
-            isNarrow ? 12 : employeeSectionCardPadding(context),
-          ),
-          decoration: EmployeeDashUi.elevatedPanel(context),
-          child: const DocuTrackerDashboardScreen(
-            isAdmin: false,
-            showTitle: false,
-            embedded: true,
+        KeyedSubtree(
+          key: widget.documentsKey,
+          child: Container(
+            padding: EdgeInsets.all(
+              isNarrow ? 12 : employeeSectionCardPadding(context),
+            ),
+            decoration: EmployeeDashUi.elevatedPanel(context),
+            child: const DocuTrackerDashboardScreen(
+              isAdmin: false,
+              showTitle: false,
+              embedded: true,
+            ),
           ),
         ),
         SizedBox(height: isNarrow ? 20 : 32),
@@ -1305,7 +1570,7 @@ class _AttendanceCard extends StatelessWidget {
     return Consumer<DtrProvider>(
       builder: (context, dtr, _) {
         final presentCount = dtr.timeRecords
-            .where((r) => r.timeIn != null)
+            .where(isCompletedAttendanceRecord)
             .length;
         final now = DateTime.now();
         final monthLabel =
@@ -1472,10 +1737,6 @@ class _LeaveBalanceCard extends StatelessWidget {
     return Consumer<LeaveProvider>(
       builder: (context, leave, _) {
         final compactLayout = compact || MediaQuery.sizeOf(context).width < 600;
-        final totalRemaining = leave.balances.fold<double>(
-          0,
-          (sum, b) => sum + b.remainingDays,
-        );
         final vacation = leave.balances
             .where((b) => b.leaveType == LeaveType.vacationLeave)
             .toList();
@@ -1486,6 +1747,10 @@ class _LeaveBalanceCard extends StatelessWidget {
             ? vacation.first.remainingDays
             : null;
         final sickDays = sick.isNotEmpty ? sick.first.remainingDays : null;
+        // The dashboard balance is the employee's accumulated VL + SL only.
+        // Annual statutory leave quotas (study, rehabilitation, maternity,
+        // etc.) are eligibility limits and must not inflate this total.
+        final totalRemaining = (vacationDays ?? 0) + (sickDays ?? 0);
 
         final hasData = leave.balances.isNotEmpty;
         if (leave.loading && !hasData) {
@@ -2120,10 +2385,18 @@ const List<String> _attendanceMonths = [
 
 /// My Attendance: employee's own time records.
 class _EmployeeAttendanceContent extends StatefulWidget {
-  const _EmployeeAttendanceContent({this.showPageHeader = true});
+  const _EmployeeAttendanceContent({
+    this.showPageHeader = true,
+    this.headerKey,
+    this.filtersKey,
+    this.recordsKey,
+  });
 
   /// When false, omits the title/subtitle (e.g. embedded under admin overview).
   final bool showPageHeader;
+  final GlobalKey? headerKey;
+  final GlobalKey? filtersKey;
+  final GlobalKey? recordsKey;
 
   @override
   State<_EmployeeAttendanceContent> createState() =>
@@ -2325,7 +2598,9 @@ class _EmployeeAttendanceContentState
   }
 
   Widget _buildMobileMonthCalendar() {
-    if (_selectedDay == null || _mobileAttendanceMode == 'monthly') {
+    // The calendar is a date picker for Day mode. Today already has a fixed
+    // date, while Monthly shows the whole period without requiring a day grid.
+    if (_mobileAttendanceMode != 'day') {
       return const SizedBox.shrink();
     }
     const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -2463,25 +2738,34 @@ class _EmployeeAttendanceContentState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (widget.showPageHeader) ...[
-          Text(
-            'My Attendance',
-            style: TextStyle(
-              color: AppTheme.dashTextPrimaryOf(context),
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'View your time-in/out records.',
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 14,
+          KeyedSubtree(
+            key: widget.headerKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'My Attendance',
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'View your time-in/out records.',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 14,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 24),
         ],
         LayoutBuilder(
+          key: widget.filtersKey,
           builder: (context, constraints) {
             final isNarrow = constraints.maxWidth < 520;
             if (isNarrow) _applyMobileDefaultIfNeeded();
@@ -2712,8 +2996,10 @@ class _EmployeeAttendanceContentState
                   ),
                   const SizedBox(height: 12),
                   _buildMobileModeSelector(),
-                  const SizedBox(height: 12),
-                  _buildMobileMonthCalendar(),
+                  if (_mobileAttendanceMode == 'day') ...[
+                    const SizedBox(height: 12),
+                    _buildMobileMonthCalendar(),
+                  ],
                 ],
               );
             }
@@ -2736,6 +3022,7 @@ class _EmployeeAttendanceContentState
         if (dtr.loading) const EmployeeTimeRecordsLoadingSkeleton(),
         if (!dtr.loading && visibleRecords.isEmpty)
           Container(
+            key: widget.recordsKey,
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
               color: AppTheme.dashPanelOf(context),
@@ -2759,6 +3046,7 @@ class _EmployeeAttendanceContentState
           ),
         if (!dtr.loading && visibleRecords.isNotEmpty)
           LayoutBuilder(
+            key: widget.recordsKey,
             builder: (context, constraints) {
               if (constraints.maxWidth < 600) {
                 return _buildMobileAttendanceList(visibleRecords);

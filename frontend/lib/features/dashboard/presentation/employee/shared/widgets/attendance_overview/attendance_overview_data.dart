@@ -53,6 +53,10 @@ class MonthlyAttendanceSummary {
   final int undertime;
   final int onLeave;
 
+  /// Completed attendance days, regardless of whether they were on time,
+  /// late, undertime, or both. Primary buckets remain mutually exclusive.
+  int get completedPresent => present + late + undertime;
+
   /// Holiday rows excluded from category totals (still in API data).
   final int daysSkippedHoliday;
 
