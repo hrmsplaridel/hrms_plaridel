@@ -259,7 +259,7 @@ class _EmployeeDashboardCoachState extends State<_EmployeeDashboardCoach> {
             right: 16,
             top: placeBelow ? null : 30,
             bottom: placeBelow ? (compact ? 24 : 30) : null,
-            width: bubbleWidth,
+            width: compact ? null : bubbleWidth,
             child: SafeArea(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
