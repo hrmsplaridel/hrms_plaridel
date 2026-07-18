@@ -429,6 +429,14 @@ class RspEmailVerificationConfig {
 class RecruitmentRepo {
   RecruitmentRepo._();
   static final RecruitmentRepo instance = RecruitmentRepo._();
+  final Map<String, String> _applicantTokensByApplicationId = {};
+
+  Options? _applicantOptions(String applicationId) {
+    final token = _applicantTokensByApplicationId[applicationId.toLowerCase()];
+    return token == null || token.isEmpty
+        ? null
+        : Options(headers: {'X-RSP-Applicant-Token': token});
+  }
 
   /// Seconds per MCQ exam (`general`, `math`, `general_info`). Used when API is unavailable.
   static const Map<String, int> kDefaultRspExamTimeLimitSeconds = {
@@ -543,6 +551,13 @@ class RecruitmentRepo {
       final appRow = res.data?['application'] as Map<String, dynamic>?;
       final id = appRow?['id'];
       if (id == null) throw Exception('Insert failed: missing id in response');
+      final accessToken = res.data?['applicantAccessToken']?.toString().trim();
+      if (accessToken != null && accessToken.isNotEmpty) {
+        _applicantTokensByApplicationId[id.toString().toLowerCase()] =
+            accessToken;
+      } else if (tok != null && tok.isNotEmpty) {
+        _applicantTokensByApplicationId[id.toString().toLowerCase()] = tok;
+      }
       return id.toString();
     } on DioException catch (e) {
       final data = e.response?.data;
@@ -580,10 +595,7 @@ class RecruitmentRepo {
   }
 
   /// Admin: set or clear orientation date/time (after final requirements are approved).
-  Future<void> updateOrientationAt(
-    String applicationId,
-    DateTime? at,
-  ) async {
+  Future<void> updateOrientationAt(String applicationId, DateTime? at) async {
     await ApiClient.instance.put<void>(
       '/api/rsp/applications/$applicationId/orientation',
       data: <String, dynamic>{
@@ -645,6 +657,7 @@ class RecruitmentRepo {
       '/api/rsp/applications/$applicationId/attachment-file?kind=$kindParam',
       bytes: fileBytes,
       fileName: fileName,
+      options: _applicantOptions(applicationId),
     );
   }
 
@@ -760,6 +773,7 @@ class RecruitmentRepo {
         '/api/rsp/applications/$applicationId/attachment-file?updateDb=0',
         bytes: f.bytes,
         fileName: uniqueName,
+        options: _applicantOptions(applicationId),
       );
     }
     final first = files.first;
@@ -788,6 +802,7 @@ class RecruitmentRepo {
       '/api/rsp/applications/$applicationId/attachment-file?kind=$kindParam',
       bytes: fileBytes,
       fileName: fileName,
+      options: _applicantOptions(applicationId),
     );
   }
 
@@ -804,6 +819,7 @@ class RecruitmentRepo {
         'fileName': displayFileName,
         'docKind': kind.apiValue,
       },
+      options: _applicantOptions(applicationId),
     );
   }
 
@@ -870,6 +886,7 @@ class RecruitmentRepo {
     await ApiClient.instance.put<void>(
       '/api/rsp/applications/$applicationId/attachment',
       data: {'path': path, 'fileName': fileName},
+      options: _applicantOptions(applicationId),
     );
   }
 
@@ -947,6 +964,7 @@ class RecruitmentRepo {
         'passed': passed,
         'answersJson': answersJson,
       },
+      options: _applicantOptions(applicationId),
     );
   }
 
