@@ -1737,10 +1737,6 @@ class _LeaveBalanceCard extends StatelessWidget {
     return Consumer<LeaveProvider>(
       builder: (context, leave, _) {
         final compactLayout = compact || MediaQuery.sizeOf(context).width < 600;
-        final totalRemaining = leave.balances.fold<double>(
-          0,
-          (sum, b) => sum + b.remainingDays,
-        );
         final vacation = leave.balances
             .where((b) => b.leaveType == LeaveType.vacationLeave)
             .toList();
@@ -1751,6 +1747,10 @@ class _LeaveBalanceCard extends StatelessWidget {
             ? vacation.first.remainingDays
             : null;
         final sickDays = sick.isNotEmpty ? sick.first.remainingDays : null;
+        // The dashboard balance is the employee's accumulated VL + SL only.
+        // Annual statutory leave quotas (study, rehabilitation, maternity,
+        // etc.) are eligibility limits and must not inflate this total.
+        final totalRemaining = (vacationDays ?? 0) + (sickDays ?? 0);
 
         final hasData = leave.balances.isNotEmpty;
         if (leave.loading && !hasData) {
@@ -2598,7 +2598,9 @@ class _EmployeeAttendanceContentState
   }
 
   Widget _buildMobileMonthCalendar() {
-    if (_selectedDay == null || _mobileAttendanceMode == 'monthly') {
+    // The calendar is a date picker for Day mode. Today already has a fixed
+    // date, while Monthly shows the whole period without requiring a day grid.
+    if (_mobileAttendanceMode != 'day') {
       return const SizedBox.shrink();
     }
     const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -2994,8 +2996,10 @@ class _EmployeeAttendanceContentState
                   ),
                   const SizedBox(height: 12),
                   _buildMobileModeSelector(),
-                  const SizedBox(height: 12),
-                  _buildMobileMonthCalendar(),
+                  if (_mobileAttendanceMode == 'day') ...[
+                    const SizedBox(height: 12),
+                    _buildMobileMonthCalendar(),
+                  ],
                 ],
               );
             }

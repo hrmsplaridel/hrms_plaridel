@@ -609,6 +609,9 @@ class MockLeaveRepository implements LeaveRepository {
       limit: query.limit,
       offset: query.offset,
       rows: const [],
+      summaryEarned: 0,
+      summaryUsed: 0,
+      summaryPending: 0,
     );
   }
 

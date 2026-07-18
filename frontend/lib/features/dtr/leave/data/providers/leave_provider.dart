@@ -175,6 +175,7 @@ class LeaveProvider extends ChangeNotifier {
       _normalize(query.userId) ?? '',
       _normalize(query.leaveType) ?? '',
       _normalize(query.action) ?? '',
+      _normalize(query.affectedBucket) ?? '',
       _normalize(query.from) ?? '',
       _normalize(query.to) ?? '',
       query.limit.toString(),
@@ -967,6 +968,9 @@ class LeaveProvider extends ChangeNotifier {
         limit: value.limit,
         offset: value.offset,
         rows: List<LeaveBalanceLedgerEntry>.from(value.rows),
+        summaryEarned: value.summaryEarned,
+        summaryUsed: value.summaryUsed,
+        summaryPending: value.summaryPending,
       );
     }
     final fresh = await _repository.getLeaveLedger(query);
@@ -976,6 +980,9 @@ class LeaveProvider extends ChangeNotifier {
         limit: fresh.limit,
         offset: fresh.offset,
         rows: List<LeaveBalanceLedgerEntry>.unmodifiable(fresh.rows),
+        summaryEarned: fresh.summaryEarned,
+        summaryUsed: fresh.summaryUsed,
+        summaryPending: fresh.summaryPending,
       ),
       DateTime.now(),
     );

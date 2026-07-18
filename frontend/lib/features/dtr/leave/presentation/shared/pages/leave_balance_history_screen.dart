@@ -42,6 +42,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   LeaveLedgerResult? _result;
   static const int _pageSize = 25;
   int _currentPage = 0; // 0-indexed
+  String? _employeeBucketFilter;
 
   /// Admin: active filter state (changes trigger an immediate reload).
   String? _draftEmployeeId;
@@ -204,6 +205,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
                   ? _draftLeaveType
                   : null)
             : null,
+        affectedBucket: widget.isAdmin ? null : _employeeBucketFilter,
         limit: _pageSize,
         offset: _currentPage * _pageSize,
       );
@@ -297,12 +299,20 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       );
     }
 
-    final stats = _ledgerSummaryStats(r.rows);
+    final stats = _ledgerSummaryStatsFromResult(r);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _EmployeeSummaryBand(stats: stats),
+        _EmployeeLedgerFilter(
+          selected: _employeeBucketFilter,
+          onSelected: (value) {
+            if (_employeeBucketFilter == value) return;
+            setState(() => _employeeBucketFilter = value);
+            _load(resetPage: true, forceRefresh: true);
+          },
+        ),
         Expanded(
           child: r.rows.isEmpty
               ? const _EmployeeEmptyState()
@@ -1128,19 +1138,67 @@ _LedgerSummaryStats _ledgerSummaryStats(List<LeaveBalanceLedgerEntry> rows) {
     if (d > 0 && (b == 'earned' || a == 'monthly_accrual')) {
       earned += d;
     }
-    if (d < 0 && b == 'used') {
-      used += -d;
+    if (b == 'used') {
+      used += d;
     }
     if (b == 'pending') {
-      pending += d.abs();
+      pending += d;
     }
   }
 
   return _LedgerSummaryStats(
     totalEarned: earned,
-    totalUsed: used,
-    totalPending: pending,
+    totalUsed: used < 0 ? 0 : used,
+    totalPending: pending < 0 ? 0 : pending,
   );
+}
+
+_LedgerSummaryStats _ledgerSummaryStatsFromResult(LeaveLedgerResult result) {
+  return _LedgerSummaryStats(
+    totalEarned: result.summaryEarned,
+    totalUsed: result.summaryUsed,
+    totalPending: result.summaryPending,
+  );
+}
+
+class _EmployeeLedgerFilter extends StatelessWidget {
+  const _EmployeeLedgerFilter({
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final String? selected;
+  final ValueChanged<String?> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    const options = <(String?, String)>[
+      (null, 'All'),
+      ('earned', 'Earned'),
+      ('used', 'Used'),
+      ('pending', 'Pending'),
+    ];
+    return Container(
+      color: AppTheme.sectionAltOf(context),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (var i = 0; i < options.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              ChoiceChip(
+                label: Text(options[i].$2),
+                selected: selected == options[i].$1,
+                onSelected: (_) => onSelected(options[i].$1),
+                showCheckmark: false,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _AdminSummaryChips extends StatelessWidget {
