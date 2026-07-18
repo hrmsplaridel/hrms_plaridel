@@ -218,12 +218,15 @@ async function issueTokensForUser(user, req, db = pool) {
  */
 router.post('/register', authRegisterLimiter, async (req, res) => {
   try {
-    const { email, password, fullName, role = 'employee' } = req.body;
+    const { email, password, fullName, role } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
-    if (!['admin', 'employee'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be admin or employee' });
+    if (role && role !== 'employee') {
+      return res.status(403).json({ error: 'Privileged accounts can only be created by an administrator' });
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -232,7 +235,7 @@ router.post('/register', authRegisterLimiter, async (req, res) => {
       `INSERT INTO users (email, password_hash, role, full_name, is_active)
        VALUES ($1, $2, $3, $4, true)
        RETURNING id, email, role, full_name, avatar_path, is_active, created_at`,
-      [email.trim().toLowerCase(), passwordHash, role, fullName || null]
+      [email.trim().toLowerCase(), passwordHash, 'employee', fullName || null]
     );
     const user = result.rows[0];
 

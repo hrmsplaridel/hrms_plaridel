@@ -186,7 +186,11 @@ router.get('/ld-training-requirement', async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    const localAbs = path.join(UPLOAD_DIR, 'ld-training-requirements', objectPath);
+    const ldRoot = path.resolve(UPLOAD_DIR, 'ld-training-requirements');
+    const localAbs = path.resolve(ldRoot, objectPath);
+    if (!localAbs.startsWith(`${ldRoot}${path.sep}`)) {
+      return res.status(403).json({ error: 'Invalid attachment path' });
+    }
     if (!fs.existsSync(localAbs)) {
       return res.status(404).json({ error: 'File not found' });
     }
@@ -303,6 +307,21 @@ async function execSofficeToPdf(outDir, inputPath) {
 router.get('/training-report/:attachmentId', async (req, res) => {
   try {
     const { attachmentId } = req.params;
+    const token = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+    if (!token || !process.env.JWT_SECRET) {
+      return res.status(401).json({ error: 'A valid attachment token is required' });
+    }
+    try {
+      const payload = jwt.verify(token, process.env.JWT_SECRET);
+      if (
+        payload.typ !== 'training_attachment' ||
+        String(payload.attachmentId) !== String(attachmentId)
+      ) {
+        return res.status(403).json({ error: 'Invalid attachment token' });
+      }
+    } catch (_) {
+      return res.status(401).json({ error: 'Invalid or expired attachment token' });
+    }
     const result = await pool.query(
       'SELECT file_path FROM training_report_attachments WHERE id = $1',
       [attachmentId]
@@ -312,7 +331,11 @@ router.get('/training-report/:attachmentId', async (req, res) => {
       return res.status(404).json({ error: 'Attachment not found' });
     }
 
-    const filePath = path.join(UPLOAD_DIR, row.file_path);
+    const trainingRoot = path.resolve(UPLOAD_DIR, 'training-reports');
+    const filePath = path.resolve(UPLOAD_DIR, row.file_path);
+    if (!filePath.startsWith(`${trainingRoot}${path.sep}`)) {
+      return res.status(403).json({ error: 'Invalid attachment path' });
+    }
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'Attachment file not found' });
     }

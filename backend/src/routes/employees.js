@@ -250,6 +250,18 @@ function csvEscape(val) {
   return s;
 }
 
+function employeeRowsForRequester(rows, requester) {
+  const privileged = ['admin', 'hr', 'supervisor'].includes(requester?.role);
+  if (privileged) return rows;
+  return rows.map((row) => ({
+    id: row.id,
+    full_name: row.full_name,
+    avatar_path: row.avatar_path,
+    current_department_name: row.current_department_name,
+    current_position_name: row.current_position_name,
+  }));
+}
+
 // GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid, ?biometric_user_ids=id1,id2,id3)
 // Optional: ?biometric_device_id=<uuid> — admin only; restrict to employees whose biometric_user_id is enrolled on that ZKTeco (reads device live)
 // Optional: ?biometric_filter=set|has|missing|none — filter by whether biometric_user_id is set (set/has = non-empty; missing/none = empty)
@@ -278,7 +290,7 @@ router.get('/', protect, async (req, res) => {
           [ids]
         );
         const rows = result.rows.map(mapEmployeeListRow);
-        return res.json(rows);
+        return res.json(employeeRowsForRequester(rows, req.user));
       }
     }
 
@@ -334,7 +346,7 @@ router.get('/', protect, async (req, res) => {
       dataParams
     );
 
-    const rows = result.rows.map(mapEmployeeListRow);
+    const rows = employeeRowsForRequester(result.rows.map(mapEmployeeListRow), req.user);
     if (usePaging) {
       return res.json({ employees: rows, total });
     }
@@ -346,7 +358,7 @@ router.get('/', protect, async (req, res) => {
 });
 
 // GET /api/employees/export/csv — same filters/search/sort as list; max MAX_EXPORT_ROWS rows (413 if exceeded).
-router.get('/export/csv', protect, async (req, res) => {
+router.get('/export/csv', protect, requireAdmin, async (req, res) => {
   try {
     let deviceBiometricIds = null;
     const bioDeviceRaw =
@@ -466,6 +478,17 @@ router.get('/:id', protect, async (req, res) => {
     );
     const r = result.rows[0];
     if (!r) return res.status(404).json({ error: 'Employee not found' });
+
+    const privileged = ['admin', 'hr', 'supervisor'].includes(req.user?.role);
+    if (!privileged && String(req.user?.id) !== String(r.id)) {
+      return res.json({
+        id: r.id,
+        full_name: r.full_name ?? 'Unknown',
+        avatar_path: r.avatar_path,
+        current_department_name: r.current_department_name ?? null,
+        current_position_name: r.current_position_name ?? null,
+      });
+    }
 
     res.json({
       id: r.id,

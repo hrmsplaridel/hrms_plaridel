@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const {
   assertPositionAcceptingApplications,
@@ -17,13 +18,72 @@ const {
   isEmailJsConfiguredForHireEmail,
   sendHireCredentialsEmailJs,
 } = require('../utils/emailJsMail');
-const { verifyRspEmailVerificationToken } = require('../utils/rspEmailVerifyToken');
+const {
+  verifyRspEmailVerificationToken,
+  signRspApplicantAccessToken,
+  verifyRspApplicantAccessToken,
+} = require('../utils/rspEmailVerifyToken');
 const rspEmailVerificationPublicRoutes = require('./rspEmailVerificationPublic');
+const { publicSubmissionLimiter, publicLookupLimiter } = require('../middleware/rateLimiters');
 
 const router = express.Router();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function rspStep1RequiresEmailOtp() {
   return rspEmailVerificationPublicRoutes.rspEmailOtpEnrollmentActive?.() === true;
+}
+
+function applicantToken(req) {
+  const authorization = req.get('authorization') || '';
+  const bearer = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+  return (
+    req.get('x-rsp-applicant-token') ||
+    bearer ||
+    req.body?.emailVerificationToken ||
+    req.query?.emailVerificationToken ||
+    ''
+  );
+}
+
+async function requireApplicantProof(req, res, next) {
+  try {
+    const authorization = req.get('authorization') || '';
+    if (authorization.startsWith('Bearer ') && process.env.JWT_SECRET) {
+      try {
+        const payload = jwt.verify(authorization.slice(7).trim(), process.env.JWT_SECRET);
+        if (payload.typ !== 'refresh' && payload.role === 'admin') {
+          req.user = { id: payload.id, email: payload.email, role: payload.role };
+          return next();
+        }
+      } catch (_) {
+        // It may instead be an applicant proof token; verify it below.
+      }
+    }
+    const applicationId = req.params.applicationId || req.body?.applicationId;
+    if (!UUID_RE.test(String(applicationId || ''))) {
+      return res.status(400).json({ error: 'Invalid applicationId' });
+    }
+    const result = await pool.query(
+      'SELECT email FROM public.recruitment_applications WHERE id = $1',
+      [applicationId],
+    );
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: 'Application not found' });
+    const proof = applicantToken(req);
+    if (
+      !verifyRspApplicantAccessToken(proof, applicationId, row.email) &&
+      !verifyRspEmailVerificationToken(proof, row.email)
+    ) {
+      return res.status(403).json({
+        error: 'Verified applicant access is required',
+        code: 'APPLICANT_VERIFICATION_REQUIRED',
+      });
+    }
+    next();
+  } catch (err) {
+    console.error('[rspApplications applicant proof]', err);
+    return res.status(500).json({ error: 'Could not verify applicant access' });
+  }
 }
 const protect = [authMiddleware, requireAdmin];
 
@@ -134,6 +194,26 @@ const rspUpload = multer({
     cb(null, ok);
   },
 });
+
+function rejectInvalidApplicationId(req, res, next) {
+  if (!UUID_RE.test(String(req.params.applicationId || ''))) {
+    return res.status(400).json({ error: 'Invalid applicationId' });
+  }
+  next();
+}
+
+function uploadedFileIsPdf(filePath) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const signature = Buffer.alloc(5);
+    return fs.readSync(fd, signature, 0, signature.length, 0) === 5 && signature.toString() === '%PDF-';
+  } catch (_) {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
 
 async function ensureRspApplicationsTables() {
   // Defensive: allow delete to work even if init-schema.sql wasn't run yet.
@@ -247,7 +327,7 @@ async function ensureRspApplicationsTables() {
 
 // POST /api/rsp/applications
 // Public create: applicants submit their basic info + documents.
-router.post('/', async (req, res) => {
+router.post('/', publicSubmissionLimiter, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const {
@@ -265,7 +345,6 @@ router.post('/', async (req, res) => {
       phone,
       resumeNotes,
       positionAppliedFor,
-      status = 'submitted',
     } = req.body || {};
 
     const optStr = (v) =>
@@ -355,7 +434,7 @@ router.post('/', async (req, res) => {
         phone ?? null,
         resumeNotes ?? null,
         position,
-        status,
+        'submitted',
       ]
     );
 
@@ -373,7 +452,8 @@ router.post('/', async (req, res) => {
       }
     })();
 
-    return res.json({ ok: true, application });
+    const applicantAccessToken = signRspApplicantAccessToken(application.id, normalizedEmail);
+    return res.json({ ok: true, application, applicantAccessToken });
   } catch (err) {
     console.error('[rspApplications POST /]', err);
     return res.status(500).json({
@@ -385,17 +465,19 @@ router.post('/', async (req, res) => {
 
 // GET /api/rsp/applications/by-email?email=...
 // Public lookup for applicants to continue their flow.
-router.get('/by-email', async (req, res) => {
+router.get('/by-email', publicLookupLimiter, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const email = req.query.email;
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ error: 'email query param is required' });
     }
-
     const result = await pool.query(
       `
-      SELECT ${RSP_APPLICATION_ROW_SELECT}
+      SELECT id, full_name, email, position_applied_for, status,
+             orientation_at, orientation_attended, final_interview_at,
+             final_interview_passed, final_requirements_approved,
+             hr_account_setup_done, created_at, updated_at
       FROM public.recruitment_applications
       WHERE email = $1
       ORDER BY created_at DESC
@@ -1020,6 +1102,9 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
 // Query updateDb=0 to only store the file and return path (multi-upload helper).
 router.post(
   '/:applicationId/attachment-file',
+  publicSubmissionLimiter,
+  rejectInvalidApplicationId,
+  requireApplicantProof,
   rspUpload.single('file'),
   async (req, res) => {
     try {
@@ -1030,6 +1115,10 @@ router.post(
 
       if (!req.file) {
         return res.status(400).json({ error: 'file is required (multipart)' });
+      }
+      if (!uploadedFileIsPdf(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: 'Uploaded file is not a valid PDF' });
       }
 
       const exists = await pool.query(
@@ -1170,7 +1259,7 @@ router.delete('/attachment-file', ...protect, async (req, res) => {
 
 // PUT /api/rsp/applications/:applicationId/attachment
 // Public for applicants: store Supabase Storage attachment path/name.
-router.put('/:applicationId/attachment', async (req, res) => {
+router.put('/:applicationId/attachment', rejectInvalidApplicationId, requireApplicantProof, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const { applicationId } = req.params;
@@ -1218,7 +1307,7 @@ router.put('/:applicationId/attachment', async (req, res) => {
 
 // PUT /api/rsp/applications/:applicationId/attachment-if-missing
 // Admin/public: only set attachment fields when attachment_path is currently NULL.
-router.put('/:applicationId/attachment-if-missing', async (req, res) => {
+router.put('/:applicationId/attachment-if-missing', ...protect, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const { applicationId } = req.params;
@@ -1265,7 +1354,7 @@ router.put('/:applicationId/attachment-if-missing', async (req, res) => {
 
 // POST /api/rsp/exam-results
 // Public: applicant submits exam results + answers_json.
-router.post('/exam-results', async (req, res) => {
+router.post('/exam-results', publicSubmissionLimiter, requireApplicantProof, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const { applicationId, scorePercent, passed, answersJson } = req.body || {};
