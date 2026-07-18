@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
-const { requireAdmin } = require('../middleware/rbac');
+const { requireAdmin, requireAdminOrSupervisor } = require('../middleware/rbac');
 const {
   expandNonRecurringToWindow,
   expandRecurringToWindow,
