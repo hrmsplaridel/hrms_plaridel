@@ -1570,7 +1570,7 @@ class _AttendanceCard extends StatelessWidget {
     return Consumer<DtrProvider>(
       builder: (context, dtr, _) {
         final presentCount = dtr.timeRecords
-            .where((r) => r.timeIn != null)
+            .where(isCompletedAttendanceRecord)
             .length;
         final now = DateTime.now();
         final monthLabel =
