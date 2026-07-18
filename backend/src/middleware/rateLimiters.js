@@ -85,6 +85,18 @@ const authPasswordChangeLimiter = createJsonLimiter({
   message: 'Too many password change attempts. Please wait and try again.',
 });
 
+const publicSubmissionLimiter = createJsonLimiter({
+  windowMs: ONE_HOUR_MS,
+  limit: parsePositiveInt(process.env.PUBLIC_SUBMISSION_RATE_LIMIT_MAX, 10),
+  message: 'Too many submissions. Please wait and try again.',
+});
+
+const publicLookupLimiter = createJsonLimiter({
+  windowMs: FIFTEEN_MINUTES_MS,
+  limit: parsePositiveInt(process.env.PUBLIC_LOOKUP_RATE_LIMIT_MAX, 30),
+  message: 'Too many lookup requests. Please wait and try again.',
+});
+
 module.exports = {
   generalApiLimiter,
   authLoginLimiter,
@@ -93,4 +105,6 @@ module.exports = {
   authPasswordResetVerifyLimiter,
   authTokenLimiter,
   authPasswordChangeLimiter,
+  publicSubmissionLimiter,
+  publicLookupLimiter,
 };
