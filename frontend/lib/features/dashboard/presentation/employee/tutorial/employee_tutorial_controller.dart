@@ -211,14 +211,18 @@ class _EmployeeDashboardCoachState extends State<_EmployeeDashboardCoach> {
       child: Stack(
         children: [
           Positioned.fill(
-            child: TweenAnimationBuilder<Rect?>(
-              tween: RectTween(end: rect),
-              duration: const Duration(milliseconds: 360),
-              curve: Curves.easeInOutCubic,
-              builder: (context, animatedRect, _) => CustomPaint(
-                painter: _TutorialSpotlightPainter(target: animatedRect),
-              ),
-            ),
+            child: rect == null
+                ? const CustomPaint(
+                    painter: _TutorialSpotlightPainter(target: null),
+                  )
+                : TweenAnimationBuilder<Rect>(
+                    tween: _TutorialRectTween(begin: rect, end: rect),
+                    duration: const Duration(milliseconds: 360),
+                    curve: Curves.easeInOutCubic,
+                    builder: (context, animatedRect, _) => CustomPaint(
+                      painter: _TutorialSpotlightPainter(target: animatedRect),
+                    ),
+                  ),
           ),
           if (rect != null)
             AnimatedPositioned(
@@ -288,11 +292,10 @@ class _EmployeeDashboardCoachState extends State<_EmployeeDashboardCoach> {
                       transitionBuilder: (child, animation) => FadeTransition(
                         opacity: animation,
                         child: SlideTransition(
-                          position:
-                              Tween<Offset>(
-                                begin: const Offset(0.04, 0),
-                                end: Offset.zero,
-                              ).animate(animation),
+                          position: Tween<Offset>(
+                            begin: const Offset(0.04, 0),
+                            end: Offset.zero,
+                          ).animate(animation),
                           child: child,
                         ),
                       ),
@@ -405,6 +408,13 @@ class _TutorialSpotlightPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _TutorialSpotlightPainter oldDelegate) =>
       oldDelegate.target != target;
+}
+
+class _TutorialRectTween extends Tween<Rect> {
+  _TutorialRectTween({required super.begin, required super.end});
+
+  @override
+  Rect lerp(double t) => Rect.lerp(begin, end, t)!;
 }
 
 class EmployeeTutorialButton extends StatelessWidget {
