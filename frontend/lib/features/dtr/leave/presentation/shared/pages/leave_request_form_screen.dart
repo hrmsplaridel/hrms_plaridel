@@ -71,6 +71,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   DateTime? _childDeliveryDate;
   DateTime? _accidentDate;
   DateTime? _calamityDate;
+  AdoptionParentRole? _adoptionParentRole;
+  DateTime? _adoptionPlacementDate;
+  VawcSupportDocumentType? _vawcSupportDocumentType;
+  DateTime? _soloParentIdExpiryDate;
   StudyLeavePurpose? _studyPurpose;
   LeaveOtherPurpose? _otherPurpose;
   LeaveCommutationOption _commutation = LeaveCommutationOption.notRequested;
@@ -90,6 +94,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   late final TextEditingController _reasonController;
   late final TextEditingController _locationDetailsController;
   late final TextEditingController _sickIllnessController;
+  late final TextEditingController _vawcCaseDetailsController;
+  late final TextEditingController _soloParentIdNumberController;
   late final TextEditingController _womenIllnessController;
   late final TextEditingController _studyPurposeDetailsController;
   late final TextEditingController _otherPurposeDetailsController;
@@ -109,6 +115,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _childDeliveryDate = initial?.childDeliveryDate;
     _accidentDate = initial?.accidentDate;
     _calamityDate = initial?.calamityDate;
+    _adoptionParentRole = initial?.adoptionParentRole;
+    _adoptionPlacementDate = initial?.adoptionPlacementDate;
+    _vawcSupportDocumentType = initial?.vawcSupportDocumentType;
+    _soloParentIdExpiryDate = initial?.soloParentIdExpiryDate;
     _studyPurpose = initial?.studyPurpose;
     _otherPurpose = initial?.otherPurpose;
     _commutation = initial?.commutation ?? LeaveCommutationOption.notRequested;
@@ -124,6 +134,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     );
     _sickIllnessController = TextEditingController(
       text: initial?.sickIllnessDetails ?? '',
+    );
+    _vawcCaseDetailsController = TextEditingController(
+      text: initial?.vawcCaseDetails ?? '',
+    );
+    _soloParentIdNumberController = TextEditingController(
+      text: initial?.soloParentIdNumber ?? '',
     );
     _womenIllnessController = TextEditingController(
       text: initial?.womenIllnessDetails ?? '',
@@ -155,6 +171,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _reasonController.dispose();
     _locationDetailsController.dispose();
     _sickIllnessController.dispose();
+    _vawcCaseDetailsController.dispose();
+    _soloParentIdNumberController.dispose();
     _womenIllnessController.dispose();
     _studyPurposeDetailsController.dispose();
     _otherPurposeDetailsController.dispose();
@@ -184,11 +202,17 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _childDeliveryDate = null;
     _accidentDate = null;
     _calamityDate = null;
+    _adoptionParentRole = null;
+    _adoptionPlacementDate = null;
+    _vawcSupportDocumentType = null;
+    _soloParentIdExpiryDate = null;
     _studyPurpose = null;
     _otherPurpose = null;
     _customLeaveTypeController.clear();
     _locationDetailsController.clear();
     _sickIllnessController.clear();
+    _vawcCaseDetailsController.clear();
+    _soloParentIdNumberController.clear();
     _womenIllnessController.clear();
     _studyPurposeDetailsController.clear();
     _otherPurposeDetailsController.clear();
@@ -222,12 +246,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   double? get _selectedMaxDays {
-    final maternityMaxDays = maxWorkingDaysForLeaveDetails(
+    final detailMaxDays = maxWorkingDaysForLeaveDetails(
       _leaveType,
       maternityDeliveryType: _maternityDeliveryType,
+      adoptionParentRole: _adoptionParentRole,
     );
-    if (_leaveType == LeaveType.maternityLeave) {
-      return maternityMaxDays?.toDouble();
+    if (_leaveType == LeaveType.maternityLeave ||
+        _leaveType == LeaveType.adoptionLeave) {
+      return detailMaxDays?.toDouble();
     }
     final def = _selectedLeaveTypeDefinition;
     return def?.maxDays ?? _leaveType.maxDays?.toDouble();
@@ -576,6 +602,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       return;
     }
     if (!_validateEventDateRules()) return;
+    if (!_validateAnnualQuotaLimit()) return;
     if (_shouldShowAttachmentSection() && !_hasAttachment()) {
       _showMessage('Attachment is required for this leave type.');
       return;
@@ -756,6 +783,39 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       }
     }
 
+    if (_leaveType == LeaveType.adoptionLeave) {
+      if (_adoptionParentRole == null) {
+        _showMessage('Please choose the adoption leave eligibility.');
+        return false;
+      }
+      if (_adoptionPlacementDate == null) {
+        _showMessage('Please enter the PAPA / adoption placement date.');
+        return false;
+      }
+    }
+
+    if (_leaveType == LeaveType.tenDayVawcLeave) {
+      if (_vawcSupportDocumentType == null) {
+        _showMessage('Please choose the VAWC supporting document type.');
+        return false;
+      }
+      if (_vawcCaseDetailsController.text.trim().isEmpty) {
+        _showMessage('Please enter the VAWC case or protection order details.');
+        return false;
+      }
+    }
+
+    if (_leaveType == LeaveType.soloParentLeave) {
+      if (_soloParentIdNumberController.text.trim().isEmpty) {
+        _showMessage('Please enter the Solo Parent ID number.');
+        return false;
+      }
+      if (_soloParentIdExpiryDate == null) {
+        _showMessage('Please enter the Solo Parent ID expiry date.');
+        return false;
+      }
+    }
+
     return true;
   }
 
@@ -809,6 +869,22 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       return true;
     }
 
+    if (_leaveType == LeaveType.adoptionLeave) {
+      final placement = _adoptionPlacementDate;
+      if (placement == null) {
+        _showMessage('Please enter the PAPA / adoption placement date.');
+        return false;
+      }
+      final startDiff = _calendarDaysFrom(placement, start);
+      if (startDiff < 0) {
+        _showMessage(
+          'Adoption Leave cannot start before the PAPA / adoption placement date.',
+        );
+        return false;
+      }
+      return true;
+    }
+
     if (_leaveType == LeaveType.rehabilitationPrivilege) {
       final accident = _accidentDate;
       if (accident == null) {
@@ -853,6 +929,67 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       return true;
     }
 
+    if (_leaveType == LeaveType.soloParentLeave) {
+      final expiry = _soloParentIdExpiryDate;
+      if (expiry == null) {
+        _showMessage('Please enter the Solo Parent ID expiry date.');
+        return false;
+      }
+      final today = _onlyDate(DateTime.now());
+      if (_onlyDate(expiry).isBefore(today)) {
+        _showMessage('Solo Parent ID is already expired.');
+        return false;
+      }
+      if (_onlyDate(expiry).isBefore(_onlyDate(start))) {
+        _showMessage(
+          'Solo Parent ID must be valid through the start date of the leave.',
+        );
+        return false;
+      }
+      return true;
+    }
+
+    return true;
+  }
+
+  double? _annualHardLimitForSelectedLeave() {
+    switch (_leaveTypeName) {
+      case 'soloParentLeave':
+        return 7;
+      case 'tenDayVawcLeave':
+        return 10;
+      default:
+        return null;
+    }
+  }
+
+  bool _validateAnnualQuotaLimit() {
+    final limit = _annualHardLimitForSelectedLeave();
+    final start = _startDate;
+    final end = _endDate;
+    if (limit == null || start == null || end == null) return true;
+
+    for (var year = start.year; year <= end.year; year++) {
+      var requested = _workingDaysInYear(start, end, year);
+      if (requested <= 0 && start.year == year) {
+        requested = _currentWorkingDaysApplied ?? 0;
+      }
+      if (requested <= 0) continue;
+      final approved = _annualUsageForYear(
+        _leaveTypeName,
+        year,
+        pending: false,
+      );
+      final pending = _annualUsageForYear(_leaveTypeName, year, pending: true);
+      final remaining = (limit - approved - pending).clamp(0, limit).toDouble();
+      if (approved + pending + requested > limit + 0.0001) {
+        _showMessage(
+          '$_selectedLeaveTypeLabel is limited to ${_formatDays(limit)} day(s) per calendar year. '
+          'You only have ${_formatDays(remaining)} day(s) remaining for $year.',
+        );
+        return false;
+      }
+    }
     return true;
   }
 
@@ -1014,6 +1151,24 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             : null,
         calamityDate: _leaveType == LeaveType.specialEmergencyCalamityLeave
             ? _calamityDate
+            : null,
+        adoptionParentRole: _leaveType == LeaveType.adoptionLeave
+            ? _adoptionParentRole
+            : null,
+        adoptionPlacementDate: _leaveType == LeaveType.adoptionLeave
+            ? _adoptionPlacementDate
+            : null,
+        vawcSupportDocumentType: _leaveType == LeaveType.tenDayVawcLeave
+            ? _vawcSupportDocumentType
+            : null,
+        vawcCaseDetails: _leaveType == LeaveType.tenDayVawcLeave
+            ? _vawcCaseDetailsController.text.trim()
+            : null,
+        soloParentIdNumber: _leaveType == LeaveType.soloParentLeave
+            ? _soloParentIdNumberController.text.trim()
+            : null,
+        soloParentIdExpiryDate: _leaveType == LeaveType.soloParentLeave
+            ? _soloParentIdExpiryDate
             : null,
         womenIllnessDetails:
             _leaveType == LeaveType.specialLeaveBenefitsForWomen
@@ -1747,6 +1902,120 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _buildHelperText(
           'Special Emergency Leave must be used within 30 days from this occurrence.',
         ),
+      ]);
+    } else if (_leaveType == LeaveType.adoptionLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        _buildDatePicker(
+          label: 'PAPA / Adoption Placement Date',
+          value: _adoptionPlacementDate,
+          onChanged: (d) => setState(() => _adoptionPlacementDate = d),
+        ),
+        _buildHelperText('Required supporting date for adoption leave review.'),
+        const SizedBox(height: 16),
+        Text(
+          'Adoption Leave Eligibility',
+          style: TextStyle(
+            fontWeight: FontWeight.w500,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final option in AdoptionParentRole.values)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => setState(() => _adoptionParentRole = option),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _adoptionParentRole == option
+                        ? AppTheme.primaryNavy
+                        : AppTheme.dashHairlineOf(context),
+                  ),
+                  color: _adoptionParentRole == option
+                      ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                      : AppTheme.dashPanelOf(context),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _adoptionParentRole == option
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: _adoptionParentRole == option
+                          ? AppTheme.primaryNavy
+                          : AppTheme.dashTextSecondaryOf(context),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(option.displayName)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ]);
+    } else if (_leaveType == LeaveType.tenDayVawcLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        DropdownButtonFormField<VawcSupportDocumentType>(
+          initialValue: _vawcSupportDocumentType,
+          decoration: _inputDecoration('Supporting document type'),
+          isExpanded: true,
+          items: VawcSupportDocumentType.values
+              .map(
+                (option) => DropdownMenuItem(
+                  value: option,
+                  child: Text(option.displayName),
+                ),
+              )
+              .toList(),
+          onChanged: (value) =>
+              setState(() => _vawcSupportDocumentType = value),
+          validator: (_) =>
+              _leaveType == LeaveType.tenDayVawcLeave &&
+                  _vawcSupportDocumentType == null
+              ? 'Required'
+              : null,
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: _vawcCaseDetailsController,
+          maxLines: 2,
+          decoration: _inputDecoration('Case / protection order details'),
+          validator: (v) =>
+              _leaveType == LeaveType.tenDayVawcLeave &&
+                  (v == null || v.trim().isEmpty)
+              ? 'Required'
+              : null,
+        ),
+      ]);
+    } else if (_leaveType == LeaveType.soloParentLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        TextFormField(
+          controller: _soloParentIdNumberController,
+          decoration: _inputDecoration('Solo Parent ID Number'),
+          validator: (v) =>
+              _leaveType == LeaveType.soloParentLeave &&
+                  (v == null || v.trim().isEmpty)
+              ? 'Required'
+              : null,
+        ),
+        const SizedBox(height: 12),
+        _buildDatePicker(
+          label: 'Solo Parent ID Expiry Date',
+          value: _soloParentIdExpiryDate,
+          onChanged: (d) => setState(() => _soloParentIdExpiryDate = d),
+        ),
+        _buildHelperText('Solo Parent ID must be valid for the leave date.'),
       ]);
     } else if (_leaveType == LeaveType.specialLeaveBenefitsForWomen) {
       children.addAll([

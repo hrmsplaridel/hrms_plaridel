@@ -451,6 +451,48 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                         label: 'Calamity occurrence date',
                         value: _formatDate(request.calamityDate!),
                       ),
+                    if (request.leaveType == LeaveType.adoptionLeave &&
+                        request.adoptionParentRole != null)
+                      _LeaveDetailTile(
+                        icon: Icons.family_restroom_rounded,
+                        label: 'Adoption eligibility',
+                        value: request.adoptionParentRole!.displayName,
+                      ),
+                    if (request.leaveType == LeaveType.adoptionLeave &&
+                        request.adoptionPlacementDate != null)
+                      _LeaveDetailTile(
+                        icon: Icons.event_available_rounded,
+                        label: 'PAPA / adoption placement date',
+                        value: _formatDate(request.adoptionPlacementDate!),
+                      ),
+                    if (request.leaveType == LeaveType.tenDayVawcLeave &&
+                        request.vawcSupportDocumentType != null)
+                      _LeaveDetailTile(
+                        icon: Icons.verified_user_outlined,
+                        label: 'VAWC supporting document',
+                        value: request.vawcSupportDocumentType!.displayName,
+                      ),
+                    if (request.leaveType == LeaveType.tenDayVawcLeave &&
+                        (request.vawcCaseDetails ?? '').trim().isNotEmpty)
+                      _LeaveDetailTile(
+                        icon: Icons.description_outlined,
+                        label: 'VAWC case details',
+                        value: request.vawcCaseDetails!.trim(),
+                      ),
+                    if (request.leaveType == LeaveType.soloParentLeave &&
+                        (request.soloParentIdNumber ?? '').trim().isNotEmpty)
+                      _LeaveDetailTile(
+                        icon: Icons.badge_outlined,
+                        label: 'Solo Parent ID number',
+                        value: request.soloParentIdNumber!.trim(),
+                      ),
+                    if (request.leaveType == LeaveType.soloParentLeave &&
+                        request.soloParentIdExpiryDate != null)
+                      _LeaveDetailTile(
+                        icon: Icons.event_busy_outlined,
+                        label: 'Solo Parent ID expiry',
+                        value: _formatDate(request.soloParentIdExpiryDate!),
+                      ),
                     _LeaveDetailTile(
                       icon: Icons.date_range_rounded,
                       label: 'Date range',

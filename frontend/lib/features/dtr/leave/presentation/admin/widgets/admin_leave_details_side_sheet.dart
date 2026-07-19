@@ -542,6 +542,36 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
       applies: leaveType == LeaveType.specialEmergencyCalamityLeave,
     );
     addRelevantEnum(
+      label: 'Adoption Eligibility',
+      value: request.adoptionParentRole?.displayName,
+      applies: leaveType == LeaveType.adoptionLeave,
+    );
+    addRelevantDate(
+      label: 'PAPA / Adoption Placement Date',
+      value: request.adoptionPlacementDate,
+      applies: leaveType == LeaveType.adoptionLeave,
+    );
+    addRelevantEnum(
+      label: 'VAWC Supporting Document',
+      value: request.vawcSupportDocumentType?.displayName,
+      applies: leaveType == LeaveType.tenDayVawcLeave,
+    );
+    addRelevant(
+      label: 'VAWC Case Details',
+      value: request.vawcCaseDetails,
+      applies: leaveType == LeaveType.tenDayVawcLeave,
+    );
+    addRelevant(
+      label: 'Solo Parent ID Number',
+      value: request.soloParentIdNumber,
+      applies: leaveType == LeaveType.soloParentLeave,
+    );
+    addRelevantDate(
+      label: 'Solo Parent ID Expiry Date',
+      value: request.soloParentIdExpiryDate,
+      applies: leaveType == LeaveType.soloParentLeave,
+    );
+    addRelevantEnum(
       label: 'Location',
       value: request.locationOption?.displayName,
       applies:
