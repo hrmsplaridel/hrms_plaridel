@@ -174,10 +174,15 @@ int maternityLeaveMaxWorkingDays(MaternityDeliveryType deliveryType) =>
 int? maxWorkingDaysForLeaveDetails(
   LeaveType leaveType, {
   MaternityDeliveryType? maternityDeliveryType,
+  AdoptionParentRole? adoptionParentRole,
 }) {
   if (leaveType == LeaveType.maternityLeave) {
     if (maternityDeliveryType == null) return null;
     return maternityLeaveMaxWorkingDays(maternityDeliveryType);
+  }
+  if (leaveType == LeaveType.adoptionLeave) {
+    if (adoptionParentRole == null) return null;
+    return adoptionLeaveMaxWorkingDays(adoptionParentRole);
   }
   return leaveType.maxDays;
 }
@@ -207,6 +212,107 @@ MaternityDeliveryType? maternityDeliveryTypeFromString(String? s) {
       normalized == 'notcs' ||
       normalized == 'normaldelivery') {
     return MaternityDeliveryType.normalDelivery;
+  }
+  return null;
+}
+
+/// Detail options for CSC adoption leave eligibility.
+enum AdoptionParentRole { primaryAdoptiveParent, legitimateMaleSpouse }
+
+const int kAdoptionPrimaryParentWorkingDays = 60;
+const int kAdoptionMaleSpouseWorkingDays = 7;
+
+extension AdoptionParentRoleExtension on AdoptionParentRole {
+  String get value => name;
+
+  String get displayName => switch (this) {
+    AdoptionParentRole.primaryAdoptiveParent =>
+      'Adoptive mother / single male adopter (60 days)',
+    AdoptionParentRole.legitimateMaleSpouse =>
+      'Legitimate male spouse (7 days)',
+  };
+}
+
+int adoptionLeaveMaxWorkingDays(AdoptionParentRole role) =>
+    role == AdoptionParentRole.legitimateMaleSpouse
+    ? kAdoptionMaleSpouseWorkingDays
+    : kAdoptionPrimaryParentWorkingDays;
+
+AdoptionParentRole? adoptionParentRoleFromString(String? s) {
+  if (s == null || s.isEmpty) return null;
+  final normalized = s.toLowerCase().replaceAll(RegExp(r'[\s_\-/()]'), '');
+  for (final e in AdoptionParentRole.values) {
+    final enumName = e.name.toLowerCase().replaceAll('_', '');
+    final label = e.displayName.toLowerCase().replaceAll(
+      RegExp(r'[\s_\-/()]'),
+      '',
+    );
+    if (enumName == normalized || label == normalized) return e;
+  }
+  if (normalized == 'adoptivemother' ||
+      normalized == 'mother' ||
+      normalized == 'qualifiedfemale' ||
+      normalized == 'femaleemployee' ||
+      normalized == 'singlemale' ||
+      normalized == 'singlemaleadopter' ||
+      normalized == 'singlemaleemployee') {
+    return AdoptionParentRole.primaryAdoptiveParent;
+  }
+  if (normalized == 'adoptivefather' ||
+      normalized == 'father' ||
+      normalized == 'malespouse' ||
+      normalized == 'legitimatemalespouse' ||
+      normalized == 'spouse') {
+    return AdoptionParentRole.legitimateMaleSpouse;
+  }
+  return null;
+}
+
+/// Common supporting document options for 10-Day VAWC leave.
+enum VawcSupportDocumentType {
+  protectionOrder,
+  policeOrProsecutorReport,
+  medicalCertificate,
+  otherSupportingDocument,
+}
+
+extension VawcSupportDocumentTypeExtension on VawcSupportDocumentType {
+  String get value => name;
+
+  String get displayName => switch (this) {
+    VawcSupportDocumentType.protectionOrder => 'Protection Order',
+    VawcSupportDocumentType.policeOrProsecutorReport =>
+      'Police / Prosecutor Report',
+    VawcSupportDocumentType.medicalCertificate => 'Medical Certificate',
+    VawcSupportDocumentType.otherSupportingDocument =>
+      'Other Supporting Document',
+  };
+}
+
+VawcSupportDocumentType? vawcSupportDocumentTypeFromString(String? s) {
+  if (s == null || s.isEmpty) return null;
+  final normalized = s.toLowerCase().replaceAll(RegExp(r'[\s_\-/()]'), '');
+  for (final e in VawcSupportDocumentType.values) {
+    final enumName = e.name.toLowerCase().replaceAll('_', '');
+    final label = e.displayName.toLowerCase().replaceAll(
+      RegExp(r'[\s_\-/()]'),
+      '',
+    );
+    if (enumName == normalized || label == normalized) return e;
+  }
+  if (normalized == 'po' || normalized == 'protectionorder') {
+    return VawcSupportDocumentType.protectionOrder;
+  }
+  if (normalized == 'policereport' ||
+      normalized == 'prosecutorreport' ||
+      normalized == 'policeorprosecutorreport') {
+    return VawcSupportDocumentType.policeOrProsecutorReport;
+  }
+  if (normalized == 'medicalcertificate') {
+    return VawcSupportDocumentType.medicalCertificate;
+  }
+  if (normalized == 'other' || normalized == 'others') {
+    return VawcSupportDocumentType.otherSupportingDocument;
   }
   return null;
 }

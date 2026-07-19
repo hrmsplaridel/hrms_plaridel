@@ -120,6 +120,12 @@ class LeaveRequest {
     this.childDeliveryDate,
     this.accidentDate,
     this.calamityDate,
+    this.adoptionParentRole,
+    this.adoptionPlacementDate,
+    this.vawcSupportDocumentType,
+    this.vawcCaseDetails,
+    this.soloParentIdNumber,
+    this.soloParentIdExpiryDate,
     this.womenIllnessDetails,
     this.studyPurpose,
     this.studyPurposeDetails,
@@ -178,6 +184,12 @@ class LeaveRequest {
   final DateTime? childDeliveryDate;
   final DateTime? accidentDate;
   final DateTime? calamityDate;
+  final AdoptionParentRole? adoptionParentRole;
+  final DateTime? adoptionPlacementDate;
+  final VawcSupportDocumentType? vawcSupportDocumentType;
+  final String? vawcCaseDetails;
+  final String? soloParentIdNumber;
+  final DateTime? soloParentIdExpiryDate;
   final String? womenIllnessDetails;
   final StudyLeavePurpose? studyPurpose;
   final String? studyPurposeDetails;
@@ -259,6 +271,42 @@ class LeaveRequest {
             json['calamity_occurrence_date'] ??
             json['calamityOccurrenceDate'],
       ),
+      adoptionParentRole: adoptionParentRoleFromString(
+        json['adoption_parent_role']?.toString() ??
+            json['adoptionParentRole']?.toString() ??
+            json['adoptive_parent_role']?.toString() ??
+            json['adoptiveParentRole']?.toString(),
+      ),
+      adoptionPlacementDate: _parseDate(
+        json['adoption_placement_date'] ??
+            json['adoptionPlacementDate'] ??
+            json['adoption_finalization_date'] ??
+            json['adoptionFinalizationDate'] ??
+            json['papa_date'] ??
+            json['papaDate'],
+      ),
+      vawcSupportDocumentType: vawcSupportDocumentTypeFromString(
+        json['vawc_support_document_type']?.toString() ??
+            json['vawcSupportDocumentType']?.toString() ??
+            json['vawc_document_type']?.toString() ??
+            json['vawcDocumentType']?.toString(),
+      ),
+      vawcCaseDetails:
+          json['vawc_case_details']?.toString() ??
+          json['vawcCaseDetails']?.toString() ??
+          json['vawc_protection_order_details']?.toString() ??
+          json['vawcProtectionOrderDetails']?.toString(),
+      soloParentIdNumber:
+          json['solo_parent_id_number']?.toString() ??
+          json['soloParentIdNumber']?.toString() ??
+          json['solo_parent_id']?.toString() ??
+          json['soloParentId']?.toString(),
+      soloParentIdExpiryDate: _parseDate(
+        json['solo_parent_id_expiry_date'] ??
+            json['soloParentIdExpiryDate'] ??
+            json['solo_parent_id_valid_until'] ??
+            json['soloParentIdValidUntil'],
+      ),
       womenIllnessDetails: json['women_illness_details']?.toString(),
       studyPurpose: studyLeavePurposeFromString(
         json['study_purpose']?.toString(),
@@ -323,6 +371,12 @@ class LeaveRequest {
       'child_delivery_date': _dateOnly(childDeliveryDate),
       'accident_date': _dateOnly(accidentDate),
       'calamity_date': _dateOnly(calamityDate),
+      'adoption_parent_role': adoptionParentRole?.value,
+      'adoption_placement_date': _dateOnly(adoptionPlacementDate),
+      'vawc_support_document_type': vawcSupportDocumentType?.value,
+      'vawc_case_details': _trimOrNull(vawcCaseDetails),
+      'solo_parent_id_number': _trimOrNull(soloParentIdNumber),
+      'solo_parent_id_expiry_date': _dateOnly(soloParentIdExpiryDate),
       'women_illness_details': _trimOrNull(womenIllnessDetails),
       'study_purpose': studyPurpose?.value,
       'study_purpose_details': _trimOrNull(studyPurposeDetails),
@@ -378,6 +432,12 @@ class LeaveRequest {
     DateTime? childDeliveryDate,
     DateTime? accidentDate,
     DateTime? calamityDate,
+    AdoptionParentRole? adoptionParentRole,
+    DateTime? adoptionPlacementDate,
+    VawcSupportDocumentType? vawcSupportDocumentType,
+    String? vawcCaseDetails,
+    String? soloParentIdNumber,
+    DateTime? soloParentIdExpiryDate,
     String? womenIllnessDetails,
     StudyLeavePurpose? studyPurpose,
     String? studyPurposeDetails,
@@ -432,6 +492,15 @@ class LeaveRequest {
       childDeliveryDate: childDeliveryDate ?? this.childDeliveryDate,
       accidentDate: accidentDate ?? this.accidentDate,
       calamityDate: calamityDate ?? this.calamityDate,
+      adoptionParentRole: adoptionParentRole ?? this.adoptionParentRole,
+      adoptionPlacementDate:
+          adoptionPlacementDate ?? this.adoptionPlacementDate,
+      vawcSupportDocumentType:
+          vawcSupportDocumentType ?? this.vawcSupportDocumentType,
+      vawcCaseDetails: vawcCaseDetails ?? this.vawcCaseDetails,
+      soloParentIdNumber: soloParentIdNumber ?? this.soloParentIdNumber,
+      soloParentIdExpiryDate:
+          soloParentIdExpiryDate ?? this.soloParentIdExpiryDate,
       womenIllnessDetails: womenIllnessDetails ?? this.womenIllnessDetails,
       studyPurpose: studyPurpose ?? this.studyPurpose,
       studyPurposeDetails: studyPurposeDetails ?? this.studyPurposeDetails,
