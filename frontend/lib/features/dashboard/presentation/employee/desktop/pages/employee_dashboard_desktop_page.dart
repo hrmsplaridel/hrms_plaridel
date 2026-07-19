@@ -70,6 +70,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   LeaveSection? _leaveInitialSection;
   int _leaveNavKey = 0;
   Timer? _notificationPollTimer;
+  bool? _isDepartmentHead;
 
   static const _navItems = [
     'Dashboard',
@@ -139,7 +140,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     });
   }
 
-  void _openDashboardTutorial() {
+  Future<void> _openDashboardTutorial() async {
     if (_selectedNavIndex == 0) {
       EmployeeTutorialController.showDashboardCoach(
         context,
@@ -158,6 +159,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       return;
     }
     if (_selectedNavIndex == 2 || _selectedNavIndex == 3) {
+      await _resolveDepartmentHeadRole();
+      if (!mounted) return;
       final isLeave = _selectedNavIndex == 2;
       EmployeeTutorialController.showCoach(
         context,
@@ -211,12 +214,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   List<EmployeeTutorialTarget> get _leaveTutorialTargets =>
       EmployeeLeaveTutorial.targets(
         showHeader: MediaQuery.sizeOf(context).width >= 600,
+        isDepartmentHead: _isDepartmentHead ?? false,
         headerKey: _leaveHeaderKey,
         contentKey: _leaveContentKey,
       );
 
   List<EmployeeTutorialTarget> get _locatorTutorialTargets =>
       EmployeeLocatorTutorial.targets(
+        isDepartmentHead: _isDepartmentHead ?? false,
         headerKey: _locatorHeaderKey,
         requestsKey: _locatorRequestsKey,
       );
@@ -275,9 +280,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   }
 
   void _showTutorialIfNeeded(int index) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       if (index >= 1 && index <= _profileNavIndex) {
+        if (index == 2 || index == 3) {
+          await _resolveDepartmentHeadRole();
+          if (!mounted) return;
+        }
         final section = _tutorialSectionForIndex(index);
         EmployeeTutorialController.showCoachIfNeeded(
           context,
@@ -295,6 +304,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         );
       }
     });
+  }
+
+  Future<bool> _resolveDepartmentHeadRole() async {
+    final cached = _isDepartmentHead;
+    if (cached != null) return cached;
+    final result = await context.read<LeaveProvider>().checkIsDepartmentHead();
+    if (mounted) _isDepartmentHead = result;
+    return result;
   }
 
   @override
