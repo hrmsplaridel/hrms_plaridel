@@ -568,6 +568,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       return;
     }
 
+    if (!_validateRequiredLeaveDetails()) return;
+
     if (_leaveType == LeaveType.maternityLeave &&
         _maternityDeliveryType == null) {
       _showMessage('Please choose the maternity leave classification.');
@@ -727,6 +729,33 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         return false;
       }
     }
+    return true;
+  }
+
+  bool _validateRequiredLeaveDetails() {
+    if (_leaveType == LeaveType.sickLeave) {
+      if (_sickLeaveNature == null) {
+        _showMessage('Please choose the sick leave nature.');
+        return false;
+      }
+      if (_sickIllnessController.text.trim().isEmpty) {
+        _showMessage('Please specify the illness details.');
+        return false;
+      }
+    }
+
+    if (_leaveType == LeaveType.vacationLeave ||
+        _leaveType == LeaveType.specialPrivilegeLeave) {
+      if (_locationOption == null) {
+        _showMessage('Please choose the location for this leave request.');
+        return false;
+      }
+      if (_locationDetailsController.text.trim().isEmpty) {
+        _showMessage('Please specify the location details.');
+        return false;
+      }
+    }
+
     return true;
   }
 
