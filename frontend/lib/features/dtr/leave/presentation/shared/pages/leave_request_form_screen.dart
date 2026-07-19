@@ -44,6 +44,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   static const int _maxAttachmentBytes = 10 * 1024 * 1024;
+  static const int _maternityMinimumNoticeDays = 30;
   static const _annualQuotaTypes = {
     'specialPrivilegeLeave',
     'paternityLeave',
@@ -746,6 +747,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _showMessage('Please enter the expected delivery date.');
         return false;
       }
+      final noticeDays = _calendarDaysFrom(DateTime.now(), expected);
+      if (noticeDays < _maternityMinimumNoticeDays) {
+        _showMessage(
+          'Maternity Leave must be filed at least $_maternityMinimumNoticeDays days before the expected delivery date.',
+        );
+        return false;
+      }
       return true;
     }
 
@@ -822,16 +830,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   String _maternityExpectedDeliveryHelper() {
     final expected = _expectedDeliveryDate;
     if (expected == null) {
-      return 'Used for HR 30-day notice tracking.';
+      return 'Submission requires at least 30 days before the expected delivery date.';
     }
     final diff = _calendarDaysFrom(DateTime.now(), expected);
-    if (diff >= 30) {
+    if (diff >= _maternityMinimumNoticeDays) {
       return 'Meets the 30-day HR notice window.';
     }
-    if (diff >= 0) {
-      return 'Less than 30 days before expected delivery; HR will review the notice context.';
-    }
-    return 'Expected delivery date is already past; HR will review the notice context.';
+    return 'Less than 30 days before expected delivery; submission will be blocked.';
   }
 
   /// Fills CSC header fields (name, office, position, salary, date filed) from
