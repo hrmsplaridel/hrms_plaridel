@@ -163,6 +163,8 @@ const LEAVE_TYPE_RULES = {
 };
 
 const MATERNITY_MINIMUM_NOTICE_DAYS = 30;
+const ADOPTION_PRIMARY_PARENT_DAYS = 60;
+const ADOPTION_MALE_SPOUSE_DAYS = 7;
 
 /** Purposes under "others" that block employee filing (HR/admin process only). */
 const SPECIAL_PROCESS_PURPOSES = ['monetizationOfLeaveCredits', 'terminalLeave'];
@@ -255,6 +257,73 @@ function normalizeLeaveLocationOption(value) {
   return null;
 }
 
+function normalizeAdoptionParentRole(value) {
+  const normalized = (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-/()]/g, '');
+  if (!normalized) return null;
+  if (
+    normalized === 'primaryadoptiveparent' ||
+    normalized === 'adoptivemother' ||
+    normalized === 'mother' ||
+    normalized === 'qualifiedfemale' ||
+    normalized === 'femaleemployee' ||
+    normalized === 'singlemale' ||
+    normalized === 'singlemaleadopter' ||
+    normalized === 'singlemaleemployee'
+  ) {
+    return 'primaryAdoptiveParent';
+  }
+  if (
+    normalized === 'legitimatemalespouse' ||
+    normalized === 'malespouse' ||
+    normalized === 'spouse' ||
+    normalized === 'adoptivefather' ||
+    normalized === 'father'
+  ) {
+    return 'legitimateMaleSpouse';
+  }
+  return null;
+}
+
+function adoptionMaxDaysForParentRole(value) {
+  return normalizeAdoptionParentRole(value) === 'legitimateMaleSpouse'
+    ? ADOPTION_MALE_SPOUSE_DAYS
+    : ADOPTION_PRIMARY_PARENT_DAYS;
+}
+
+function normalizeVawcSupportDocumentType(value) {
+  const normalized = (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-/()]/g, '');
+  if (!normalized) return null;
+  if (normalized === 'protectionorder' || normalized === 'po') {
+    return 'protectionOrder';
+  }
+  if (
+    normalized === 'policereport' ||
+    normalized === 'prosecutorreport' ||
+    normalized === 'policeorprosecutorreport'
+  ) {
+    return 'policeOrProsecutorReport';
+  }
+  if (normalized === 'medicalcertificate') {
+    return 'medicalCertificate';
+  }
+  if (
+    normalized === 'othersupportingdocument' ||
+    normalized === 'other' ||
+    normalized === 'others'
+  ) {
+    return 'otherSupportingDocument';
+  }
+  return null;
+}
+
 function requiredLeaveDetailsFilingError({ leaveType, leaveTypeLabel, details = {} }) {
   const label = (leaveTypeLabel || leaveType || 'This leave type').toString().trim();
 
@@ -289,6 +358,81 @@ function requiredLeaveDetailsFilingError({ leaveType, leaveTypeLabel, details = 
     ]);
     if (!locationDetails) {
       return `${label} requires location details.`;
+    }
+  }
+
+  if (leaveType === 'adoptionLeave') {
+    const role = normalizeAdoptionParentRole(
+      readDetailValue(details, [
+        'adoption_parent_role',
+        'adoptionParentRole',
+        'adoptive_parent_role',
+        'adoptiveParentRole',
+      ])
+    );
+    if (!role) {
+      return `${label} requires the adoption leave eligibility.`;
+    }
+    const placementDate = normalizeIsoDateString(
+      readDetailValue(details, [
+        'adoption_placement_date',
+        'adoptionPlacementDate',
+        'adoption_finalization_date',
+        'adoptionFinalizationDate',
+        'papa_date',
+        'papaDate',
+      ])
+    );
+    if (!placementDate) {
+      return `${label} requires the PAPA / adoption placement date.`;
+    }
+  }
+
+  if (leaveType === 'tenDayVawcLeave') {
+    const supportType = normalizeVawcSupportDocumentType(
+      readDetailValue(details, [
+        'vawc_support_document_type',
+        'vawcSupportDocumentType',
+        'vawc_document_type',
+        'vawcDocumentType',
+      ])
+    );
+    if (!supportType) {
+      return `${label} requires the VAWC supporting document type.`;
+    }
+    const caseDetails = readDetailValue(details, [
+      'vawc_case_details',
+      'vawcCaseDetails',
+      'vawc_protection_order_details',
+      'vawcProtectionOrderDetails',
+      'protection_order_details',
+      'protectionOrderDetails',
+    ]);
+    if (!caseDetails) {
+      return `${label} requires VAWC case or protection order details.`;
+    }
+  }
+
+  if (leaveType === 'soloParentLeave') {
+    const idNumber = readDetailValue(details, [
+      'solo_parent_id_number',
+      'soloParentIdNumber',
+      'solo_parent_id',
+      'soloParentId',
+    ]);
+    if (!idNumber) {
+      return `${label} requires the Solo Parent ID number.`;
+    }
+    const expiryDate = normalizeIsoDateString(
+      readDetailValue(details, [
+        'solo_parent_id_expiry_date',
+        'soloParentIdExpiryDate',
+        'solo_parent_id_valid_until',
+        'soloParentIdValidUntil',
+      ])
+    );
+    if (!expiryDate) {
+      return `${label} requires a valid Solo Parent ID expiry date.`;
     }
   }
 
@@ -336,6 +480,21 @@ function leaveEventDateFilingError({
     return null;
   }
 
+  if (leaveType === 'adoptionLeave') {
+    const placement = normalizeIsoDateString(
+      eventDates.adoptionPlacementDate || eventDates.adoptionFinalizationDate
+    );
+    if (!placement) {
+      return `${label} requires the PAPA / adoption placement date.`;
+    }
+    const startDiff = calendarDaySpan(placement, start);
+    if (startDiff == null) return 'Invalid PAPA / adoption placement date.';
+    if (startDiff < 0) {
+      return `${label} cannot start before the PAPA / adoption placement date.`;
+    }
+    return null;
+  }
+
   if (leaveType === 'rehabilitationPrivilege') {
     const accident = normalizeIsoDateString(eventDates.accidentDate);
     if (!accident) return `${label} requires the accident date.`;
@@ -363,6 +522,17 @@ function leaveEventDateFilingError({
     }
     if (endDiff > 30) {
       return `${label} must be used within 30 days from the calamity occurrence.`;
+    }
+    return null;
+  }
+
+  if (leaveType === 'soloParentLeave') {
+    const expiry = normalizeIsoDateString(eventDates.soloParentIdExpiryDate);
+    if (!expiry) return `${label} requires a valid Solo Parent ID expiry date.`;
+    const today = todayIsoDateInTimeZone();
+    if (expiry < today) return 'Solo Parent ID is already expired.';
+    if (expiry < start) {
+      return 'Solo Parent ID must be valid through the start date of the leave.';
     }
     return null;
   }
@@ -403,9 +573,12 @@ function maternityMaxDaysForDeliveryType(value) {
   return normalizeMaternityDeliveryType(value) === 'caesareanSection' ? 115 : 105;
 }
 
-function effectiveMaxDaysForRule({ rule, leaveType, maternityDeliveryType }) {
+function effectiveMaxDaysForRule({ rule, leaveType, maternityDeliveryType, adoptionParentRole }) {
   if (leaveType === 'maternityLeave') {
     return maternityMaxDaysForDeliveryType(maternityDeliveryType);
+  }
+  if (leaveType === 'adoptionLeave') {
+    return adoptionMaxDaysForParentRole(adoptionParentRole);
   }
   const maxDays = rule?.max_days;
   if (maxDays == null || maxDays === '') return null;
@@ -447,6 +620,7 @@ function validateEmployeeLeaveRequest(opts) {
     numberOfDays,
     hasAttachment = false,
     maternityDeliveryType,
+    adoptionParentRole,
     eventDates,
     details,
     enforceRequiredDetails = true,
@@ -524,6 +698,7 @@ function validateEmployeeLeaveRequest(opts) {
     rule,
     leaveType,
     maternityDeliveryType,
+    adoptionParentRole,
   });
   if (maxDays != null && numberOfDays != null) {
     const days = parseFloat(numberOfDays);
@@ -582,6 +757,9 @@ module.exports = {
   leaveEventDateFilingError,
   normalizeMaternityDeliveryType,
   maternityMaxDaysForDeliveryType,
+  normalizeAdoptionParentRole,
+  adoptionMaxDaysForParentRole,
+  normalizeVawcSupportDocumentType,
   effectiveMaxDaysForRule,
   requiredLeaveDetailsFilingError,
   isEmployeeFileable,

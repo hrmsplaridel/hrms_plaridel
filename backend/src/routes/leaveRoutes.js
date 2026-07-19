@@ -257,11 +257,23 @@ const LEGACY_NO_CREDIT_LEDGER_TYPES = new Set([
   ...SYSTEM_NO_CREDIT_LEAVE_TYPES,
   'others',
 ]);
-const SPECIAL_PRIVILEGE_LEAVE_TYPE = 'specialPrivilegeLeave';
-const SPECIAL_PRIVILEGE_LEAVE_ANNUAL_LIMIT = 3;
+const ANNUAL_QUOTA_LEAVE_LIMITS = Object.freeze({
+  specialPrivilegeLeave: {
+    limit: 3,
+    label: 'Special Privilege Leave',
+  },
+  soloParentLeave: {
+    limit: 7,
+    label: 'Solo Parent Leave',
+  },
+  tenDayVawcLeave: {
+    limit: 10,
+    label: '10-Day VAWC Leave',
+  },
+});
 const LEAVE_REVOKE_WINDOW_DAYS = 3;
 const LEAVE_REVOKE_WINDOW_MS = LEAVE_REVOKE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
-const SPECIAL_PRIVILEGE_LEAVE_USAGE_STATUSES = [
+const ANNUAL_QUOTA_LEAVE_USAGE_STATUSES = [
   'pending',
   'pending_department_head',
   'pending_hr',
@@ -628,11 +640,13 @@ async function workingDaysWithinYear(client, userId, startStr, endStr, year) {
   return result.days ?? 0;
 }
 
-async function assertSpecialPrivilegeLeaveAnnualLimit(
+async function assertAnnualQuotaLeaveLimit(
   client,
   { userId, leaveTypeName, startStr, endStr, excludeId = null }
 ) {
-  if (leaveTypeName !== SPECIAL_PRIVILEGE_LEAVE_TYPE) return;
+  const leaveTypeKey = String(leaveTypeName || '').trim();
+  const config = ANNUAL_QUOTA_LEAVE_LIMITS[leaveTypeKey];
+  if (!config) return;
   if (!client || !userId || !startStr || !endStr) return;
 
   const years = calendarYearsForDateRange(startStr, endStr);
@@ -652,8 +666,8 @@ async function assertSpecialPrivilegeLeaveAnnualLimit(
        AND ($6::uuid IS NULL OR lr.id <> $6::uuid)`,
     [
       userId,
-      SPECIAL_PRIVILEGE_LEAVE_TYPE,
-      SPECIAL_PRIVILEGE_LEAVE_USAGE_STATUSES,
+      leaveTypeKey,
+      ANNUAL_QUOTA_LEAVE_USAGE_STATUSES,
       queryFrom,
       queryTo,
       excludeId,
@@ -671,10 +685,10 @@ async function assertSpecialPrivilegeLeaveAnnualLimit(
       usedDays += await workingDaysWithinYear(client, userId, existingStart, existingEnd, year);
     }
 
-    const remaining = Math.max(0, SPECIAL_PRIVILEGE_LEAVE_ANNUAL_LIMIT - usedDays);
-    if (usedDays + requestedDays > SPECIAL_PRIVILEGE_LEAVE_ANNUAL_LIMIT + 0.0001) {
+    const remaining = Math.max(0, config.limit - usedDays);
+    if (usedDays + requestedDays > config.limit + 0.0001) {
       const err = new Error(
-        `Special Privilege Leave is limited to ${SPECIAL_PRIVILEGE_LEAVE_ANNUAL_LIMIT} days per calendar year. ` +
+        `${config.label} is limited to ${config.limit} days per calendar year. ` +
         `You only have ${formatDayCount(remaining)} day(s) remaining for ${year}; this request needs ${formatDayCount(requestedDays)} day(s).`
       );
       err.statusCode = 400;
@@ -893,6 +907,17 @@ function readMaternityDeliveryType(details) {
   );
 }
 
+function readAdoptionParentRole(details) {
+  if (!details || typeof details !== 'object') return null;
+  return (
+    details.adoption_parent_role ||
+    details.adoptionParentRole ||
+    details.adoptive_parent_role ||
+    details.adoptiveParentRole ||
+    null
+  );
+}
+
 function readFirstDetailValue(details, keys) {
   if (!details || typeof details !== 'object') return null;
   for (const key of keys) {
@@ -928,6 +953,20 @@ function readLeaveEventDates(details) {
       'calamity_occurrence_date',
       'calamityOccurrenceDate',
     ]),
+    adoptionPlacementDate: readFirstDetailValue(details, [
+      'adoption_placement_date',
+      'adoptionPlacementDate',
+      'adoption_finalization_date',
+      'adoptionFinalizationDate',
+      'papa_date',
+      'papaDate',
+    ]),
+    soloParentIdExpiryDate: readFirstDetailValue(details, [
+      'solo_parent_id_expiry_date',
+      'soloParentIdExpiryDate',
+      'solo_parent_id_valid_until',
+      'soloParentIdValidUntil',
+    ]),
   };
 }
 
@@ -941,6 +980,7 @@ function validateEmployeeLeaveRequestWithRule(opts) {
     numberOfDays,
     userSex,
     maternityDeliveryType,
+    adoptionParentRole,
     eventDates,
     details,
     enforceEventDateRules = false,
@@ -1038,6 +1078,7 @@ function validateEmployeeLeaveRequestWithRule(opts) {
     rule,
     leaveType,
     maternityDeliveryType,
+    adoptionParentRole,
   });
   if (maxDays != null && numberOfDays != null) {
     const days = parseFloat(numberOfDays);
@@ -1908,6 +1949,7 @@ router.post('/draft', protect, async (req, res) => {
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
+      const adoptionParentRole = readAdoptionParentRole(payloadDetails);
       const eventDates = readLeaveEventDates(payloadDetails);
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       const userSex = await getUserSexForLeaveValidation(client, userId);
@@ -1921,6 +1963,7 @@ router.post('/draft', protect, async (req, res) => {
         hasAttachment: false,
         userSex,
         maternityDeliveryType,
+        adoptionParentRole,
         eventDates,
         details: payloadDetails,
         enforceEventDateRules: false,
@@ -2022,6 +2065,7 @@ router.post('/submit', protect, async (req, res) => {
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
+      const adoptionParentRole = readAdoptionParentRole(payloadDetails);
       const eventDates = readLeaveEventDates(payloadDetails);
 
       // Validate the server-computed, holiday-aware working day count.
@@ -2043,6 +2087,7 @@ router.post('/submit', protect, async (req, res) => {
         hasAttachment: false,
         userSex,
         maternityDeliveryType,
+        adoptionParentRole,
         eventDates,
         details: payloadDetails,
         enforceEventDateRules: true,
@@ -2067,7 +2112,7 @@ router.post('/submit', protect, async (req, res) => {
         return res.status(400).json({ error: 'Overlapping leave request exists' });
       }
 
-      await assertSpecialPrivilegeLeaveAnnualLimit(client, {
+      await assertAnnualQuotaLeaveLimit(client, {
         userId,
         leaveTypeName: String(leave_type),
         startStr,
@@ -2214,6 +2259,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
+      const adoptionParentRole = readAdoptionParentRole(payloadDetails);
       const eventDates = readLeaveEventDates(payloadDetails);
 
       const effectiveDaysSubmit = workingDayResult.days ?? days;
@@ -2234,6 +2280,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         hasAttachment: true,
         userSex,
         maternityDeliveryType,
+        adoptionParentRole,
         eventDates,
         details: payloadDetails,
         enforceEventDateRules: true,
@@ -2257,7 +2304,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         return res.status(400).json({ error: 'Overlapping leave request exists' });
       }
 
-      await assertSpecialPrivilegeLeaveAnnualLimit(client, {
+      await assertAnnualQuotaLeaveLimit(client, {
         userId,
         leaveTypeName: String(leave_type),
         startStr,
@@ -2439,6 +2486,7 @@ router.put('/:id', protect, async (req, res) => {
         : { ...rest, leave_type, start_date: startStr, end_date: endStr };
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
+      const adoptionParentRole = readAdoptionParentRole(payloadDetails);
       const eventDates = readLeaveEventDates(payloadDetails);
       if (startStr && endStr) {
         const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
@@ -2465,6 +2513,7 @@ router.put('/:id', protect, async (req, res) => {
           hasAttachment: false,
           userSex,
           maternityDeliveryType,
+          adoptionParentRole,
           eventDates,
           details: payloadDetails,
           enforceEventDateRules:
@@ -2511,7 +2560,7 @@ router.put('/:id', protect, async (req, res) => {
         startStr &&
         endStr
       ) {
-        await assertSpecialPrivilegeLeaveAnnualLimit(client, {
+        await assertAnnualQuotaLeaveLimit(client, {
           userId,
           leaveTypeName: String(leave_type),
           startStr,
@@ -3196,7 +3245,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       currentStatus: r.status,
       desiredStatus: 'pending_hr',
     });
-    await assertSpecialPrivilegeLeaveAnnualLimit(client, {
+    await assertAnnualQuotaLeaveLimit(client, {
       userId: r.user_id || r.employee_id,
       leaveTypeName: r.leave_type_name || null,
       startStr: toIsoDateStr(r.start_date),
@@ -3549,7 +3598,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         return res.status(400).json({ error: 'Overlapping leave request exists' });
       }
 
-      await assertSpecialPrivilegeLeaveAnnualLimit(client, {
+      await assertAnnualQuotaLeaveLimit(client, {
         userId: targetUserId,
         leaveTypeName,
         startStr,
