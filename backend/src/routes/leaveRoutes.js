@@ -13,6 +13,7 @@ const {
   leaveEventDateFilingError,
   minimumAdvanceDaysFilingError,
   mustBlockMissingAttachment,
+  requiredLeaveDetailsFilingError,
 } = require('./leaveTypeRules');
 const {
   validateEmployeeUpdateTransition,
@@ -941,6 +942,7 @@ function validateEmployeeLeaveRequestWithRule(opts) {
     userSex,
     maternityDeliveryType,
     eventDates,
+    details,
     enforceEventDateRules = false,
   } = opts;
 
@@ -1003,6 +1005,19 @@ function validateEmployeeLeaveRequestWithRule(opts) {
       valid: false,
       error: advanceError,
     };
+  }
+  if (enforceEventDateRules) {
+    const requiredDetailsError = requiredLeaveDetailsFilingError({
+      leaveType,
+      leaveTypeLabel: rule.display_name,
+      details,
+    });
+    if (requiredDetailsError) {
+      return {
+        valid: false,
+        error: requiredDetailsError,
+      };
+    }
   }
   if (enforceEventDateRules) {
     const eventDateError = leaveEventDateFilingError({
@@ -1907,6 +1922,7 @@ router.post('/draft', protect, async (req, res) => {
         userSex,
         maternityDeliveryType,
         eventDates,
+        details: payloadDetails,
         enforceEventDateRules: false,
       });
       if (!validation.valid) {
@@ -2028,6 +2044,7 @@ router.post('/submit', protect, async (req, res) => {
         userSex,
         maternityDeliveryType,
         eventDates,
+        details: payloadDetails,
         enforceEventDateRules: true,
       });
       if (!validation.valid) {
@@ -2218,6 +2235,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         userSex,
         maternityDeliveryType,
         eventDates,
+        details: payloadDetails,
         enforceEventDateRules: true,
       });
       if (!validation.valid) {
@@ -2448,6 +2466,7 @@ router.put('/:id', protect, async (req, res) => {
           userSex,
           maternityDeliveryType,
           eventDates,
+          details: payloadDetails,
           enforceEventDateRules:
             nextStatus === 'pending' ||
             nextStatus === 'pending_department_head' ||

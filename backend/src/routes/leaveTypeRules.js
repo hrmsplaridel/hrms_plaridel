@@ -212,6 +212,89 @@ function normalizeIsoDateString(value) {
   return isoDateToUtcDayMs(text) == null ? null : text;
 }
 
+function readDetailValue(details, keys) {
+  if (!details || typeof details !== 'object') return null;
+  for (const key of keys) {
+    const value = details[key];
+    if (value != null && `${value}`.trim() !== '') return `${value}`.trim();
+  }
+  return null;
+}
+
+function normalizeSickLeaveNature(value) {
+  const normalized = (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-/()]/g, '');
+  if (normalized === 'inhospital' || normalized === 'hospital') {
+    return 'inHospital';
+  }
+  if (normalized === 'outpatient' || normalized === 'outpatientcare') {
+    return 'outPatient';
+  }
+  return null;
+}
+
+function normalizeLeaveLocationOption(value) {
+  const normalized = (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-/()]/g, '');
+  if (
+    normalized === 'withinphilippines' ||
+    normalized === 'philippines' ||
+    normalized === 'local'
+  ) {
+    return 'withinPhilippines';
+  }
+  if (normalized === 'abroad' || normalized === 'foreign' || normalized === 'outsidephilippines') {
+    return 'abroad';
+  }
+  return null;
+}
+
+function requiredLeaveDetailsFilingError({ leaveType, leaveTypeLabel, details = {} }) {
+  const label = (leaveTypeLabel || leaveType || 'This leave type').toString().trim();
+
+  if (leaveType === 'sickLeave') {
+    const nature = normalizeSickLeaveNature(
+      readDetailValue(details, ['sick_leave_nature', 'sickLeaveNature'])
+    );
+    if (!nature) {
+      return `${label} requires the sick leave nature (In Hospital or Out Patient).`;
+    }
+    const illnessDetails = readDetailValue(details, [
+      'sick_illness_details',
+      'sickIllnessDetails',
+      'illness_details',
+      'illnessDetails',
+    ]);
+    if (!illnessDetails) {
+      return `${label} requires illness details.`;
+    }
+  }
+
+  if (leaveType === 'vacationLeave' || leaveType === 'specialPrivilegeLeave') {
+    const location = normalizeLeaveLocationOption(
+      readDetailValue(details, ['location_option', 'locationOption'])
+    );
+    if (!location) {
+      return `${label} requires a location option (Within the Philippines or Abroad).`;
+    }
+    const locationDetails = readDetailValue(details, [
+      'location_details',
+      'locationDetails',
+    ]);
+    if (!locationDetails) {
+      return `${label} requires location details.`;
+    }
+  }
+
+  return null;
+}
+
 function leaveEventDateFilingError({
   leaveType,
   leaveTypeLabel,
@@ -365,6 +448,8 @@ function validateEmployeeLeaveRequest(opts) {
     hasAttachment = false,
     maternityDeliveryType,
     eventDates,
+    details,
+    enforceRequiredDetails = true,
   } = opts;
   const rule = getRule(leaveType);
 
@@ -410,6 +495,17 @@ function validateEmployeeLeaveRequest(opts) {
   });
   if (advanceError) {
     return { valid: false, error: advanceError };
+  }
+
+  if (enforceRequiredDetails) {
+    const requiredDetailsError = requiredLeaveDetailsFilingError({
+      leaveType,
+      leaveTypeLabel: rule.display_name,
+      details,
+    });
+    if (requiredDetailsError) {
+      return { valid: false, error: requiredDetailsError };
+    }
   }
 
   const eventDateError = leaveEventDateFilingError({
@@ -487,6 +583,7 @@ module.exports = {
   normalizeMaternityDeliveryType,
   maternityMaxDaysForDeliveryType,
   effectiveMaxDaysForRule,
+  requiredLeaveDetailsFilingError,
   isEmployeeFileable,
   mustBlockMissingAttachment,
 };
