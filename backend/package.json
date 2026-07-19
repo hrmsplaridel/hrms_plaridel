@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node scripts/free-dev-port.js && node --watch src/index.js",
+    "preflight": "node scripts/preflight.js",
+    "pm2:deploy": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-pm2.ps1",
     "db:init": "psql -d $npm_config_db -f scripts/init-schema.sql",
     "leave:accrual": "node scripts/run-leave-monthly-accrual.js",
     "leave:accrual:dry": "node scripts/run-leave-monthly-accrual.js --dry-run",

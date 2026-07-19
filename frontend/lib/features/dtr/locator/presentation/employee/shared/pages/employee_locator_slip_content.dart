@@ -230,7 +230,10 @@ class EmployeeLocatorSlipContentState
                 child: _buildMyRequests(width: width, compact: compact),
               ),
             if (_currentSection == _LocatorSection.approvals)
-              _buildApprovalsView(),
+              KeyedSubtree(
+                key: widget.tutorialRequestsKey,
+                child: _buildApprovalsView(),
+              ),
           ],
         );
       },
