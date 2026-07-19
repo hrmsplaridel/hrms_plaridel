@@ -162,6 +162,8 @@ const LEAVE_TYPE_RULES = {
   },
 };
 
+const MATERNITY_MINIMUM_NOTICE_DAYS = 30;
+
 /** Purposes under "others" that block employee filing (HR/admin process only). */
 const SPECIAL_PROCESS_PURPOSES = ['monetizationOfLeaveCredits', 'terminalLeave'];
 
@@ -226,6 +228,10 @@ function leaveEventDateFilingError({
     const expected = normalizeIsoDateString(eventDates.expectedDeliveryDate);
     if (!expected) {
       return `${label} requires the expected delivery date.`;
+    }
+    const noticeDays = calendarDayDifference(expected);
+    if (noticeDays != null && noticeDays < MATERNITY_MINIMUM_NOTICE_DAYS) {
+      return `${label} must be filed at least ${MATERNITY_MINIMUM_NOTICE_DAYS} days before the expected delivery date.`;
     }
     return null;
   }
