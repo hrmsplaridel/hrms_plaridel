@@ -3,7 +3,7 @@ const GUIDELINES = {
     description:
       'Granted to employees for personal recreation, rest, or travel. Must be applied for in advance and is subject to approval.',
     requirements:
-      'No documentary requirement. Indicate location, whether within the Philippines or abroad.',
+      'No documentary requirement, but HRMS requires the location option and specific location/details.',
     advanceFiling: 'File at least 5 days before the intended leave date.',
   },
   mandatoryForcedLeave: {
@@ -18,41 +18,45 @@ const GUIDELINES = {
     description:
       'Granted when an employee is unable to report due to personal illness, injury, or medical appointment.',
     requirements:
-      'Medical certificate required if the absence is 5 or more consecutive days, or at the discretion of the head of office.',
+      'Choose In Hospital or Out Patient and enter illness details. Medical certificate required if the absence is 5 or more consecutive days, or at the discretion of the head of office.',
     advanceFiling: 'Apply immediately upon return or during absence if possible.',
   },
   maternityLeave: {
     description:
       'Granted to female employees for childbirth or miscarriage, both married and unmarried.',
     requirements:
-      'Medical certificate or birth/delivery record. Marriage certificate if applicable. Notify your agency before the expected delivery.',
+      'Expected delivery date, maternity classification, and supporting attachment are required. Use the date and classification from the medical record.',
     limits:
       'Normal delivery: up to 105 working days. Caesarean section: up to 115 working days.',
     advanceFiling:
-      'Notify your supervisor at least 30 days before the expected delivery date.',
+      'HRMS blocks submission if filed less than 30 days before the expected delivery date.',
     notes: 'Covers normal delivery, caesarean section, and miscarriage.',
   },
   paternityLeave: {
     description:
       'Granted to married male employees upon the delivery/miscarriage of their legitimate spouse.',
     requirements:
-      'Marriage certificate. Birth certificate or medical records showing delivery/miscarriage.',
-    limits: '7 working days; must be availed within 60 days of delivery.',
+      'Child delivery or miscarriage date and supporting attachment are required, such as marriage certificate plus birth certificate or medical record.',
+    limits:
+      '7 working days. HRMS blocks requests that start before the child delivery date or end more than 60 days from delivery.',
     advanceFiling: 'Notify HR prior or immediately after the event.',
   },
   specialPrivilegeLeave: {
     description:
       'Granted for personal milestones and special occasions such as birthdays, weddings, or hospitalization of immediate family.',
-    requirements: 'No documentary requirement. State location/occasion.',
+    requirements:
+      'No documentary requirement, but HRMS requires the location option and specific location/details.',
     limits: '3 days per year, non-cumulative.',
-    advanceFiling: 'File in advance when possible.',
+    advanceFiling: 'File at least 7 days before the intended leave date.',
   },
   soloParentLeave: {
     description:
       'Granted to solo parents as defined by RA 8972 for parental obligations.',
     requirements:
-      'Solo Parent ID or DSWD-issued certificate. Submit to HR before or after availing the leave.',
-    limits: '7 working days per year.',
+      'Solo Parent ID number, Solo Parent ID expiry date, and supporting attachment are required.',
+    limits:
+      '7 working days per year. HRMS counts pending plus approved requests and requires the Solo Parent ID to be valid through the leave start date.',
+    advanceFiling: 'File at least 5 days before the intended leave date.',
   },
   studyLeave: {
     description:
@@ -66,8 +70,9 @@ const GUIDELINES = {
     description:
       'Granted to women employees who are victims of Violence Against Women and Children under RA 9262.',
     requirements:
-      'Barangay Protection Order, Court order, or any certified government-issued document confirming the VAWC situation.',
-    limits: '10 days per year; may be extended as deemed necessary by the agency.',
+      'Supporting attachment, supporting document type, and case/protection order details are required.',
+    limits:
+      '10 working days per year. HRMS counts pending plus approved requests for the annual cap.',
   },
   rehabilitationPrivilege: {
     description:
@@ -75,13 +80,14 @@ const GUIDELINES = {
     requirements:
       'Medical certificate showing the injury and its direct connection to official duties. Incident/accident report endorsed by the head of office.',
     limits: 'Up to 6 months or 180 working days.',
-    notes: 'Available only for work-related injuries, not personal accidents.',
+    notes:
+      'Available only for work-related injuries, not personal accidents. HRMS requires the accident date and blocks filing more than 1 week after the accident.',
   },
   specialLeaveBenefitsForWomen: {
     description:
       'Granted to female employees who undergo surgery caused by gynecological disorders under RA 9710.',
     requirements:
-      'Medical certificate from a licensed physician confirming the gynecological disorder and necessity of the operation.',
+      'Illness/procedure details and medical certificate from a licensed physician confirming the gynecological disorder and necessity of the operation.',
     limits: 'Maximum 60 days, non-cumulative.',
     advanceFiling: 'Apply before or immediately after the procedure.',
   },
@@ -89,22 +95,25 @@ const GUIDELINES = {
     description:
       "Granted when an employee's residence is within a declared calamity area or the employee must attend to immediate family needs due to calamity.",
     requirements:
-      'Certification from the Barangay/LDRRMO or NDRRMC that the area is under calamity. Proof of residency in the affected area.',
-    limits: '5 working days per calamity incident.',
+      'Calamity/disaster occurrence date, affected location, and supporting certification from Barangay/LDRRMO/NDRRMC or proof of residency.',
+    limits:
+      '5 working days per calamity incident. HRMS blocks requests that start before the calamity date or end more than 30 days from the calamity.',
   },
   adoptionLeave: {
     description:
       'Granted to adoptive parents upon finalization of the adoption decree under RA 8552.',
     requirements:
-      'Court order / Adoption decree. Certified copy of the Certificate of Finality.',
-    limits: '60 working days for the adoptive mother; 7 working days for the adoptive father.',
+      'PAPA/adoption placement date, adoption leave eligibility role, and supporting attachment are required.',
+    limits:
+      '60 working days for the adoptive mother or single male adopter; 7 working days for the legitimate male spouse. HRMS blocks requests that start before the placement date.',
   },
   others: {
     description:
       'Other leave types not covered by the standard categories. Include complete details in the reason/remarks field.',
     requirements:
       'Provide supporting documents as applicable to the specific circumstance.',
-    notes: 'Your supervisor and HR will review and determine applicable rules.',
+    notes:
+      'Your supervisor and HR will review and determine applicable rules. Monetization of Leave Credits and Terminal Leave are HR/admin processes only.',
   },
 };
 
@@ -168,7 +177,7 @@ const GUIDELINE_SECTIONS = [
     points: [
       'Leave is subject to supervisor/department head and HR approval.',
       'Approved leave dates are used by HRMS when updating DTR and leave balances.',
-      'Employees should provide accurate dates, number of days, reason, and required documents.',
+      'Employees should provide accurate dates, number of days, reason, required form details, and required documents.',
     ],
   },
   {
@@ -178,7 +187,7 @@ const GUIDELINE_SECTIONS = [
     points: [
       'Vacation leave is normally filed in advance; HRMS leave type rules may require a minimum advance notice.',
       'Sick leave may be filed during the absence or immediately upon return when advance filing is not practical.',
-      'Late or past-date filing depends on the configured leave type rule and HR review.',
+      'HRMS hard-blocks some timing rules, such as maternity 30-day notice, paternity 60-day window, adoption placement-date start, calamity 30-day use, and rehabilitation filing within 1 week from accident.',
     ],
   },
   {
@@ -188,15 +197,29 @@ const GUIDELINE_SECTIONS = [
     points: [
       'Sick leave normally needs a medical certificate for 5 or more consecutive days, or when required by the head of office.',
       'Maternity, paternity, solo parent, VAWC, calamity, rehabilitation, adoption, and special women leave commonly need supporting documents.',
-      'The exact attachment requirement still follows the active HRMS leave type configuration.',
+      'Some leave types also require form details before submission, such as location, illness nature, delivery date, placement date, VAWC case details, or Solo Parent ID validity.',
     ],
   },
   {
     key: 'credits_limits',
     title: 'Leave Credits & Limits',
-    aliases: ['credits', 'leave credits', 'limits', 'maximum', 'max', 'balance'],
+    aliases: [
+      'credits',
+      'leave credits',
+      'monthly credits',
+      'monthly accrual',
+      'earned credits',
+      'earned leave',
+      '1.25',
+      '1.250',
+      'limits',
+      'maximum',
+      'max',
+      'balance',
+    ],
     points: [
-      'Vacation and sick leave normally use earned leave credits and reduce available balance after approval/posting.',
+      'Vacation and sick leave earn 1.250 days per month through monthly accrual when the employee is leave-credit eligible and has an active assignment for the month.',
+      'Monthly accrual does not require a shift and does not check employment type in the current HRMS rule.',
       'Some special leave types have annual or per-incident limits and may not use the same balance ledger.',
       'Pending leave may reduce the available balance shown before final approval.',
     ],
@@ -216,7 +239,7 @@ const FORM_FIELD_GUIDANCE = {
   vacationLeave: [
     'Select Vacation Leave.',
     'Enter start date, end date, and number of days.',
-    'Indicate whether the leave is within the Philippines or abroad, then add the location/reason.',
+    'Choose the location option, then enter the specific location/details.',
   ],
   mandatoryForcedLeave: [
     'Select Mandatory/Forced Leave if available for employee filing.',
@@ -226,28 +249,32 @@ const FORM_FIELD_GUIDANCE = {
   sickLeave: [
     'Select Sick Leave.',
     'Enter the absence dates and number of days.',
-    'State whether it is in-hospital, outpatient, medical appointment, or recovery.',
+    'Choose In Hospital or Out Patient, then enter illness details.',
     'Attach a medical certificate when required, especially for 5 or more consecutive days.',
   ],
   maternityLeave: [
     'Select Maternity Leave.',
-    'Enter expected/actual delivery or miscarriage date and covered leave dates.',
-    'Indicate delivery classification when applicable, such as normal delivery or caesarean section.',
-    'Attach medical certificate, birth/delivery record, or related documents required by HR.',
+    'Enter the expected delivery date and covered leave dates.',
+    'Choose the maternity classification, such as Normal Delivery or Caesarean Section.',
+    'Attach the medical certificate, birth/delivery record, or related document required by HR.',
+    'File at least 30 days before the expected delivery date.',
   ],
   paternityLeave: [
     'Select Paternity Leave.',
     'Enter the spouse delivery/miscarriage date and requested covered dates.',
+    'Make sure the leave starts on or after the delivery date and ends within 60 days from delivery.',
     'Attach marriage certificate plus birth certificate or medical record when required.',
   ],
   specialPrivilegeLeave: [
     'Select Special Privilege Leave.',
     'Enter covered dates, number of days, and occasion/reason.',
-    'State the location or occasion clearly.',
+    'Choose the location option, then enter the specific location/details.',
   ],
   soloParentLeave: [
     'Select Solo Parent Leave.',
     'Enter covered dates and reason related to parental obligation.',
+    'Enter the Solo Parent ID number and expiry date.',
+    'Make sure the ID is not expired and is valid through the leave start date.',
     'Attach Solo Parent ID or DSWD-issued certificate when required.',
   ],
   studyLeave: [
@@ -258,6 +285,8 @@ const FORM_FIELD_GUIDANCE = {
   tenDayVawcLeave: [
     'Select 10-Day VAWC Leave.',
     'Enter covered dates and supporting reason.',
+    'Choose the VAWC supporting document type.',
+    'Enter the case or protection order details.',
     'Attach a Barangay Protection Order, court order, or certified government document when required.',
   ],
   rehabilitationPrivilege: [
@@ -273,11 +302,14 @@ const FORM_FIELD_GUIDANCE = {
   specialEmergencyCalamityLeave: [
     'Select Special Emergency/Calamity Leave.',
     'Enter calamity date, covered dates, and affected location.',
+    'Make sure the leave starts on or after the calamity date and ends within 30 days from the calamity.',
     'Attach barangay/LDRRMO/NDRRMC certification or proof of residency when required.',
   ],
   adoptionLeave: [
     'Select Adoption Leave.',
-    'Enter covered dates tied to adoption finalization.',
+    'Enter the PAPA/adoption placement date.',
+    'Choose the adoption leave eligibility role.',
+    'Make sure the leave starts on or after the placement date.',
     'Attach court order/adoption decree and Certificate of Finality when required.',
   ],
   others: [
@@ -473,6 +505,106 @@ const LEAVE_FORM_FIELDS = {
       'Enter the actual delivery or miscarriage date shown in the supporting record.',
     examples: ['Child Delivery Date: July 2, 2026'],
     note: 'Paternity leave timing is checked from this date.',
+  },
+  adoption_placement_date: {
+    title: 'PAPA / Adoption Placement Date',
+    aliases: [
+      'papa date',
+      'papa placement date',
+      'adoption placement date',
+      'adoption finalization date',
+      'placement date',
+      'papa field',
+      'adoption date',
+    ],
+    explanation:
+      'Enter the PAPA or adoption placement date supported by the adoption record.',
+    examples: ['PAPA / Adoption Placement Date: July 10, 2026'],
+    note: 'Adoption Leave cannot start before this date.',
+  },
+  adoption_parent_role: {
+    title: 'Adoption Leave Eligibility',
+    aliases: [
+      'adoption eligibility',
+      'adoption leave eligibility',
+      'adoption role',
+      'adoption parent role',
+      'adoptive mother',
+      'single male adopter',
+      'legitimate male spouse',
+    ],
+    explanation:
+      'Choose the role that matches your eligibility for adoption leave.',
+    examples: [
+      'Adoptive mother / single male adopter (60 days)',
+      'Legitimate male spouse (7 days)',
+    ],
+    note: 'HRMS uses this selection to apply the correct 60-day or 7-day maximum.',
+  },
+  vawc_support_document_type: {
+    title: 'VAWC Supporting Document Type',
+    aliases: [
+      'vawc supporting document type',
+      'vawc document type',
+      'supporting document type',
+      'protection order',
+      'police report',
+      'prosecutor report',
+      'vawc medical certificate',
+    ],
+    explanation:
+      'Choose the document type that matches the VAWC proof you will attach.',
+    examples: [
+      'Protection Order',
+      'Police / Prosecutor Report',
+      'Medical Certificate',
+      'Other Supporting Document',
+    ],
+    note: 'The selected document type should match the uploaded attachment.',
+  },
+  vawc_case_details: {
+    title: 'Case / Protection Order Details',
+    aliases: [
+      'vawc case details',
+      'case details',
+      'protection order details',
+      'case protection order details',
+      'vawc details',
+      'vawc case',
+    ],
+    explanation:
+      'Enter the case reference, protection order details, issuing office, or brief supporting context from the document.',
+    examples: ['BPO issued by [barangay] on July 10, 2026', 'Police blotter/report reference [number]'],
+    note: 'Keep the details accurate and limited to what HR needs to match the supporting document.',
+  },
+  solo_parent_id_number: {
+    title: 'Solo Parent ID Number',
+    aliases: [
+      'solo parent id number',
+      'solo parent id',
+      'solo parent number',
+      'solo parent id field',
+      'solo parent id no',
+    ],
+    explanation:
+      'Enter the ID number shown on your valid Solo Parent ID.',
+    examples: ['Solo Parent ID Number: SP-2026-00123'],
+    note: 'Use the exact number from the document you will attach.',
+  },
+  solo_parent_id_expiry_date: {
+    title: 'Solo Parent ID Expiry Date',
+    aliases: [
+      'solo parent id expiry date',
+      'solo parent expiry date',
+      'solo parent id valid until',
+      'solo parent validity',
+      'id expiry',
+      'expiry date',
+    ],
+    explanation:
+      'Enter the expiry or valid-until date shown on your Solo Parent ID.',
+    examples: ['Solo Parent ID Expiry Date: December 31, 2026'],
+    note: 'The ID must not be expired and must still be valid on the leave start date.',
   },
   accident_date: {
     title: 'Accident Date',

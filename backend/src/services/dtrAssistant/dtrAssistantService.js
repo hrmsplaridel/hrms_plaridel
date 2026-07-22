@@ -1228,7 +1228,7 @@ function isHowToFileInstructionQuestion(text) {
 }
 
 function isLeaveGuidelineSectionQuestion(text) {
-  return /\b(general rules?|filing deadlines?|deadlines?|supporting documents?|attachments?|leave credits?|credits and limits?|commutation|monetization|monetisation|terminal leave|guidelines?|guideline sections?|guidelines?.*(?:leave types?|types of leave)|leave types?.*guidelines?|types of leave.*guidelines?|explain.*guidelines?|explain.*deadlines?|explain.*credits?|explain.*documents?)\b/.test(
+  return /\b(general rules?|filing deadlines?|deadlines?|supporting documents?|attachments?|leave credits?|monthly credits?|monthly accrual|earned credits?|earned leave|credits and limits?|commutation|monetization|monetisation|terminal leave|guidelines?|guideline sections?|guidelines?.*(?:leave types?|types of leave)|leave types?.*guidelines?|types of leave.*guidelines?|explain.*guidelines?|explain.*deadlines?|explain.*credits?|explain.*documents?)\b|1\.25(?:0)?/.test(
     lower(text)
   );
 }

@@ -28,7 +28,7 @@ function isLeaveHowToFileQuestion(text) {
 }
 
 function isLeaveGuidelineSectionQuestion(text) {
-  return /\b(general rules?|filing deadlines?|deadlines?|supporting documents?|attachments?|leave credits?|credits and limits?|commutation|monetization|monetisation|terminal leave|guidelines?|guideline sections?|guidelines?.*(?:leave types?|types of leave)|leave types?.*guidelines?|types of leave.*guidelines?|explain.*guidelines?|explain.*deadlines?|explain.*credits?|explain.*documents?)\b/.test(
+  return /\b(general rules?|filing deadlines?|deadlines?|supporting documents?|attachments?|leave credits?|monthly credits?|monthly accrual|earned credits?|earned leave|credits and limits?|commutation|monetization|monetisation|terminal leave|guidelines?|guideline sections?|guidelines?.*(?:leave types?|types of leave)|leave types?.*guidelines?|types of leave.*guidelines?|explain.*guidelines?|explain.*deadlines?|explain.*credits?|explain.*documents?)\b|1\.25(?:0)?/.test(
     text
   );
 }
@@ -251,6 +251,10 @@ const FUZZY_INTENT_PROFILES = [
       'filing deadlines',
       'supporting documents',
       'leave credits and limits',
+      'monthly leave credits',
+      'monthly accrual',
+      'earned credits',
+      '1.250 credits',
       'what is sick leave',
       'unsay pasabot sick leave',
     ],

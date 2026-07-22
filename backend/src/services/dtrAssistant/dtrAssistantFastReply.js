@@ -155,7 +155,7 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
   bisaya: {
     vacationLeave: {
       description: 'Para sa personal nga pahuway, lakaw, o travel; kinahanglan i-file daan ug subject sa approval.',
-      requirements: 'Walay required document. Ibutang ang location kung sulod ba sa Pilipinas o abroad.',
+      requirements: 'Walay required document, pero required sa HRMS ang location option ug specific location/details.',
       advanceFiling: 'I-file labing menos 5 ka adlaw before sa leave date.',
     },
     mandatoryForcedLeave: {
@@ -166,32 +166,33 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
     },
     sickLeave: {
       description: 'Para kung dili ka makareport tungod sa sakit, injury, recovery, o medical appointment.',
-      requirements: 'Medical certificate kasagaran kinahanglan kung 5 o labaw ka sunod-sunod nga adlaw, o kung pangayoon sa head of office.',
+      requirements: 'Pilia ang In Hospital o Out Patient ug ibutang ang illness details. Medical certificate kinahanglan kung 5 o labaw ka sunod-sunod nga adlaw, o kung pangayoon sa head of office.',
       advanceFiling: 'I-file dayon pagbalik nimo o samtang absent kung posible.',
     },
     maternityLeave: {
       description: 'Para sa female employees tungod sa childbirth o miscarriage, married man o unmarried.',
-      requirements: 'Medical certificate o birth/delivery record. Marriage certificate kung applicable.',
+      requirements: 'Required ang expected delivery date, maternity classification, ug supporting attachment base sa medical record.',
       limits: 'Normal delivery: hangtod 105 working days. Caesarean section: hangtod 115 working days.',
-      advanceFiling: 'I-notify ang supervisor labing menos 30 ka adlaw before expected delivery date.',
+      advanceFiling: 'I-block sa HRMS kung less than 30 days before expected delivery date ang filing.',
       notes: 'Apil niini ang normal delivery, caesarean section, ug miscarriage.',
     },
     paternityLeave: {
       description: 'Para sa married male employee kung nanganak o na-miscarriage ang iyang legitimate spouse.',
-      requirements: 'Marriage certificate ug birth certificate o medical record sa delivery/miscarriage.',
-      limits: '7 working days; gamiton sulod sa 60 ka adlaw gikan sa delivery.',
+      requirements: 'Required ang child delivery/miscarriage date ug supporting attachment, sama sa marriage certificate plus birth certificate o medical record.',
+      limits: '7 working days. I-block sa HRMS kung magsugod before delivery date o molapas sa 60 days from delivery.',
       advanceFiling: 'I-notify ang HR before o dayon after sa event.',
     },
     specialPrivilegeLeave: {
       description: 'Para sa personal milestones o special occasions sama sa birthday, wedding, o hospitalization sa immediate family.',
-      requirements: 'Walay required document. Ibutang ang occasion o location.',
+      requirements: 'Walay required document, pero required sa HRMS ang location option ug specific location/details.',
       limits: '3 ka adlaw kada tuig, dili ma-carry over.',
-      advanceFiling: 'I-file daan kung posible.',
+      advanceFiling: 'I-file labing menos 7 ka adlaw before sa leave date.',
     },
     soloParentLeave: {
       description: 'Para sa solo parents under RA 8972 para sa parental obligations.',
-      requirements: 'Solo Parent ID o DSWD-issued certificate.',
-      limits: '7 working days kada tuig.',
+      requirements: 'Required ang Solo Parent ID number, ID expiry date, ug supporting attachment.',
+      limits: '7 working days kada tuig. I-count sa HRMS ang pending plus approved requests, ug kinahanglan valid ang ID hangtod sa leave start date.',
+      advanceFiling: 'I-file labing menos 5 ka adlaw before sa leave date.',
     },
     studyLeave: {
       description: 'Para sa higher education o licensure exam review, kinahanglan prior approval ug service obligation.',
@@ -201,41 +202,41 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
     },
     tenDayVawcLeave: {
       description: 'Para sa women employees nga victims of Violence Against Women and Children under RA 9262.',
-      requirements: 'Barangay Protection Order, court order, o certified government document nga nag-confirm sa VAWC situation.',
-      limits: '10 ka adlaw kada tuig; mahimong ma-extend kung kinahanglan sa agency.',
+      requirements: 'Required ang supporting attachment, supporting document type, ug case/protection order details.',
+      limits: '10 working days kada tuig. I-count sa HRMS ang pending plus approved requests para sa annual cap.',
     },
     rehabilitationPrivilege: {
       description: 'Para sa employees nga na-injure samtang nagtrabaho sa official duties.',
       requirements: 'Medical certificate nga nagpakita sa injury ug incident/accident report endorsed by the office.',
       limits: 'Hangtod 6 months o 180 working days.',
-      notes: 'Para ra ni sa work-related injuries, dili personal accidents.',
+      notes: 'Para ra ni sa work-related injuries, dili personal accidents. Required ang accident date ug i-block kung more than 1 week after accident ang filing.',
     },
     specialLeaveBenefitsForWomen: {
       description: 'Para sa female employees nga moagi ug surgery tungod sa gynecological disorder under RA 9710.',
-      requirements: 'Medical certificate gikan sa licensed physician nga nag-confirm sa condition ug operation.',
+      requirements: 'Required ang illness/procedure details ug medical certificate gikan sa licensed physician nga nag-confirm sa condition ug operation.',
       limits: 'Maximum 60 days, non-cumulative.',
       advanceFiling: 'I-file before o dayon after sa procedure.',
     },
     specialEmergencyCalamityLeave: {
       description: 'Para kung ang residence naa sa declared calamity area o kinahanglan mo-atiman sa immediate family tungod sa calamity.',
-      requirements: 'Certification from Barangay/LDRRMO/NDRRMC ug proof of residency sa affected area.',
-      limits: '5 working days kada calamity incident.',
+      requirements: 'Required ang calamity/disaster occurrence date, affected location, ug supporting certification o proof of residency.',
+      limits: '5 working days kada calamity incident. I-block kung magsugod before calamity date o molapas sa 30 days from calamity.',
     },
     adoptionLeave: {
       description: 'Para sa adoptive parents human ma-finalize ang adoption decree under RA 8552.',
-      requirements: 'Court order/adoption decree ug certified copy sa Certificate of Finality.',
-      limits: '60 working days para sa adoptive mother; 7 working days para sa adoptive father.',
+      requirements: 'Required ang PAPA/adoption placement date, adoption leave eligibility role, ug supporting attachment.',
+      limits: '60 working days para sa adoptive mother o single male adopter; 7 working days para sa legitimate male spouse. I-block kung magsugod before placement date.',
     },
     others: {
       description: 'Para sa leave types nga dili covered sa standard categories; kinahanglan klaro ang reason ug details.',
       requirements: 'I-attach ang supporting documents nga fit sa imong circumstance kung applicable.',
-      notes: 'Supervisor ug HR ang mo-review kung unsang rule ang applicable.',
+      notes: 'Supervisor ug HR ang mo-review kung unsang rule ang applicable. Monetization of Leave Credits ug Terminal Leave kay HR/admin process only.',
     },
   },
   tagalog: {
     vacationLeave: {
       description: 'Para sa personal na pahinga, lakad, o travel; kailangang i-file in advance at subject sa approval.',
-      requirements: 'Walang required document. Ilagay ang location kung within the Philippines o abroad.',
+      requirements: 'Walang required document, pero required sa HRMS ang location option at specific location/details.',
       advanceFiling: 'I-file kahit 5 araw bago ang leave date.',
     },
     mandatoryForcedLeave: {
@@ -246,32 +247,33 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
     },
     sickLeave: {
       description: 'Para kapag hindi makakapasok dahil sa sakit, injury, recovery, o medical appointment.',
-      requirements: 'Medical certificate ang karaniwang kailangan kapag 5 o higit pang sunod-sunod na araw, o kung hiningi ng head of office.',
+      requirements: 'Piliin ang In Hospital o Out Patient at ilagay ang illness details. Medical certificate ang kailangan kapag 5 o higit pang sunod-sunod na araw, o kung hiningi ng head of office.',
       advanceFiling: 'I-file agad pagbalik o habang absent kung posible.',
     },
     maternityLeave: {
       description: 'Para sa female employees dahil sa childbirth o miscarriage, married man o unmarried.',
-      requirements: 'Medical certificate o birth/delivery record. Marriage certificate kung applicable.',
+      requirements: 'Required ang expected delivery date, maternity classification, at supporting attachment base sa medical record.',
       limits: 'Normal delivery: hanggang 105 working days. Caesarean section: hanggang 115 working days.',
-      advanceFiling: 'I-notify ang supervisor kahit 30 araw bago ang expected delivery date.',
+      advanceFiling: 'Iba-block ng HRMS kapag less than 30 days before expected delivery date ang filing.',
       notes: 'Kasama rito ang normal delivery, caesarean section, at miscarriage.',
     },
     paternityLeave: {
       description: 'Para sa married male employee kapag nanganak o nag-miscarriage ang legitimate spouse.',
-      requirements: 'Marriage certificate at birth certificate o medical record ng delivery/miscarriage.',
-      limits: '7 working days; gamitin sa loob ng 60 araw mula delivery.',
+      requirements: 'Required ang child delivery/miscarriage date at supporting attachment, gaya ng marriage certificate plus birth certificate o medical record.',
+      limits: '7 working days. Iba-block ng HRMS kapag magsisimula before delivery date o lalampas sa 60 days from delivery.',
       advanceFiling: 'I-notify ang HR bago o agad pagkatapos ng event.',
     },
     specialPrivilegeLeave: {
       description: 'Para sa personal milestones o special occasions tulad ng birthday, wedding, o hospitalization ng immediate family.',
-      requirements: 'Walang required document. Ilagay ang occasion o location.',
+      requirements: 'Walang required document, pero required sa HRMS ang location option at specific location/details.',
       limits: '3 araw bawat taon, non-cumulative.',
-      advanceFiling: 'I-file in advance kung posible.',
+      advanceFiling: 'I-file kahit 7 araw bago ang leave date.',
     },
     soloParentLeave: {
       description: 'Para sa solo parents under RA 8972 para sa parental obligations.',
-      requirements: 'Solo Parent ID o DSWD-issued certificate.',
-      limits: '7 working days bawat taon.',
+      requirements: 'Required ang Solo Parent ID number, ID expiry date, at supporting attachment.',
+      limits: '7 working days bawat taon. Binibilang ng HRMS ang pending plus approved requests, at kailangan valid ang ID hanggang leave start date.',
+      advanceFiling: 'I-file kahit 5 araw bago ang leave date.',
     },
     studyLeave: {
       description: 'Para sa higher education o licensure exam review, kailangan ng prior approval at service obligation.',
@@ -281,35 +283,35 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
     },
     tenDayVawcLeave: {
       description: 'Para sa women employees na victims of Violence Against Women and Children under RA 9262.',
-      requirements: 'Barangay Protection Order, court order, o certified government document na nag-confirm ng VAWC situation.',
-      limits: '10 araw bawat taon; puwedeng ma-extend kung kailangan ng agency.',
+      requirements: 'Required ang supporting attachment, supporting document type, at case/protection order details.',
+      limits: '10 working days bawat taon. Binibilang ng HRMS ang pending plus approved requests para sa annual cap.',
     },
     rehabilitationPrivilege: {
       description: 'Para sa employees na na-injure habang gumaganap ng official duties.',
       requirements: 'Medical certificate na nagpapakita ng injury at incident/accident report endorsed by the office.',
       limits: 'Hanggang 6 months o 180 working days.',
-      notes: 'Para lang ito sa work-related injuries, hindi personal accidents.',
+      notes: 'Para lang ito sa work-related injuries, hindi personal accidents. Required ang accident date at iba-block kapag more than 1 week after accident ang filing.',
     },
     specialLeaveBenefitsForWomen: {
       description: 'Para sa female employees na sasailalim sa surgery dahil sa gynecological disorder under RA 9710.',
-      requirements: 'Medical certificate mula sa licensed physician na nag-confirm ng condition at operation.',
+      requirements: 'Required ang illness/procedure details at medical certificate mula sa licensed physician na nag-confirm ng condition at operation.',
       limits: 'Maximum 60 days, non-cumulative.',
       advanceFiling: 'I-file bago o agad pagkatapos ng procedure.',
     },
     specialEmergencyCalamityLeave: {
       description: 'Para kung ang residence ay nasa declared calamity area o kailangang asikasuhin ang immediate family dahil sa calamity.',
-      requirements: 'Certification from Barangay/LDRRMO/NDRRMC at proof of residency sa affected area.',
-      limits: '5 working days bawat calamity incident.',
+      requirements: 'Required ang calamity/disaster occurrence date, affected location, at supporting certification o proof of residency.',
+      limits: '5 working days bawat calamity incident. Iba-block kapag magsisimula before calamity date o lalampas sa 30 days from calamity.',
     },
     adoptionLeave: {
       description: 'Para sa adoptive parents pagkatapos ma-finalize ang adoption decree under RA 8552.',
-      requirements: 'Court order/adoption decree at certified copy ng Certificate of Finality.',
-      limits: '60 working days para sa adoptive mother; 7 working days para sa adoptive father.',
+      requirements: 'Required ang PAPA/adoption placement date, adoption leave eligibility role, at supporting attachment.',
+      limits: '60 working days para sa adoptive mother o single male adopter; 7 working days para sa legitimate male spouse. Iba-block kapag magsisimula before placement date.',
     },
     others: {
       description: 'Para sa leave types na hindi covered ng standard categories; kailangang malinaw ang reason at details.',
       requirements: 'Mag-attach ng supporting documents na tugma sa circumstance kung applicable.',
-      notes: 'Supervisor at HR ang magre-review kung anong rule ang applicable.',
+      notes: 'Supervisor at HR ang magre-review kung anong rule ang applicable. Monetization of Leave Credits at Terminal Leave ay HR/admin process only.',
     },
   },
 };
@@ -884,14 +886,15 @@ function localizedLeaveRequirementParts(type, language) {
 function localizedLeaveFormGuideLine(type, language, days) {
   const label = labelLeaveType(type.display_name || type.name);
   const requirement = localizedAttachmentRuleText(type, days, language);
+  const form = getFormGuidanceForType(type);
+  const fieldChecklist = form.fields.join(' ');
   if (language === 'bisaya') {
-    return `${label}: Pilia ang ${label}. Ibutang ang covered dates ug pila ka adlaw, dayon isulat ang klarong reason. Attachment: ${requirement}.`;
+    return `${label}: ${fieldChecklist} Attachment: ${requirement}.`;
   }
   if (language === 'tagalog') {
-    return `${label}: Piliin ang ${label}. Ilagay ang covered dates at bilang ng araw, tapos isulat ang malinaw na reason. Attachment: ${requirement}.`;
+    return `${label}: ${fieldChecklist} Attachment: ${requirement}.`;
   }
 
-  const form = getFormGuidanceForType(type);
   return `${label}: ${form.fields.join(' ')} Requirement: ${attachmentRuleText(type, days)}.`;
 }
 
@@ -3356,6 +3359,18 @@ function localizedLeaveFieldExplanation(field, language) {
       'Pilia ang Normal Delivery o Caesarean Section base sa medical record.',
     child_delivery_date:
       'Ibutang ang actual delivery o miscarriage date nga naa sa supporting record.',
+    adoption_placement_date:
+      'Ibutang ang PAPA o adoption placement date nga naa sa adoption record.',
+    adoption_parent_role:
+      'Pilia ang adoption leave eligibility nga mo-match sa imong role.',
+    vawc_support_document_type:
+      'Pilia ang type sa VAWC supporting document nga imong i-upload.',
+    vawc_case_details:
+      'Ibutang ang case reference, protection order details, issuing office, o mubo nga context nga makita sa supporting document.',
+    solo_parent_id_number:
+      'Ibutang ang ID number nga naa sa imong valid Solo Parent ID.',
+    solo_parent_id_expiry_date:
+      'Ibutang ang expiry o valid-until date sa imong Solo Parent ID.',
     accident_date:
       'Ibutang ang petsa sa work-related accident o injury nga sakop sa rehabilitation request.',
     calamity_date:
@@ -3396,6 +3411,18 @@ function localizedLeaveFieldExplanation(field, language) {
       'Piliin ang Normal Delivery o Caesarean Section ayon sa medical record.',
     child_delivery_date:
       'Ilagay ang actual delivery o miscarriage date mula sa supporting record.',
+    adoption_placement_date:
+      'Ilagay ang PAPA o adoption placement date mula sa adoption record.',
+    adoption_parent_role:
+      'Piliin ang adoption leave eligibility na tugma sa role mo.',
+    vawc_support_document_type:
+      'Piliin ang type ng VAWC supporting document na ia-upload mo.',
+    vawc_case_details:
+      'Ilagay ang case reference, protection order details, issuing office, o maikling context na nasa supporting document.',
+    solo_parent_id_number:
+      'Ilagay ang ID number na nasa valid Solo Parent ID mo.',
+    solo_parent_id_expiry_date:
+      'Ilagay ang expiry o valid-until date ng Solo Parent ID mo.',
     accident_date:
       'Ilagay ang petsa ng work-related accident o injury na sakop ng rehabilitation request.',
     calamity_date:
@@ -3510,6 +3537,9 @@ function leaveFormFieldHelpReply(context, message) {
         'Start Date / End Date',
         'Reason / Remarks',
         'Location or Illness Details',
+        'PAPA / Adoption Placement Date',
+        'VAWC Document Type / Case Details',
+        'Solo Parent ID Number / Expiry Date',
         'Attachment',
         'Requested Commutation',
       ],
