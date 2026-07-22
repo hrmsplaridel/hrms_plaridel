@@ -40,6 +40,7 @@ class _EmployeeProfile {
     this.salaryGrade,
     this.dateHired,
     this.employmentStatus,
+    this.leaveCreditEligible = true,
     this.biometricUserId,
     this.departmentName,
     this.positionName,
@@ -65,6 +66,7 @@ class _EmployeeProfile {
   final String? salaryGrade;
   final DateTime? dateHired;
   final String? employmentStatus;
+  final bool leaveCreditEligible;
   final String? biometricUserId;
   final String? departmentName;
   final String? positionName;
@@ -160,6 +162,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   String? _employmentType;
   String _employmentStatus = 'active';
   DateTime? _dateHired;
+  bool _leaveCreditEligible = true;
   Uint8List? _selectedImageBytes;
   bool _saving = false;
   int? _lastAppliedPrefillStamp;
@@ -356,6 +359,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       _employmentType = null;
       _employmentStatus = 'active';
       _dateHired = null;
+      _leaveCreditEligible = true;
       _selectedImageBytes = null;
       _passwordController.clear();
     });
@@ -405,6 +409,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           'biometric_user_id': _biometricIdController.text.trim(),
         'date_hired': _dateHired!.toIso8601String().split('T')[0],
         'employment_status': _employmentStatus,
+        'leave_credit_eligible': _leaveCreditEligible,
       };
 
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
@@ -1154,6 +1159,23 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
             onChanged: (v) => setState(() => _employmentStatus = v ?? 'active'),
           ),
+          const SizedBox(height: 14),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: _leaveCreditEligible,
+            title: Text(
+              'Earn monthly VL/SL credits',
+              style: TextStyle(
+                color: _chromeHeadingColor(context),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            secondary: Icon(
+              Icons.account_balance_wallet_outlined,
+              color: AppTheme.primaryNavy,
+            ),
+            onChanged: (value) => setState(() => _leaveCreditEligible = value),
+          ),
         ],
       ),
     );
@@ -1222,6 +1244,7 @@ _EmployeeProfile _employeeProfileFromJson(Map<String, dynamic> m) {
         ? DateTime.tryParse(dateHiredRaw.toString())
         : null,
     employmentStatus: m['employment_status'] as String?,
+    leaveCreditEligible: m['leave_credit_eligible'] != false,
     biometricUserId: m['biometric_user_id'] as String?,
     departmentName: m['current_department_name'] as String?,
     positionName: m['current_position_name'] as String?,
@@ -3455,6 +3478,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   String? _employmentType;
   DateTime? _dateHired;
   String? _employmentStatus;
+  bool _leaveCreditEligible = true;
   Uint8List? _selectedImageBytes;
   bool _saving = false;
 
@@ -3491,6 +3515,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     _employmentType = _profile.employmentType;
     _dateHired = _profile.dateHired;
     _employmentStatus = _profile.employmentStatus ?? 'active';
+    _leaveCreditEligible = _profile.leaveCreditEligible;
     _biometricIdController.text = _profile.biometricUserId ?? '';
     _loadBioDevicesForPush();
   }
@@ -3647,6 +3672,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         if (_dateHired != null)
           'date_hired': _dateHired!.toIso8601String().split('T')[0],
         if (_employmentStatus != null) 'employment_status': _employmentStatus,
+        'leave_credit_eligible': _leaveCreditEligible,
         if (!_biometricUserIdLocked &&
             _biometricIdController.text.trim().isNotEmpty)
           'biometric_user_id': _biometricIdController.text.trim(),
@@ -4192,6 +4218,23 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
               'terminated',
             ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
             onChanged: (v) => setState(() => _employmentStatus = v ?? 'active'),
+          ),
+          const SizedBox(height: 14),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: _leaveCreditEligible,
+            title: Text(
+              'Earn monthly VL/SL credits',
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            secondary: Icon(
+              Icons.account_balance_wallet_outlined,
+              color: AppTheme.primaryNavy,
+            ),
+            onChanged: (value) => setState(() => _leaveCreditEligible = value),
           ),
         ],
       ),

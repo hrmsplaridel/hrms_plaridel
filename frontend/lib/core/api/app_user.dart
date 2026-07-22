@@ -12,6 +12,7 @@ class AppUser {
     this.dateHired,
     this.employmentStatus,
     this.employmentType,
+    this.leaveCreditEligible = true,
     this.departmentName,
     this.positionName,
     this.sex,
@@ -35,6 +36,7 @@ class AppUser {
   final DateTime? dateHired;
   final String? employmentStatus;
   final String? employmentType;
+  final bool leaveCreditEligible;
   final String? departmentName;
   final String? positionName;
   final String? sex;
@@ -59,6 +61,7 @@ class AppUser {
       dateHired: dateHired,
       employmentStatus: employmentStatus,
       employmentType: employmentType,
+      leaveCreditEligible: leaveCreditEligible,
       departmentName: departmentName,
       positionName: positionName,
       sex: sex,
@@ -101,6 +104,7 @@ class AppUser {
       dateHired: _parseDate(json['date_hired']),
       employmentStatus: json['employment_status'] as String?,
       employmentType: json['employment_type'] as String?,
+      leaveCreditEligible: json['leave_credit_eligible'] != false,
       departmentName: json['department_name'] as String?,
       positionName: json['position_name'] as String?,
       sex: json['sex'] as String?,
