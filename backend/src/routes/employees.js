@@ -91,6 +91,22 @@ async function ensureEmployeeProfileColumns() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS civil_status TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
+    ON users (leave_credit_eligible)
+    WHERE leave_credit_eligible = true`);
+}
+
+function boolField(value, fallback = true) {
+  if (value === undefined) return fallback;
+  if (value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  return fallback;
 }
 
 function mapEmployeeListRow(r) {
@@ -117,6 +133,7 @@ function mapEmployeeListRow(r) {
     salary_grade: r.salary_grade,
     date_hired: r.date_hired,
     employment_status: r.employment_status ?? 'active',
+    leave_credit_eligible: r.leave_credit_eligible !== false,
     current_department_id: r.current_department_id ?? null,
     current_department_name: r.current_department_name ?? null,
     current_position_id: r.current_position_id ?? null,
@@ -280,7 +297,7 @@ router.get('/', protect, async (req, res) => {
           `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
                   u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
                   u.civil_status, u.nationality,
-                  u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
+                  u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
                   cur.current_department_name, cur.current_position_name,
                   cur.current_shift_punch_mode
            FROM users u
@@ -338,7 +355,7 @@ router.get('/', protect, async (req, res) => {
       `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
               u.civil_status, u.nationality,
-              u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
+              u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
               cur.current_department_name, cur.current_position_name,
               cur.current_shift_punch_mode
        ${fromSql}
@@ -468,7 +485,7 @@ router.get('/:id', protect, async (req, res) => {
       `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active, u.avatar_path,
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
               u.civil_status, u.nationality,
-              u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
+              u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
               cur.current_department_name, cur.current_position_name,
               cur.current_shift_punch_mode
        FROM users u
@@ -512,6 +529,7 @@ router.get('/:id', protect, async (req, res) => {
       salary_grade: r.salary_grade,
       date_hired: r.date_hired,
       employment_status: r.employment_status ?? 'active',
+      leave_credit_eligible: r.leave_credit_eligible !== false,
       current_department_name: r.current_department_name ?? null,
       current_position_name: r.current_position_name ?? null,
     });
@@ -525,7 +543,7 @@ router.get('/:id', protect, async (req, res) => {
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
     await ensureEmployeeProfileColumns();
-    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
+    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, employment_status, biometric_user_id, leave_credit_eligible } = req.body;
     if (!email) {
       return res.status(400).json({ error: 'Email is required' });
     }
@@ -545,18 +563,19 @@ router.post('/', protect, requireAdmin, async (req, res) => {
          email, password_hash, role, first_name, full_name, last_name, middle_name,
          suffix, sex, date_of_birth, contact_number, address, civil_status,
          nationality, is_active, employee_number, employment_type, salary_grade,
-         date_hired, employment_status, biometric_user_id
+         date_hired, employment_status, biometric_user_id, leave_credit_eligible
        )
        VALUES (
          $1, $2, $3, $4, $5, $6, $7,
          $8, $9, $10::date, $11, $12, $13,
          $14, true, $15, $16, $17,
-         COALESCE($18::date, CURRENT_DATE), $19, $20
+         COALESCE($18::date, CURRENT_DATE), $19, $20, $21
        )
        RETURNING id, employee_number, email, role, first_name, full_name, last_name,
                  avatar_path, is_active, middle_name, suffix, sex, date_of_birth,
                  contact_number, address, civil_status, nationality, employment_type,
-                 salary_grade, date_hired, employment_status, biometric_user_id`,
+                 salary_grade, date_hired, employment_status, biometric_user_id,
+                 leave_credit_eligible`,
       [
         email.trim().toLowerCase(),
         passwordHash,
@@ -578,6 +597,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         date_hired || null,
         (employment_status && ['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(employment_status)) ? employment_status : 'active',
         biometric_user_id?.trim() || null,
+        boolField(leave_credit_eligible, true),
       ]
     );
 
@@ -665,6 +685,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       date_hired,
       employment_status,
       biometric_user_id,
+      leave_credit_eligible,
       office_id,
     } = req.body;
 
@@ -719,6 +740,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['date_hired', date_hired],
       ['employment_status', employment_status],
       ['biometric_user_id', biometric_user_id],
+      ['leave_credit_eligible', leave_credit_eligible],
       ...(canUseOfficeId ? [['office_id', office_id]] : []),
     ];
     for (const [col, val] of fields) {
@@ -726,6 +748,11 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         if (col === 'role' && !['admin', 'employee'].includes(val)) continue;
         if (col === 'employment_type' && val && !['regular', 'contractual', 'job_order', 'casual'].includes(val)) continue;
         if (col === 'employment_status' && val && !['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(val)) continue;
+        if (col === 'leave_credit_eligible') {
+          updates.push(`${col} = $${i++}`);
+          values.push(boolField(val, true));
+          continue;
+        }
         if (col === 'office_id') {
           const raw = val === null || val === '' ? null : String(val).trim();
           updates.push(`office_id = $${i++}::uuid`);
@@ -769,6 +796,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       'date_hired',
       'employment_status',
       'biometric_user_id',
+      'leave_credit_eligible',
       ...(canUseOfficeId ? ['office_id'] : []),
     ];
 

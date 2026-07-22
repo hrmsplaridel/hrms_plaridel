@@ -18,6 +18,8 @@
  *                                    review; credits still proceed at the full rate.
  *  8. last_accrual_date edit guard — enforced in the PUT /balances/:userId route (see
  *                                    leaveRoutes.js); not this file.
+ *  9. Eligibility gate             — only leave_credit_eligible users with an active assignment
+ *                                    overlapping the target month receive monthly credits.
  *
  * @module services/leaveMonthlyAccrual
  */
@@ -123,6 +125,33 @@ function parseTargetMonth(input) {
     throw new Error('targetMonth must be a valid date or YYYY-MM');
   }
   return parsed;
+}
+
+function endOfMonth(d) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+
+async function ensureLeaveCreditEligibilityColumn(db) {
+  await db.query(
+    `ALTER TABLE users
+       ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true`
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
+       ON users (leave_credit_eligible)
+       WHERE leave_credit_eligible = true`
+  );
+}
+
+function activeAssignmentExistsSql(userAlias, targetStartParam, targetEndParam) {
+  return `EXISTS (
+    SELECT 1
+    FROM assignments a
+    WHERE a.employee_id = ${userAlias}.id
+      AND (a.is_active IS NULL OR a.is_active = true)
+      AND (a.effective_from IS NULL OR a.effective_from <= ${targetEndParam}::date)
+      AND (a.effective_to IS NULL OR a.effective_to >= ${targetStartParam}::date)
+  )`;
 }
 
 function monthStartInTimeZone(input = new Date(), timeZone = 'Asia/Manila') {
@@ -371,6 +400,8 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
   }
 
   const targetYearMonth = `${targetMonth.getFullYear()}-${String(targetMonth.getMonth() + 1).padStart(2, '0')}`;
+  const targetMonthStartStr = toDateStr(targetMonth);
+  const targetMonthEndStr = toDateStr(endOfMonth(targetMonth));
 
   // Enhancement 6: Read DB-driven leave type configs (falls back to hardcoded pre-migration)
   const leaveTypeConfigs = await readAccrualLeaveTypeConfigs(pgPool);
@@ -378,6 +409,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
   const accrualLeaveTypes = leaveTypeConfigs.map((c) => c.name);
 
   initLeaveBalanceLedger(pgPool);
+  await ensureLeaveCreditEligibilityColumn(pgPool);
 
   const client = await pgPool.connect();
   const details = [];
@@ -393,17 +425,20 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
     // Enhancement 1: exclude employees whose employment_status is resigned/retired/terminated
     const missingBalanceResult = await client.query(
       `SELECT u.id AS user_id, u.full_name, u.date_hired,
-              u.employment_type, u.employment_status, u.separation_date, t.leave_type
+              u.employment_type, u.employment_status, u.separation_date,
+              u.leave_credit_eligible, t.leave_type
        FROM users u
        CROSS JOIN unnest($1::text[]) AS t(leave_type)
        LEFT JOIN leave_balances lb
          ON lb.user_id = u.id
         AND lb.leave_type = t.leave_type
        WHERE (u.is_active IS NULL OR u.is_active = true)
+         AND u.leave_credit_eligible = true
          AND (u.employment_status IS NULL
               OR u.employment_status NOT IN ('resigned', 'retired', 'terminated'))
+         AND ${activeAssignmentExistsSql('u', '$2', '$3')}
          AND lb.id IS NULL`,
-      [accrualLeaveTypes]
+      [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
     );
     const missingBalanceKeys = new Set(
       missingBalanceResult.rows.map((row) => `${row.user_id}|${row.leave_type}`)
@@ -422,11 +457,13 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
            ON lb.user_id = u.id
           AND lb.leave_type = t.leave_type
          WHERE (u.is_active IS NULL OR u.is_active = true)
+           AND u.leave_credit_eligible = true
            AND (u.employment_status IS NULL
                 OR u.employment_status NOT IN ('resigned', 'retired', 'terminated'))
+           AND ${activeAssignmentExistsSql('u', '$2', '$3')}
            AND lb.id IS NULL
          ON CONFLICT (user_id, leave_type) DO NOTHING`,
-        [accrualLeaveTypes]
+        [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
       );
     }
 
@@ -443,14 +480,17 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
                 lb.earned_days, lb.used_days, lb.adjusted_days,
                 lb.last_accrual_date,
                 u.full_name, u.date_hired, u.employment_type,
-                u.employment_status, u.separation_date
+                u.employment_status, u.separation_date,
+                u.leave_credit_eligible
          FROM leave_balances lb
          INNER JOIN users u ON u.id = lb.user_id
          WHERE lb.leave_type = ANY($1::text[])
            AND (u.is_active IS NULL OR u.is_active = true)
+           AND u.leave_credit_eligible = true
            AND (u.employment_status IS NULL
-                OR u.employment_status NOT IN ('resigned', 'retired', 'terminated'))`,
-        [accrualLeaveTypes]
+                OR u.employment_status NOT IN ('resigned', 'retired', 'terminated'))
+           AND ${activeAssignmentExistsSql('u', '$2', '$3')}`,
+        [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
       ));
     } catch (colErr) {
       if (colErr.code === '42703') {
@@ -459,14 +499,17 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
           `SELECT lb.id, lb.user_id, lb.leave_type,
                   lb.earned_days, lb.used_days, lb.adjusted_days,
                   lb.last_accrual_date,
-                  u.full_name, u.date_hired, u.employment_type, u.employment_status
+                  u.full_name, u.date_hired, u.employment_type, u.employment_status,
+                  u.leave_credit_eligible
            FROM leave_balances lb
            INNER JOIN users u ON u.id = lb.user_id
            WHERE lb.leave_type = ANY($1::text[])
              AND (u.is_active IS NULL OR u.is_active = true)
+             AND u.leave_credit_eligible = true
              AND (u.employment_status IS NULL
-                  OR u.employment_status NOT IN ('resigned', 'retired', 'terminated'))`,
-          [accrualLeaveTypes]
+                  OR u.employment_status NOT IN ('resigned', 'retired', 'terminated'))
+             AND ${activeAssignmentExistsSql('u', '$2', '$3')}`,
+          [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
         ));
       } else {
         throw colErr;
@@ -488,6 +531,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
           date_hired: row.date_hired,
           employment_type: row.employment_type,
           employment_status: row.employment_status,
+          leave_credit_eligible: row.leave_credit_eligible !== false,
           separation_date: row.separation_date ?? null,
         }))
       );

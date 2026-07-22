@@ -146,6 +146,7 @@ async function ensurePersonalInfoColumns() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`);
 }
 
@@ -467,6 +468,7 @@ router.get('/me', authMiddleware, async (req, res) => {
               u.sex, u.date_of_birth, u.contact_number,
               u.address, u.civil_status, u.nationality, u.created_at,
               u.employee_number, u.date_hired, u.employment_status, u.employment_type,
+              u.leave_credit_eligible,
               d.name AS department_name,
               p.name AS position_name
        FROM users u
@@ -502,6 +504,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       date_hired: row.date_hired,
       employment_status: row.employment_status,
       employment_type: row.employment_type,
+      leave_credit_eligible: row.leave_credit_eligible !== false,
       department_name: row.department_name,
       position_name: row.position_name,
       user_metadata: {

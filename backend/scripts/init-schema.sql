@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS users (
   date_hired DATE,
   employment_status TEXT DEFAULT 'active'
     CHECK (employment_status IN ('active', 'inactive', 'resigned', 'retired', 'terminated')),
+  leave_credit_eligible BOOLEAN NOT NULL DEFAULT true,
   separation_date DATE,
 
   biometric_user_id TEXT UNIQUE,
@@ -64,6 +65,9 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true;
 
 -- =========================================
 -- AUTH REFRESH TOKENS (PERSISTENT SESSIONS)
@@ -1891,6 +1895,9 @@ CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_users_employment_status
   ON users (employment_status)
   WHERE employment_status IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
+  ON users (leave_credit_eligible)
+  WHERE leave_credit_eligible = true;
 CREATE INDEX IF NOT EXISTS idx_users_separation_date
   ON users (separation_date)
   WHERE separation_date IS NOT NULL;
