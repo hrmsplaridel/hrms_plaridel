@@ -194,12 +194,13 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       _error = null;
     });
     try {
+      final adminEmployeeId =
+          _draftEmployeeId != null && _draftEmployeeId!.isNotEmpty
+          ? _draftEmployeeId
+          : null;
       final q = LeaveLedgerQuery(
-        userId: widget.isAdmin
-            ? (_draftEmployeeId != null && _draftEmployeeId!.isNotEmpty
-                  ? _draftEmployeeId
-                  : null)
-            : null,
+        userId: widget.isAdmin ? adminEmployeeId : null,
+        allUsers: widget.isAdmin && adminEmployeeId == null,
         leaveType: widget.isAdmin
             ? (_draftLeaveType != null && _draftLeaveType!.isNotEmpty
                   ? _draftLeaveType
