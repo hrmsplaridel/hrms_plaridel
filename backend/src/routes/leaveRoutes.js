@@ -4083,7 +4083,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
 // BALANCES & LEDGER
 // ============================
 
-// GET /api/leave/ledger — balance movement audit (self: own rows; admin/HR: filterable)
+// GET /api/leave/ledger — balance movement audit (self by default; admin/HR can filter or pass all_users=true)
 router.get('/ledger', protect, async (req, res) => {
   const requesterId = req.user?.id;
   const role = req.user?.role;
@@ -4101,24 +4101,26 @@ router.get('/ledger', protect, async (req, res) => {
   const affectedBucket = (req.query?.affected_bucket || '').toString().trim().toLowerCase() || null;
   const from = (req.query?.from || req.query?.created_from || '').toString().trim() || null;
   const to = (req.query?.to || req.query?.created_to || '').toString().trim() || null;
+  const includeAllUsers = ['1', 'true', 'yes'].includes(
+    (req.query?.all_users || req.query?.include_all_users || '')
+      .toString()
+      .trim()
+      .toLowerCase()
+  );
 
   if (!isPrivileged && filterUserId && filterUserId !== requesterId) {
     return res.status(403).json({ error: 'Not allowed to view ledger for other users' });
   }
 
-  const scopeSelfOnly = !isPrivileged;
-  const scopeAdminAllUsers = isPrivileged && !filterUserId;
+  const scopeAllUsers = isPrivileged && includeAllUsers && !filterUserId;
+  const scopedUserId = filterUserId || requesterId;
 
   const params = [];
   let p = 1;
   const where = [];
-  if (scopeSelfOnly) {
+  if (!scopeAllUsers) {
     where.push(`l.user_id = $${p}::uuid`);
-    params.push(requesterId);
-    p += 1;
-  } else if (!scopeAdminAllUsers) {
-    where.push(`l.user_id = $${p}::uuid`);
-    params.push(filterUserId);
+    params.push(scopedUserId);
     p += 1;
   }
   if (leaveType) {
