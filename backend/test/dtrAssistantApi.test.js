@@ -9,7 +9,7 @@ const {
   withMockedModule,
 } = require('./helpers/moduleMocks');
 
-function requestJson(server, { method = 'GET', path, token, body }) {
+function requestJson(server, { method = 'GET', path, token, body, headers = {} }) {
   const address = server.address();
   const payload = body == null ? null : JSON.stringify(body);
 
@@ -22,6 +22,7 @@ function requestJson(server, { method = 'GET', path, token, body }) {
         path,
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...headers,
           ...(payload
             ? {
                 'Content-Type': 'application/json',
@@ -57,6 +58,62 @@ function requestJson(server, { method = 'GET', path, token, body }) {
     request.end();
   });
 }
+
+test('DTR assistant rate limiter is per employee and returns localized retry details', async (t) => {
+  const {
+    createEmployeeAssistantLimiter,
+  } = require('../src/middleware/rateLimiters');
+  const app = express();
+  app.use(express.json());
+  app.post(
+    '/chat',
+    (req, _res, next) => {
+      req.user = { id: req.get('x-test-user-id') };
+      next();
+    },
+    createEmployeeAssistantLimiter({
+      windowMs: 60 * 1000,
+      limit: 1,
+      code: 'TEST_CHAT_LIMITED',
+    }),
+    (_req, res) => res.json({ ok: true }),
+  );
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  const send = (userId, message) =>
+    requestJson(server, {
+      method: 'POST',
+      path: '/chat',
+      headers: { 'x-test-user-id': userId },
+      body: { message },
+    });
+
+  assert.equal((await send('employee-en', 'hello')).status, 200);
+  const english = await send('employee-en', 'check my leave balance');
+  assert.equal(english.status, 429);
+  assert.equal(english.json.code, 'TEST_CHAT_LIMITED');
+  assert.match(english.json.error, /Too many chatbot requests/i);
+  assert.ok(english.json.retryAfterSeconds >= 1);
+  assert.ok(Number(english.headers['retry-after']) >= 1);
+
+  assert.equal((await send('employee-bi', 'kumusta')).status, 200);
+  const bisaya = await send('employee-bi', 'pila akong leave balance?');
+  assert.equal(bisaya.status, 429);
+  assert.match(bisaya.json.error, /Daghan ra kaayo/i);
+
+  assert.equal((await send('employee-tl', 'kumusta po')).status, 200);
+  const tagalog = await send('employee-tl', 'ano ang leave balance ko?');
+  assert.equal(tagalog.status, 429);
+  assert.match(tagalog.json.error, /Masyadong maraming/i);
+
+  const unaffectedEmployee = await send('employee-other', 'check my leave balance');
+  assert.equal(unaffectedEmployee.status, 200);
+});
 
 test('DTR assistant API enforces auth and preserves route contracts', async (t) => {
   const previousSecret = process.env.JWT_SECRET;
