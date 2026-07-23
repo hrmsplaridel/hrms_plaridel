@@ -30,7 +30,11 @@ const {
   applyPendingClarificationAnswer,
   evaluateGuidedClarification,
 } = require('../src/services/dtrAssistant/dtrAssistantGuidedClarification');
-const { extractDayCount } = require('../src/services/dtrAssistant/dtrAssistantMessageExtraction');
+const {
+  extractDayCount,
+  extractMessageEntities,
+  normalizePlannerExtraction,
+} = require('../src/services/dtrAssistant/dtrAssistantMessageExtraction');
 
 test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected intents', () => {
   const cases = [
@@ -2621,9 +2625,9 @@ test('DTR assistant regression: leave type answers continue the pending filing c
     context,
     vacationIntent
   );
-  assert.match(vacationReply, /Pwede nimo i-file ang 1 ka adlaw nga vacation leave/i);
-  assert.match(vacationReply, /10 ka adlaw available vacation leave/i);
-  assert.match(vacationReply, /Pending pa kini hangtod ma-approve/i);
+  assert.match(vacationReply, /Kulang pa ang details/i);
+  assert.match(vacationReply, /location option/i);
+  assert.match(vacationReply, /10 ka adlaw available Vacation leave/i);
 
   const tagalogMemory = assistantServiceTest.buildNextAssistantMemory(null, {
     intent: 'leave_availability_check',
@@ -2649,6 +2653,167 @@ test('DTR assistant regression: leave type answers continue the pending filing c
   assert.match(tagalogReply, /Hindi ka pa makakapag-file ng 1 araw na sick leave/i);
   assert.match(tagalogReply, /Kulang: 0\.25 araw/i);
   assert.doesNotMatch(tagalogReply, /Dili pa limpyo/i);
+});
+
+test('DTR assistant regression: smart leave filing checks special rules in English, Bisaya, and Tagalog', () => {
+  const paternityContext = {
+    date_range: { label: 'July 25, 2099', startDate: '2099-07-25', endDate: '2099-07-25' },
+    employee: { sex: 'male' },
+    leave_types: [
+      {
+        name: 'paternityLeave',
+        display_name: 'Paternity Leave',
+        employee_can_file: true,
+        requires_attachment: true,
+        max_days: 7,
+        sex_eligibility: 'male',
+        balance_ledger_type: 'paternityLeave',
+      },
+    ],
+    leave_balances: [],
+    recent_leave_requests: [],
+    leave_annual_usage: [],
+  };
+
+  const paternityMissing = buildFastEmployeeAssistantReply(
+    'Can I file 1 day paternity leave on 2099-07-25?',
+    paternityContext,
+    'leave_availability_check'
+  );
+  assert.match(paternityMissing, /I need more details before I can confirm 1 day of Paternity leave/i);
+  assert.match(paternityMissing, /child delivery or miscarriage date/i);
+  assert.doesNotMatch(paternityMissing, /no matching Paternity leave balance row/i);
+
+  const paternityReady = buildFastEmployeeAssistantReply(
+    'Can I file 1 day paternity leave on 2099-07-25? child delivery date is 2099-07-20',
+    {
+      ...paternityContext,
+      assistant_extraction: {
+        dayCount: 1,
+        leavePrefill: { childDeliveryDate: '2099-07-20' },
+      },
+    },
+    'leave_availability_check'
+  );
+  assert.match(paternityReady, /You can file 1 day of Paternity leave/i);
+  assert.match(paternityReady, /does not use the VL\/SL credit balance/i);
+  assert.doesNotMatch(paternityReady, /no matching Paternity leave balance row/i);
+
+  const vawcReply = buildFastEmployeeAssistantReply(
+    'Can I file 3 days VAWC leave on 2099-08-10?',
+    {
+      date_range: { label: 'August 10, 2099', startDate: '2099-08-10', endDate: '2099-08-12' },
+      employee: { sex: 'female' },
+      leave_types: [
+        {
+          name: 'tenDayVawcLeave',
+          display_name: '10-Day VAWC Leave',
+          employee_can_file: true,
+          requires_attachment: true,
+          max_days: 10,
+          sex_eligibility: 'female',
+          balance_ledger_type: 'none',
+        },
+      ],
+      leave_balances: [],
+      recent_leave_requests: [],
+      leave_annual_usage: [
+        { year: 2099, leave_type_key: 'tenDayVawcLeave', days: 8, request_count: 2 },
+      ],
+      assistant_extraction: {
+        dayCount: 3,
+        leavePrefill: {
+          vawcSupportDocumentType: 'protectionOrder',
+          vawcCaseDetails: 'BPO-2099-001',
+        },
+      },
+    },
+    'leave_availability_check'
+  );
+  assert.match(vawcReply, /cannot be filed yet/i);
+  assert.match(vawcReply, /limited to 10 days per calendar year/i);
+  assert.match(vawcReply, /2 days remains for 2099/i);
+
+  const adoptionBisaya = buildFastEmployeeAssistantReply(
+    'pwede ko mag file ug 1 day adoption leave sa 2099-08-05?',
+    {
+      date_range: { label: 'August 5, 2099', startDate: '2099-08-05', endDate: '2099-08-05' },
+      leave_types: [
+        {
+          name: 'adoptionLeave',
+          display_name: 'Adoption Leave',
+          employee_can_file: true,
+          requires_attachment: true,
+          max_days: null,
+          sex_eligibility: 'any',
+          balance_ledger_type: 'none',
+        },
+      ],
+      leave_balances: [],
+      recent_leave_requests: [],
+      leave_annual_usage: [],
+    },
+    'leave_availability_check'
+  );
+  assert.match(adoptionBisaya, /Kulang pa ang details/i);
+  assert.match(adoptionBisaya, /adoption leave eligibility/i);
+  assert.match(adoptionBisaya, /PAPA\/adoption placement date/i);
+  assert.doesNotMatch(adoptionBisaya, /matching Adoption leave balance/i);
+
+  const soloParentTagalog = buildFastEmployeeAssistantReply(
+    'puwede ba ako mag file ng 1 araw solo parent leave sa 2099-08-10?',
+    {
+      date_range: { label: 'August 10, 2099', startDate: '2099-08-10', endDate: '2099-08-10' },
+      leave_types: [
+        {
+          name: 'soloParentLeave',
+          display_name: 'Solo Parent Leave',
+          employee_can_file: true,
+          requires_attachment: true,
+          max_days: 7,
+          minimum_advance_days: null,
+          sex_eligibility: 'any',
+          balance_ledger_type: 'none',
+        },
+      ],
+      leave_balances: [],
+      recent_leave_requests: [],
+      leave_annual_usage: [
+        { year: 2099, leave_type_key: 'soloParentLeave', days: 0, request_count: 0 },
+      ],
+      assistant_extraction: {
+        dayCount: 1,
+        leavePrefill: {
+          soloParentIdNumber: 'SP-2099-001',
+          soloParentIdExpiryDate: '2099-08-01',
+        },
+      },
+    },
+    'leave_availability_check'
+  );
+  assert.match(soloParentTagalog, /Hindi pa ma-file/i);
+  assert.match(soloParentTagalog, /Kailangang valid ang Solo Parent ID hanggang leave start date/i);
+});
+
+test('DTR assistant regression: planner and rules extraction keep special leave details', () => {
+  const extracted = extractMessageEntities(
+    'file paternity leave on 2099-07-25 for 1 day, child delivery date is 2099-07-20',
+    null
+  );
+  assert.equal(extracted.leaveType, 'paternity');
+  assert.equal(extracted.dayCount, 1);
+  assert.equal(extracted.leavePrefill.childDeliveryDate, '2099-07-20');
+
+  const planned = normalizePlannerExtraction({
+    leaveType: 'VAWC leave',
+    dayCount: 2,
+    vawcSupportDocumentType: 'protection order',
+    vawcCaseDetails: 'BPO-2099-001',
+  });
+  assert.equal(planned.leaveType, 'vawc');
+  assert.equal(planned.dayCount, 2);
+  assert.equal(planned.leavePrefill.vawcSupportDocumentType, 'protection order');
+  assert.equal(planned.leavePrefill.vawcCaseDetails, 'BPO-2099-001');
 });
 
 test('DTR assistant regression: switching from sick to vacation leave does not reuse the sick reply', () => {
