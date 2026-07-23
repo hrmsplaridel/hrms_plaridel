@@ -485,3 +485,147 @@ test('DTR assistant full chat pipeline preserves a long mixed-topic conversation
   assert.equal(mixedLanguage.intent, 'dtr_absent_summary');
   assert.match(mixedLanguage.message.content, /Nakita nako|posibleng absent|Detalye/i);
 });
+
+test('DTR assistant locator prompts yield to new locator and DTR questions', async (t) => {
+  const restoreData = withMockedModule(
+    '../src/services/dtrAssistant/dtrAssistantDataService',
+    {
+      loadEmployeeAssistantContext: async (
+        _pool,
+        { userId, dateRange }
+      ) => assistantContext(dateRange, userId),
+    }
+  );
+  const restoreLlm = withMockedModule('../src/services/llm/llmClient', {
+    chatCompletion: async () => {
+      const error = new Error('AI disabled in deterministic integration test');
+      error.code = 'AI_LOCAL_UNAVAILABLE';
+      throw error;
+    },
+  });
+  clearModule('../src/services/dtrAssistant/dtrAssistantService');
+  const {
+    chatWithDtrAssistant,
+  } = require('../src/services/dtrAssistant/dtrAssistantService');
+
+  t.after(() => {
+    clearModule('../src/services/dtrAssistant/dtrAssistantService');
+    restoreLlm();
+    restoreData();
+  });
+
+  const pool = { query: async () => ({ rows: [] }) };
+  const baseUser = {
+    id: '88888888-8888-4888-8888-888888888888',
+    role: 'employee',
+  };
+
+  const creditUser = { ...baseUser, id: `${baseUser.id}-credit` };
+  const creditQuestion = await chatWithDtrAssistant(pool, {
+    user: creditUser,
+    message: 'ang locator need ug credits?',
+  });
+  assert.equal(creditQuestion.intent, 'locator_requirements');
+  assert.match(creditQuestion.message.content, /^Dili\./i);
+  assert.match(creditQuestion.message.content, /dili mogamit ug dili mobawas/i);
+  assert.doesNotMatch(
+    creditQuestion.message.content,
+    /Tubag sa imong mga pangutana|Here are the leave balances|0\.75|16 days/i
+  );
+  assert.ok(
+    creditQuestion.message.actions.some(
+      (action) => action.type === 'open_locator_form'
+    )
+  );
+
+  const requirementsUser = { ...baseUser, id: `${baseUser.id}-requirements` };
+  const locatorPrompt = await chatWithDtrAssistant(pool, {
+    user: requirementsUser,
+    message: 'can I file a locator?',
+  });
+  assert.equal(locatorPrompt.intent, 'locator_availability_check');
+  assert.match(locatorPrompt.message.content, /locator type|Official Business|WFH/i);
+
+  const requirements = await chatWithDtrAssistant(pool, {
+    user: requirementsUser,
+    message: 'unsa requirements sa WFH?',
+  });
+  assert.equal(requirements.intent, 'locator_requirements');
+  assert.match(requirements.message.content, /Work From Home|WFH/i);
+  assert.doesNotMatch(requirements.message.content, /Which workday|Asa nga workday/i);
+
+  const dtrUser = { ...baseUser, id: `${baseUser.id}-dtr-switch` };
+  const datePrompt = await chatWithDtrAssistant(pool, {
+    user: dtrUser,
+    message: 'can I file WFH?',
+  });
+  assert.equal(datePrompt.intent, 'locator_availability_check');
+  assert.match(datePrompt.message.content, /workday|petsa|date/i);
+
+  const dtrQuestion = await chatWithDtrAssistant(pool, {
+    user: dtrUser,
+    message: 'ngano absent ko gahapon?',
+  });
+  assert.equal(dtrQuestion.intent, 'dtr_status_explanation');
+  assert.doesNotMatch(dtrQuestion.message.content, /locator type|Which workday/i);
+
+  const destinationUser = { ...baseUser, id: `${baseUser.id}-destination` };
+  const destinationPrompt = await chatWithDtrAssistant(pool, {
+    user: destinationUser,
+    message: 'can I file official business tomorrow?',
+  });
+  assert.equal(destinationPrompt.intent, 'locator_availability_check');
+  assert.match(destinationPrompt.message.content, /destination|office/i);
+
+  const destinationAnswer = await chatWithDtrAssistant(pool, {
+    user: destinationUser,
+    message: 'Cebu City Hall',
+  });
+  assert.equal(destinationAnswer.intent, 'locator_availability_check');
+  assert.doesNotMatch(destinationAnswer.message.content, /What destination|Asa ang imong destination/i);
+  const locatorAction = destinationAnswer.message.actions.find(
+    (action) => action.type === 'open_locator_form'
+  );
+  assert.equal(locatorAction.payload.locatorType, 'locator');
+  assert.equal(locatorAction.payload.destination, 'Cebu City Hall');
+
+  const statusUser = { ...baseUser, id: `${baseUser.id}-status` };
+  const statusPrompt = await chatWithDtrAssistant(pool, {
+    user: statusUser,
+    message: 'can I file official business tomorrow?',
+  });
+  assert.equal(statusPrompt.intent, 'locator_availability_check');
+  assert.match(statusPrompt.message.content, /destination|office/i);
+  const {
+    getAssistantMemory,
+  } = require('../src/services/dtrAssistant/dtrAssistantMemoryService');
+  const {
+    interruptsPendingClarification,
+  } = require('../src/services/dtrAssistant/dtrAssistantGuidedClarification');
+  const statusMemory = getAssistantMemory(statusUser.id);
+  assert.equal(statusMemory.pendingClarification?.field, 'destination');
+  assert.equal(
+    interruptsPendingClarification(
+      'asa na akong locator request?',
+      statusMemory
+    ),
+    true
+  );
+  const statusQuestion = await chatWithDtrAssistant(pool, {
+    user: statusUser,
+    message: 'asa na akong locator request?',
+  });
+  assert.equal(
+    statusQuestion.intent,
+    'locator_approval_tracker',
+    JSON.stringify(
+      {
+        prompt: statusPrompt.message,
+        question: statusQuestion.message,
+      },
+      null,
+      2
+    )
+  );
+  assert.doesNotMatch(statusQuestion.message.content, /destination\/office/i);
+});
