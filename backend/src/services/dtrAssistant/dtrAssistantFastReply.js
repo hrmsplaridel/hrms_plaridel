@@ -15,6 +15,13 @@ const {
   getLeaveGuidanceForType,
   getGuidelineSectionsForMessage,
 } = require('./leaveFilingGuidelines');
+const {
+  effectiveMaxDaysForRule,
+  leaveEventDateFilingError,
+  normalizeAdoptionParentRole,
+  normalizeMaternityDeliveryType,
+  requiredLeaveDetailsFilingError,
+} = require('../../routes/leaveTypeRules');
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
 const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
 
@@ -166,12 +173,12 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
     },
     sickLeave: {
       description: 'Para kung dili ka makareport tungod sa sakit, injury, recovery, o medical appointment.',
-      requirements: 'Pilia ang In Hospital o Out Patient ug ibutang ang illness details. Medical certificate kinahanglan kung 5 o labaw ka sunod-sunod nga adlaw, o kung pangayoon sa head of office.',
+      requirements: 'Pilia ang In Hospital o Out Patient ug ibutang ang illness details. Medical certificate kasagaran kinahanglan kung 5 o labaw ka sunod-sunod nga adlaw, o kung pangayoon sa head of office.',
       advanceFiling: 'I-file dayon pagbalik nimo o samtang absent kung posible.',
     },
     maternityLeave: {
       description: 'Para sa female employees tungod sa childbirth o miscarriage, married man o unmarried.',
-      requirements: 'Required ang expected delivery date, maternity classification, ug supporting attachment base sa medical record.',
+      requirements: 'Required ang expected delivery date, maternity classification, ug medical certificate o birth/delivery record base sa medical record.',
       limits: 'Normal delivery: hangtod 105 working days. Caesarean section: hangtod 115 working days.',
       advanceFiling: 'I-block sa HRMS kung less than 30 days before expected delivery date ang filing.',
       notes: 'Apil niini ang normal delivery, caesarean section, ug miscarriage.',
@@ -737,6 +744,19 @@ function rangeDayCount(range) {
   return diff == null ? null : diff + 1;
 }
 
+function todayIsoInHrmsTimezone() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: HRMS_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const year = parts.find((p) => p.type === 'year')?.value || '';
+  const month = parts.find((p) => p.type === 'month')?.value || '';
+  const day = parts.find((p) => p.type === 'day')?.value || '';
+  return `${year}-${month}-${day}`;
+}
+
 function pendingStatus(value) {
   return /^(pending|pending_department_head|pending_hr)$/i.test(String(value || ''));
 }
@@ -772,7 +792,12 @@ function parseRequestedDays(message) {
 }
 
 function requestedDaysOrRangeDays(message, context) {
-  return parseRequestedDays(message) || rangeDayCount(context.date_range);
+  return (
+    parseRequestedDays(message) ||
+    asNumber(context?.assistant_extraction?.dayCount) ||
+    asNumber(context?.assistant_memory?.dayCount) ||
+    rangeDayCount(context.date_range)
+  );
 }
 
 function leaveTypeMatches(balance, type) {
@@ -791,6 +816,49 @@ function leaveBalanceMatchesRecord(balance, typeRecord) {
   return typeName.includes(balanceName) || balanceName.includes(typeName);
 }
 
+const ASSISTANT_NO_CREDIT_LEAVE_TYPES = new Set([
+  'maternityLeave',
+  'paternityLeave',
+  'specialPrivilegeLeave',
+  'soloParentLeave',
+  'studyLeave',
+  'tenDayVawcLeave',
+  'rehabilitationPrivilege',
+  'specialLeaveBenefitsForWomen',
+  'specialEmergencyCalamityLeave',
+  'adoptionLeave',
+  'others',
+]);
+
+function creditLedgerKeyForType(typeRecord) {
+  if (!typeRecord) return null;
+  const name = String(typeRecord.name || '').trim();
+  const raw = String(typeRecord.balance_ledger_type || '').trim();
+  if (ASSISTANT_NO_CREDIT_LEAVE_TYPES.has(name) && (!raw || raw === name || raw === 'ownBalance')) {
+    return null;
+  }
+  if (!raw || raw === 'ownBalance') return name || null;
+  if (raw === 'none') return null;
+  return raw;
+}
+
+function leaveTypeUsesCreditBalance(typeRecord) {
+  return Boolean(creditLedgerKeyForType(typeRecord));
+}
+
+function leaveBalanceMatchesRecordOrLedger(balance, typeRecord) {
+  const ledgerKey = creditLedgerKeyForType(typeRecord);
+  if (!ledgerKey) return false;
+  const balanceName = normalizedText(balance.leave_type);
+  const ledgerName = normalizedText(ledgerKey);
+  const typeName = normalizedText(`${typeRecord.display_name || ''} ${typeRecord.name || ''}`);
+  if (!balanceName) return false;
+  return (
+    (ledgerName && (balanceName.includes(ledgerName) || ledgerName.includes(balanceName))) ||
+    (typeName && (typeName.includes(balanceName) || balanceName.includes(typeName)))
+  );
+}
+
 function leaveTypeRecordMatches(typeRecord, type) {
   if (!type) return true;
   const name = lower(`${typeRecord.display_name || ''} ${typeRecord.name || ''}`).replace(
@@ -800,6 +868,228 @@ function leaveTypeRecordMatches(typeRecord, type) {
   if (type === 'sick') return name.includes('sick') || name === 'sl';
   if (type === 'vacation') return name.includes('vacation') || name === 'vl';
   return true;
+}
+
+function assistantLeavePrefill(context) {
+  return {
+    ...(context?.assistant_memory?.topics?.leave?.leavePrefill || {}),
+    ...(context?.assistant_memory?.leavePrefill || {}),
+    ...(context?.assistant_extraction?.leavePrefill || {}),
+  };
+}
+
+function simulatedLeaveDetails(context) {
+  const prefill = assistantLeavePrefill(context);
+  const details = {};
+  const assign = (key, value) => {
+    if (value == null || value === '') return;
+    details[key] = value;
+  };
+  assign('location_option', prefill.locationOption);
+  assign('location_details', prefill.locationDetails);
+  assign('sick_leave_nature', prefill.sickLeaveNature);
+  assign('sick_illness_details', prefill.sickIllnessDetails || prefill.illnessDetails);
+  assign('maternity_delivery_type', prefill.maternityDeliveryType);
+  assign('adoption_parent_role', prefill.adoptionParentRole);
+  assign('adoption_placement_date', prefill.adoptionPlacementDate);
+  assign('vawc_support_document_type', prefill.vawcSupportDocumentType);
+  assign('vawc_case_details', prefill.vawcCaseDetails);
+  assign('solo_parent_id_number', prefill.soloParentIdNumber);
+  assign('solo_parent_id_expiry_date', prefill.soloParentIdExpiryDate);
+  assign('study_purpose', prefill.studyPurpose);
+  assign('study_details', prefill.studyDetails);
+  assign('other_purpose', prefill.otherPurpose);
+  return details;
+}
+
+function simulatedLeaveEventDates(context) {
+  const prefill = assistantLeavePrefill(context);
+  return {
+    expectedDeliveryDate: prefill.expectedDeliveryDate,
+    childDeliveryDate: prefill.childDeliveryDate,
+    adoptionPlacementDate: prefill.adoptionPlacementDate,
+    adoptionFinalizationDate: prefill.adoptionFinalizationDate,
+    accidentDate: prefill.accidentDate,
+    calamityDate: prefill.calamityDate,
+    soloParentIdExpiryDate: prefill.soloParentIdExpiryDate,
+  };
+}
+
+function calendarYearFromRange(range) {
+  const year = parseInt(String(range?.startDate || '').slice(0, 4), 10);
+  return Number.isInteger(year) ? year : null;
+}
+
+const ASSISTANT_ANNUAL_QUOTAS = {
+  specialPrivilegeLeave: 3,
+  soloParentLeave: 7,
+  tenDayVawcLeave: 10,
+};
+
+function requestMatchesLeaveTypeKey(request, leaveTypeKey) {
+  const requestKey = normalizedText(request.leave_type_key || '');
+  const requestName = normalizedText(request.leave_type || '');
+  const target = normalizedText(leaveTypeKey || '');
+  if (!target) return false;
+  return requestKey === target || requestName.includes(target) || target.includes(requestName);
+}
+
+function annualUsageForLeaveType(context, leaveTypeKey, year) {
+  if (!leaveTypeKey || !year) return null;
+  const rows = Array.isArray(context?.leave_annual_usage)
+    ? context.leave_annual_usage
+    : [];
+  const fromContext = rows.find((row) => {
+    return Number(row?.year) === year && normalizedText(row.leave_type_key) === normalizedText(leaveTypeKey);
+  });
+  if (fromContext) return asNumber(fromContext.days) || 0;
+
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  const requests = Array.isArray(context?.recent_leave_requests)
+    ? context.recent_leave_requests
+    : [];
+  let total = 0;
+  let sawAny = false;
+  for (const request of requests) {
+    if (!pendingStatus(request.status) && !approvedStatus(request.status)) continue;
+    if (!requestMatchesLeaveTypeKey(request, leaveTypeKey)) continue;
+    if (!request.start_date || !request.end_date) continue;
+    if (request.start_date > yearEnd || request.end_date < yearStart) continue;
+    sawAny = true;
+    total += asNumber(request.days) || 0;
+  }
+  return sawAny ? total : null;
+}
+
+function localizedRuleIssue(message, language) {
+  const text = String(message || '');
+  if (!text) return '';
+  if (language === 'english') return text;
+
+  const isBisaya = language === 'bisaya';
+  const pairs = [
+    [/requires the sick leave nature/i, isBisaya
+      ? 'Kinahanglan pilion ang sick leave nature: In Hospital o Out Patient.'
+      : 'Kailangang piliin ang sick leave nature: In Hospital o Out Patient.'],
+    [/requires illness details/i, isBisaya
+      ? 'Kinahanglan ibutang ang illness details.'
+      : 'Kailangang ilagay ang illness details.'],
+    [/requires a location option/i, isBisaya
+      ? 'Kinahanglan pilion ang location option: Within the Philippines o Abroad.'
+      : 'Kailangang piliin ang location option: Within the Philippines o Abroad.'],
+    [/requires location details/i, isBisaya
+      ? 'Kinahanglan ibutang ang specific location/details.'
+      : 'Kailangang ilagay ang specific location/details.'],
+    [/requires the adoption leave eligibility/i, isBisaya
+      ? 'Kinahanglan pilion ang adoption leave eligibility.'
+      : 'Kailangang piliin ang adoption leave eligibility.'],
+    [/requires the PAPA \/ adoption placement date/i, isBisaya
+      ? 'Kinahanglan ibutang ang PAPA/adoption placement date.'
+      : 'Kailangang ilagay ang PAPA/adoption placement date.'],
+    [/cannot start before the PAPA \/ adoption placement date/i, isBisaya
+      ? 'Dili pwede magsugod before sa PAPA/adoption placement date.'
+      : 'Hindi puwedeng magsimula before sa PAPA/adoption placement date.'],
+    [/requires the VAWC supporting document type/i, isBisaya
+      ? 'Kinahanglan pilion ang VAWC supporting document type.'
+      : 'Kailangang piliin ang VAWC supporting document type.'],
+    [/requires VAWC case or protection order details/i, isBisaya
+      ? 'Kinahanglan ibutang ang VAWC case o protection order details.'
+      : 'Kailangang ilagay ang VAWC case o protection order details.'],
+    [/requires the Solo Parent ID number/i, isBisaya
+      ? 'Kinahanglan ibutang ang Solo Parent ID number.'
+      : 'Kailangang ilagay ang Solo Parent ID number.'],
+    [/requires a valid Solo Parent ID expiry date/i, isBisaya
+      ? 'Kinahanglan ibutang ang valid Solo Parent ID expiry date.'
+      : 'Kailangang ilagay ang valid Solo Parent ID expiry date.'],
+    [/Solo Parent ID is already expired/i, isBisaya
+      ? 'Expired na ang Solo Parent ID.'
+      : 'Expired na ang Solo Parent ID.'],
+    [/Solo Parent ID must be valid through the start date/i, isBisaya
+      ? 'Kinahanglan valid ang Solo Parent ID hangtod sa leave start date.'
+      : 'Kailangang valid ang Solo Parent ID hanggang leave start date.'],
+    [/requires the expected delivery date/i, isBisaya
+      ? 'Kinahanglan ibutang ang expected delivery date.'
+      : 'Kailangang ilagay ang expected delivery date.'],
+    [/must be filed at least 30 days before the expected delivery date/i, isBisaya
+      ? 'Kinahanglan i-file ang Maternity Leave at least 30 days before expected delivery date.'
+      : 'Kailangang i-file ang Maternity Leave at least 30 days before expected delivery date.'],
+    [/requires the child delivery or miscarriage date/i, isBisaya
+      ? 'Kinahanglan ibutang ang child delivery o miscarriage date.'
+      : 'Kailangang ilagay ang child delivery o miscarriage date.'],
+    [/cannot start before the child delivery date/i, isBisaya
+      ? 'Dili pwede magsugod before sa child delivery date.'
+      : 'Hindi puwedeng magsimula before sa child delivery date.'],
+    [/must be availed within 60 days from delivery/i, isBisaya
+      ? 'Kinahanglan gamiton sulod sa 60 days from delivery.'
+      : 'Kailangang gamitin sa loob ng 60 days from delivery.'],
+    [/requires the accident date/i, isBisaya
+      ? 'Kinahanglan ibutang ang accident date.'
+      : 'Kailangang ilagay ang accident date.'],
+    [/must be filed within 1 week from the accident/i, isBisaya
+      ? 'Kinahanglan i-file sulod sa 1 week gikan sa accident.'
+      : 'Kailangang i-file sa loob ng 1 week mula sa accident.'],
+    [/requires the calamity\/disaster occurrence date/i, isBisaya
+      ? 'Kinahanglan ibutang ang calamity/disaster occurrence date.'
+      : 'Kailangang ilagay ang calamity/disaster occurrence date.'],
+    [/cannot start before the calamity date/i, isBisaya
+      ? 'Dili pwede magsugod before sa calamity date.'
+      : 'Hindi puwedeng magsimula before sa calamity date.'],
+    [/must be used within 30 days from the calamity occurrence/i, isBisaya
+      ? 'Kinahanglan gamiton sulod sa 30 days from calamity occurrence.'
+      : 'Kailangang gamitin sa loob ng 30 days from calamity occurrence.'],
+  ];
+  for (const [pattern, replacement] of pairs) {
+    if (pattern.test(text)) return replacement;
+  }
+  return text;
+}
+
+function localizedShortIssue(key, language, data = {}) {
+  if (language === 'bisaya') {
+    const map = {
+      employeeDisabled: 'disabled ang employee filing para ani nga leave type',
+      adminOnly: 'admin/HR-only ni nga leave type',
+      sexMissing: `missing ang profile sex; ipa-confirm sa HR kung eligible ba para sa ${data.sex || 'required'} employees`,
+      sexMismatch: `configured ni para sa ${data.sex || 'required'} employees only`,
+      pastDate: 'dili pwede past-date filing para ani nga leave type',
+      advance: `kinahanglan ${fmtLocalizedDayCount(data.days, language)} advance notice`,
+      maxDays: `max allowed kay ${fmtLocalizedDayCount(data.days, language)}`,
+      noBalance: `wala koy matching ${data.type || 'leave'} balance row para ma-check ang credits`,
+      annualCap: `${data.label || 'This leave'} limited to ${fmtLocalizedDayCount(data.limit, language)} kada calendar year; nabilin ${fmtLocalizedDayCount(data.remaining, language)} for ${data.year}, pero ang request kay ${fmtLocalizedDayCount(data.requested, language)}`,
+    };
+    return map[key] || key;
+  }
+  if (language === 'tagalog') {
+    const map = {
+      employeeDisabled: 'disabled ang employee filing para sa leave type na ito',
+      adminOnly: 'admin/HR-only ang leave type na ito',
+      sexMissing: `missing ang profile sex; ipa-confirm sa HR kung eligible para sa ${data.sex || 'required'} employees`,
+      sexMismatch: `configured ito para sa ${data.sex || 'required'} employees only`,
+      pastDate: 'hindi puwede ang past-date filing para sa leave type na ito',
+      advance: `kailangan ng ${fmtLocalizedDayCount(data.days, language)} advance notice`,
+      maxDays: `max allowed ay ${fmtLocalizedDayCount(data.days, language)}`,
+      noBalance: `wala akong matching ${data.type || 'leave'} balance row para ma-check ang credits`,
+      annualCap: `${data.label || 'This leave'} ay limited to ${fmtLocalizedDayCount(data.limit, language)} bawat calendar year; natitira ${fmtLocalizedDayCount(data.remaining, language)} for ${data.year}, pero ang request ay ${fmtLocalizedDayCount(data.requested, language)}`,
+    };
+    return map[key] || key;
+  }
+  const map = {
+    employeeDisabled: 'employee filing is disabled for this leave type',
+    adminOnly: 'this leave type is admin/HR-only',
+    sexMissing: `profile sex is missing, so HR should confirm ${data.sex || 'required'} eligibility`,
+    sexMismatch: `configured for ${data.sex || 'required'} employees only`,
+    pastDate: 'past-date filing is not allowed for this leave type',
+    advance: `needs ${fmtDayCount(data.days)} advance notice`,
+    maxDays: `max allowed is ${fmtDayCount(data.days)}`,
+    noBalance: `no matching ${data.type || 'leave'} balance row was found for credit checking`,
+    annualCap: `${data.label || 'This leave'} is limited to ${fmtDayCount(data.limit)} per calendar year; ${fmtDayCount(data.remaining)} remains for ${data.year}, but this request needs ${fmtDayCount(data.requested)}`,
+  };
+  return map[key] || key;
+}
+
+function isMissingRuleDetail(message) {
+  return /\brequires?\b/i.test(String(message || ''));
 }
 
 function labelLeaveType(value) {
@@ -883,11 +1173,30 @@ function localizedLeaveRequirementParts(type, language) {
   return leaveRequirementParts(type);
 }
 
+function localizedLeaveFormChecklist(type, language) {
+  const label = labelLeaveType(type.display_name || type.name);
+  if (language === 'english') {
+    return getFormGuidanceForType(type).fields.join(' ');
+  }
+
+  const guidance = getLeaveGuidanceForType(type);
+  const pieces =
+    language === 'bisaya'
+      ? [`Pilia ang ${label}.`, 'Ibutang ang covered dates ug number of days.']
+      : [`Piliin ang ${label}.`, 'Ilagay ang covered dates at number of days.'];
+  const requirements = localizedLeaveGuidanceField(type, guidance, 'requirements', language);
+  const limits = localizedLeaveGuidanceField(type, guidance, 'limits', language);
+  const advanceFiling = localizedLeaveGuidanceField(type, guidance, 'advanceFiling', language);
+  if (requirements) pieces.push(`Requirements: ${requirements}`);
+  if (limits) pieces.push(`Limit: ${limits}`);
+  if (advanceFiling) pieces.push(`Filing: ${advanceFiling}`);
+  return pieces.join(' ');
+}
+
 function localizedLeaveFormGuideLine(type, language, days) {
   const label = labelLeaveType(type.display_name || type.name);
   const requirement = localizedAttachmentRuleText(type, days, language);
-  const form = getFormGuidanceForType(type);
-  const fieldChecklist = form.fields.join(' ');
+  const fieldChecklist = localizedLeaveFormChecklist(type, language);
   if (language === 'bisaya') {
     return `${label}: ${fieldChecklist} Attachment: ${requirement}.`;
   }
@@ -895,7 +1204,7 @@ function localizedLeaveFormGuideLine(type, language, days) {
     return `${label}: ${fieldChecklist} Attachment: ${requirement}.`;
   }
 
-  return `${label}: ${form.fields.join(' ')} Requirement: ${attachmentRuleText(type, days)}.`;
+  return `${label}: ${fieldChecklist} Requirement: ${attachmentRuleText(type, days)}.`;
 }
 
 function fmtLeaveRequest(request, language = 'english') {
@@ -2827,9 +3136,10 @@ function leaveAvailabilityReply(context, message) {
   const days = requestedDaysOrRangeDays(message, context);
   const balances = context.leave_balances || [];
   const selected = balances.filter((b) => {
-    if (requestedRecord) return leaveBalanceMatchesRecord(b, requestedRecord);
+    if (requestedRecord) return leaveBalanceMatchesRecordOrLedger(b, requestedRecord);
     return leaveTypeMatches(b, requestedType);
   });
+  const balanceRequired = requestedRecord ? leaveTypeUsesCreditBalance(requestedRecord) : true;
   const balance = requestedType || requestedRecord || selected.length === 1 ? selected[0] : null;
 
   if (!days) {
@@ -2844,40 +3154,118 @@ function leaveAvailabilityReply(context, message) {
     return 'Which leave type do you want to use: sick leave, vacation leave, or another type?';
   }
 
-  const available = balance ? asNumber(balance.available_days) || 0 : null;
-  const type = labelLeaveType(balance?.leave_type || requestedRecord?.display_name || requestedRecord?.name || 'leave');
+  const available = balanceRequired && balance ? asNumber(balance.available_days) || 0 : null;
+  const type = labelLeaveType(requestedRecord?.display_name || balance?.leave_type || requestedRecord?.name || 'leave');
   const enough = available == null ? null : available >= days;
   const warnings = [];
   const blockers = [];
+  const missing = [];
   const notes = [];
+  const typeKey = requestedRecord?.name || null;
+  const detailsInput = simulatedLeaveDetails(context);
+  const eventDates = simulatedLeaveEventDates(context);
+
   if (requestedRecord?.employee_can_file === false) {
-    blockers.push('employee filing is disabled for this leave type');
+    blockers.push(localizedShortIssue('employeeDisabled', language));
   }
   if (requestedRecord?.admin_only === true) {
-    blockers.push('this leave type is admin/HR-only');
+    blockers.push(localizedShortIssue('adminOnly', language));
+  }
+  const sexRule = lower(requestedRecord?.sex_eligibility || 'any') || 'any';
+  const employeeSex = normalizeSex(context.employee?.sex);
+  if (requestedRecord && sexRule !== 'any') {
+    if (!employeeSex) {
+      warnings.push(localizedShortIssue('sexMissing', language, { sex: sexRule }));
+    } else if (employeeSex !== sexRule) {
+      blockers.push(localizedShortIssue('sexMismatch', language, { sex: sexRule }));
+    }
   }
   if (requestedRecord?.allows_past_dates === false && context.date_range?.startDate) {
-    const daysFromToday = daysBetweenIso(new Date().toISOString().slice(0, 10), context.date_range.startDate);
+    const daysFromToday = daysBetweenIso(todayIsoInHrmsTimezone(), context.date_range.startDate);
     if (daysFromToday != null && daysFromToday < 0) {
-      blockers.push('past-date filing is not allowed for this leave type');
+      blockers.push(localizedShortIssue('pastDate', language));
     }
   }
   const advanceDays = asNumber(requestedRecord?.minimum_advance_days);
   if (advanceDays != null && context.date_range?.startDate) {
-    const daysFromToday = daysBetweenIso(new Date().toISOString().slice(0, 10), context.date_range.startDate);
+    const daysFromToday = daysBetweenIso(todayIsoInHrmsTimezone(), context.date_range.startDate);
     if (daysFromToday != null && daysFromToday < advanceDays) {
-      warnings.push(`needs ${fmtDayCount(advanceDays)} advance notice`);
+      blockers.push(localizedShortIssue('advance', language, { days: advanceDays }));
     }
   }
-  const maxDays = asNumber(requestedRecord?.max_days);
+  const maxDays = requestedRecord
+    ? effectiveMaxDaysForRule({
+        rule: requestedRecord,
+        leaveType: typeKey,
+        maternityDeliveryType: normalizeMaternityDeliveryType(detailsInput.maternity_delivery_type),
+        adoptionParentRole: normalizeAdoptionParentRole(detailsInput.adoption_parent_role),
+      })
+    : null;
   if (maxDays != null && days > maxDays) {
-    blockers.push(`max allowed is ${fmtDayCount(maxDays)}`);
+    blockers.push(localizedShortIssue('maxDays', language, { days: maxDays }));
+  }
+  if (typeKey) {
+    const detailError = requiredLeaveDetailsFilingError({
+      leaveType: typeKey,
+      leaveTypeLabel: type,
+      details: detailsInput,
+    });
+    if (detailError) {
+      missing.push(localizedRuleIssue(detailError, language));
+    }
+    const eventDateError = leaveEventDateFilingError({
+      leaveType: typeKey,
+      leaveTypeLabel: type,
+      startDateStr: context.date_range?.startDate,
+      endDateStr: context.date_range?.endDate,
+      eventDates,
+    });
+    if (eventDateError) {
+      const localized = localizedRuleIssue(eventDateError, language);
+      if (isMissingRuleDetail(eventDateError)) missing.push(localized);
+      else blockers.push(localized);
+    }
+    const annualLimit = ASSISTANT_ANNUAL_QUOTAS[typeKey];
+    const year = calendarYearFromRange(context.date_range);
+    if (annualLimit != null && year != null) {
+      const used = annualUsageForLeaveType(context, typeKey, year);
+      if (used != null) {
+        const remaining = Math.max(0, annualLimit - used);
+        if (used + days > annualLimit + 0.0001) {
+          blockers.push(
+            localizedShortIssue('annualCap', language, {
+              label: type,
+              limit: annualLimit,
+              remaining,
+              requested: days,
+              year,
+            })
+          );
+        } else {
+          notes.push(
+            language === 'bisaya'
+              ? `Annual cap check: ${fmtLocalizedDayCount(remaining, language)} remaining for ${year} before this request.`
+              : language === 'tagalog'
+                ? `Annual cap check: ${fmtLocalizedDayCount(remaining, language)} remaining for ${year} bago ang request na ito.`
+                : `Annual cap check: ${fmtDayCount(remaining)} remaining for ${year} before this request.`
+          );
+        }
+      } else {
+        warnings.push(
+          language === 'bisaya'
+            ? `Wala ma-load ang annual usage for ${year}; HRMS mo-check ani during submit.`
+            : language === 'tagalog'
+              ? `Hindi na-load ang annual usage for ${year}; HRMS ang magche-check nito during submit.`
+              : `Annual usage for ${year} was not loaded; HRMS will check it during submit.`
+        );
+      }
+    }
   }
   if (requestedRecord) {
     notes.push(localizedAttachmentRuleText(requestedRecord, days, language));
   }
-  if (!balance) {
-    notes.push('no matching leave balance row was found for this leave type');
+  if (balanceRequired && !balance) {
+    blockers.push(localizedShortIssue('noBalance', language, { type }));
   }
   if (hasDateRangeHint(message)) {
     const overlaps = (context.recent_leave_requests || []).filter((request) => {
@@ -2888,30 +3276,41 @@ function leaveAvailabilityReply(context, message) {
     });
     if (overlaps.length > 0) {
       blockers.push(
-        `Overlap found: ${limitedRequests(overlaps, 2)
+        `${language === 'bisaya'
+          ? 'Naay overlap'
+          : language === 'tagalog'
+            ? 'May overlap'
+            : 'Overlap found'}: ${limitedRequests(overlaps, 2)
           .map((request) => fmtLeaveRequest(request, language))
           .join(' | ')}`
       );
     }
   }
   const baseBalanceEnglish =
-    available == null
+    !balanceRequired
+      ? `${type} does not use the VL/SL credit balance, so I checked the special filing rules for ${fmtDayCount(days)}`
+      : available == null
       ? `I could not verify a balance row for ${type}, but I checked the filing rules for ${fmtDayCount(days)}`
       : `you have ${fmtLocalizedDayCount(available, language)} available ${type} for ${fmtDayCount(days)}`;
   const baseBalanceBisaya =
-    available == null
+    !balanceRequired
+      ? `${type} dili mogamit sa VL/SL credit balance, mao gi-check nako ang special filing rules para sa ${fmtLocalizedDayCount(days, language)}`
+      : available == null
       ? `wala koy matching balance row para sa ${type}, pero na-check nako ang filing rules para sa ${fmtLocalizedDayCount(days, language)}`
       : `naa kay ${fmtLocalizedDayCount(available, language)} available ${type} para sa ${fmtLocalizedDayCount(days, language)}`;
   const baseBalanceTagalog =
-    available == null
+    !balanceRequired
+      ? `${type} ay hindi gumagamit ng VL/SL credit balance, kaya chineck ko ang special filing rules para sa ${fmtLocalizedDayCount(days, language)}`
+      : available == null
       ? `wala akong matching balance row para sa ${type}, pero na-check ko ang filing rules para sa ${fmtLocalizedDayCount(days, language)}`
       : `may ${fmtLocalizedDayCount(available, language)} available ${type} para sa ${fmtLocalizedDayCount(days, language)}`;
 
   if (language === 'bisaya') {
     const details = [
       blockers.length > 0 ? `Issue: ${blockers.join(' | ')}` : null,
+      missing.length > 0 ? `Kulang pa: ${missing.join(' | ')}` : null,
       warnings.length > 0 ? `Warning: ${warnings.join(' | ')}` : null,
-      ...notes.map((note) => `Attachment: ${note}`),
+      ...notes.map((note) => `Note: ${note}`),
     ].filter(Boolean);
     if (blockers.length > 0 || enough === false) {
       if (enough === false) {
@@ -2935,6 +3334,14 @@ function leaveAvailabilityReply(context, message) {
             : 'Ayuhon una ang issue nga nakalista sa taas, dayon i-submit pag-usab.',
       });
     }
+    if (missing.length > 0) {
+      return structuredReply(language, {
+        title: 'Leave filing check',
+        summary: `Kulang pa ang details para ma-confirm kung pwede ang ${fmtLocalizedDayCount(days, language)} nga ${type}. ${baseBalanceBisaya}.`,
+        details,
+        nextStep: 'Ihatag ang kulang nga field sa taas, dayon i-check nato pag-usab.',
+      });
+    }
     return structuredReply(language, {
       title: 'Leave filing check',
       summary: `Pwede nimo i-file ang ${fmtLocalizedDayCount(days, language)} nga ${type}. ${baseBalanceBisaya}.`,
@@ -2945,8 +3352,9 @@ function leaveAvailabilityReply(context, message) {
   if (language === 'tagalog') {
     const details = [
       blockers.length > 0 ? `Issue: ${blockers.join(' | ')}` : null,
+      missing.length > 0 ? `Kulang pa: ${missing.join(' | ')}` : null,
       warnings.length > 0 ? `Warning: ${warnings.join(' | ')}` : null,
-      ...notes.map((note) => `Attachment: ${note}`),
+      ...notes.map((note) => `Note: ${note}`),
     ].filter(Boolean);
     if (blockers.length > 0 || enough === false) {
       if (enough === false) {
@@ -2970,6 +3378,14 @@ function leaveAvailabilityReply(context, message) {
             : 'Ayusin muna ang issue sa itaas, pagkatapos ay isumite ulit.',
       });
     }
+    if (missing.length > 0) {
+      return structuredReply(language, {
+        title: 'Leave filing check',
+        summary: `Kulang pa ang details para ma-confirm kung puwede ang ${fmtLocalizedDayCount(days, language)} na ${type}. ${baseBalanceTagalog}.`,
+        details,
+        nextStep: 'Ibigay ang kulang na field sa itaas, pagkatapos i-check natin ulit.',
+      });
+    }
     return structuredReply(language, {
       title: 'Leave filing check',
       summary: `Puwede mong i-file ang ${fmtLocalizedDayCount(days, language)} na ${type}. ${baseBalanceTagalog}.`,
@@ -2979,8 +3395,9 @@ function leaveAvailabilityReply(context, message) {
   }
   const details = [
     blockers.length > 0 ? `Issue: ${blockers.join(' | ')}` : null,
+    missing.length > 0 ? `Still missing: ${missing.join(' | ')}` : null,
     warnings.length > 0 ? `Warning: ${warnings.join(' | ')}` : null,
-    ...notes.map((note) => `Attachment: ${note}`),
+    ...notes.map((note) => `Note: ${note}`),
   ].filter(Boolean);
   if (blockers.length > 0 || enough === false) {
     if (enough === false) {
@@ -3002,6 +3419,14 @@ function leaveAvailabilityReply(context, message) {
         enough === false
           ? 'Reduce the requested days to fit your available balance, or contact HR if you need the full leave period.'
           : 'Fix the issue listed above, then submit the request again.',
+    });
+  }
+  if (missing.length > 0) {
+    return structuredReply(language, {
+      title: 'Leave filing check',
+      summary: `I need more details before I can confirm ${fmtDayCount(days)} of ${type}. ${baseBalanceEnglish}.`,
+      details,
+      nextStep: 'Provide the missing field above, then I can check it again.',
     });
   }
   return structuredReply(language, {
@@ -4033,7 +4458,7 @@ function compactLeaveTypeGuidelineLine(type, guidance, language = 'english') {
     localizedAvailableForFiling(language);
   const requirements = compactText(
     localizedLeaveGuidanceField(type, guidance, 'requirements', language),
-    105
+    90
   );
   const limits = compactText(localizedLeaveGuidanceField(type, guidance, 'limits', language), 80);
   const parts = [description];
