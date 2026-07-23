@@ -2124,10 +2124,14 @@ function buildToolData(intent, context) {
   }
   if (intent === 'leave_availability_check' || intent === 'leave_balance_after_filing') {
     return {
+      employee: context.employee || null,
       balances: context.leave_balances || [],
+      requests: context.recent_leave_requests || [],
+      annualUsage: context.leave_annual_usage || [],
       leaveTypes: context.leave_types || [],
       leaveGuidelines: context.leave_guidelines || [],
       leaveGuidelineCatalog: context.leave_guideline_catalog || [],
+      extraction: context.assistant_extraction || null,
     };
   }
   if (
@@ -2504,6 +2508,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   if (mergedExtraction.dateRange?.startDate) {
     context.date_range = mergedExtraction.dateRange;
   }
+  context.assistant_extraction = mergedExtraction;
+  context.assistant_memory = extractionMemory;
 
   if (!resolvedIntent) {
     const classified = await classifyIntentWithLocalAi(plannedText, profile);
