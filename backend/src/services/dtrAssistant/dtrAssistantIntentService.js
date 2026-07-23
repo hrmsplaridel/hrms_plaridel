@@ -27,10 +27,60 @@ function isLeaveHowToFileQuestion(text) {
   );
 }
 
+function isBareLeaveFilingCommand(text) {
+  const leaveType =
+    '(?:(?:sick|vacation|paternity|maternity|adoption|solo parent|vawc|calamity|mandatory|forced|special privilege)\\s+)?leave';
+  return new RegExp(
+    `^(?:please\\s+)?(?:file|start|create)\\s+(?:a\\s+|new\\s+)?${leaveType}(?:\\s+request)?(?:\\s+for\\s+me)?(?:\\s+please)?[.!?]*$|^(?:mag[\\s-]?file)(?:\\s+(?:ko|ako))?\\s+(?:ug|ng)\\s+(?:usa\\s+ka\\s+|isang\\s+)?${leaveType}(?:\\s+request)?(?:\\s+palihug|\\s+po)?[.!?]*$`
+  ).test(text);
+}
+
 function isLeaveGuidelineSectionQuestion(text) {
   return /\b(general rules?|filing deadlines?|deadlines?|supporting documents?|attachments?|leave credits?|monthly credits?|monthly accrual|earned credits?|earned leave|credits and limits?|commutation|monetization|monetisation|terminal leave|guidelines?|guideline sections?|guidelines?.*(?:leave types?|types of leave)|leave types?.*guidelines?|types of leave.*guidelines?|explain.*guidelines?|explain.*deadlines?|explain.*credits?|explain.*documents?)\b|1\.25(?:0)?/.test(
     text
   );
+}
+
+function isLeaveCreditRequirementQuestion(message) {
+  const text = lower(normalizeAssistantMessageForRules(message));
+  if (
+    /\b(locator|locator slip|pass slip|wfh|work from home|official business|fieldwork)\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
+  if (/\b(enough|saktong|sakto|igo|sapat|how many|pila|ilan)\b/.test(text)) {
+    return false;
+  }
+  const mentionsCredits =
+    /\b(credits?|leave balance|vl\s*\/\s*sl|vacation\/sick leave)\b/.test(text);
+  const asksIfRequired =
+    /\b(need|needed|required|require|use|uses|deduct|deducted|kinahanglan|kailangan|gamit|mogamit|mobawas)\b/.test(
+      text
+    ) ||
+    /\b(para|to|before|bago)\b.*\b(maka\s*file|makapag[\s-]*file|mag[\s-]*file|file|submit)\b/.test(
+      text
+    );
+  return mentionsCredits && asksIfRequired;
+}
+
+function isLocatorCreditRequirementQuestion(message) {
+  const text = lower(normalizeAssistantMessageForRules(message));
+  const mentionsLocator =
+    /\b(locator|locator slip|pass slip|wfh|work from home|official business|fieldwork)\b/.test(
+      text
+    );
+  const mentionsCredits =
+    /\b(credits?|leave balance|vl\s*\/\s*sl|vacation(?: leave)?|sick(?: leave)?)\b/.test(
+      text
+    );
+  const asksRelationship =
+    /\b(need|needed|required|require|use|uses|deduct|deducted|consume|kinahanglan|kailangan|gamit|mogamit|mobawas|mokuha|bawasan)\b/.test(
+      text
+    ) ||
+    /[?]$/.test(text.trim());
+  return mentionsLocator && mentionsCredits && asksRelationship;
 }
 
 function isLeaveTypeExplanationQuestion(text) {
@@ -556,6 +606,7 @@ function shouldAllowFuzzyOverride(ruleIntent, fuzzyIntent, message) {
     'dtr_missing_log_reason',
     'dtr_correction_guidance',
     'pending_leave_requests',
+    'approved_leave_requests',
     'leave_approval_tracker',
     'leave_rejection_reason',
     'leave_form_field_help',
@@ -612,6 +663,17 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
 
   const fuzzy = scoreFuzzyIntents(message);
   const semantic = scoreSemanticIntents(message);
+  if (isLocatorCreditRequirementQuestion(message)) {
+    return {
+      intent: 'locator_requirements',
+      confidence: 1,
+      source: 'locator_credit_rule',
+      needsAiPlan: false,
+      fuzzy,
+      semantic,
+      ruleIntent: 'locator_requirements',
+    };
+  }
   const ruleIntent = detectEmployeeAssistantIntentByRules(message, null);
   const top = fuzzy.top;
   const runnerUp = fuzzy.runnerUp;
@@ -642,6 +704,7 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
     if (
       semanticTop &&
       semanticTop.intent !== ruleIntent &&
+      shouldAllowFuzzyOverride(ruleIntent, semanticTop.intent, message) &&
       hasIntentDomainSignal(message, semanticTop.intent) &&
       semanticTop.confidence >= 0.58 &&
       semanticTop.confidence - Math.max(ruleScore, semanticScore) >= 0.12
@@ -724,7 +787,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
       text
     );
   const hasDateTopic =
-    /\b(date|day|today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|ngayon|karong adlawa|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|ana|ato|adto|same day|same date|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/.test(
+    /\b(date|day|today|tomorrow|yesterday|ugma|bukas|kagahapon|gahapon|kahapon|karon|ngayon|karong adlawa|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|ana|ato|adto|same day|same date|this year|current year|last year|previous year|next year|karong tuiga|niaging tuig|miaging tuig|ngayong taon|nakaraang taon|susunod na taon|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/.test(
       text
     ) ||
     /\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:days?|weeks?|months?)\s+ago\b/.test(
@@ -748,6 +811,9 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (hasLocatorTopic) {
+    if (isLocatorCreditRequirementQuestion(text)) {
+      return 'locator_requirements';
+    }
     if (isLocatorFormFieldHelpQuestion(text)) {
       return 'locator_form_field_help';
     }
@@ -809,7 +875,16 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
       return 'locator_approval_tracker';
     }
     if (
-      /\b(can i file|can file|can i submit|can submit|pwede.*(?:file|submit)|puwede.*(?:file|submit)|pwede ba|puwede ba|allowed|eligible|eligibility|qualified|available.*file|file.*tomorrow|file.*today|file.*ugma|file.*karon|submit.*tomorrow|submit.*today|submit.*ugma|submit.*karon)\b/.test(text)
+      /\b(can i file|can file|can i submit|can submit|pwede.*(?:file|submit)|puwede.*(?:file|submit)|pwede ba|puwede ba|allowed|eligible|eligibility|qualified|available.*file|file.*tomorrow|file.*today|file.*ugma|file.*bukas|file.*karon|submit.*tomorrow|submit.*today|submit.*ugma|submit.*bukas|submit.*karon)\b/.test(text) ||
+      (
+        hasDateTopic &&
+        /\b(wfh|work from home|pass slip|official business|ob|field work|fieldwork)\b/.test(
+          text
+        ) &&
+        !/\b(status|approved|accepted|pending|rejected|returned|cancelled|canceled|latest|last|recent|history|show|list|my|akong|request|remarks|reason|who|where|asa|kinsa|sino)\b/.test(
+          text
+        )
+      )
     ) {
       return 'locator_availability_check';
     }
@@ -1096,7 +1171,10 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
 
   if (
     /\b(latest|last|most recent|recent)\b/.test(text) &&
-    /\b(leave request|leave status|leave)\b/.test(text)
+    /\b(leave request|leave status|leave)\b/.test(text) &&
+    !/\b(?:last|previous)\s+(?:year|month|week|pay\s*period|payroll\s*period|cutoff|cut-off|cut off)\b/.test(
+      text
+    )
   ) {
     return 'latest_leave_request';
   }
@@ -1168,6 +1246,7 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     /\b(find|lookup|locate|show)\b/.test(text) &&
     /\b(leave request|leave)\b/.test(text) &&
     hasDateTopic &&
+    !/\b(approved|pending|rejected|returned|declined|denied)\b/.test(text) &&
     !/\b(pwede|puwede|can i|can we|allowed|eligible|qualified)\b/.test(text)
   ) {
     return 'leave_request_lookup';
@@ -1214,6 +1293,10 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
     return 'leave_filing_policy';
   }
 
+  if (isLeaveCreditRequirementQuestion(text)) {
+    return 'leave_filing_policy';
+  }
+
   if (
     /\b(attachment|attachments|document|documents|docs|proof|medical certificate|med cert|need.*attach|required.*attach|what.*attach|which.*attach|kinahanglan.*attach|kailangan.*attach)\b/.test(
       text
@@ -1251,9 +1334,10 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   }
 
   if (
-    /\b(help me file|guide me file|assist me file|tabangi.*file|tabangi ko|mag file ko|mag-file ko|i want to file|gusto ko mag file|gusto nako mag file)\b/.test(
-      text
-    ) &&
+    (isBareLeaveFilingCommand(text) ||
+      /\b(help me file|guide me file|assist me file|tabangi.*file|tabangi ko|mag file ko|mag-file ko|i want to file|gusto ko mag file|gusto nako mag file)\b/.test(
+        text
+      )) &&
     LEAVE_TOPIC_PATTERN.test(text)
   ) {
     return 'leave_guided_filing';
@@ -1353,6 +1437,16 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
       text
     ) &&
     (LEAVE_TOPIC_PATTERN.test(text) || /\b\d+\b/.test(text))
+  ) {
+    return 'leave_availability_check';
+  }
+
+  if (
+    LEAVE_TOPIC_PATTERN.test(text) &&
+    hasDateTopic &&
+    !/\b(status|approved|pending|rejected|returned|cancelled|canceled|latest|last|recent|history|show|list|my|akong|request|balance|credits?|attachment|requirements?|policy|rules?|guidelines?|what|why|how|unsa|ngano|ano|bakit)\b/.test(
+      text
+    )
   ) {
     return 'leave_availability_check';
   }
@@ -1482,6 +1576,8 @@ function detectEmployeeAssistantIntent(message, explicitIntent) {
 
 module.exports = {
   detectEmployeeAssistantIntent,
+  isLeaveCreditRequirementQuestion,
+  isLocatorCreditRequirementQuestion,
   intentDomain,
   normalizeIntent,
   scoreEmployeeAssistantIntent,
