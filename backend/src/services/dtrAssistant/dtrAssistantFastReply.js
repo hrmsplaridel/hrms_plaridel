@@ -24,6 +24,11 @@ const {
 } = require('../../routes/leaveTypeRules');
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
 const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
+const { extractDayCount } = require('./dtrAssistantMessageExtraction');
+const {
+  isLeaveCreditRequirementQuestion,
+  isLocatorCreditRequirementQuestion,
+} = require('./dtrAssistantIntentService');
 
 function lower(value) {
   return String(value || '').toLowerCase();
@@ -148,6 +153,12 @@ function firstSentence(value) {
   if (!text) return '';
   const match = text.match(/^.*?[.!?](?:\s|$)/);
   return trimTrailingSentencePunctuation(match ? match[0] : text);
+}
+
+function completeText(value) {
+  return trimTrailingSentencePunctuation(
+    String(value || '').replace(/\s+/g, ' ').trim()
+  );
 }
 
 function compactText(value, maxLength = 120) {
@@ -720,7 +731,7 @@ function isEnoughBalanceQuestion(message) {
 
 function hasDateRangeHint(message) {
   const text = lower(message);
-  return /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|karong adlawa|week|semana|semanaha|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|bulan|bulana|buwan|buwana|aning bulana|last month|this month|next month|last week|this week|next week|next day|following day|previous day|day before|same day|same date|sunod adlaw|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/.test(
+  return /\b(today|tomorrow|yesterday|ugma|bukas|kagahapon|gahapon|kahapon|karon|ngayon|karong adlawa|week|semana|semanaha|month|year|tuig|tuiga|taon|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|bulan|bulana|buwan|buwana|aning bulana|last month|this month|next month|last week|this week|next week|next day|following day|previous day|day before|same day|same date|sunod adlaw|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b|\b\d{1,2}\s+(?:days?|weeks?|months?)\s+ago\b|\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+\d{1,2}\b/.test(
     text
   );
 }
@@ -786,9 +797,7 @@ function activeLeaveStatus(value) {
 }
 
 function parseRequestedDays(message) {
-  const text = lower(message);
-  const match = text.match(/\b(\d+(?:\.\d+)?)\s*(?:day|days|adlaw|ka\s*adlaw)?\b/);
-  return match ? asNumber(match[1]) : null;
+  return asNumber(extractDayCount(message));
 }
 
 function requestedDaysOrRangeDays(message, context) {
@@ -2947,6 +2956,12 @@ function leaveBalanceSufficiencyReply(visibleBalances, language) {
 }
 
 function leaveBalanceReply(context, localized, message) {
+  if (isLocatorCreditRequirementQuestion(message)) {
+    return locatorCreditRequirementReply(message);
+  }
+  if (isLeaveCreditRequirementQuestion(message)) {
+    return leaveCreditRequirementReply(context, message);
+  }
   const balances = context.leave_balances || [];
   if (balances.length === 0) {
     return localized
@@ -3129,7 +3144,66 @@ function leaveHistoryReply(context, message) {
   });
 }
 
+function leaveCreditRequirementReply(context, message) {
+  const language = languageOf(message);
+  const requestedRecord = requestedLeaveTypeRecord(message, context);
+
+  if (!requestedRecord) {
+    if (language === 'bisaya') {
+      return 'Depende sa leave type. Ang Vacation Leave ug Sick Leave kinahanglan ug available credits. Ang Mandatory/Forced Leave mobawas sa Vacation Leave credits. Ang maternity, paternity, adoption, VAWC, solo parent, ug ubang special leave dili mogamit sa imong VL/SL credits.';
+    }
+    if (language === 'tagalog') {
+      return 'Depende sa leave type. Kailangan ng available credits ang Vacation Leave at Sick Leave. Ibinabawas sa Vacation Leave credits ang Mandatory/Forced Leave. Ang maternity, paternity, adoption, VAWC, solo parent, at iba pang special leave ay hindi gumagamit ng VL/SL credits.';
+    }
+    return 'It depends on the leave type. Vacation Leave and Sick Leave require available credits. Mandatory/Forced Leave uses Vacation Leave credits. Maternity, paternity, adoption, VAWC, solo parent, and other special leaves do not use your VL/SL credits.';
+  }
+
+  const type = labelLeaveType(requestedRecord.display_name || requestedRecord.name);
+  const ledgerKey = creditLedgerKeyForType(requestedRecord);
+  if (!ledgerKey) {
+    if (language === 'bisaya') {
+      return `Dili. Ang ${type} dili mogamit ug dili mobawas sa imong Vacation Leave o Sick Leave credits. Ang kakulang sa VL/SL credits dili makapugong sa pag-file, pero kinahanglan gihapon nga eligible ka, kompleto ang required details ug attachment, ug ma-approve ang request sa HR workflow.`;
+    }
+    if (language === 'tagalog') {
+      return `Hindi. Ang ${type} ay hindi gumagamit o nagbabawas sa iyong Vacation Leave o Sick Leave credits. Hindi hadlang ang kakulangan ng VL/SL credits sa pag-file, pero kailangan mo pa ring maging eligible, kumpletuhin ang required details at attachment, at maaprubahan ang request sa HR workflow.`;
+    }
+    return `No. ${type} does not use or deduct from your Vacation Leave or Sick Leave credits. A lack of VL/SL credits does not prevent filing, but you must still be eligible, complete the required details and attachment, and pass the HR approval workflow.`;
+  }
+
+  const ledgerLabel = labelLeaveType(ledgerKey);
+  const balance = (context.leave_balances || []).find((item) =>
+    leaveBalanceMatchesRecordOrLedger(item, requestedRecord)
+  );
+  const balanceNote =
+    balance == null
+      ? ''
+      : language === 'bisaya'
+        ? ` Naa kay ${fmtLocalizedDayCount(balance.available_days, language)} available karon.`
+        : language === 'tagalog'
+          ? ` May ${fmtLocalizedDayCount(balance.available_days, language)} kang available ngayon.`
+          : ` You currently have ${fmtLocalizedDayCount(balance.available_days, language)} available.`;
+  const adminNote =
+    requestedRecord.employee_can_file === false || requestedRecord.admin_only === true
+      ? language === 'bisaya'
+        ? ' HR/admin ang mo-file niini para nimo.'
+        : language === 'tagalog'
+          ? ' HR/admin ang magfa-file nito para sa iyo.'
+          : ' HR/admin must file this leave for you.'
+      : '';
+
+  if (language === 'bisaya') {
+    return `Oo. Ang ${type} mogamit sa imong ${ledgerLabel} credits, busa kinahanglan igo ang available balance para sa number of days nga i-file.${balanceNote}${adminNote}`;
+  }
+  if (language === 'tagalog') {
+    return `Oo. Ginagamit ng ${type} ang iyong ${ledgerLabel} credits, kaya kailangan sapat ang available balance para sa bilang ng araw na ifa-file.${balanceNote}${adminNote}`;
+  }
+  return `Yes. ${type} uses your ${ledgerLabel} credits, so the available balance must cover the number of days you file.${balanceNote}${adminNote}`;
+}
+
 function leaveAvailabilityReply(context, message) {
+  if (isLeaveCreditRequirementQuestion(message)) {
+    return leaveCreditRequirementReply(context, message);
+  }
   const language = languageOf(message);
   const requestedType = requestedLeaveType(message);
   const requestedRecord = requestedLeaveTypeRecord(message, context);
@@ -3595,6 +3669,9 @@ function leaveAttachmentRequirementReply(context, message) {
 
 function leaveFilingPolicyReply(context, message) {
   const language = languageOf(message);
+  if (isLeaveCreditRequirementQuestion(message)) {
+    return leaveCreditRequirementReply(context, message);
+  }
   if (
     /\b(what happens?|what will happen|what happens next|after i submit|after submitting|after submission|human after submit|unsa.*mahitabo|mahitabo.*submit|ano.*mangyayari|mangyayari.*submit)\b/i.test(
       message
@@ -4451,16 +4528,17 @@ function isLeaveTypeGuidelineOverviewQuestion(message) {
     /\b(leave types?|types of leave|all leave|available leave)\b/.test(text);
 }
 
-function compactLeaveTypeGuidelineLine(type, guidance, language = 'english') {
+function completeLeaveTypeGuidelineLine(type, guidance, language = 'english') {
   const label = labelLeaveType(type.display_name || type.name || type.leave_type);
   const description =
-    compactText(localizedLeaveGuidanceField(type, guidance, 'description', language), 125) ||
+    completeText(localizedLeaveGuidanceField(type, guidance, 'description', language)) ||
     localizedAvailableForFiling(language);
-  const requirements = compactText(
-    localizedLeaveGuidanceField(type, guidance, 'requirements', language),
-    90
+  const requirements = completeText(
+    localizedLeaveGuidanceField(type, guidance, 'requirements', language)
   );
-  const limits = compactText(localizedLeaveGuidanceField(type, guidance, 'limits', language), 80);
+  const limits = completeText(
+    localizedLeaveGuidanceField(type, guidance, 'limits', language)
+  );
   const parts = [description];
   if (requirements) parts.push(`Req: ${requirements}`);
   if (limits) parts.push(`Limit: ${limits}`);
@@ -4485,12 +4563,12 @@ function leaveTypeGuidelineOverviewReply(context, message) {
     .filter((type) => type.employee_can_file !== false)
     .map((type) => {
       const guidance = getLeaveGuidanceForType(type);
-      return compactLeaveTypeGuidelineLine(type, guidance, language);
+      return completeLeaveTypeGuidelineLine(type, guidance, language);
     })
     .filter(Boolean);
 
   const fallbackGuidelines = (context.leave_guidelines || []).map((guidance) => {
-    return compactLeaveTypeGuidelineLine(
+    return completeLeaveTypeGuidelineLine(
       {
         name: guidance.leave_type,
         display_name: guidance.leave_type,
@@ -4500,7 +4578,7 @@ function leaveTypeGuidelineOverviewReply(context, message) {
     );
   });
   const catalogGuidelines = (context.leave_guideline_catalog || []).map((guidance) => {
-    return compactLeaveTypeGuidelineLine(
+    return completeLeaveTypeGuidelineLine(
       {
         name: guidance.leave_type,
         display_name: guidance.leave_type,
@@ -5575,8 +5653,22 @@ function locatorSummaryReply(context, message) {
   });
 }
 
+function locatorCreditRequirementReply(message) {
+  const language = languageOf(message);
+  if (language === 'bisaya') {
+    return 'Dili. Ang locator request dili mogamit ug dili mobawas sa imong Vacation Leave o Sick Leave credits. Lahi kini sa leave filing. Kinahanglan lang nga sakto ang locator type, workday, covered AM/PM slots, destination ug reason, required attachment depende sa type, ug approval. Kung approved, makatabang kini sa DTR coverage pero dili mokunhod ang imong leave balance.';
+  }
+  if (language === 'tagalog') {
+    return 'Hindi. Ang locator request ay hindi gumagamit o nagbabawas sa iyong Vacation Leave o Sick Leave credits. Hiwalay ito sa leave filing. Kailangan lamang ang tamang locator type, workday, covered AM/PM slots, destination at reason, required attachment depende sa type, at approval. Kapag approved, makakatulong ito sa DTR coverage pero hindi mababawasan ang leave balance mo.';
+  }
+  return 'No. A locator request does not use or deduct from your Vacation Leave or Sick Leave credits. It is separate from leave filing. You only need the correct locator type, workday, covered AM/PM slots, destination and reason, any attachment required by the type, and approval. Once approved, it can support DTR coverage without reducing your leave balance.';
+}
+
 function locatorRequirementsReply(context, message) {
   const language = languageOf(message);
+  if (isLocatorCreditRequirementQuestion(message)) {
+    return locatorCreditRequirementReply(message);
+  }
   const asksDestination =
     /\b(destination|destination field|location field|office field|where.*(?:put|enter|write|type)|asa.*ibutang|saan.*ilalagay)\b/i.test(
       message
