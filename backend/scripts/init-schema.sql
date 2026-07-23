@@ -360,7 +360,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   max_days NUMERIC,
   minimum_advance_days INTEGER,
   affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
-  balance_ledger_type TEXT NOT NULL DEFAULT 'others',
+  balance_ledger_type TEXT NOT NULL DEFAULT 'none',
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
   accrual_monthly_rate NUMERIC(5,2),
   accrual_annual_cap NUMERIC(8,2),
@@ -446,22 +446,8 @@ SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
     ),
     balance_ledger_type = CASE
       WHEN name = 'mandatoryForcedLeave' THEN 'vacationLeave'
-      WHEN name IN (
-        'vacationLeave',
-        'sickLeave',
-        'maternityLeave',
-        'paternityLeave',
-        'specialPrivilegeLeave',
-        'soloParentLeave',
-        'studyLeave',
-        'tenDayVawcLeave',
-        'rehabilitationPrivilege',
-        'specialLeaveBenefitsForWomen',
-        'specialEmergencyCalamityLeave',
-        'adoptionLeave',
-        'others'
-      ) THEN name
-      ELSE 'others'
+      WHEN name IN ('vacationLeave', 'sickLeave') THEN name
+      ELSE 'none'
     END,
     accrues_monthly = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN true ELSE false END,
     accrual_monthly_rate = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN 1.25 ELSE NULL END,
