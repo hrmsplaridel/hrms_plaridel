@@ -43,6 +43,77 @@ function firstCapture(text, patterns) {
   return null;
 }
 
+const DATE_FRAGMENT =
+  '(?:\\d{4}-\\d{2}-\\d{2}|(?:january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\\s+\\d{1,2}(?:,?\\s*20\\d{2})?|today|tomorrow|ngayon|bukas|karon|ugma)';
+
+function extractLabeledDate(source, labelPattern) {
+  const pattern = new RegExp(
+    `\\b(?:${labelPattern})(?:\\s+(?:date|petsa))?\\s*(?:is|are|on|sa|ng|:|=)?\\s*(${DATE_FRAGMENT})\\b`,
+    'i'
+  );
+  const match = source.match(pattern);
+  if (!match?.[1]) return null;
+  const parsed = parseAssistantDateRange(match[1]);
+  return parsed?.startDate || null;
+}
+
+function normalizeSickNatureHint(value) {
+  const text = lower(value);
+  if (/\bin[-\s]?hospital\b|\bconfined\b|\bna[-\s]?confine\b|\badmitted\b/.test(text)) {
+    return 'inHospital';
+  }
+  if (/\bout[-\s]?patient\b|\boutpatient\b|\bclinic\b|\bconsultation\b|\bhome recovery\b/.test(text)) {
+    return 'outPatient';
+  }
+  return null;
+}
+
+function normalizeMaternityDeliveryHint(value) {
+  const text = lower(value);
+  if (/\bcaesarean\b|\bcesarean\b|\bc[-\s]?section\b|\bcs\b/.test(text)) {
+    return 'caesareanSection';
+  }
+  if (/\bnormal\b|\bnormal delivery\b/.test(text)) return 'normalDelivery';
+  return null;
+}
+
+function normalizeAdoptionRoleHint(value) {
+  const text = lower(value);
+  if (/\blegitimate male spouse\b|\bmale spouse\b|\bspouse\b|\badoptive father\b/.test(text)) {
+    return 'legitimateMaleSpouse';
+  }
+  if (/\badoptive mother\b|\bsingle male\b|\bsingle male adopter\b|\bmother\b/.test(text)) {
+    return 'primaryAdoptiveParent';
+  }
+  return null;
+}
+
+function normalizeVawcDocumentHint(value) {
+  const text = lower(value);
+  if (/\bprotection order\b|\bbpo\b|\btpo\b|\bppo\b|\bpo\b/.test(text)) {
+    return 'protectionOrder';
+  }
+  if (/\bpolice\b|\bprosecutor\b|\bblotter\b/.test(text)) {
+    return 'policeOrProsecutorReport';
+  }
+  if (/\bmedical certificate\b|\bmed cert\b|\bmedical\b/.test(text)) {
+    return 'medicalCertificate';
+  }
+  if (/\bother\b|\bcertified document\b|\bgovernment document\b/.test(text)) {
+    return 'otherSupportingDocument';
+  }
+  return null;
+}
+
+function extractFieldValue(source, labelPattern, max = 120) {
+  const pattern = new RegExp(
+    `\\b(?:${labelPattern})\\s*(?:is|are|:|=)?\\s+(.{3,${max}}?)(?:[.?!]|,\\s*(?:and|then|with|from|on|sa|ng)\\b|$)`,
+    'i'
+  );
+  const match = source.match(pattern);
+  return trimPrefillValue(match?.[1] || '');
+}
+
 function normalizeLeaveTypeHint(value) {
   const text = lower(value);
   if (!text) return null;
@@ -178,6 +249,66 @@ function extractLeavePrefill(text, memory) {
     result.locationOption = 'within_philippines';
   }
 
+  const sickNature = normalizeSickNatureHint(source);
+  if (sickNature) result.sickLeaveNature = sickNature;
+  const illnessDetails = extractFieldValue(
+    source,
+    'illness details|illness|sick details|diagnosis|medical reason|sakit'
+  );
+  if (illnessDetails && !/^(?:leave|sick leave|today|tomorrow|ugma|bukas)\b/i.test(illnessDetails)) {
+    result.sickIllnessDetails = illnessDetails;
+  }
+
+  const leaveType = normalizeLeaveTypeHint(source);
+  const genericDeliveryDate = extractLabeledDate(source, 'delivery|delivery date');
+  const expectedDeliveryDate =
+    extractLabeledDate(source, 'expected delivery|expected delivery date|due date|maternity date|edd') ||
+    (leaveType === 'maternity' ? genericDeliveryDate : null);
+  if (expectedDeliveryDate) result.expectedDeliveryDate = expectedDeliveryDate;
+
+  const childDeliveryDate =
+    extractLabeledDate(source, 'child delivery|child delivery date|spouse delivery|birth date|miscarriage') ||
+    (leaveType === 'paternity' ? genericDeliveryDate : null);
+  if (childDeliveryDate) result.childDeliveryDate = childDeliveryDate;
+
+  const maternityDeliveryType = normalizeMaternityDeliveryHint(source);
+  if (maternityDeliveryType) result.maternityDeliveryType = maternityDeliveryType;
+
+  const adoptionPlacementDate = extractLabeledDate(
+    source,
+    'papa|papa date|placement|placement date|adoption placement|adoption placement date|adoption finalization|adoption finalization date'
+  );
+  if (adoptionPlacementDate) result.adoptionPlacementDate = adoptionPlacementDate;
+  const adoptionParentRole = normalizeAdoptionRoleHint(source);
+  if (adoptionParentRole) result.adoptionParentRole = adoptionParentRole;
+
+  const vawcSupportDocumentType = normalizeVawcDocumentHint(source);
+  if (vawcSupportDocumentType) result.vawcSupportDocumentType = vawcSupportDocumentType;
+  const vawcCaseDetails = extractFieldValue(
+    source,
+    'case details|vawc case details|protection order details|case\\/protection order details|vawc details'
+  );
+  if (vawcCaseDetails) result.vawcCaseDetails = vawcCaseDetails;
+
+  const soloParentIdNumber = extractFieldValue(
+    source,
+    'solo parent id number|solo parent id no|solo parent id'
+  );
+  if (soloParentIdNumber) result.soloParentIdNumber = soloParentIdNumber;
+  const soloParentIdExpiryDate = extractLabeledDate(
+    source,
+    'solo parent id expiry|solo parent id expiry date|solo parent expiry|solo parent validity|valid until|expiry'
+  );
+  if (soloParentIdExpiryDate) result.soloParentIdExpiryDate = soloParentIdExpiryDate;
+
+  const accidentDate = extractLabeledDate(source, 'accident|accident date|incident|incident date|injury date');
+  if (accidentDate) result.accidentDate = accidentDate;
+  const calamityDate = extractLabeledDate(
+    source,
+    'calamity|calamity date|disaster|disaster date|occurrence|occurrence date'
+  );
+  if (calamityDate) result.calamityDate = calamityDate;
+
   return result;
 }
 
@@ -248,12 +379,35 @@ function mergePlannerExtraction(rulesExtraction, plannerExtraction) {
     ...(rules.leavePrefill || {}),
     ...(planner.leavePrefill || {}),
   };
+  const leavePrefillKeys = [
+    'sickLeaveNature',
+    'sickIllnessDetails',
+    'illnessDetails',
+    'expectedDeliveryDate',
+    'maternityDeliveryType',
+    'childDeliveryDate',
+    'adoptionPlacementDate',
+    'adoptionFinalizationDate',
+    'adoptionParentRole',
+    'vawcSupportDocumentType',
+    'vawcCaseDetails',
+    'soloParentIdNumber',
+    'soloParentIdExpiryDate',
+    'accidentDate',
+    'calamityDate',
+    'studyPurpose',
+    'studyDetails',
+    'otherPurpose',
+  ];
   if (planner.reason && !mergedLeavePrefill.reason) mergedLeavePrefill.reason = planner.reason;
   if (planner.locationDetails && !mergedLeavePrefill.locationDetails) {
     mergedLeavePrefill.locationDetails = planner.locationDetails;
   }
   if (planner.locationOption && !mergedLeavePrefill.locationOption) {
     mergedLeavePrefill.locationOption = planner.locationOption;
+  }
+  for (const key of leavePrefillKeys) {
+    if (planner[key] && !mergedLeavePrefill[key]) mergedLeavePrefill[key] = planner[key];
   }
 
   const mergedLocatorPrefill = {
@@ -316,6 +470,30 @@ function normalizePlannerExtraction(raw) {
     const option = lower(raw.locationOption);
     if (option.includes('abroad')) leavePrefill.locationOption = 'abroad';
     if (option.includes('within')) leavePrefill.locationOption = 'within_philippines';
+  }
+  for (const key of [
+    'sickLeaveNature',
+    'sickIllnessDetails',
+    'illnessDetails',
+    'expectedDeliveryDate',
+    'maternityDeliveryType',
+    'childDeliveryDate',
+    'adoptionPlacementDate',
+    'adoptionFinalizationDate',
+    'adoptionParentRole',
+    'vawcSupportDocumentType',
+    'vawcCaseDetails',
+    'soloParentIdNumber',
+    'soloParentIdExpiryDate',
+    'accidentDate',
+    'calamityDate',
+    'studyPurpose',
+    'studyDetails',
+    'otherPurpose',
+  ]) {
+    if (raw[key] != null && raw[key] !== '') {
+      leavePrefill[key] = typeof raw[key] === 'string' ? compact(raw[key], 180) : raw[key];
+    }
   }
   for (const slot of ['amIn', 'amOut', 'pmIn', 'pmOut']) {
     if (raw[slot] === true || lower(raw[slot]) === 'true') locatorPrefill[slot] = true;
