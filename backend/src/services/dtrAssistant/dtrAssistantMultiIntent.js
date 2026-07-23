@@ -1,5 +1,9 @@
 const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
-const { scoreEmployeeAssistantIntent, intentDomain } = require('./dtrAssistantIntentService');
+const {
+  isLocatorCreditRequirementQuestion,
+  scoreEmployeeAssistantIntent,
+  intentDomain,
+} = require('./dtrAssistantIntentService');
 
 function lower(value) {
   return String(value || '').toLowerCase();
@@ -83,6 +87,21 @@ function uniqueIntents(items) {
 }
 
 function detectMultipleIntents(message, options = {}) {
+  if (isLocatorCreditRequirementQuestion(message)) {
+    return {
+      isMulti: false,
+      intents: [
+        {
+          segment: String(message || '').trim(),
+          intent: 'locator_requirements',
+          confidence: 1,
+          source: 'locator_credit_rule',
+          domain: 'locator',
+        },
+      ],
+      segments: [String(message || '').trim()],
+    };
+  }
   const segments = splitMessageSegments(message);
   const scoredSegments = segments.map((segment) => {
     const scored = scoreEmployeeAssistantIntent(segment, options.explicitIntent || null);
