@@ -198,7 +198,7 @@ function extractDayCount(text) {
   const patterns = [
     /\b(\d+(?:\.\d+)?)\s*(?:day|days|adlaw|ka\s*adlaw|araw)\b/,
     /\b(?:file|take|use|mag[- ]?file)\s+(?:ug\s+)?(\d+(?:\.\d+)?)\b/,
-    /\b(\d+(?:\.\d+)?)\b/,
+    /^(\d+(?:\.\d+)?)$/,
   ];
   for (const pattern of patterns) {
     const match = source.match(pattern);
@@ -207,12 +207,19 @@ function extractDayCount(text) {
     if (Number.isFinite(value) && value > 0 && value <= 365) return value;
   }
 
+  const wordToken =
+    '(one|two|three|four|five|six|seven|eight|nine|ten|isa|usa|uno|duha|dos|dalawa|tulo|tres|tatlo|upat|kwatro|apat|lima|singko|unom|walo|siyam|napulo)';
   const wordMatch = source.match(
-    /\b(one|two|three|four|five|six|seven|eight|nine|ten|isa|usa|uno|duha|dos|dalawa|tulo|tres|tatlo|upat|kwatro|apat|lima|singko|unom|walo|siyam|napulo)\b(?:\s*(?:ka\s*)?(?:day|days|adlaw|araw))?\b/
+    new RegExp(`\\b${wordToken}\\b\\s*(?:ka\\s*)?(?:day|days|adlaw|araw)\\b`)
   );
   if (wordMatch?.[1]) {
     const value = parseDayCountToken(wordMatch[1]);
     if (value != null) return value;
+  }
+
+  const bareWordMatch = source.match(new RegExp(`^${wordToken}$`));
+  if (bareWordMatch?.[1]) {
+    return parseDayCountToken(bareWordMatch[1]);
   }
 
   return null;
