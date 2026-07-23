@@ -32,8 +32,10 @@ const {
 const {
   applyPendingClarificationAnswer,
   evaluateGuidedClarification,
+  interruptsPendingClarification,
 } = require('./dtrAssistantGuidedClarification');
 const {
+  isLeaveCreditRequirementQuestion,
   normalizeIntent,
   scoreEmployeeAssistantIntent,
 } = require('./dtrAssistantIntentService');
@@ -55,6 +57,7 @@ const {
 } = require('../../utils/dateRangeParser');
 
 const MAX_ASSISTANT_REPLY_CHARS = 4000;
+const MAX_LONG_FORM_ASSISTANT_REPLY_CHARS = 12000;
 const MAX_MEMORY_TURNS = 6;
 
 const DEFAULT_MODEL_PROFILE_ID = 'tools_ollama';
@@ -172,7 +175,13 @@ function emptyAssistantContext(dateRange = null) {
   };
 }
 
-function compactAssistantContent(content) {
+function assistantReplyCharLimit(intent) {
+  return intent === 'leave_guideline_section'
+    ? MAX_LONG_FORM_ASSISTANT_REPLY_CHARS
+    : MAX_ASSISTANT_REPLY_CHARS;
+}
+
+function compactAssistantContent(content, maxChars = MAX_ASSISTANT_REPLY_CHARS) {
   const text = String(content || '')
     .replace(/\r\n/g, '\n')
     .split('\n')
@@ -180,8 +189,8 @@ function compactAssistantContent(content) {
     .filter(Boolean)
     .join('\n')
     .trim();
-  if (text.length <= MAX_ASSISTANT_REPLY_CHARS) return text;
-  return `${text.slice(0, MAX_ASSISTANT_REPLY_CHARS - 3).trim()}...`;
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars - 3).trim()}...`;
 }
 
 function isStructuredDtrIntent(intent) {
@@ -309,12 +318,18 @@ function memoryLocatorTypeForIntent(intent, effectiveText, memory) {
 function memoryWithClarificationPatch(memory, patch) {
   if (!patch) return memory;
   const base = memory || {};
+  const hasPendingClarification = Object.prototype.hasOwnProperty.call(
+    patch,
+    'pendingClarification'
+  );
   return {
     ...base,
     leaveType: patch.leaveType || base.leaveType || null,
     locatorType: patch.locatorType || base.locatorType || null,
     dateRange: patch.dateRange || base.dateRange || null,
-    pendingClarification: patch.pendingClarification ?? base.pendingClarification ?? null,
+    pendingClarification: hasPendingClarification
+      ? patch.pendingClarification
+      : base.pendingClarification ?? null,
     dayCount: patch.dayCount ?? base.dayCount ?? null,
     leavePrefill: patch.leavePrefill
       ? mergePrefill(base.leavePrefill || {}, patch.leavePrefill)
@@ -1039,7 +1054,7 @@ function buildAssistantResult({
     message: {
       id: crypto.randomUUID(),
       role: 'assistant',
-      content: compactAssistantContent(content),
+      content: compactAssistantContent(content, assistantReplyCharLimit(intent)),
       createdAt: new Date().toISOString(),
       intent: intent || null,
       intentConfidence: safeIntentConfidence,
@@ -1353,7 +1368,11 @@ function isShortDurationAnswer(text) {
 function isShortLeaveTypeAnswer(text) {
   const value = lower(text).trim();
   if (value.split(/\s+/).filter(Boolean).length > 6) return false;
-  if (/\b(how|what|which|why|ngano|unsa|unsay|ano|pila|can|pwede|puwede)\b/.test(value)) {
+  if (
+    /\b(how|what|which|why|when|where|who|ngano|unsa|unsay|ano|pila|asa|kinsa|sino|can|pwede|puwede|status|request|requirements?|attachment|remarks?|reason)\b/.test(
+      value
+    )
+  ) {
     return false;
   }
   return (
@@ -1366,7 +1385,11 @@ function isShortLeaveTypeAnswer(text) {
 function isShortLocatorTypeAnswer(text) {
   const value = lower(text).trim();
   if (value.split(/\s+/).filter(Boolean).length > 6) return false;
-  if (/\b(how|what|which|why|ngano|unsa|unsay|ano|pila|can|pwede|puwede)\b/.test(value)) {
+  if (
+    /\b(how|what|which|why|when|where|who|ngano|unsa|unsay|ano|pila|asa|kinsa|sino|can|pwede|puwede|status|request|requirements?|attachment|remarks?|reason)\b/.test(
+      value
+    )
+  ) {
     return false;
   }
   return /\b(wfh|work from home|official business|ob|pass slip|locator|fieldwork|field work)\b/.test(
@@ -1453,6 +1476,13 @@ function resolveIntentFromMemory(text, memory) {
   }
   const memoryTopic = memory.topic || topicForIntent(memory.intent);
   const explicitTopic = explicitTopicFromText(text);
+  if (
+    isLeaveCreditRequirementQuestion(value) &&
+    (!explicitTopic || explicitTopic === 'leave') &&
+    (memoryTopic === 'leave' || explicitTopic === 'leave')
+  ) {
+    return 'leave_filing_policy';
+  }
   if (isLanguageRestyleRequest(value)) {
     const recent = (memory.history || []).find(
       (item) => item?.intent && !['clarify_filing_topic', 'clarify_status_topic', 'direct_ai'].includes(item.intent)
@@ -2325,7 +2355,9 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   const memory = getAssistantMemory(scope.userId);
   const normalizedTextForRules = normalizeAssistantMessageForRules(text);
   const clarificationPatch = memory?.pendingClarification
-    ? applyPendingClarificationAnswer(normalizedTextForRules, memory)
+    ? interruptsPendingClarification(normalizedTextForRules, memory)
+      ? { pendingClarification: null }
+      : applyPendingClarificationAnswer(normalizedTextForRules, memory)
     : null;
   const workingMemory = memoryWithClarificationPatch(memory, clarificationPatch);
   const greetingReply = assistantGreetingReply(normalizedTextForRules);
@@ -2636,7 +2668,10 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       );
 
       return buildAssistantResult({
-        content: compactAssistantContent(combined),
+        content: compactAssistantContent(
+          combined,
+          assistantReplyCharLimit(primaryIntent)
+        ),
         provider: 'hrms',
         model: 'hrms-multi-intent',
         modelProfile: profile.id,
@@ -2691,7 +2726,10 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     }));
 
     return buildAssistantResult({
-      content: compactAssistantContent(refined?.content || fastReply),
+      content: compactAssistantContent(
+        refined?.content || fastReply,
+        assistantReplyCharLimit(resolvedIntent)
+      ),
       provider: refined?.provider || 'hrms',
       model: refined?.model || model,
       modelProfile: profile.id,
@@ -2737,10 +2775,12 @@ module.exports = {
   resetDtrAssistantChat,
   getDtrAssistantModelProfiles,
   __test: {
+    assistantReplyCharLimit,
     buildActions,
     buildNextAssistantMemory,
     clarificationContent,
     clarificationIntentForMessage,
+    compactAssistantContent,
     directOpenCommandForMessage,
     enrichMessageWithMemory,
     isAmbiguousFilingQuestion,
