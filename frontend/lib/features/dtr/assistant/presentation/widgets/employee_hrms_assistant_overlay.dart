@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import 'package:hrms_plaridel/features/dtr/assistant/presentation/pages/employee_dtr_assistant_page.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_controller.dart';
 
-/// Keeps the employee HRMS Assistant above modal filing surfaces.
+/// Keeps the employee HRMS Assistant available above modal filing surfaces.
 ///
-/// The assistant route is pushed above the active form, so returning preserves
-/// the employee's unfinished input.
+/// The root floating panel does not replace the active form route, so unfinished
+/// employee input remains visible and intact while they chat.
 class EmployeeHrmsAssistantOverlay extends StatelessWidget {
   const EmployeeHrmsAssistantOverlay({
     super.key,
@@ -20,9 +20,7 @@ class EmployeeHrmsAssistantOverlay extends StatelessWidget {
   final double initialBottom;
 
   void _openAssistant(BuildContext context) {
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(builder: (_) => const EmployeeDtrAssistantPage()),
-    );
+    EmployeeHrmsAssistantController.instance.openFullPage(context);
   }
 
   @override
@@ -31,10 +29,16 @@ class EmployeeHrmsAssistantOverlay extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         Positioned.fill(child: child),
-        DraggableDtrAssistantLauncher(
-          onPressed: () => _openAssistant(context),
-          initialRight: initialRight,
-          initialBottom: initialBottom,
+        ValueListenableBuilder<bool>(
+          valueListenable:
+              EmployeeHrmsAssistantController.instance.floatingVisible,
+          builder: (context, assistantOpen, _) => assistantOpen
+              ? const SizedBox.shrink()
+              : DraggableDtrAssistantLauncher(
+                  onPressed: () => _openAssistant(context),
+                  initialRight: initialRight,
+                  initialBottom: initialBottom,
+                ),
         ),
       ],
     );

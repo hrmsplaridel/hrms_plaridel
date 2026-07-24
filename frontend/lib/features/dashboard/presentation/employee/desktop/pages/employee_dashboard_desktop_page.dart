@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
-import 'package:hrms_plaridel/features/dtr/assistant/presentation/pages/employee_dtr_assistant_page.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_controller.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_overlay.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
@@ -325,6 +325,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _notificationPollTimer?.cancel();
+    EmployeeHrmsAssistantController.instance.hideFloating();
     super.dispose();
   }
 
@@ -464,9 +465,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   }
 
   void _openHrmsAssistant() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const EmployeeDtrAssistantPage()),
-    );
+    EmployeeHrmsAssistantController.instance.openFullPage(context);
   }
 
   bool get _showHrmsAssistantFab =>
@@ -709,13 +708,19 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
           ),
           if (_showHrmsAssistantFab)
             ValueListenableBuilder<bool>(
-              valueListenable: EmployeeTutorialController.coachActive,
-              builder: (context, coachActive, _) => coachActive
+              valueListenable:
+                  EmployeeHrmsAssistantController.instance.floatingVisible,
+              builder: (context, assistantOpen, _) => assistantOpen
                   ? const SizedBox.shrink()
-                  : DraggableDtrAssistantLauncher(
-                      onPressed: _openHrmsAssistant,
-                      initialRight: 24,
-                      initialBottom: 24,
+                  : ValueListenableBuilder<bool>(
+                      valueListenable: EmployeeTutorialController.coachActive,
+                      builder: (context, coachActive, _) => coachActive
+                          ? const SizedBox.shrink()
+                          : DraggableDtrAssistantLauncher(
+                              onPressed: _openHrmsAssistant,
+                              initialRight: 24,
+                              initialBottom: 24,
+                            ),
                     ),
             ),
         ],

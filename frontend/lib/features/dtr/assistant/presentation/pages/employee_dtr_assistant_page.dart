@@ -29,10 +29,20 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 class EmployeeDtrAssistantPage extends StatefulWidget {
-  const EmployeeDtrAssistantPage({super.key, DtrAssistantApi? api})
-    : _api = api;
+  const EmployeeDtrAssistantPage({
+    super.key,
+    DtrAssistantApi? api,
+    this.floating = false,
+    this.onMinimize,
+    this.onClose,
+    this.onExpand,
+  }) : _api = api;
 
   final DtrAssistantApi? _api;
+  final bool floating;
+  final FutureOr<void> Function()? onMinimize;
+  final FutureOr<void> Function()? onClose;
+  final FutureOr<void> Function()? onExpand;
 
   @override
   State<EmployeeDtrAssistantPage> createState() =>
@@ -177,6 +187,13 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   void _stop() {
     _cancelToken?.cancel('Cancelled by user');
     setState(() => _sending = false);
+  }
+
+  Future<void> _runPresentationAction(FutureOr<void> Function()? action) async {
+    if (action == null || _sending || _resettingChat) return;
+    await _persistSession();
+    if (!mounted) return;
+    await action();
   }
 
   Future<void> _send(String text, {String? intent}) async {
@@ -638,20 +655,46 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
+    final floating = widget.floating;
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
+        automaticallyImplyLeading: !floating,
         title: const Text('HRMS Assistant'),
         backgroundColor: AppTheme.dashPanelOf(context),
         foregroundColor: AppTheme.dashTextPrimaryOf(context),
         elevation: dark ? 0 : 1,
         actions: [
+          if (!floating && widget.onMinimize != null)
+            IconButton(
+              tooltip: 'Minimize to floating assistant',
+              onPressed: (_sending || _resettingChat)
+                  ? null
+                  : () => _runPresentationAction(widget.onMinimize),
+              icon: const Icon(Icons.picture_in_picture_alt_rounded),
+            ),
           IconButton(
             tooltip: 'New chat',
             onPressed: (_sending || _resettingChat) ? null : _startNewChat,
             icon: const Icon(Icons.refresh_rounded),
           ),
+          if (floating && widget.onExpand != null)
+            IconButton(
+              tooltip: 'Open full assistant',
+              onPressed: (_sending || _resettingChat)
+                  ? null
+                  : () => _runPresentationAction(widget.onExpand),
+              icon: const Icon(Icons.open_in_full_rounded),
+            ),
+          if (floating && widget.onClose != null)
+            IconButton(
+              tooltip: 'Close assistant',
+              onPressed: (_sending || _resettingChat)
+                  ? null
+                  : () => _runPresentationAction(widget.onClose),
+              icon: const Icon(Icons.close_rounded),
+            ),
         ],
       ),
       body: SafeArea(
@@ -660,10 +703,17 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
             Expanded(
               child: ListView(
                 controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                padding: EdgeInsets.fromLTRB(
+                  floating ? 12 : 16,
+                  floating ? 12 : 16,
+                  floating ? 12 : 16,
+                  12,
+                ),
                 children: [
-                  _AssistantHeader(sending: _sending),
-                  const SizedBox(height: 16),
+                  if (!floating) ...[
+                    _AssistantHeader(sending: _sending),
+                    const SizedBox(height: 16),
+                  ],
                   DtrAssistantPromptChips(
                     enabled: !_sending,
                     onSelected: (prompt) =>
