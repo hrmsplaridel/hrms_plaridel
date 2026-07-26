@@ -45,6 +45,125 @@ const {
   extractMessageEntities,
   normalizePlannerExtraction,
 } = require('../src/services/dtrAssistant/dtrAssistantMessageExtraction');
+const {
+  contextGate,
+} = require('../src/services/dtrAssistant/dtrAssistantContextGate');
+const {
+  validateEmployeeLeaveRequestWithRule,
+} = require('../src/routes/leaveTypeRules');
+const {
+  evaluateLocatorWorkingDay,
+  parseLocatorDateOnly,
+  validateLocatorRequiredFields,
+} = require('../src/services/locatorFilingRules');
+
+test('DTR assistant regression: context gate only reuses memory for real follow-ups', () => {
+  const leaveMemory = {
+    intent: 'leave_request_lookup',
+    topic: 'leave',
+    lastUserMessage: 'what happened to my sick leave on June 9?',
+  };
+
+  assert.equal(
+    contextGate({
+      message: 'what is my leave balance?',
+      memory: leaveMemory,
+      scoredIntent: { intent: 'leave_balance', confidence: 0.98 },
+    }).kind,
+    'standalone'
+  );
+  assert.equal(
+    contextGate({
+      message: 'how about tomorrow?',
+      memory: leaveMemory,
+      scoredIntent: { intent: 'unknown', confidence: 0.2 },
+    }).kind,
+    'follow_up'
+  );
+  assert.equal(
+    contextGate({
+      message: 'can I file WFH tomorrow?',
+      memory: leaveMemory,
+      scoredIntent: { intent: 'locator_availability_check', confidence: 0.98 },
+    }).kind,
+    'topic_switch'
+  );
+});
+
+test('DTR assistant regression: response depth supports short, normal, and detailed answers', () => {
+  assert.equal(
+    assistantServiceTest.selectAssistantResponseDepth(
+      'briefly, what is my leave balance?',
+      'leave_balance'
+    ),
+    'short'
+  );
+  assert.equal(
+    assistantServiceTest.selectAssistantResponseDepth(
+      'Can I file sick leave tomorrow?',
+      'leave_availability_check'
+    ),
+    'normal'
+  );
+  assert.equal(
+    assistantServiceTest.selectAssistantResponseDepth(
+      'Show all leave guidelines in full detail',
+      'leave_guideline_section'
+    ),
+    'detailed'
+  );
+  assert.equal(
+    assistantServiceTest.adaptAssistantContentToDepth(
+      'Balance\nYou have 2 days.\nDetails:\nPending: 1 day.',
+      'short'
+    ),
+    'Balance\nYou have 2 days.'
+  );
+});
+
+test('DTR assistant regression: chatbot and leave filing share the same rule validator', () => {
+  const maternityRule = {
+    display_name: 'Maternity Leave',
+    employee_can_file: true,
+    admin_only: false,
+    allows_past_dates: true,
+    sex_eligibility: 'female',
+    max_days: 105,
+  };
+  const validation = validateEmployeeLeaveRequestWithRule({
+    rule: maternityRule,
+    leaveType: 'maternityLeave',
+    numberOfDays: 1,
+    userSex: 'male',
+  });
+  assert.equal(validation.valid, false);
+  assert.match(validation.error, /female accounts/i);
+});
+
+test('DTR assistant regression: chatbot and locator filing share required-field and shift-day rules', () => {
+  const dateInfo = parseLocatorDateOnly('2026-07-27');
+  assert.deepEqual(
+    evaluateLocatorWorkingDay({
+      dateInfo,
+      assignment: {
+        shift_id: 'shift-1',
+        shift_name: 'Regular Shift',
+        working_days: [1, 2, 3, 4, 5],
+      },
+    }),
+    { ok: true }
+  );
+
+  const fields = validateLocatorRequiredFields({
+    slipDate: '2026-07-27',
+    requestType: 'locator',
+    office: 'Municipal Hall',
+    reason: 'Official business',
+    slots: {},
+  });
+  assert.equal(fields.valid, false);
+  assert.match(fields.error, /AM\/PM IN\/OUT/i);
+});
 
 test('DTR assistant regression: Bisaya/Tagalog/English prompts route to expected intents', () => {
   const cases = [
@@ -2015,7 +2134,7 @@ test('DTR assistant regression: action metadata is generated for next-step work'
     []
   );
   assert.equal(leaveActions[0].type, 'open_leave_form');
-  assert.equal(leaveActions[0].payload.leaveType, 'vacation');
+  assert.equal(leaveActions[0].payload.leaveType, 'vacationLeave');
   assert.equal(leaveActions[0].payload.startDate, '2026-06-16');
 
   const locatorActions = assistantServiceTest.buildActions(

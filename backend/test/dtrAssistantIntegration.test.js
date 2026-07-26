@@ -314,7 +314,7 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
   const leaveFormAction = insufficientLeave.message.actions.find(
     (action) => action.type === 'open_leave_form'
   );
-  assert.equal(leaveFormAction.payload.leaveType, 'sick');
+  assert.equal(leaveFormAction.payload.leaveType, 'sickLeave');
   assert.equal(leaveFormAction.payload.startDate, expectedTomorrowDate());
 
   const rejectedLeave = await chatWithDtrAssistant(pool, {
