@@ -342,17 +342,17 @@ function isTagalogOrBisaya(message) {
 }
 
 function normalizedGreetingText(message) {
-  return normalizeAssistantMessageForRules(message)
+  return lower(normalizeAssistantMessageForRules(message))
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function isAssistantGreetingMessage(message) {
+function assistantPromptKind(message) {
   const text = normalizedGreetingText(message);
-  if (!text || text.length > 72) return false;
+  if (!text || text.length > 96) return null;
 
-  const exact = new Set([
+  const greetings = new Set([
     'hello',
     'hi',
     'hey',
@@ -362,42 +362,109 @@ function isAssistantGreetingMessage(message) {
     'good morning',
     'good afternoon',
     'good evening',
+    'kumusta',
+    'kumusta ka',
+    'kamusta',
+    'kamusta ka',
+    'komusta',
+    'komusta ka',
+  ]);
+  const identityQuestions = new Set([
     'what are you',
     'who are you',
-    'what can you do',
-    'what do you do',
     'what is this',
     'unsaka',
     'unsa ka',
     'unsa man ka',
     'kinsa ka',
-    'kumusta',
-    'kumusta ka',
     'ano ka',
     'sino ka',
-    'kamusta',
-    'kamusta ka',
     'ano ka ba',
     'sino ka ba',
   ]);
+  const capabilityQuestions = new Set([
+    'what can you do',
+    'what do you do',
+    'what can you help me with',
+    'how can you help me',
+    'unsa imong mabuhat',
+    'unsay imong mabuhat',
+    'unsa imong mahimo',
+    'unsay imong mahimo',
+    'unsa ka makatabang',
+    'unsay matabang nimo',
+    'ano ang kaya mong gawin',
+    'anong kaya mong gawin',
+    'ano ang magagawa mo',
+    'anong magagawa mo',
+    'paano ka makakatulong',
+  ]);
 
-  if (exact.has(text)) return true;
-  if (/^(hello|hi|hey|helo|hii|kumusta|kamusta|komusta)(\s+there|\s+po)?$/.test(text)) return true;
-  if (/^good\s+(morning|afternoon|evening)(\s+po)?$/.test(text)) return true;
-  if (/^(what|who)\s+are\s+you(\s+ba)?$/.test(text)) return true;
-  if (/^(what|who)\s+(is|are)\s+you$/.test(text)) return true;
-  if (/^(unsa|kinsa)\s+ka(\s+man|\s+ba)?$/.test(text)) return true;
-  if (/^unsaka$/.test(text)) return true;
-  if (/^(ano|sino)\s+ka(\s+ba)?$/.test(text)) return true;
-  if (/^(what can you do|what do you do)$/.test(text)) return true;
+  if (greetings.has(text)) return 'greeting';
+  if (identityQuestions.has(text)) return 'identity';
+  if (capabilityQuestions.has(text)) return 'capabilities';
+  if (/^(hello|hi|hey|helo|hii|kumusta|kamusta|komusta)(\s+there|\s+po)?$/.test(text)) {
+    return 'greeting';
+  }
+  if (/^good\s+(morning|afternoon|evening)(\s+po)?$/.test(text)) {
+    return 'greeting';
+  }
+  if (/^(what|who)\s+are\s+you(\s+ba)?$/.test(text)) return 'identity';
+  if (/^(what|who)\s+(is|are)\s+you$/.test(text)) return 'identity';
+  if (/^(unsa|kinsa)\s+ka(\s+man|\s+ba)?$/.test(text)) return 'identity';
+  if (/^unsaka$/.test(text)) return 'identity';
+  if (/^(ano|sino)\s+ka(\s+ba)?$/.test(text)) return 'identity';
+  if (/^(what can you do|what do you do|what can you help me with|how can you help me)$/.test(text)) {
+    return 'capabilities';
+  }
+  if (/^(unsa|unsay)\s+(imong\s+)?(mabuhat|mahimo|matabang)(\s+nimo)?$/.test(text)) {
+    return 'capabilities';
+  }
+  if (/^(ano|anong)\s+(ang\s+)?(kaya mong gawin|magagawa mo)$/.test(text)) {
+    return 'capabilities';
+  }
 
-  return false;
+  return null;
+}
+
+function isAssistantGreetingMessage(message) {
+  return assistantPromptKind(message) != null;
 }
 
 function assistantGreetingReply(message) {
-  if (!isAssistantGreetingMessage(message)) return null;
-
+  const kind = assistantPromptKind(message);
+  if (!kind) return null;
   const language = languageOf(message);
+
+  if (kind === 'capabilities') {
+    if (language === 'bisaya') {
+      return (
+        'Makatabang ko sa imong HRMS records: DTR ug attendance; leave credits, requirements, status, ug filing checks; ' +
+        'ug locator/WFH requirements, status, ug DTR coverage. Dili ko mo-auto-submit og request; ikaw gihapon ang mo-review ug submit sa form.'
+      );
+    }
+    if (language === 'tagalog') {
+      return (
+        'Makakatulong ako sa iyong HRMS records: DTR at attendance; leave credits, requirements, status, at filing checks; ' +
+        'at locator/WFH requirements, status, at DTR coverage. Hindi ako awtomatikong nagsusumite ng request; ikaw pa rin ang magre-review at magsusumite ng form.'
+      );
+    }
+    return (
+      'I can help with your HRMS records: DTR and attendance; leave credits, requirements, status, and filing checks; ' +
+      'and locator/WFH requirements, status, and DTR coverage. I do not automatically submit requests; you still review and submit the form.'
+    );
+  }
+
+  if (kind === 'identity') {
+    if (language === 'bisaya') {
+      return 'Ako ang imong HRMS Assistant. Motubag ko gamit lang ang imong authorized HRMS records para sa DTR, leave, ug locator services.';
+    }
+    if (language === 'tagalog') {
+      return 'Ako ang iyong HRMS Assistant. Sumasagot ako gamit lamang ang awtorisadong HRMS records mo para sa DTR, leave, at locator services.';
+    }
+    return 'I am your HRMS Assistant. I answer using only your authorized HRMS records for DTR, leave, and locator services.';
+  }
+
   if (language === 'bisaya') {
     return (
       'Kumusta! Ako ang imong HRMS Assistant. ' +
@@ -2955,6 +3022,59 @@ function leaveBalanceSufficiencyReply(visibleBalances, language) {
   });
 }
 
+function conciseLeaveBalanceReply(visibleBalances, language) {
+  const entries = visibleBalances.map((balance) => {
+    const type = labelLeaveType(balance.leave_type)
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+    const available = asNumber(balance.available_days);
+    const amount =
+      available == null
+        ? language === 'bisaya'
+          ? 'wala ma-load'
+          : language === 'tagalog'
+            ? 'hindi ma-load'
+            : 'not loaded'
+        : fmtLocalizedDayCount(available, language);
+    return { type, available, amount };
+  });
+
+  if (entries.length === 1) {
+    const entry = entries[0];
+    if (language === 'bisaya') {
+      return `Available ${entry.type} credits nimo: ${entry.amount}.`;
+    }
+    if (language === 'tagalog') {
+      return `Available ${entry.type} credits mo: ${entry.amount}.`;
+    }
+    return `Available ${entry.type} credits: ${entry.amount}.`;
+  }
+
+  const allLoaded = entries.every((entry) => entry.available != null);
+  const total = allLoaded
+    ? entries.reduce((sum, entry) => sum + entry.available, 0)
+    : null;
+  const amounts = entries
+    .map((entry) => `${entry.type}: ${entry.amount}`)
+    .join('; ');
+
+  if (language === 'bisaya') {
+    return total == null
+      ? `Available leave credits nimo: ${amounts}.`
+      : `Naa kay ${fmtLocalizedDayCount(total, language)} nga total available leave credits. ${amounts}.`;
+  }
+  if (language === 'tagalog') {
+    return total == null
+      ? `Available leave credits mo: ${amounts}.`
+      : `Mayroon kang ${fmtLocalizedDayCount(total, language)} na kabuuang available leave credits. ${amounts}.`;
+  }
+  return total == null
+    ? `Available leave credits: ${amounts}.`
+    : `You have ${fmtLocalizedDayCount(total, language)} of available leave credits. ${amounts}.`;
+}
+
 function leaveBalanceReply(context, localized, message) {
   if (isLocatorCreditRequirementQuestion(message)) {
     return locatorCreditRequirementReply(message);
@@ -3033,27 +3153,7 @@ function leaveBalanceReply(context, localized, message) {
     )}. Available balance is affected by earned, used, adjusted, and pending days.`;
   }
 
-  const lines = visibleBalances.map((b) => {
-    return `${labelLeaveType(b.leave_type)}: ${fmtLocalizedDayCount(
-      b.available_days,
-      language
-    )} available to file; ${fmtLocalizedDayCount(
-      b.remaining_days,
-      language
-    )} remaining; ${fmtLocalizedDayCount(b.pending_days, language)} pending`;
-  });
-
-  return structuredReply(language, {
-    title: 'Leave balance',
-    summary:
-      language === 'bisaya'
-        ? `Mao ni ang leave balance nga naa sa imong HRMS records.`
-        : language === 'tagalog'
-          ? `Ito ang leave balance na nasa HRMS records mo.`
-          : `Here are the leave balances in your HRMS records.`,
-    details: lines,
-    limit: 8,
-  });
+  return conciseLeaveBalanceReply(visibleBalances, language);
 }
 
 function latestLeaveReply(context, localized, message = '') {

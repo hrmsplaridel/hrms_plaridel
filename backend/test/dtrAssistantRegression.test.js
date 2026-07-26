@@ -158,8 +158,20 @@ test('DTR assistant regression: language detection handles typos and mixed langu
   assert.ok(isAssistantGreetingMessage('helo'));
   assert.ok(isAssistantGreetingMessage('komusta!'));
   assert.ok(isAssistantGreetingMessage('what are you?'));
+  assert.ok(isAssistantGreetingMessage('Who are you?'));
+  assert.ok(isAssistantGreetingMessage('unsa imong mabuhat?'));
+  assert.ok(isAssistantGreetingMessage('ano ang kaya mong gawin?'));
   assert.match(assistantGreetingReply('komusta!'), /HRMS Assistant/i);
   assert.match(assistantGreetingReply('kamusta ka'), /HRMS Assistant/i);
+  assert.match(assistantGreetingReply('Who are you?'), /authorized HRMS records/i);
+  assert.match(
+    assistantGreetingReply('unsa imong mabuhat?'),
+    /DTR ug attendance.*leave credits.*locator\/WFH/i
+  );
+  assert.match(
+    assistantGreetingReply('ano ang kaya mong gawin?'),
+    /DTR at attendance.*leave credits.*locator\/WFH/i
+  );
 });
 
 test('DTR assistant regression: leave form field help gives safe examples in the user language', () => {
@@ -599,6 +611,42 @@ test('DTR assistant regression: "enough credits" questions get a direct verdict'
     'leave_balance'
   );
   assert.doesNotMatch(plainReply, /Leave credits check/i);
+});
+
+test('DTR assistant regression: simple credit questions return concise multilingual totals', () => {
+  const context = {
+    leave_balances: [
+      {
+        leave_type: 'sick_leave',
+        available_days: 0.75,
+        remaining_days: 0.75,
+        pending_days: 0,
+      },
+      {
+        leave_type: 'vacation_leave',
+        available_days: 17.75,
+        remaining_days: 17.75,
+        pending_days: 0,
+      },
+    ],
+  };
+  const cases = [
+    ['pila akong credits?', /18\.5 ka adlaw/],
+    ['magkano ang leave credits ko?', /18\.5 araw/],
+    ['what are my leave credits?', /18\.5 days/],
+  ];
+
+  for (const [message, totalPattern] of cases) {
+    const reply = buildFastEmployeeAssistantReply(
+      message,
+      context,
+      detectEmployeeAssistantIntent(message)
+    );
+    assert.match(reply, totalPattern, message);
+    assert.match(reply, /sick leave: 0\.75/i, message);
+    assert.match(reply, /vacation leave: 17\.75/i, message);
+    assert.doesNotMatch(reply, /remaining|pending|Detalye:|Details:/i, message);
+  }
 });
 
 test('DTR assistant regression: how-to-file leave questions show form guidance', () => {

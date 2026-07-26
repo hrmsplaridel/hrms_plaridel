@@ -460,6 +460,24 @@ test('DTR assistant full chat pipeline preserves a long mixed-topic conversation
     )
   );
 
+  const identity = await chatWithDtrAssistant(pool, {
+    user,
+    message: 'Who are you?',
+  });
+  assert.equal(identity.intent, 'assistant_greeting');
+  assert.match(identity.message.content, /HRMS Assistant/i);
+  assert.doesNotMatch(identity.message.content, /leave request|June 9|reviewer/i);
+
+  const capabilities = await chatWithDtrAssistant(pool, {
+    user,
+    message: 'unsa imong mabuhat?',
+  });
+  assert.equal(capabilities.intent, 'assistant_greeting');
+  assert.match(capabilities.message.content, /DTR ug attendance/i);
+  assert.match(capabilities.message.content, /leave credits/i);
+  assert.match(capabilities.message.content, /locator\/WFH/i);
+  assert.doesNotMatch(capabilities.message.content, /leave request nga gi-file/i);
+
   const bisayaTypo = await chatWithDtrAssistant(pool, {
     user: { ...user, id: `${user.id}-bisaya-typo` },
     message: 'unsaon nko pg file ug sik leev?',
