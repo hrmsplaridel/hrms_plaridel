@@ -20,13 +20,43 @@ function buildLeaveActionPayload({ text, memory, leaveType, rangePayload }) {
     {};
   const extracted = extractLeavePrefill(text, memory);
   const leavePrefill = mergePrefill(stored, extracted);
+  const supportedFields = [
+    'reason',
+    'locationDetails',
+    'locationOption',
+    'sickLeaveNature',
+    'sickIllnessDetails',
+    'expectedDeliveryDate',
+    'maternityDeliveryType',
+    'childDeliveryDate',
+    'adoptionPlacementDate',
+    'adoptionFinalizationDate',
+    'adoptionParentRole',
+    'vawcSupportDocumentType',
+    'vawcCaseDetails',
+    'soloParentIdNumber',
+    'soloParentIdExpiryDate',
+    'accidentDate',
+    'calamityDate',
+    'womenIllnessDetails',
+    'studyPurpose',
+    'studyDetails',
+    'studyPurposeDetails',
+    'otherPurpose',
+    'otherPurposeDetails',
+    'commutation',
+  ];
+  const payloadFields = {};
+  for (const key of supportedFields) {
+    const value = leavePrefill[key];
+    if (value == null || value === '') continue;
+    payloadFields[key] = value;
+  }
 
   return {
     ...rangePayload,
     leaveType,
-    ...(leavePrefill.reason ? { reason: leavePrefill.reason } : {}),
-    ...(leavePrefill.locationDetails ? { locationDetails: leavePrefill.locationDetails } : {}),
-    ...(leavePrefill.locationOption ? { locationOption: leavePrefill.locationOption } : {}),
+    ...payloadFields,
   };
 }
 
