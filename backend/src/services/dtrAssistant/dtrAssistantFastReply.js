@@ -21,6 +21,7 @@ const {
   normalizeAdoptionParentRole,
   normalizeMaternityDeliveryType,
   requiredLeaveDetailsFilingError,
+  validateEmployeeLeaveRequestWithRule,
 } = require('../../routes/leaveTypeRules');
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
 const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
@@ -29,6 +30,12 @@ const {
   isLeaveCreditRequirementQuestion,
   isLocatorCreditRequirementQuestion,
 } = require('./dtrAssistantIntentService');
+const {
+  LOCATOR_REQUIRED_FIELDS,
+  evaluateLocatorWorkingDay,
+  locatorAttachmentRequiredError,
+  parseLocatorDateOnly,
+} = require('../locatorFilingRules');
 
 function lower(value) {
   return String(value || '').toLowerCase();
@@ -3339,44 +3346,28 @@ function leaveAvailabilityReply(context, message) {
   const detailsInput = simulatedLeaveDetails(context);
   const eventDates = simulatedLeaveEventDates(context);
 
-  if (requestedRecord?.employee_can_file === false) {
-    blockers.push(localizedShortIssue('employeeDisabled', language));
-  }
-  if (requestedRecord?.admin_only === true) {
-    blockers.push(localizedShortIssue('adminOnly', language));
-  }
-  const sexRule = lower(requestedRecord?.sex_eligibility || 'any') || 'any';
-  const employeeSex = normalizeSex(context.employee?.sex);
-  if (requestedRecord && sexRule !== 'any') {
-    if (!employeeSex) {
-      warnings.push(localizedShortIssue('sexMissing', language, { sex: sexRule }));
-    } else if (employeeSex !== sexRule) {
-      blockers.push(localizedShortIssue('sexMismatch', language, { sex: sexRule }));
+  if (requestedRecord) {
+    const filingValidation = validateEmployeeLeaveRequestWithRule({
+      rule: requestedRecord,
+      leaveType: typeKey,
+      otherPurpose: detailsInput.other_purpose,
+      startDateStr: context.date_range?.startDate,
+      endDateStr: context.date_range?.endDate,
+      numberOfDays: days,
+      userSex: context.employee?.sex,
+      maternityDeliveryType: normalizeMaternityDeliveryType(
+        detailsInput.maternity_delivery_type
+      ),
+      adoptionParentRole: normalizeAdoptionParentRole(
+        detailsInput.adoption_parent_role
+      ),
+      eventDates,
+      details: detailsInput,
+      enforceEventDateRules: false,
+    });
+    if (!filingValidation.valid) {
+      blockers.push(localizedRuleIssue(filingValidation.error, language));
     }
-  }
-  if (requestedRecord?.allows_past_dates === false && context.date_range?.startDate) {
-    const daysFromToday = daysBetweenIso(todayIsoInHrmsTimezone(), context.date_range.startDate);
-    if (daysFromToday != null && daysFromToday < 0) {
-      blockers.push(localizedShortIssue('pastDate', language));
-    }
-  }
-  const advanceDays = asNumber(requestedRecord?.minimum_advance_days);
-  if (advanceDays != null && context.date_range?.startDate) {
-    const daysFromToday = daysBetweenIso(todayIsoInHrmsTimezone(), context.date_range.startDate);
-    if (daysFromToday != null && daysFromToday < advanceDays) {
-      blockers.push(localizedShortIssue('advance', language, { days: advanceDays }));
-    }
-  }
-  const maxDays = requestedRecord
-    ? effectiveMaxDaysForRule({
-        rule: requestedRecord,
-        leaveType: typeKey,
-        maternityDeliveryType: normalizeMaternityDeliveryType(detailsInput.maternity_delivery_type),
-        adoptionParentRole: normalizeAdoptionParentRole(detailsInput.adoption_parent_role),
-      })
-    : null;
-  if (maxDays != null && days > maxDays) {
-    blockers.push(localizedShortIssue('maxDays', language, { days: maxDays }));
   }
   if (typeKey) {
     const detailError = requiredLeaveDetailsFilingError({
@@ -5891,7 +5882,14 @@ function locatorAvailabilityReply(context, message) {
     if (date && slip.slip_date !== date) return false;
     return locatorTypeMatches(slip, requestedType);
   });
-  const isWorkingDay = day ? isCalendarWorkingDay(day) : null;
+  const workingDayValidation =
+    date && day
+      ? evaluateLocatorWorkingDay({
+          dateInfo: parseLocatorDateOnly(date),
+          assignment: day,
+        })
+      : null;
+  const isWorkingDay = workingDayValidation?.ok ?? null;
   const isWholeDayHoliday =
     day?.holiday_name && day.holiday_coverage === 'whole_day';
   const friendlyDate = date ? fmtFriendlyDate(date) : '';
@@ -5905,11 +5903,7 @@ function locatorAvailabilityReply(context, message) {
   }
   if (day && !isWorkingDay && !isWholeDayHoliday) {
     issues.push(
-      language === 'bisaya'
-        ? `Base sa schedule, ang ${friendlyDate} kay rest day/non-working (walay required DTR logs).`
-        : language === 'tagalog'
-          ? `Base sa schedule, ang ${friendlyDate} ay rest day/non-working (walang required DTR logs).`
-          : `Based on the schedule, ${friendlyDate} is a rest day / non-working day (no required DTR logs).`
+      localizedRuleIssue(workingDayValidation.error, language)
     );
   }
   if (!day && date) {
@@ -5986,7 +5980,11 @@ function locatorAvailabilityReply(context, message) {
     day?.holiday_name ? `Holiday: ${day.holiday_name} (${day.holiday_coverage || 'whole_day'})` : null,
     coverageLine,
     type
-      ? `Attachment: ${type.requires_attachment ? 'required' : 'not required by this locator type'}`
+      ? `Attachment: ${
+          locatorAttachmentRequiredError(type, false)
+            ? 'required'
+            : 'not required by this locator type'
+        }`
       : 'Type rules: choose the exact locator type to check attachment rules.',
     existing.length > 0
       ? `Existing locator on this date: ${existing.map(fmtLocatorSlip).join('; ')}`
@@ -6015,7 +6013,9 @@ function locatorAvailabilityReply(context, message) {
         ? 'Initial check: murag pwede ka mag-file, basta kompleto ang type, slots, destination, reason, ug required attachment.'
         : language === 'tagalog'
           ? 'Initial check: mukhang puwede kang mag-file kung kumpleto ang type, slots, destination, reason, at required attachment.'
-          : 'Initial check: you can file if the type, slots, destination, reason, and required attachment are complete.';
+          : `Initial check: you can file when these are complete: ${LOCATOR_REQUIRED_FIELDS.join(
+              ', '
+            )}, and any required attachment.`;
   return structuredReply(language, {
     title,
     summary,
@@ -6533,6 +6533,7 @@ module.exports = {
   buildFastEmployeeAssistantReply,
   isAssistantGreetingMessage,
   requestedLeaveType,
+  requestedLeaveTypeRecord,
   requestedLocatorType,
 };
 
