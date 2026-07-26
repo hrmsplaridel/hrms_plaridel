@@ -600,6 +600,173 @@ function minimumAdvanceDaysFilingError({ rule, leaveType, leaveTypeLabel, startD
   return `${label} must be filed at least ${minimumDays} ${unit} before the intended leave date.`;
 }
 
+function defaultSexEligibilityForLeaveType(leaveType) {
+  if (
+    leaveType === 'maternityLeave' ||
+    leaveType === 'tenDayVawcLeave' ||
+    leaveType === 'specialLeaveBenefitsForWomen'
+  ) {
+    return 'female';
+  }
+  if (leaveType === 'paternityLeave') return 'male';
+  return 'any';
+}
+
+function normalizeSexEligibilityForLeave(value, leaveType) {
+  const normalized = (value || '').toString().trim().toLowerCase();
+  if (normalized === 'female_only' || normalized === 'femaleonly') return 'female';
+  if (normalized === 'male_only' || normalized === 'maleonly') return 'male';
+  if (normalized === 'both' || normalized === 'all' || normalized === 'bothsexes') {
+    return 'any';
+  }
+  if (normalized === 'female' || normalized === 'male' || normalized === 'any') {
+    return normalized;
+  }
+  return defaultSexEligibilityForLeaveType(leaveType);
+}
+
+function normalizeUserSexForLeave(value) {
+  const normalized = (value || '').toString().trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'f' || normalized === 'female') return 'female';
+  if (normalized === 'm' || normalized === 'male') return 'male';
+  return normalized;
+}
+
+function leaveTypeSexEligibilityError({
+  leaveType,
+  leaveTypeLabel,
+  sexEligibility,
+  userSex,
+}) {
+  const label = (leaveTypeLabel || leaveType || 'This leave type').toString().trim();
+  const sex = normalizeUserSexForLeave(userSex);
+  const eligibility = normalizeSexEligibilityForLeave(sexEligibility, leaveType);
+  if (eligibility === 'female') {
+    if (!sex) {
+      return `${label} requires your profile sex to be set to Female. Please update your profile or contact HR.`;
+    }
+    if (sex !== 'female') return `${label} can only be filed by female accounts.`;
+  }
+  if (eligibility === 'male') {
+    if (!sex) {
+      return `${label} requires your profile sex to be set to Male. Please update your profile or contact HR.`;
+    }
+    if (sex !== 'male') return `${label} can only be filed by male accounts.`;
+  }
+  return null;
+}
+
+function validateEmployeeLeaveRequestWithRule(opts) {
+  const {
+    rule,
+    leaveType,
+    otherPurpose,
+    startDateStr,
+    endDateStr,
+    numberOfDays,
+    userSex,
+    maternityDeliveryType,
+    adoptionParentRole,
+    eventDates,
+    details,
+    enforceEventDateRules = false,
+    enforceRequiredDetails = enforceEventDateRules,
+  } = opts;
+
+  if (!rule) return { valid: true };
+
+  if (Object.prototype.hasOwnProperty.call(opts, 'userSex')) {
+    const sexEligibilityError = leaveTypeSexEligibilityError({
+      leaveType,
+      leaveTypeLabel: rule.display_name,
+      sexEligibility: rule.sex_eligibility,
+      userSex,
+    });
+    if (sexEligibilityError) return { valid: false, error: sexEligibilityError };
+  }
+
+  if (rule.admin_only) {
+    return {
+      valid: false,
+      error: 'This leave type cannot be filed by employees. It is admin-assigned only.',
+    };
+  }
+  if (rule.employee_can_file === false) {
+    return {
+      valid: false,
+      error: 'This leave type is not available for employee filing.',
+    };
+  }
+  if (leaveType === 'others' && otherPurpose) {
+    const purpose = String(otherPurpose).trim().toLowerCase();
+    if (
+      SPECIAL_PROCESS_PURPOSES.some((item) =>
+        purpose.includes(item.toLowerCase().replace(/_/g, ''))
+      )
+    ) {
+      return {
+        valid: false,
+        error:
+          'Monetization of Leave Credits and Terminal Leave are HR/admin processes. Please contact HR.',
+      };
+    }
+  }
+  if (rule.allows_past_dates === false && startDateStr) {
+    const today = todayIsoDateInTimeZone();
+    if (startDateStr < today) {
+      return {
+        valid: false,
+        error: 'Past-date filing is not allowed for this leave type. Please file in advance.',
+      };
+    }
+  }
+
+  const advanceError = minimumAdvanceDaysFilingError({
+    rule,
+    leaveType,
+    leaveTypeLabel: rule.display_name,
+    startDateStr,
+  });
+  if (advanceError) return { valid: false, error: advanceError };
+
+  if (enforceRequiredDetails) {
+    const requiredDetailsError = requiredLeaveDetailsFilingError({
+      leaveType,
+      leaveTypeLabel: rule.display_name,
+      details,
+    });
+    if (requiredDetailsError) return { valid: false, error: requiredDetailsError };
+  }
+  if (enforceEventDateRules) {
+    const eventDateError = leaveEventDateFilingError({
+      leaveType,
+      leaveTypeLabel: rule.display_name,
+      startDateStr,
+      endDateStr,
+      eventDates,
+    });
+    if (eventDateError) return { valid: false, error: eventDateError };
+  }
+
+  const maxDays = effectiveMaxDaysForRule({
+    rule,
+    leaveType,
+    maternityDeliveryType,
+    adoptionParentRole,
+  });
+  if (maxDays != null && numberOfDays != null) {
+    const days = parseFloat(numberOfDays);
+    if (!Number.isNaN(days) && days > maxDays) {
+      return {
+        valid: false,
+        error: `This leave type allows a maximum of ${maxDays} working days. Requested: ${days.toFixed(1)}.`,
+      };
+    }
+  }
+  return { valid: true };
+}
+
 /**
  * Validate leave request for employee filing (draft/submit/put).
  * @param {object} opts
@@ -618,7 +785,6 @@ function validateEmployeeLeaveRequest(opts) {
     startDateStr,
     endDateStr,
     numberOfDays,
-    hasAttachment = false,
     maternityDeliveryType,
     adoptionParentRole,
     eventDates,
@@ -626,91 +792,20 @@ function validateEmployeeLeaveRequest(opts) {
     enforceRequiredDetails = true,
   } = opts;
   const rule = getRule(leaveType);
-
-  if (!rule) {
-    return { valid: true }; // unknown type, skip rule-based validation
-  }
-
-  // Admin-only: employee cannot file
-  if (rule.admin_only) {
-    return { valid: false, error: 'This leave type cannot be filed by employees. It is admin-assigned only.' };
-  }
-
-  // Special process: monetization/terminal under "others"
-  if (leaveType === 'others' && otherPurpose) {
-    const purpose = String(otherPurpose).trim();
-    if (SPECIAL_PROCESS_PURPOSES.some((p) => purpose.toLowerCase().includes(p.toLowerCase().replace(/_/g, '')))) {
-      return {
-        valid: false,
-        error: 'Monetization of Leave Credits and Terminal Leave are HR/admin processes. Please contact HR.',
-      };
-    }
-  }
-
-  if (rule.employee_can_file === false) {
-    return { valid: false, error: 'This leave type is not available for employee filing.' };
-  }
-
-  // Past-date check
-  if (rule.allows_past_dates === false && startDateStr) {
-    const today = todayIsoDateInTimeZone();
-    if (startDateStr < today) {
-      return {
-        valid: false,
-        error: 'Past-date filing is not allowed for this leave type. Please file in advance.',
-      };
-    }
-  }
-
-  const advanceError = minimumAdvanceDaysFilingError({
+  return validateEmployeeLeaveRequestWithRule({
     rule,
     leaveType,
-    startDateStr,
-  });
-  if (advanceError) {
-    return { valid: false, error: advanceError };
-  }
-
-  if (enforceRequiredDetails) {
-    const requiredDetailsError = requiredLeaveDetailsFilingError({
-      leaveType,
-      leaveTypeLabel: rule.display_name,
-      details,
-    });
-    if (requiredDetailsError) {
-      return { valid: false, error: requiredDetailsError };
-    }
-  }
-
-  const eventDateError = leaveEventDateFilingError({
-    leaveType,
-    leaveTypeLabel: rule.display_name,
+    otherPurpose,
     startDateStr,
     endDateStr,
-    eventDates,
-  });
-  if (eventDateError) {
-    return { valid: false, error: eventDateError };
-  }
-
-  // Max days check
-  const maxDays = effectiveMaxDaysForRule({
-    rule,
-    leaveType,
+    numberOfDays,
     maternityDeliveryType,
     adoptionParentRole,
+    eventDates,
+    details,
+    enforceRequiredDetails,
+    enforceEventDateRules: true,
   });
-  if (maxDays != null && numberOfDays != null) {
-    const days = parseFloat(numberOfDays);
-    if (!Number.isNaN(days) && days > maxDays) {
-      return {
-        valid: false,
-        error: `This leave type allows a maximum of ${maxDays} working days. Requested: ${days.toFixed(1)}.`,
-      };
-    }
-  }
-
-  return { valid: true };
 }
 
 /**
@@ -753,6 +848,9 @@ module.exports = {
   SPECIAL_PROCESS_PURPOSES,
   getRule,
   validateEmployeeLeaveRequest,
+  validateEmployeeLeaveRequestWithRule,
+  leaveTypeSexEligibilityError,
+  normalizeUserSexForLeave,
   minimumAdvanceDaysFilingError,
   leaveEventDateFilingError,
   normalizeMaternityDeliveryType,
