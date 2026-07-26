@@ -63,11 +63,14 @@ CREATE TABLE IF NOT EXISTS users (
   biometric_user_id TEXT UNIQUE,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true;
+  CONSTRAINT users_nonactive_access_leave_check
+    CHECK (
+      COALESCE(employment_status, 'active') = 'active'
+      OR (is_active = false AND leave_credit_eligible = false)
+    )
+);
 
 -- =========================================
 -- AUTH REFRESH TOKENS (PERSISTENT SESSIONS)
