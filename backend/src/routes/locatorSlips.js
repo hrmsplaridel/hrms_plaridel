@@ -12,6 +12,12 @@ const {
 } = require('../services/departmentHeadService');
 const locatorNotifications = require('../services/locatorNotifications');
 const { broadcastAppEvent } = require('../websockets/appEvents');
+const {
+  evaluateLocatorWorkingDay,
+  locatorAttachmentRequiredError,
+  parseLocatorDateOnly,
+  validateLocatorRequiredFields,
+} = require('../services/locatorFilingRules');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -62,8 +68,6 @@ if (!fs.existsSync(locatorAttachmentDir)) {
 }
 const ALLOWED_LOCATOR_ATTACHMENT_EXT = /\.(pdf|jpg|jpeg|png)$/i;
 const MAX_LOCATOR_ATTACHMENT_SIZE = 10 * 1024 * 1024;
-const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5];
-const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function notifySafe(fn) {
   Promise.resolve()
@@ -220,28 +224,6 @@ function canModifyAttachment(status) {
   ].includes(status);
 }
 
-function parseDateOnly(value) {
-  const raw = (value || '').toString().trim();
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() !== month - 1 ||
-    parsed.getUTCDate() !== day
-  ) {
-    return null;
-  }
-  const utcDay = parsed.getUTCDay();
-  return {
-    dateStr: raw,
-    isoWeekday: utcDay === 0 ? 7 : utcDay,
-  };
-}
-
 function toDateOnlyString(value) {
   if (!value) return null;
   if (typeof value === 'string') {
@@ -257,15 +239,6 @@ function toDateOnlyString(value) {
     return `${y}-${m}-${d}`;
   }
   return null;
-}
-
-function normalizeWorkingDays(value) {
-  if (!Array.isArray(value)) return DEFAULT_WORKING_DAYS;
-  const days = value
-    .map((day) => Number(day))
-    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7);
-  const unique = [...new Set(days)].sort((a, b) => a - b);
-  return unique.length > 0 ? unique : DEFAULT_WORKING_DAYS;
 }
 
 async function validateLocatorSlipWorkingDay(client, employeeId, dateInfo) {
@@ -284,24 +257,10 @@ async function validateLocatorSlipWorkingDay(client, employeeId, dateInfo) {
      LIMIT 1`,
     [employeeId, dateInfo.dateStr]
   );
-  const assignment = result.rows[0];
-  if (!assignment || !assignment.shift_id || !assignment.shift_name) {
-    return {
-      ok: false,
-      error: 'You cannot file a locator request for this date because you have no active shift assignment.',
-    };
-  }
-
-  const workingDays = normalizeWorkingDays(assignment.working_days);
-  if (!workingDays.includes(dateInfo.isoWeekday)) {
-    const weekdayName = WEEKDAY_NAMES[dateInfo.isoWeekday - 1] || 'that day';
-    return {
-      ok: false,
-      error: `You cannot file a locator request for ${weekdayName} because it is not included in your assigned shift working days.`,
-    };
-  }
-
-  return { ok: true };
+  return evaluateLocatorWorkingDay({
+    dateInfo,
+    assignment: result.rows[0],
+  });
 }
 
 pool
@@ -673,15 +632,17 @@ router.post('/submit', protect, async (req, res) => {
   const pmIn = req.body?.pm_in === true;
   const pmOut = req.body?.pm_out === true;
 
-  if (!slipDate) return res.status(400).json({ error: 'slip_date is required' });
-  const slipDateInfo = parseDateOnly(slipDate);
-  if (!slipDateInfo) return res.status(400).json({ error: 'Invalid slip_date' });
-  if (!requestType) return res.status(400).json({ error: 'Invalid request_type' });
-  if (!office) return res.status(400).json({ error: 'office is required' });
-  if (!reason) return res.status(400).json({ error: 'reason is required' });
-  if (!amIn && !amOut && !pmIn && !pmOut) {
-    return res.status(400).json({ error: 'At least one AM/PM IN/OUT marker is required' });
+  const fieldValidation = validateLocatorRequiredFields({
+    slipDate,
+    requestType,
+    office,
+    reason,
+    slots: { amIn, amOut, pmIn, pmOut },
+  });
+  if (!fieldValidation.valid) {
+    return res.status(400).json({ error: fieldValidation.error });
   }
+  const slipDateInfo = parseLocatorDateOnly(slipDate);
 
   const client = await pool.connect();
   try {
@@ -701,9 +662,10 @@ router.post('/submit', protect, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Invalid request_type' });
     }
-    if (locatorType.requires_attachment === true) {
+    const attachmentError = locatorAttachmentRequiredError(locatorType, false);
+    if (attachmentError) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Attachment is required for this locator type.' });
+      return res.status(400).json({ error: attachmentError });
     }
 
     const inserted = await client.query(
@@ -810,31 +772,18 @@ router.post('/submit-with-attachment', protect, uploadLocatorAttachmentMw, async
     } catch (_) {}
   };
 
-  if (!slipDate) {
+  const fieldValidation = validateLocatorRequiredFields({
+    slipDate,
+    requestType,
+    office,
+    reason,
+    slots: { amIn, amOut, pmIn, pmOut },
+  });
+  if (!fieldValidation.valid) {
     cleanup();
-    return res.status(400).json({ error: 'slip_date is required' });
+    return res.status(400).json({ error: fieldValidation.error });
   }
-  const slipDateInfo = parseDateOnly(slipDate);
-  if (!slipDateInfo) {
-    cleanup();
-    return res.status(400).json({ error: 'Invalid slip_date' });
-  }
-  if (!requestType) {
-    cleanup();
-    return res.status(400).json({ error: 'Invalid request_type' });
-  }
-  if (!office) {
-    cleanup();
-    return res.status(400).json({ error: 'office is required' });
-  }
-  if (!reason) {
-    cleanup();
-    return res.status(400).json({ error: 'reason is required' });
-  }
-  if (!amIn && !amOut && !pmIn && !pmOut) {
-    cleanup();
-    return res.status(400).json({ error: 'At least one segment must be selected' });
-  }
+  const slipDateInfo = parseLocatorDateOnly(slipDate);
 
   const client = await pool.connect();
   try {
