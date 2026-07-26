@@ -55,6 +55,7 @@ router.post(
         message: req.body?.message,
         intent: req.body?.intent,
         modelProfile: req.body?.modelProfile,
+        conversationId: req.body?.conversationId,
       });
       res.json(result);
     } catch (err) {
@@ -85,7 +86,7 @@ router.post(
 
 router.post('/reset', protect, dtrAssistantResetLimiter, async (req, res) => {
   try {
-    res.json(resetDtrAssistantChat(req.user));
+    res.json(resetDtrAssistantChat(req.user, req.body?.conversationId));
   } catch (err) {
     const status = err.statusCode || 500;
     if (status >= 500) {
