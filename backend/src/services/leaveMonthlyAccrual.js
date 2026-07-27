@@ -422,7 +422,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
     }
 
     // ── Find employees missing balance rows ───────────────────────────────────
-    // Enhancement 1: exclude employees whose employment_status is resigned/retired/terminated
+    // Only currently active employees may earn monthly leave credits.
     const missingBalanceResult = await client.query(
       `SELECT u.id AS user_id, u.full_name, u.date_hired,
               u.employment_type, u.employment_status, u.separation_date,
@@ -434,8 +434,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
         AND lb.leave_type = t.leave_type
        WHERE (u.is_active IS NULL OR u.is_active = true)
          AND u.leave_credit_eligible = true
-         AND (u.employment_status IS NULL
-              OR u.employment_status NOT IN ('resigned', 'retired', 'terminated'))
+         AND COALESCE(u.employment_status, 'active') = 'active'
          AND ${activeAssignmentExistsSql('u', '$2', '$3')}
          AND lb.id IS NULL`,
       [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
@@ -458,8 +457,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
           AND lb.leave_type = t.leave_type
          WHERE (u.is_active IS NULL OR u.is_active = true)
            AND u.leave_credit_eligible = true
-           AND (u.employment_status IS NULL
-                OR u.employment_status NOT IN ('resigned', 'retired', 'terminated'))
+           AND COALESCE(u.employment_status, 'active') = 'active'
            AND ${activeAssignmentExistsSql('u', '$2', '$3')}
            AND lb.id IS NULL
          ON CONFLICT (user_id, leave_type) DO NOTHING`,
@@ -487,8 +485,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
          WHERE lb.leave_type = ANY($1::text[])
            AND (u.is_active IS NULL OR u.is_active = true)
            AND u.leave_credit_eligible = true
-           AND (u.employment_status IS NULL
-                OR u.employment_status NOT IN ('resigned', 'retired', 'terminated'))
+           AND COALESCE(u.employment_status, 'active') = 'active'
            AND ${activeAssignmentExistsSql('u', '$2', '$3')}`,
         [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
       ));
@@ -506,8 +503,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
            WHERE lb.leave_type = ANY($1::text[])
              AND (u.is_active IS NULL OR u.is_active = true)
              AND u.leave_credit_eligible = true
-             AND (u.employment_status IS NULL
-                  OR u.employment_status NOT IN ('resigned', 'retired', 'terminated'))
+             AND COALESCE(u.employment_status, 'active') = 'active'
              AND ${activeAssignmentExistsSql('u', '$2', '$3')}`,
           [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
         ));
