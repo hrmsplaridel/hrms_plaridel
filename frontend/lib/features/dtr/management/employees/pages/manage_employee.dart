@@ -468,8 +468,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       } catch (_) {}
       final emailConfigured = data['account_email_configured'] == true;
       final emailSent = data['account_email_sent'] == true;
+      final accountIsActive = data['is_active'] != false;
       final temporaryPassword = data['temporary_password']?.toString() ?? '';
-      if (!emailSent && temporaryPassword.isNotEmpty) {
+      if (accountIsActive && !emailSent && temporaryPassword.isNotEmpty) {
         await _showTemporaryPasswordDialog(
           email: email,
           password: temporaryPassword,
@@ -482,7 +483,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       if (widget.onAccountCreated != null) {
         widget.onAccountCreated!();
       } else {
-        final emailStatus = emailSent
+        final emailStatus = !accountIsActive
+            ? ' Account is inactive; credentials were not sent.'
+            : emailSent
             ? ' Credentials were emailed to the employee.'
             : emailConfigured
             ? ' Account email failed; please share the login details manually.'
@@ -1157,7 +1160,12 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
               'retired',
               'terminated',
             ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-            onChanged: (v) => setState(() => _employmentStatus = v ?? 'active'),
+            onChanged: (v) => setState(() {
+              _employmentStatus = v ?? 'active';
+              if (_employmentStatus != 'active') {
+                _leaveCreditEligible = false;
+              }
+            }),
           ),
           const SizedBox(height: 14),
           SwitchListTile.adaptive(
@@ -1170,11 +1178,16 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            subtitle: _employmentStatus == 'active'
+                ? null
+                : const Text('Available only for active employees'),
             secondary: Icon(
               Icons.account_balance_wallet_outlined,
               color: AppTheme.primaryNavy,
             ),
-            onChanged: (value) => setState(() => _leaveCreditEligible = value),
+            onChanged: _employmentStatus == 'active'
+                ? (value) => setState(() => _leaveCreditEligible = value)
+                : null,
           ),
         ],
       ),
@@ -4217,7 +4230,12 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
               'retired',
               'terminated',
             ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-            onChanged: (v) => setState(() => _employmentStatus = v ?? 'active'),
+            onChanged: (v) => setState(() {
+              _employmentStatus = v ?? 'active';
+              if (_employmentStatus != 'active') {
+                _leaveCreditEligible = false;
+              }
+            }),
           ),
           const SizedBox(height: 14),
           SwitchListTile.adaptive(
@@ -4230,11 +4248,16 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            subtitle: _employmentStatus == 'active'
+                ? null
+                : const Text('Available only for active employees'),
             secondary: Icon(
               Icons.account_balance_wallet_outlined,
               color: AppTheme.primaryNavy,
             ),
-            onChanged: (value) => setState(() => _leaveCreditEligible = value),
+            onChanged: _employmentStatus == 'active'
+                ? (value) => setState(() => _leaveCreditEligible = value)
+                : null,
           ),
         ],
       ),
