@@ -434,10 +434,13 @@ class LeaveCardPrintView {
     final deductions = forcedLeaveDeductions
         .where(
           (entry) =>
-              entry.action == 'forced_leave_deduction' &&
+              _isLeaveCardDeduction(entry) &&
               entry.leaveType == LeaveType.vacationLeave.value,
         )
         .toList();
+    final monthlyVacationEarned = _monthlyVacationEarnedByPeriod(
+      forcedLeaveDeductions,
+    );
     if (cardRequests.isEmpty && deductions.isEmpty) {
       return List.generate(16, (_) => const _LeaveCardRow.empty());
     }
@@ -511,17 +514,16 @@ class LeaveCardPrintView {
         deduction: (entry) {
           final deductedDays = _forcedDeductionDays(entry);
           vacationBalance -= deductedDays;
-          final year =
-              entry.metadataJson?['year'] ??
-              entry.metadataJson?['deduction_year'];
-          final period = year != null ? 'CY $year' : _fmtDate(entry.createdAt);
+          final withoutPayDays = _attendanceWithoutPayDays(entry);
           return _LeaveCardRow(
-            period: period,
+            period: _deductionPeriod(entry),
             particulars: _forcedDeductionParticulars(entry),
-            vacEarned: earnedStr,
+            vacEarned: _fmtEarned(
+              _earnedDaysForDeduction(entry, monthlyVacationEarned),
+            ),
             vacWithPay: _fmtNum(deductedDays),
             vacBalance: _fmtNum(vacationBalance),
-            vacWithoutPay: '',
+            vacWithoutPay: withoutPayDays > 0 ? _fmtNum(withoutPayDays) : '',
             slEarned: '',
             slWithPay: '',
             slBalance: '',
@@ -596,7 +598,10 @@ class LeaveCardPrintView {
 
   static String _fmtNum(double value) {
     if (value == value.roundToDouble()) return value.toInt().toString();
-    return value.toStringAsFixed(1);
+    return value
+        .toStringAsFixed(3)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
   }
 
   static String _fmtEarned(double value) => value.toStringAsFixed(3);
@@ -608,6 +613,9 @@ class LeaveCardPrintView {
   }
 
   static double _forcedDeductionDays(LeaveBalanceLedgerEntry entry) {
+    if (_isAttendanceDeduction(entry)) {
+      return entry.daysChanged;
+    }
     final meta = entry.metadataJson?['deducted_days'];
     if (meta is num && meta > 0) return meta.toDouble();
     if (entry.affectedBucket.toLowerCase() == 'used' && entry.daysChanged > 0) {
@@ -617,6 +625,15 @@ class LeaveCardPrintView {
   }
 
   static String _forcedDeductionParticulars(LeaveBalanceLedgerEntry entry) {
+    if (_isAttendanceDeduction(entry)) {
+      final serviceMonth = entry.metadataJson?['service_month']?.toString();
+      final label = entry.action == 'attendance_deduction_adjusted'
+          ? 'DTR Deduction Correction'
+          : 'DTR Late/Undertime Deduction';
+      return serviceMonth == null || serviceMonth.isEmpty
+          ? label
+          : '$label ($serviceMonth)';
+    }
     final year =
         entry.metadataJson?['year'] ?? entry.metadataJson?['deduction_year'];
     if (year != null) {
@@ -625,6 +642,69 @@ class LeaveCardPrintView {
     final remarks = entry.remarks?.trim();
     if (remarks != null && remarks.isNotEmpty) return remarks;
     return 'Year-end Mandatory Leave Deduction';
+  }
+
+  static bool _isLeaveCardDeduction(LeaveBalanceLedgerEntry entry) {
+    return entry.action == 'forced_leave_deduction' ||
+        _isAttendanceDeduction(entry);
+  }
+
+  static bool _isAttendanceDeduction(LeaveBalanceLedgerEntry entry) {
+    return entry.action == 'attendance_deduction' ||
+        entry.action == 'attendance_deduction_adjusted';
+  }
+
+  static Map<String, double> _monthlyVacationEarnedByPeriod(
+    List<LeaveBalanceLedgerEntry> entries,
+  ) {
+    final earnedByPeriod = <String, double>{};
+    for (final entry in entries) {
+      final isAccrual =
+          entry.action == 'monthly_accrual' ||
+          entry.action == 'monthly_accrual_adjusted';
+      if (!isAccrual ||
+          entry.leaveType != LeaveType.vacationLeave.value ||
+          entry.affectedBucket.toLowerCase() != 'earned') {
+        continue;
+      }
+      final period =
+          entry.metadataJson?['target_year_month']?.toString() ??
+          entry.metadataJson?['service_month']?.toString();
+      if (period == null || period.isEmpty) continue;
+      earnedByPeriod.update(
+        period,
+        (value) => value + entry.daysChanged,
+        ifAbsent: () => entry.daysChanged,
+      );
+    }
+    return earnedByPeriod;
+  }
+
+  static double _earnedDaysForDeduction(
+    LeaveBalanceLedgerEntry entry,
+    Map<String, double> monthlyVacationEarned,
+  ) {
+    if (!_isAttendanceDeduction(entry)) return _monthlyEarnedDays;
+    final period = entry.metadataJson?['service_month']?.toString();
+    final earned = period == null ? null : monthlyVacationEarned[period];
+    return earned == null
+        ? _monthlyEarnedDays
+        : earned.clamp(0, double.infinity).toDouble();
+  }
+
+  static double _attendanceWithoutPayDays(LeaveBalanceLedgerEntry entry) {
+    if (entry.action != 'attendance_deduction') return 0;
+    final value = entry.metadataJson?['without_pay_days'];
+    if (value is num && value > 0) return value.toDouble();
+    return 0;
+  }
+
+  static String _deductionPeriod(LeaveBalanceLedgerEntry entry) {
+    final serviceMonth = entry.metadataJson?['service_month']?.toString();
+    if (serviceMonth != null && serviceMonth.isNotEmpty) return serviceMonth;
+    final year =
+        entry.metadataJson?['year'] ?? entry.metadataJson?['deduction_year'];
+    return year != null ? 'CY $year' : _fmtDate(entry.createdAt);
   }
 }
 
