@@ -6,13 +6,16 @@ const {
   assistantGreetingReply,
   buildFastEmployeeAssistantReply,
   requestedLeaveType,
+  requestedLeaveTypeRecord,
   requestedLocatorType,
 } = require('./dtrAssistantFastReply');
 const {
   getAssistantMemory,
   setAssistantMemory,
   clearAssistantMemory,
+  normalizeConversationId,
 } = require('./dtrAssistantMemoryService');
+const { contextGate } = require('./dtrAssistantContextGate');
 const {
   buildLeaveActionPayload,
   buildLocatorActionPayload,
@@ -175,8 +178,64 @@ function emptyAssistantContext(dateRange = null) {
   };
 }
 
-function assistantReplyCharLimit(intent) {
-  return intent === 'leave_guideline_section'
+function selectAssistantResponseDepth(text, intent) {
+  const value = lower(normalizeAssistantMessageForRules(text));
+  if (
+    /\b(detailed|in detail|full details?|complete details?|comprehensive|explain all|show all|list all|all leave types?|all guidelines?|step by step|breakdown|detalyado|kompletong detalye|lahat ng detalye|tanang detalye)\b/.test(
+      value
+    )
+  ) {
+    return 'detailed';
+  }
+  if (
+    /\b(short answer|brief|briefly|quick answer|quickly|concise|summary only|just the answer|only the answer|mubo lang|diretso lang|maikli lang|maikling sagot)\b/.test(
+      value
+    )
+  ) {
+    return 'short';
+  }
+  const wordCount = value.split(/\s+/).filter(Boolean).length;
+  if (
+    wordCount <= 8 &&
+    [
+      'leave_balance',
+      'today_dtr',
+      'latest_leave_request',
+      'latest_locator_request',
+      'locator_status',
+      'dtr_schedule_context',
+    ].includes(String(intent || '')) &&
+    !/\b(why|ngano|bakit|explain|details?|breakdown)\b/.test(value)
+  ) {
+    return 'short';
+  }
+  if (
+    String(intent || '') === 'leave_guideline_section' &&
+    /\b(all|every|complete|full|guidelines?|rules?)\b/.test(value)
+  ) {
+    return 'detailed';
+  }
+  return 'normal';
+}
+
+function adaptAssistantContentToDepth(content, depth) {
+  const value = String(content || '').trim();
+  if (depth !== 'short' || !value.includes('\n')) return value;
+  const lines = value.split(/\r?\n/);
+  const detailIndex = lines.findIndex((line) =>
+    /^(details|detalye)\s*:/i.test(line.trim())
+  );
+  if (detailIndex <= 0) return value;
+  return lines
+    .slice(0, detailIndex)
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function assistantReplyCharLimit(intent, responseDepth = 'normal') {
+  if (responseDepth === 'short') return 1200;
+  return responseDepth === 'detailed' || intent === 'leave_guideline_section'
     ? MAX_LONG_FORM_ASSISTANT_REPLY_CHARS
     : MAX_ASSISTANT_REPLY_CHARS;
 }
@@ -684,11 +743,37 @@ function dateRangePayload(context) {
   };
 }
 
-function actionLeaveType(text) {
-  const type = requestedLeaveType(text);
-  if (type === 'sick') return 'sick';
-  if (type === 'vacation') return 'vacation';
-  return null;
+function canonicalLeaveTypeFromText(text) {
+  const value = lower(normalizeAssistantMessageForRules(text));
+  const types = [
+    ['tenDayVawcLeave', /\b(10[\s-]*day vawc|vawc)\b/],
+    ['specialEmergencyCalamityLeave', /\b(special emergency|calamity)\b/],
+    ['specialLeaveBenefitsForWomen', /\b(special leave benefits for women|special leave for women|gynecological)\b/],
+    ['specialPrivilegeLeave', /\b(special privilege)\b/],
+    ['mandatoryForcedLeave', /\b(mandatory|forced leave)\b/],
+    ['soloParentLeave', /\bsolo parent\b/],
+    ['rehabilitationPrivilege', /\brehabilitation\b/],
+    ['maternityLeave', /\bmaternity\b/],
+    ['paternityLeave', /\bpaternity\b/],
+    ['adoptionLeave', /\badoption\b/],
+    ['studyLeave', /\bstudy leave\b/],
+    ['sickLeave', /\b(sick leave|sick|sl)\b/],
+    ['vacationLeave', /\b(vacation leave|vacation|vl)\b/],
+    ['others', /\b(other leave|others leave)\b/],
+  ];
+  const matches = types
+    .map(([name, pattern]) => {
+      const match = value.match(pattern);
+      return match ? { name, index: match.index ?? Number.MAX_SAFE_INTEGER } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index);
+  return matches[0]?.name || null;
+}
+
+function actionLeaveType(text, context = null) {
+  const record = context ? requestedLeaveTypeRecord(text, context) : null;
+  return record?.name || canonicalLeaveTypeFromText(text);
 }
 
 function actionLocatorType(text) {
@@ -767,7 +852,7 @@ function buildActions(intent, context, text, attachments = [], memory = null) {
   const value = String(intent || '');
   const actions = [];
   const rangePayload = dateRangePayload(context);
-  const leaveType = actionLeaveType(text);
+  const leaveType = actionLeaveType(text, context);
   const locatorType = actionLocatorType(text);
   const exportAttachment = attachments.find((item) => item?.downloadUrl || item?.contentBase64);
 
@@ -1047,18 +1132,26 @@ function buildAssistantResult({
   text,
   actions,
   memory,
+  conversationId,
 }) {
   const safeAttachments = attachments || [];
   const safeIntentConfidence = numericConfidence(intentConfidence);
+  const responseDepth = selectAssistantResponseDepth(text, intent);
+  const adaptedContent = adaptAssistantContentToDepth(content, responseDepth);
   return {
     message: {
       id: crypto.randomUUID(),
       role: 'assistant',
-      content: compactAssistantContent(content, assistantReplyCharLimit(intent)),
+      content: compactAssistantContent(
+        adaptedContent,
+        assistantReplyCharLimit(intent, responseDepth)
+      ),
       createdAt: new Date().toISOString(),
       intent: intent || null,
       intentConfidence: safeIntentConfidence,
       intentSource: intentSource || null,
+      responseDepth,
+      conversationId: conversationId || null,
       provider: provider || null,
       model: model || null,
       modelProfile: modelProfile || null,
@@ -1074,6 +1167,8 @@ function buildAssistantResult({
     intent: intent || null,
     intentConfidence: safeIntentConfidence,
     intentSource: intentSource || null,
+    responseDepth,
+    conversationId: conversationId || null,
     sources: buildSources(context),
   };
 }
@@ -2348,14 +2443,30 @@ async function generateDirectAnswerWithAi({ text, context, profile }) {
   };
 }
 
-async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile }) {
+async function chatWithDtrAssistant(
+  pool,
+  { user, message, intent, modelProfile, conversationId }
+) {
   const text = normalizeMessage(message);
   const profile = resolveModelProfile(modelProfile);
   const scope = getEmployeeSelfScope(user);
-  const memory = getAssistantMemory(scope.userId);
+  const conversationKey = normalizeConversationId(conversationId);
+  const readMemory = () => getAssistantMemory(scope.userId, conversationKey);
+  const saveMemory = (value) =>
+    setAssistantMemory(scope.userId, value, undefined, conversationKey);
+  const memory = readMemory();
   const normalizedTextForRules = normalizeAssistantMessageForRules(text);
+  const forcedIntent = normalizeIntent(intent);
+  const rawScoredIntent = scoreEmployeeAssistantIntent(
+    normalizedTextForRules,
+    intent
+  );
+  const clarificationInterrupted = Boolean(
+    memory?.pendingClarification &&
+      interruptsPendingClarification(normalizedTextForRules, memory)
+  );
   const clarificationPatch = memory?.pendingClarification
-    ? interruptsPendingClarification(normalizedTextForRules, memory)
+    ? clarificationInterrupted
       ? { pendingClarification: null }
       : applyPendingClarificationAnswer(normalizedTextForRules, memory)
     : null;
@@ -2363,6 +2474,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   const greetingReply = assistantGreetingReply(normalizedTextForRules);
   if (greetingReply) {
     return buildAssistantResult({
+      conversationId: conversationKey,
       content: greetingReply,
       provider: 'hrms',
       model: 'hrms-greeting-rules',
@@ -2379,13 +2491,29 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       memory,
     });
   }
-  const memoryIntent = resolveIntentFromMemory(normalizedTextForRules, workingMemory);
+  const contextDecision = contextGate({
+    message: normalizedTextForRules,
+    memory: workingMemory,
+    scoredIntent: rawScoredIntent,
+    forcedIntent,
+    clarificationInterrupted,
+    clarificationAnswered: Boolean(
+      memory?.pendingClarification &&
+        clarificationPatch &&
+        !clarificationInterrupted
+    ),
+  });
+  const routingMemory = contextDecision.useMemory ? workingMemory : null;
+  const memoryIntent = resolveIntentFromMemory(
+    normalizedTextForRules,
+    routingMemory
+  );
   const effectiveText = enrichMessageWithMemory(
     normalizedTextForRules,
-    workingMemory,
+    routingMemory,
     memoryIntent
   );
-  const clarificationIntent = workingMemory?.pendingClarification
+  const clarificationIntent = routingMemory?.pendingClarification
     ? null
     : clarificationIntentForMessage(
         normalizedTextForRules,
@@ -2396,7 +2524,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     const clarificationContext = emptyAssistantContext(
       parseAssistantDateRange(normalizedTextForRules)
     );
-    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
+    clarificationContext.assistant_context_gate = contextDecision;
+    saveMemory(buildNextAssistantMemory(routingMemory, {
       intent: clarificationIntent,
       text: normalizedTextForRules,
       dateRange: clarificationContext.date_range,
@@ -2407,6 +2536,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     }));
 
     return buildAssistantResult({
+      conversationId: conversationKey,
       content: clarificationContent(clarificationIntent, normalizedTextForRules),
       provider: 'hrms',
       model: 'hrms-clarification-rules',
@@ -2418,7 +2548,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'clarification_rules',
       attachments: [],
       text: normalizedTextForRules,
-      memory: getAssistantMemory(scope.userId),
+      memory: readMemory(),
     });
   }
 
@@ -2427,7 +2557,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     const actionContext = emptyAssistantContext(
       parseAssistantDateRange(normalizedTextForRules)
     );
-    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
+    actionContext.assistant_context_gate = contextDecision;
+    saveMemory(buildNextAssistantMemory(routingMemory, {
       intent: directOpenCommand.intent,
       text: normalizedTextForRules,
       dateRange: actionContext.date_range,
@@ -2438,6 +2569,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     }));
 
     return buildAssistantResult({
+      conversationId: conversationKey,
       content: directOpenCommand.content,
       provider: 'hrms',
       model: 'hrms-action-rules',
@@ -2450,14 +2582,18 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       attachments: [],
       text: normalizedTextForRules,
       actions: directOpenCommand.actions,
-      memory: getAssistantMemory(scope.userId),
+      memory: readMemory(),
     });
   }
 
-  const scoredIntent = scoreEmployeeAssistantIntent(effectiveText, intent);
+  const scoredIntent =
+    effectiveText === normalizedTextForRules
+      ? rawScoredIntent
+      : scoreEmployeeAssistantIntent(effectiveText, intent);
   const fallbackMemoryIntent =
-    memoryIntent || resolveIntentFromMemory(effectiveText, memory);
-  const forcedIntent = normalizeIntent(intent);
+    contextDecision.useMemory
+      ? memoryIntent || resolveIntentFromMemory(effectiveText, routingMemory)
+      : null;
   const shouldPreferMemoryIntent = Boolean(fallbackMemoryIntent && !forcedIntent);
   let resolvedIntent = shouldPreferMemoryIntent
     ? fallbackMemoryIntent
@@ -2524,18 +2660,19 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     message: plannedText,
     dateRange: plannedDateRange,
   });
+  context.assistant_context_gate = contextDecision;
 
   const mergedExtraction = mergePlannerExtraction(
-    extractMessageEntities(plannedText, workingMemory),
+    extractMessageEntities(plannedText, routingMemory),
     plannerExtraction
   );
-  const extractionMemory = memoryWithClarificationPatch(workingMemory, {
+  const extractionMemory = memoryWithClarificationPatch(routingMemory, {
     leaveType: mergedExtraction.leaveType,
     locatorType: mergedExtraction.locatorType,
     dateRange: mergedExtraction.dateRange,
     leavePrefill: mergedExtraction.leavePrefill,
     locatorPrefill: mergedExtraction.locatorPrefill,
-    pendingClarification: workingMemory?.pendingClarification ?? null,
+    pendingClarification: routingMemory?.pendingClarification ?? null,
   });
   if (mergedExtraction.dateRange?.startDate) {
     context.date_range = mergedExtraction.dateRange;
@@ -2561,11 +2698,20 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       profile,
     });
 
-    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
+    saveMemory(buildNextAssistantMemory(routingMemory, {
       intent: 'direct_ai',
       text: plannedText,
-      leaveType: memoryLeaveTypeForIntent('direct_ai', plannedText, context, memory),
-      locatorType: memoryLocatorTypeForIntent('direct_ai', plannedText, memory),
+      leaveType: memoryLeaveTypeForIntent(
+        'direct_ai',
+        plannedText,
+        context,
+        routingMemory
+      ),
+      locatorType: memoryLocatorTypeForIntent(
+        'direct_ai',
+        plannedText,
+        routingMemory
+      ),
       dateRange: context.date_range,
       toolData: {
         modelProfile: profile.id,
@@ -2574,6 +2720,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     }));
 
     return buildAssistantResult({
+      conversationId: conversationKey,
       content: direct.content,
       provider: direct.provider,
       model: direct.model,
@@ -2585,7 +2732,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'direct_ai',
       attachments: [],
       text: plannedText,
-      memory: getAssistantMemory(scope.userId),
+      memory: readMemory(),
     });
   }
 
@@ -2596,8 +2743,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     memory: extractionMemory,
   });
   if (guided?.content) {
-    setAssistantMemory(
-      scope.userId,
+    saveMemory(
       buildNextAssistantMemory(extractionMemory, {
         intent: resolvedIntent,
         text: plannedText,
@@ -2616,6 +2762,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     );
 
     return buildAssistantResult({
+      conversationId: conversationKey,
       content: guided.content,
       provider: 'hrms',
       model: 'hrms-guided-clarification',
@@ -2627,12 +2774,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'guided_clarification',
       attachments: [],
       text: plannedText,
-      memory: getAssistantMemory(scope.userId),
+      memory: readMemory(),
     });
   }
 
   const multi = detectMultipleIntents(effectiveText, { explicitIntent: intent });
-  if (multi.isMulti && multi.intents.length >= 2 && !workingMemory?.pendingClarification) {
+  if (multi.isMulti && multi.intents.length >= 2 && !routingMemory?.pendingClarification) {
     const multiReplies = [];
     for (const item of multi.intents) {
       const segmentText = item.segment || plannedText;
@@ -2644,8 +2791,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     if (multiReplies.length >= 2) {
       const combined = combineMultiIntentReplies(multiReplies, effectiveText);
       const primaryIntent = multiReplies[0].intent;
-      setAssistantMemory(
-        scope.userId,
+      saveMemory(
         buildNextAssistantMemory(extractionMemory, {
           intent: primaryIntent,
           text: plannedText,
@@ -2668,10 +2814,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       );
 
       return buildAssistantResult({
-        content: compactAssistantContent(
-          combined,
-          assistantReplyCharLimit(primaryIntent)
-        ),
+        conversationId: conversationKey,
+        content: combined,
         provider: 'hrms',
         model: 'hrms-multi-intent',
         modelProfile: profile.id,
@@ -2682,7 +2826,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
         intentSource: 'multi_intent',
         attachments: [],
         text: plannedText,
-        memory: getAssistantMemory(scope.userId),
+        memory: readMemory(),
       });
     }
   }
@@ -2705,7 +2849,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
           profile,
         });
 
-    setAssistantMemory(scope.userId, buildNextAssistantMemory(extractionMemory, {
+    saveMemory(buildNextAssistantMemory(extractionMemory, {
       intent: resolvedIntent,
       text: plannedText,
       leaveType: memoryLeaveTypeForIntent(
@@ -2726,10 +2870,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     }));
 
     return buildAssistantResult({
-      content: compactAssistantContent(
-        refined?.content || fastReply,
-        assistantReplyCharLimit(resolvedIntent)
-      ),
+      conversationId: conversationKey,
+      content: refined?.content || fastReply,
       provider: refined?.provider || 'hrms',
       model: refined?.model || model,
       modelProfile: profile.id,
@@ -2740,12 +2882,13 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource,
       attachments,
       text: plannedText,
-      memory: getAssistantMemory(scope.userId),
+      memory: readMemory(),
     });
   }
 
   const fallbackAttachments = buildAttachments(resolvedIntent, context, scope.userId);
   return buildAssistantResult({
+    conversationId: conversationKey,
     content: gracefulFallbackContent(normalizedTextForRules),
     provider: 'hrms',
     model: 'hrms-graceful-fallback',
@@ -2761,12 +2904,14 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   });
 }
 
-function resetDtrAssistantChat(user) {
+function resetDtrAssistantChat(user, conversationId) {
   const scope = getEmployeeSelfScope(user);
-  clearAssistantMemory(scope.userId);
+  const conversationKey = normalizeConversationId(conversationId);
+  clearAssistantMemory(scope.userId, conversationKey);
   return {
     ok: true,
     mode: scope.mode,
+    conversationId: conversationKey,
   };
 }
 
@@ -2776,6 +2921,7 @@ module.exports = {
   getDtrAssistantModelProfiles,
   __test: {
     assistantReplyCharLimit,
+    adaptAssistantContentToDepth,
     buildActions,
     buildNextAssistantMemory,
     clarificationContent,
@@ -2786,6 +2932,7 @@ module.exports = {
     isAmbiguousFilingQuestion,
     isAmbiguousStatusQuestion,
     resolveIntentFromMemory,
+    selectAssistantResponseDepth,
     topicForIntent,
   },
 };
