@@ -38,6 +38,9 @@ const {
 const leaveNotifications = require('../services/leaveNotifications');
 const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
 const {
+  runMonthlyAttendanceDeductions,
+} = require('../services/leaveAttendanceDeduction');
+const {
   getYearEndForcedLeaveCompliance,
   applyYearEndForcedLeaveDeductions,
   manilaYearNow: yearEndManilaYearNow,
@@ -2823,7 +2826,9 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
   }
 });
 
-// POST /api/leave/admin/monthly-accrual — admin/HR: apply VL + SL monthly accrual (1.25 days each per month credited)
+// POST /api/leave/admin/monthly-accrual — admin/HR month-end processing:
+// credit completed-month VL/SL accrual, then post the completed month's DTR
+// equivalent-day charge to Vacation Leave.
 // Body/query (optional): dry_run, target_month (YYYY-MM), max_catch_up_months (default 1)
 router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res) => {
   try {
@@ -2841,16 +2846,65 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
       req.query?.target_month ??
       req.query?.year_month;
 
-    const result = await runLeaveMonthlyAccrual(pool, {
+    const accrualResult = await runLeaveMonthlyAccrual(pool, {
       dryRun,
       maxCatchUpMonths: Number.isFinite(maxCatchUpMonths) ? maxCatchUpMonths : undefined,
       targetMonth: targetMonth ? String(targetMonth).trim() : undefined,
     });
-    if (!result.dryRun && (result.rowsUpdated > 0 || result.missingBalanceRowsCreated > 0)) {
+
+    const previewEarnedByUser = new Map();
+    if (dryRun) {
+      for (const detail of accrualResult.details || []) {
+        if (
+          detail.leave_type === 'vacationLeave' &&
+          (
+            detail.action === 'would_apply' ||
+            detail.action === 'would_adjust'
+          )
+        ) {
+          const key = String(detail.user_id);
+          const earnedMovement = Number(
+            detail.balance_delta ?? detail.days_added ?? 0
+          );
+          previewEarnedByUser.set(
+            key,
+            (previewEarnedByUser.get(key) || 0) + earnedMovement
+          );
+        }
+      }
+    }
+
+    const attendanceDeductions = await runMonthlyAttendanceDeductions(pool, {
+      dryRun,
+      targetMonth: accrualResult.targetYearMonth,
+      balanceEarnedAdjustmentsByUser: previewEarnedByUser,
+    });
+    const result = { ...accrualResult, attendanceDeductions };
+
+    const attendanceBalanceDetails = (attendanceDeductions.details || []).filter(
+      (item) => Number(item.balance_delta || 0) !== 0
+    );
+    if (
+      !result.dryRun &&
+      (
+        result.rowsUpdated > 0 ||
+        result.missingBalanceRowsCreated > 0 ||
+        attendanceBalanceDetails.length > 0
+      )
+    ) {
       const affectedUserIds = [
         ...new Set(
-          (Array.isArray(result.details) ? result.details : [])
-            .filter((item) => item.action === 'applied' || item.created_balance_row === true)
+          [
+            ...(Array.isArray(result.details) ? result.details : []),
+            ...attendanceBalanceDetails,
+          ]
+            .filter(
+              (item) =>
+                item.action === 'applied' ||
+                item.action === 'adjusted' ||
+                item.created_balance_row === true ||
+                Number(item.balance_delta || 0) !== 0
+            )
             .map((item) => item.user_id)
             .filter(Boolean)
             .map((id) => String(id))
@@ -2864,6 +2918,9 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
           rowsUpdated: result.rowsUpdated,
           rowsSkipped: result.rowsSkipped,
           missingBalanceRowsCreated: result.missingBalanceRowsCreated || 0,
+          attendanceRowsUpdated: attendanceDeductions.rowsUpdated,
+          attendanceDeductedDays: attendanceDeductions.totalDeductedDays,
+          attendanceWithoutPayDays: attendanceDeductions.totalWithoutPayDays,
           leaveTypes: result.leaveTypes,
           balanceChanged: true,
         });
@@ -4009,8 +4066,8 @@ router.get('/ledger', protect, async (req, res) => {
       pool.query(
         `SELECT
            COALESCE(SUM(CASE
-             WHEN l.days_changed > 0 AND
-                  (LOWER(l.affected_bucket) = 'earned' OR LOWER(l.action) = 'monthly_accrual')
+             WHEN LOWER(l.affected_bucket) = 'earned'
+                  OR LOWER(l.action) = 'monthly_accrual'
              THEN l.days_changed ELSE 0 END), 0)::float8 AS earned,
            GREATEST(COALESCE(SUM(CASE
              WHEN LOWER(l.affected_bucket) = 'used'
