@@ -4,6 +4,8 @@ const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
   ensureShiftPunchModeColumn,
   getShiftType: resolveShiftType,
+  getExpectedAmEndMinutes,
+  computeClockOutUndertimeMinutes,
   interpretPunchesForShift,
   computeTotalHours: computeShiftTotalHours,
 } = require('./shiftAttendance');
@@ -385,20 +387,37 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
   let amUndertimePenalty = 0;
   if (type === 'full_day' && evalAm && shiftInfo.startMinutes != null) {
     const hasAmLogs = timeInIso != null && breakOutIso != null;
+    const amEndMinutes = getExpectedAmEndMinutes(shiftInfo);
     const pmStartMinutes = shiftInfo.breakEndMinutes ?? NOON_MINUTES;
     const amWindowClosed =
       dateStr < todayStr || (dateStr === todayStr && nowMinutes >= pmStartMinutes);
     if (!hasAmLogs && amWindowClosed) {
-      amUndertimePenalty = Math.max(0, pmStartMinutes - shiftInfo.startMinutes);
+      amUndertimePenalty = Math.max(0, amEndMinutes - shiftInfo.startMinutes);
     }
   }
+  const breakOutMins = breakOutIso
+    ? minutesFromMidnightInTimeZone(breakOutIso)
+    : null;
+  const timeOutMins = timeOutIso
+    ? minutesFromMidnightInTimeZone(timeOutIso)
+    : null;
+  const completedSegmentUndertime = computeClockOutUndertimeMinutes({
+    shiftInfo,
+    breakOutMinutes: breakOutMins,
+    timeOutMinutes: timeOutMins,
+    evaluateAm: evalAm,
+    evaluatePm: evalPm,
+  });
   let clockOutMins = null;
-  if (evalAm && type === 'am_only' && breakOutIso) {
-    clockOutMins = minutesFromMidnightInTimeZone(breakOutIso);
-  } else if (evalPm && timeOutIso) {
-    clockOutMins = minutesFromMidnightInTimeZone(timeOutIso);
+  if (type === 'am_only') {
+    if (evalAm) clockOutMins = breakOutMins;
+  } else if (evalPm) {
+    clockOutMins = timeOutMins;
   }
   if (clockOutMins == null) {
+    if (type === 'am_only' ? !evalAm : !evalPm) {
+      return completedSegmentUndertime + amUndertimePenalty;
+    }
     // Incomplete record: employee clocked in but never clocked out.
     const hasClockIn = !!(timeInIso || breakInIso);
     if (!hasClockIn) return 0;
@@ -420,9 +439,7 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
     }
     return 0;
   }
-  const endMinutes = shiftInfo.endMinutes;
-  if (clockOutMins >= endMinutes) return 0;
-  return (endMinutes - clockOutMins) + amUndertimePenalty;
+  return completedSegmentUndertime + amUndertimePenalty;
 }
 
 function getShiftType(shiftInfo) {

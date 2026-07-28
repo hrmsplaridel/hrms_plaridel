@@ -59,6 +59,69 @@ function getExpectedWorkMinutes(shiftInfo) {
   return Math.max(0, spanMinutes - lunchMinutes);
 }
 
+function getExpectedAmEndMinutes(shiftInfo) {
+  if (!shiftInfo) return NOON_MINUTES;
+  const configured =
+    shiftInfo.breakStartMinutes ??
+    shiftInfo.break_start_minutes ??
+    shiftInfo.breakStart ??
+    shiftInfo.break_start;
+  const parsed = Number(configured);
+  return Number.isFinite(parsed) ? parsed : NOON_MINUTES;
+}
+
+/**
+ * Calculate undertime from completed clock-out segments.
+ *
+ * Full-day shifts have two possible early departures:
+ * AM Out before the expected AM end, and PM Out before shift end.
+ * The current shift schema does not store break_start, so full-day AM
+ * work ends at noon unless a caller supplies breakStartMinutes.
+ */
+function computeClockOutUndertimeMinutes({
+  shiftInfo,
+  breakOutMinutes = null,
+  timeOutMinutes = null,
+  evaluateAm = true,
+  evaluatePm = true,
+  coveredSegments = [],
+} = {}) {
+  if (!shiftInfo || shiftInfo.endMinutes == null) return 0;
+
+  const type = getShiftType(shiftInfo);
+  const covered = new Set(
+    (Array.isArray(coveredSegments) ? coveredSegments : [])
+      .map((segment) => String(segment).trim().toUpperCase())
+  );
+  const breakOut = breakOutMinutes == null ? null : Number(breakOutMinutes);
+  const timeOut = timeOutMinutes == null ? null : Number(timeOutMinutes);
+  const hasBreakOut = breakOut != null && Number.isFinite(breakOut);
+  const hasTimeOut = timeOut != null && Number.isFinite(timeOut);
+  let total = 0;
+
+  if (type === 'full_day') {
+    if (evaluateAm && !covered.has('AM OUT') && hasBreakOut) {
+      total += Math.max(0, getExpectedAmEndMinutes(shiftInfo) - breakOut);
+    }
+    if (evaluatePm && !covered.has('PM OUT') && hasTimeOut) {
+      total += Math.max(0, shiftInfo.endMinutes - timeOut);
+    }
+    return total;
+  }
+
+  if (type === 'am_only') {
+    if (evaluateAm && !covered.has('AM OUT') && hasBreakOut) {
+      total += Math.max(0, shiftInfo.endMinutes - breakOut);
+    }
+    return total;
+  }
+
+  if (evaluatePm && !covered.has('PM OUT') && hasTimeOut) {
+    total += Math.max(0, shiftInfo.endMinutes - timeOut);
+  }
+  return total;
+}
+
 function getShiftExpectedLogs(shiftInfo) {
   const type = getShiftType(shiftInfo);
   if (!type) return { needsAm: true, needsPm: true, needsInOut: false };
@@ -233,6 +296,8 @@ module.exports = {
   ensureShiftPunchModeColumn,
   getShiftType,
   getExpectedWorkMinutes,
+  getExpectedAmEndMinutes,
+  computeClockOutUndertimeMinutes,
   getShiftExpectedLogs,
   getExpectedLogsForDay,
   minutesFromMidnightInTimeZone,

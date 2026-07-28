@@ -218,8 +218,12 @@ const GUIDELINE_SECTIONS = [
       'balance',
     ],
     points: [
-      'Vacation and sick leave earn 1.250 days per month through monthly accrual when the employee is leave-credit eligible and has an active assignment for the month.',
-      'Monthly accrual does not require a shift and does not check employment type in the current HRMS rule.',
+      'Vacation and sick leave earn 1.250 days after a completed service month when the employee is leave-credit eligible and has an assignment during that month.',
+      'The scheduler initially processes the completed month on the first day and performs a full reconciliation of that same month on the 15th; it does not grant the new month in advance.',
+      'The reconciliation does not duplicate an existing credit. If the recorded hire or separation date changed, HRMS recalculates the earned credit and applies only the difference.',
+      'The first and final service months are prorated from the recorded hire or separation date. Approved paid leave still counts as service.',
+      'DTR late, undertime, and absence equivalents are posted separately against Vacation Leave after the completed month; any amount beyond the available balance is recorded as without pay for HR review.',
+      'The current HRMS rule does not check employment type for monthly accrual.',
       'Some special leave types have annual or per-incident limits and may not use the same balance ledger.',
       'Pending leave may reduce the available balance shown before final approval.',
     ],
@@ -234,6 +238,43 @@ const GUIDELINE_SECTIONS = [
     ],
   },
 ];
+
+const CREDIT_LIMIT_SECTION_TRANSLATIONS = {
+  bisaya: {
+    title: 'Leave Credits ug Limits',
+    points: [
+      'Ang Vacation ug Sick Leave maka-earn ug 1.250 ka adlaw human makompleto ang service month, basta leave-credit eligible ang empleyado ug adunay assignment sulod sa maong bulan.',
+      'Modagan una ang scheduler sa unang adlaw para sa nahuman nga bulan ug mag-full reconciliation pag-abot sa ika-15 para sa parehas nga bulan; dili niini i-advance ang bag-ong bulan.',
+      'Dili magdoble ang existing credit sa reconciliation. Kung nausab ang recorded hire o separation date, i-recalculate sa HRMS ang earned credit ug ang kalainan ra ang i-adjust.',
+      'I-prorate ang una ug katapusang service month base sa recorded hire o separation date. Ang approved paid leave apil gihapon sa service.',
+      'Ang DTR late, undertime, ug absence equivalent lahi nga i-charge sa Vacation Leave human mahuman ang bulan; ang sobra sa available balance i-record isip without pay para ma-review sa HR.',
+      'Ang current HRMS rule dili mo-check sa employment type para sa monthly accrual.',
+      'Ang ubang special leave adunay annual o per-incident limit ug posibleng dili mogamit sa parehas nga balance ledger.',
+      'Ang pending leave mahimong mopakunhod sa available balance nga makita before final approval.',
+    ],
+  },
+  tagalog: {
+    title: 'Leave Credits at Limits',
+    points: [
+      'Ang Vacation at Sick Leave ay kumikita ng 1.250 araw pagkatapos makumpleto ang service month, kung leave-credit eligible ang empleyado at may assignment sa buwang iyon.',
+      'Unang pinoproseso ng scheduler ang natapos na buwan sa unang araw at nagsasagawa ito ng full reconciliation para sa parehong buwan sa ika-15; hindi nito ina-advance ang bagong buwan.',
+      'Hindi dinodoble ng reconciliation ang kasalukuyang credit. Kapag nabago ang recorded hire o separation date, muling kinakalkula ng HRMS ang earned credit at ang pagkakaiba lamang ang ina-adjust.',
+      'Prorated ang una at huling service month ayon sa recorded hire o separation date. Kasama pa rin sa service ang approved paid leave.',
+      'Ang DTR late, undertime, at absence equivalent ay hiwalay na kinakaltas sa Vacation Leave pagkatapos ng buwan; ang sobra sa available balance ay nire-record bilang without pay para ma-review ng HR.',
+      'Hindi chine-check ng current HRMS rule ang employment type para sa monthly accrual.',
+      'May annual o per-incident limit ang ilang special leave at maaaring hindi gumamit ng parehong balance ledger.',
+      'Maaaring bawasan ng pending leave ang available balance na ipinapakita bago ang final approval.',
+    ],
+  },
+};
+
+function localizeGuidelineSection(section, language = 'english') {
+  if (!section || section.key !== 'credits_limits') return section;
+  const translated = CREDIT_LIMIT_SECTION_TRANSLATIONS[language];
+  return translated
+    ? { ...section, title: translated.title, points: translated.points }
+    : section;
+}
 
 const FORM_FIELD_GUIDANCE = {
   vacationLeave: [
@@ -885,6 +926,7 @@ module.exports = {
   getLeaveGuidanceForType,
   getGuidelineSectionsForMessage,
   isLeaveFormFieldHelpQuestion,
+  localizeGuidelineSection,
   GUIDELINE_SECTIONS,
   LEAVE_FORM_FIELDS,
   summarizeLeaveGuidance,

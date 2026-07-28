@@ -2,7 +2,8 @@
  * Monthly earned-days accrual for Vacation and Sick leave.
  *
  * Enhancements over v1:
- *  1. Employment status filtering  — resigned / retired / terminated employees are excluded.
+ *  1. Service-month eligibility     — employees who served during the target month are included;
+ *                                    employees separated before it are excluded.
  *  2. Hire date backfill           — when last_accrual_date IS NULL and maxCatchUpMonths > 1,
  *                                    months are counted from date_hired (not always just 1).
  *  3. Catch-up hire-month proration— hire month is prorated even in a multi-month backfill.
@@ -74,9 +75,9 @@ function isValidDate(d) {
   return d instanceof Date && !Number.isNaN(d.getTime());
 }
 
-/** Round to 2 decimal places (policy for earned days). */
-function round2(n) {
-  return Math.round(Number(n) * 100) / 100;
+/** Round leave-credit movements to the three decimals used by CSC leave cards. */
+function round3(n) {
+  return Math.round((Number(n) + Number.EPSILON) * 1000) / 1000;
 }
 
 /** Calendar days in month (handles Feb 28/29). */
@@ -143,6 +144,34 @@ async function ensureLeaveCreditEligibilityColumn(db) {
   );
 }
 
+async function ensureMonthlyAccrualPostingTable(db) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS leave_monthly_accrual_postings (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      service_month DATE NOT NULL,
+      leave_type TEXT NOT NULL,
+      credited_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (credited_days >= 0),
+      accrual_rate NUMERIC(6,3) NOT NULL CHECK (accrual_rate >= 0),
+      metadata_json JSONB,
+      posted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CONSTRAINT uq_leave_monthly_accrual_posting
+        UNIQUE (user_id, service_month, leave_type),
+      CONSTRAINT chk_leave_monthly_accrual_service_month
+        CHECK (EXTRACT(DAY FROM service_month) = 1),
+      CONSTRAINT fk_leave_monthly_accrual_posting_leave_type
+        FOREIGN KEY (leave_type) REFERENCES leave_types(name)
+        ON UPDATE CASCADE ON DELETE RESTRICT
+    )
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_leave_monthly_accrual_postings_month
+      ON leave_monthly_accrual_postings(service_month, user_id)
+  `);
+}
+
 function activeAssignmentExistsSql(userAlias, targetStartParam, targetEndParam) {
   return `EXISTS (
     SELECT 1
@@ -151,6 +180,27 @@ function activeAssignmentExistsSql(userAlias, targetStartParam, targetEndParam) 
       AND (a.is_active IS NULL OR a.is_active = true)
       AND (a.effective_from IS NULL OR a.effective_from <= ${targetEndParam}::date)
       AND (a.effective_to IS NULL OR a.effective_to >= ${targetStartParam}::date)
+  )`;
+}
+
+function servedDuringTargetMonthSql(
+  userAlias,
+  targetStartParam,
+  targetEndParam
+) {
+  return `(
+    (${userAlias}.date_hired IS NULL OR ${userAlias}.date_hired <= ${targetEndParam}::date)
+    AND (
+      ${userAlias}.separation_date IS NULL
+      OR ${userAlias}.separation_date >= ${targetStartParam}::date
+    )
+    AND (
+      (
+        (${userAlias}.is_active IS NULL OR ${userAlias}.is_active = true)
+        AND COALESCE(${userAlias}.employment_status, 'active') = 'active'
+      )
+      OR ${userAlias}.separation_date >= ${targetStartParam}::date
+    )
   )`;
 }
 
@@ -176,6 +226,11 @@ function monthStartInTimeZone(input = new Date(), timeZone = 'Asia/Manila') {
     throw new Error('Could not resolve current accrual month');
   }
   return parseTargetMonth(`${year}-${month}`);
+}
+
+/** Most recently completed calendar month in the configured business timezone. */
+function completedMonthStartInTimeZone(input = new Date(), timeZone = 'Asia/Manila') {
+  return addMonths(monthStartInTimeZone(input, timeZone), -1);
 }
 
 // ─── DB-driven leave type config ─────────────────────────────────────────────
@@ -297,7 +352,7 @@ function firstMonthAccrualAmount(targetMonthStart, dateHiredRaw, daysPerMonth) {
   const hire = parseDateOnly(dateHiredRaw);
   if (!hire) {
     return {
-      addDays: round2(daysPerMonth),
+      addDays: round3(daysPerMonth),
       skipped: false,
       prorated: false,
       reason: 'no_hire_date_full_rate',
@@ -311,12 +366,12 @@ function firstMonthAccrualAmount(targetMonthStart, dateHiredRaw, daysPerMonth) {
   }
 
   if (monthKey(hireMonthStart) < monthKey(target)) {
-    return { addDays: round2(daysPerMonth), skipped: false, prorated: false };
+    return { addDays: round3(daysPerMonth), skipped: false, prorated: false };
   }
 
   // Same calendar month as target
   if (hire.getDate() === 1) {
-    return { addDays: round2(daysPerMonth), skipped: false, prorated: false };
+    return { addDays: round3(daysPerMonth), skipped: false, prorated: false };
   }
 
   // Hired mid-month (day 2..last): prorate
@@ -324,7 +379,7 @@ function firstMonthAccrualAmount(targetMonthStart, dateHiredRaw, daysPerMonth) {
   if (daysWorked < 1) {
     return { addDays: 0, skipped: true, reason: 'invalid_hire_day', prorated: false };
   }
-  const addDays = Math.max(0, round2((daysWorked / dim) * daysPerMonth));
+  const addDays = Math.max(0, round3((daysWorked / dim) * daysPerMonth));
   return {
     addDays,
     skipped: false,
@@ -346,7 +401,7 @@ function firstMonthAccrualAmount(targetMonthStart, dateHiredRaw, daysPerMonth) {
 function separationMonthAccrualAmount(separationDate, lastMonthStart, daysPerMonth) {
   const sep = parseDateOnly(separationDate);
   if (!sep) {
-    return { addDays: round2(daysPerMonth), prorated: false };
+    return { addDays: round3(daysPerMonth), prorated: false };
   }
   const target = startOfMonth(lastMonthStart);
   const y = target.getFullYear();
@@ -360,10 +415,388 @@ function separationMonthAccrualAmount(separationDate, lastMonthStart, daysPerMon
   }
   if (daysWorked >= dim) {
     // Worked the full month — no proration needed
-    return { addDays: round2(daysPerMonth), prorated: false };
+    return { addDays: round3(daysPerMonth), prorated: false };
   }
-  const addDays = round2((daysWorked / dim) * daysPerMonth);
+  const addDays = round3((daysWorked / dim) * daysPerMonth);
   return { addDays, prorated: true, days_worked: daysWorked, days_in_month: dim };
+}
+
+/**
+ * Recalculate one service month's expected credit from the employee data that
+ * exists now. This is also used by the 15th-day correction pass.
+ */
+function expectedAccrualForServiceMonth({
+  targetMonth,
+  dateHired,
+  separationDate,
+  rate,
+  eligible = true,
+}) {
+  if (!eligible) {
+    return {
+      expectedDays: 0,
+      hireProrated: false,
+      separationProrated: false,
+      reason: 'not_eligible_for_service_month',
+    };
+  }
+
+  const hireInfo = firstMonthAccrualAmount(targetMonth, dateHired, rate);
+  if (hireInfo.skipped) {
+    return {
+      expectedDays: 0,
+      hireProrated: false,
+      separationProrated: false,
+      reason: hireInfo.reason || 'not_employed_in_service_month',
+    };
+  }
+
+  let expectedDays = hireInfo.addDays;
+  let separationInfo = null;
+  const separation = parseDateOnly(separationDate);
+  if (
+    separation &&
+    monthKey(startOfMonth(separation)) === monthKey(startOfMonth(targetMonth))
+  ) {
+    separationInfo = separationMonthAccrualAmount(
+      separation,
+      targetMonth,
+      rate
+    );
+    expectedDays = Math.max(
+      0,
+      round3(expectedDays - rate + separationInfo.addDays)
+    );
+  }
+
+  return {
+    expectedDays: round3(expectedDays),
+    hireProrated: !!hireInfo.prorated,
+    separationProrated: !!separationInfo?.prorated,
+    hireDaysWorked: hireInfo.days_worked,
+    hireDaysInMonth: hireInfo.days_in_month,
+    separationDaysWorked: separationInfo?.days_worked,
+    separationDaysInMonth: separationInfo?.days_in_month,
+    reason: 'eligible',
+  };
+}
+
+function monthlyPostingAllocations({
+  firstMonthStart,
+  months,
+  dateHired,
+  separationDate,
+  rate,
+  totalDays,
+}) {
+  const allocations = [];
+  let remaining = round3(totalDays);
+  for (let index = 0; index < months && remaining > 0; index += 1) {
+    const serviceMonth = addMonths(startOfMonth(firstMonthStart), index);
+    const expected = expectedAccrualForServiceMonth({
+      targetMonth: serviceMonth,
+      dateHired,
+      separationDate,
+      rate,
+      eligible: true,
+    });
+    const creditedDays = round3(
+      Math.min(Math.max(0, expected.expectedDays), remaining)
+    );
+    if (creditedDays > 0) {
+      allocations.push({
+        serviceMonth,
+        creditedDays,
+        expected,
+      });
+      remaining = Math.max(0, round3(remaining - creditedDays));
+    }
+  }
+  return allocations;
+}
+
+async function insertMonthlyAccrualPosting(client, {
+  userId,
+  serviceMonth,
+  leaveType,
+  creditedDays,
+  rate,
+  metadata,
+}) {
+  return client.query(
+    `INSERT INTO leave_monthly_accrual_postings (
+       user_id, service_month, leave_type, credited_days,
+       accrual_rate, metadata_json, posted_at, created_at, updated_at
+     )
+     VALUES (
+       $1::uuid, $2::date, $3::text, $4::numeric,
+       $5::numeric, $6::jsonb, now(), now(), now()
+     )
+     ON CONFLICT (user_id, service_month, leave_type) DO NOTHING`,
+    [
+      userId,
+      toDateStr(serviceMonth),
+      leaveType,
+      creditedDays,
+      rate,
+      metadata,
+    ]
+  );
+}
+
+async function loadAccrualPostingsForReconciliation(
+  client,
+  targetYearMonth,
+  targetMonthStartStr,
+  targetMonthEndStr,
+  forUpdate = false
+) {
+  const result = await client.query(
+    `WITH legacy AS (
+       SELECT lbl.user_id,
+              ($1::text || '-01')::date AS service_month,
+              lbl.leave_type,
+              GREATEST(0, ROUND(SUM(lbl.days_changed)::numeric, 3)) AS credited_days,
+              COALESCE(MAX(lt.accrual_monthly_rate), $4::numeric) AS accrual_rate,
+              jsonb_build_object('legacy_ledger_import', true) AS metadata_json
+       FROM leave_balance_ledger lbl
+       LEFT JOIN leave_types lt ON lt.name = lbl.leave_type
+       WHERE lbl.action = 'monthly_accrual'
+         AND lbl.metadata_json->>'target_year_month' = $1::text
+         AND COALESCE(lbl.metadata_json->>'months_credited', '1') = '1'
+       GROUP BY lbl.user_id, lbl.leave_type
+     ),
+     effective_postings AS (
+       SELECT p.id, p.user_id, p.service_month, p.leave_type,
+              p.credited_days, p.accrual_rate, p.metadata_json,
+              true AS posting_persisted
+       FROM leave_monthly_accrual_postings p
+       WHERE p.service_month = ($1::text || '-01')::date
+
+       UNION ALL
+
+       SELECT NULL::uuid AS id, l.user_id, l.service_month, l.leave_type,
+              l.credited_days, l.accrual_rate, l.metadata_json,
+              false AS posting_persisted
+       FROM legacy l
+       WHERE NOT EXISTS (
+         SELECT 1
+         FROM leave_monthly_accrual_postings p
+         WHERE p.user_id = l.user_id
+           AND p.service_month = l.service_month
+           AND p.leave_type = l.leave_type
+       )
+     )
+     SELECT ep.id AS posting_id, ep.user_id, ep.service_month,
+            ep.leave_type, ep.credited_days, ep.accrual_rate,
+            ep.metadata_json, ep.posting_persisted,
+            lb.id AS balance_id, lb.earned_days, lb.used_days,
+            lb.adjusted_days, lb.last_accrual_date,
+            u.full_name, u.date_hired, u.separation_date,
+            (
+              u.leave_credit_eligible = true
+              AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
+              AND ${activeAssignmentExistsSql('u', '$2', '$3')}
+            ) AS target_eligible
+     FROM effective_postings ep
+     INNER JOIN users u ON u.id = ep.user_id
+     INNER JOIN leave_balances lb
+       ON lb.user_id = ep.user_id
+      AND lb.leave_type = ep.leave_type
+     ORDER BY u.full_name, ep.leave_type
+     ${forUpdate ? 'FOR UPDATE OF lb' : ''}`,
+    [
+      targetYearMonth,
+      targetMonthStartStr,
+      targetMonthEndStr,
+      DAYS_PER_MONTH,
+    ]
+  );
+  return result.rows;
+}
+
+async function reconcileMonthlyAccrualPostings(client, {
+  dryRun,
+  targetMonth,
+  targetYearMonth,
+  targetMonthStartStr,
+  targetMonthEndStr,
+  leaveTypeConfigMap,
+}) {
+  const rows = await loadAccrualPostingsForReconciliation(
+    client,
+    targetYearMonth,
+    targetMonthStartStr,
+    targetMonthEndStr,
+    !dryRun
+  );
+  const correctionDetails = [];
+  const adjustedKeys = new Set();
+  let rowsUpdated = 0;
+
+  for (const row of rows) {
+    const config = leaveTypeConfigMap.get(row.leave_type);
+    const rate = config?.monthly_rate ?? parseFloat(row.accrual_rate || DAYS_PER_MONTH);
+    const previousDays = round3(parseFloat(row.credited_days || 0));
+    const expected = expectedAccrualForServiceMonth({
+      targetMonth,
+      dateHired: row.date_hired,
+      separationDate: row.separation_date,
+      rate,
+      eligible: config != null && row.target_eligible === true,
+    });
+
+    const oldEarned = round3(parseFloat(row.earned_days || 0));
+    let desiredDays = expected.expectedDays;
+    let capApplied = false;
+    if (config?.accrual_annual_cap != null) {
+      const used = parseFloat(row.used_days || 0);
+      const adjusted = parseFloat(row.adjusted_days || 0);
+      const balanceWithoutPosting = round3(
+        oldEarned - previousDays - used + adjusted
+      );
+      const capacity = Math.max(
+        0,
+        round3(config.accrual_annual_cap - balanceWithoutPosting)
+      );
+      if (desiredDays > capacity) {
+        desiredDays = capacity;
+        capApplied = true;
+      }
+    }
+
+    let delta = round3(desiredDays - previousDays);
+    let newEarned = round3(oldEarned + delta);
+    if (newEarned < 0) {
+      newEarned = 0;
+      delta = round3(-oldEarned);
+      desiredDays = round3(previousDays + delta);
+    }
+
+    const postingMetadata = {
+      service_month: targetYearMonth,
+      target_year_month: targetYearMonth,
+      reconciliation: true,
+      eligibility_reason: expected.reason,
+      previous_credited_days: previousDays,
+      expected_credited_days: desiredDays,
+      accrual_rate: rate,
+      hire_date_proration: expected.hireProrated,
+      separation_proration: expected.separationProrated,
+      annual_cap_applied: capApplied,
+      ...(expected.hireDaysWorked != null
+        ? {
+            hire_days_worked: expected.hireDaysWorked,
+            hire_days_in_month: expected.hireDaysInMonth,
+          }
+        : {}),
+      ...(expected.separationDaysWorked != null
+        ? {
+            separation_days_worked: expected.separationDaysWorked,
+            separation_days_in_month: expected.separationDaysInMonth,
+          }
+        : {}),
+    };
+
+    if (delta === 0) {
+      if (!dryRun && row.posting_persisted !== true) {
+        await insertMonthlyAccrualPosting(client, {
+          userId: row.user_id,
+          serviceMonth: targetMonth,
+          leaveType: row.leave_type,
+          creditedDays: previousDays,
+          rate,
+          metadata: {
+            ...(row.metadata_json || {}),
+            ...postingMetadata,
+          },
+        });
+      }
+      continue;
+    }
+
+    rowsUpdated += 1;
+    adjustedKeys.add(`${row.user_id}|${row.leave_type}`);
+    const detail = {
+      user_id: row.user_id,
+      employee_name: row.full_name,
+      leave_type: row.leave_type,
+      action: dryRun ? 'would_adjust' : 'adjusted',
+      reason: 'accrual_recalculated',
+      months_credited: 1,
+      days_added: delta,
+      balance_delta: delta,
+      previous_days: previousDays,
+      expected_days: desiredDays,
+      last_accrual_date: targetMonthStartStr,
+      accrual_rate: rate,
+      hire_prorated: expected.hireProrated,
+      separation_prorated: expected.separationProrated,
+      cap_applied: capApplied,
+      created_balance_row: false,
+    };
+    correctionDetails.push(detail);
+    if (dryRun) continue;
+
+    if (row.posting_persisted !== true) {
+      await insertMonthlyAccrualPosting(client, {
+        userId: row.user_id,
+        serviceMonth: targetMonth,
+        leaveType: row.leave_type,
+        creditedDays: previousDays,
+        rate,
+        metadata: row.metadata_json || { legacy_ledger_import: true },
+      });
+    }
+
+    await client.query(
+      `UPDATE leave_balances
+       SET earned_days = $3::numeric,
+           as_of_date = CURRENT_DATE,
+           updated_at = now()
+       WHERE user_id = $1::uuid AND leave_type = $2::text`,
+      [row.user_id, row.leave_type, newEarned]
+    );
+    await client.query(
+      `UPDATE leave_monthly_accrual_postings
+       SET credited_days = $4::numeric,
+           accrual_rate = $5::numeric,
+           metadata_json = $6::jsonb,
+           posted_at = now(),
+           updated_at = now()
+       WHERE user_id = $1::uuid
+         AND service_month = $2::date
+         AND leave_type = $3::text`,
+      [
+        row.user_id,
+        targetMonthStartStr,
+        row.leave_type,
+        desiredDays,
+        rate,
+        postingMetadata,
+      ]
+    );
+    await insertLeaveBalanceLedger(client, {
+      userId: row.user_id,
+      leaveType: row.leave_type,
+      action: 'monthly_accrual_adjusted',
+      affectedBucket: 'earned',
+      daysChanged: delta,
+      oldValue: oldEarned,
+      newValue: newEarned,
+      relatedLeaveRequestId: null,
+      actorUserId: null,
+      actorKind: 'system',
+      remarks: `Accrual correction for ${targetYearMonth}`,
+      metadataJson: postingMetadata,
+    });
+  }
+
+  return {
+    rowsUpdated,
+    correctionDetails,
+    adjustedKeys,
+  };
 }
 
 // ─── Main accrual function ───────────────────────────────────────────────────
@@ -371,10 +804,10 @@ function separationMonthAccrualAmount(separationDate, lastMonthStart, daysPerMon
 /**
  * @param {import('pg').Pool} pgPool
  * @param {object} [options]
- * @param {Date|string} [options.targetMonth]       - Defaults to current Asia/Manila month.
+ * @param {Date|string} [options.targetMonth]       - Defaults to the last completed Asia/Manila month.
  * @param {number}      [options.maxCatchUpMonths=1] - Max months to credit per row per run.
  * @param {boolean}     [options.dryRun=false]
- * @param {boolean}     [options.allowFutureTargetMonth=false]
+ * @param {boolean}     [options.allowCurrentTargetMonth=false] - Testing/recovery override only.
  * @param {Date|string} [options.now]               - Testing hook for current month guard.
  * @param {string}      [options.timeZone='Asia/Manila']
  * @returns {Promise<{
@@ -385,18 +818,21 @@ function separationMonthAccrualAmount(separationDate, lastMonthStart, daysPerMon
 async function runLeaveMonthlyAccrual(pgPool, options = {}) {
   const dryRun = options.dryRun === true;
   const maxCatchUpMonths = options.maxCatchUpMonths != null ? options.maxCatchUpMonths : 1;
-  const allowFutureTargetMonth = options.allowFutureTargetMonth === true;
+  const allowCurrentTargetMonth = options.allowCurrentTargetMonth === true;
   const accrualTimeZone = options.timeZone || 'Asia/Manila';
   const nowMonth = monthStartInTimeZone(
     options.now != null ? options.now : new Date(),
     accrualTimeZone
   );
   const targetMonth = options.targetMonth == null
-    ? nowMonth
+    ? addMonths(nowMonth, -1)
     : parseTargetMonth(options.targetMonth);
 
-  if (!allowFutureTargetMonth && monthKey(targetMonth) > monthKey(nowMonth)) {
-    throw new Error('targetMonth cannot be in the future');
+  if (
+    !allowCurrentTargetMonth &&
+    monthKey(targetMonth) >= monthKey(nowMonth)
+  ) {
+    throw new Error('targetMonth must be a completed month before the current month');
   }
 
   const targetYearMonth = `${targetMonth.getFullYear()}-${String(targetMonth.getMonth() + 1).padStart(2, '0')}`;
@@ -408,8 +844,9 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
   const leaveTypeConfigMap = new Map(leaveTypeConfigs.map((c) => [c.name, c]));
   const accrualLeaveTypes = leaveTypeConfigs.map((c) => c.name);
 
-  initLeaveBalanceLedger(pgPool);
+  await initLeaveBalanceLedger(pgPool);
   await ensureLeaveCreditEligibilityColumn(pgPool);
+  await ensureMonthlyAccrualPostingTable(pgPool);
 
   const client = await pgPool.connect();
   const details = [];
@@ -422,7 +859,8 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
     }
 
     // ── Find employees missing balance rows ───────────────────────────────────
-    // Only currently active employees may earn monthly leave credits.
+    // Include employees who served in the target month, even when their
+    // separation has already been finalized by the time this job runs.
     const missingBalanceResult = await client.query(
       `SELECT u.id AS user_id, u.full_name, u.date_hired,
               u.employment_type, u.employment_status, u.separation_date,
@@ -432,9 +870,8 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
        LEFT JOIN leave_balances lb
          ON lb.user_id = u.id
         AND lb.leave_type = t.leave_type
-       WHERE (u.is_active IS NULL OR u.is_active = true)
-         AND u.leave_credit_eligible = true
-         AND COALESCE(u.employment_status, 'active') = 'active'
+       WHERE u.leave_credit_eligible = true
+         AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
          AND ${activeAssignmentExistsSql('u', '$2', '$3')}
          AND lb.id IS NULL`,
       [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
@@ -455,9 +892,8 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
          LEFT JOIN leave_balances lb
            ON lb.user_id = u.id
           AND lb.leave_type = t.leave_type
-         WHERE (u.is_active IS NULL OR u.is_active = true)
-           AND u.leave_credit_eligible = true
-           AND COALESCE(u.employment_status, 'active') = 'active'
+         WHERE u.leave_credit_eligible = true
+           AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
            AND ${activeAssignmentExistsSql('u', '$2', '$3')}
            AND lb.id IS NULL
          ON CONFLICT (user_id, leave_type) DO NOTHING`,
@@ -465,8 +901,8 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
       );
     }
 
-    // ── Fetch balance rows for active, non-separated employees ───────────────
-    // Enhancement 1: employment_status filter
+    // ── Fetch balance rows for employees who served in the target month ──────
+    // Enhancement 1: service-month employment filtering
     // Enhancement 4: fetch used_days, adjusted_days for annual cap check
     // Enhancement 5: fetch separation_date for final-month proration
     // The separation_date column is added by migration 20260626_accrual_enhancements.sql.
@@ -483,10 +919,10 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
          FROM leave_balances lb
          INNER JOIN users u ON u.id = lb.user_id
          WHERE lb.leave_type = ANY($1::text[])
-           AND (u.is_active IS NULL OR u.is_active = true)
            AND u.leave_credit_eligible = true
-           AND COALESCE(u.employment_status, 'active') = 'active'
-           AND ${activeAssignmentExistsSql('u', '$2', '$3')}`,
+           AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
+           AND ${activeAssignmentExistsSql('u', '$2', '$3')}
+         ${dryRun ? '' : 'FOR UPDATE OF lb'}`,
         [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
       ));
     } catch (colErr) {
@@ -501,10 +937,16 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
            FROM leave_balances lb
            INNER JOIN users u ON u.id = lb.user_id
            WHERE lb.leave_type = ANY($1::text[])
-             AND (u.is_active IS NULL OR u.is_active = true)
              AND u.leave_credit_eligible = true
-             AND COALESCE(u.employment_status, 'active') = 'active'
-             AND ${activeAssignmentExistsSql('u', '$2', '$3')}`,
+             AND (
+               (u.date_hired IS NULL OR u.date_hired <= $3::date)
+               AND (
+                 (u.is_active IS NULL OR u.is_active = true)
+                 AND COALESCE(u.employment_status, 'active') = 'active'
+               )
+             )
+             AND ${activeAssignmentExistsSql('u', '$2', '$3')}
+           ${dryRun ? '' : 'FOR UPDATE OF lb'}`,
           [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
         ));
       } else {
@@ -607,11 +1049,11 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
           addDays = firstMonthInfo.addDays;
         } else {
           // Enhancement 3: multi-month backfill — hire month prorated, rest full
-          addDays = round2(firstMonthInfo.addDays + (months - 1) * rate);
+          addDays = round3(firstMonthInfo.addDays + (months - 1) * rate);
         }
       } else {
         // Subsequent run (catch-up): full rate for each month
-        addDays = round2(months * rate);
+        addDays = round3(months * rate);
       }
 
       // Enhancement 5: Separation date proration — prorate the last credited month
@@ -620,7 +1062,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
       if (sepDate && monthKey(startOfMonth(sepDate)) === monthKey(lastMonthStart)) {
         separationProrateInfo = separationMonthAccrualAmount(sepDate, lastMonthStart, rate);
         // Replace the last full month's credit with the prorated amount
-        addDays = Math.max(0, round2(addDays - rate + separationProrateInfo.addDays));
+        addDays = Math.max(0, round3(addDays - rate + separationProrateInfo.addDays));
       }
 
       // Enhancement 4: Annual balance cap — cap earned_days to prevent exceeding max balance
@@ -629,8 +1071,8 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
         const currentEarned = parseFloat(row.earned_days || 0);
         const currentUsed = parseFloat(row.used_days || 0);
         const currentAdjusted = parseFloat(row.adjusted_days || 0);
-        const currentBalance = round2(currentEarned - currentUsed + currentAdjusted);
-        const capacityLeft = Math.max(0, round2(config.accrual_annual_cap - currentBalance));
+        const currentBalance = round3(currentEarned - currentUsed + currentAdjusted);
+        const capacityLeft = Math.max(0, round3(config.accrual_annual_cap - currentBalance));
         if (addDays > capacityLeft) {
           addDays = capacityLeft;
           capApplied = true;
@@ -716,6 +1158,34 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
       if (capApplied) meta.annual_cap_applied = true;
       if (missingHireDate) meta.missing_hire_date_warning = true;
 
+      const postingAllocations = monthlyPostingAllocations({
+        firstMonthStart,
+        months,
+        dateHired: row.date_hired,
+        separationDate: row.separation_date,
+        rate,
+        totalDays: addDays,
+      });
+      for (const allocation of postingAllocations) {
+        await insertMonthlyAccrualPosting(client, {
+          userId: row.user_id,
+          serviceMonth: allocation.serviceMonth,
+          leaveType: row.leave_type,
+          creditedDays: allocation.creditedDays,
+          rate,
+          metadata: {
+            target_year_month: targetYearMonth,
+            service_month: toDateStr(allocation.serviceMonth).slice(0, 7),
+            credited_days: allocation.creditedDays,
+            accrual_rate: rate,
+            hire_date_proration: allocation.expected.hireProrated,
+            separation_proration:
+              allocation.expected.separationProrated,
+            annual_cap_applied: capApplied,
+          },
+        });
+      }
+
       await insertLeaveBalanceLedger(client, {
         userId: row.user_id,
         leaveType: row.leave_type,
@@ -734,6 +1204,31 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
       rowsUpdated += 1;
       details.push({ ...detailBase, action: 'applied' });
     }
+
+    const reconciliation = await reconcileMonthlyAccrualPostings(client, {
+      dryRun,
+      targetMonth,
+      targetYearMonth,
+      targetMonthStartStr,
+      targetMonthEndStr,
+      leaveTypeConfigMap,
+    });
+    if (reconciliation.adjustedKeys.size > 0) {
+      const retainedDetails = details.filter((detail) => {
+        const adjusted = reconciliation.adjustedKeys.has(
+          `${detail.user_id}|${detail.leave_type}`
+        );
+        if (adjusted && detail.action === 'skipped') {
+          rowsSkipped = Math.max(0, rowsSkipped - 1);
+          return false;
+        }
+        return true;
+      });
+      details.length = 0;
+      details.push(...retainedDetails);
+    }
+    rowsUpdated += reconciliation.rowsUpdated;
+    details.push(...reconciliation.correctionDetails);
 
     if (!dryRun) {
       await client.query('COMMIT');
@@ -772,8 +1267,11 @@ module.exports = {
   startOfMonth,
   firstMonthAccrualAmount,
   separationMonthAccrualAmount,
+  expectedAccrualForServiceMonth,
+  monthlyPostingAllocations,
   readAccrualLeaveTypeConfigs,
   parseTargetMonth,
   monthStartInTimeZone,
-  round2,
+  completedMonthStartInTimeZone,
+  round3,
 };

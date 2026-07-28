@@ -14,6 +14,7 @@ const {
   getLeaveFormFieldGuidance,
   getLeaveGuidanceForType,
   getGuidelineSectionsForMessage,
+  localizeGuidelineSection,
 } = require('./leaveFilingGuidelines');
 const {
   effectiveMaxDaysForRule,
@@ -4836,10 +4837,20 @@ function leaveGuidelineSectionReply(context, message) {
     return `I can explain these leave guideline sections: ${titles}. Tell me which one you want, for example: "explain filing deadlines".`;
   }
 
-  const lines = sections.map((section) => `${section.title}: ${section.points.join(' ')}`);
-  const sectionNames = sections.map((section) => section.title).join(', ');
+  const localizedSections = sections.map((section) =>
+    localizeGuidelineSection(section, language)
+  );
+  const lines = localizedSections.map(
+    (section) => `${section.title}: ${section.points.join(' ')}`
+  );
+  const sectionNames = localizedSections
+    .map((section) => section.title)
+    .join(', ');
   return structuredReply(language, {
-    title: sections.length === 1 ? sections[0].title : 'Leave Guidelines',
+    title:
+      localizedSections.length === 1
+        ? localizedSections[0].title
+        : 'Leave Guidelines',
     summary:
       language === 'bisaya'
         ? `Mao ni ang ${sectionNames} guideline.`
