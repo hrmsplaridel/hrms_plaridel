@@ -57,12 +57,19 @@ CREATE TABLE IF NOT EXISTS users (
   date_hired DATE,
   employment_status TEXT DEFAULT 'active'
     CHECK (employment_status IN ('active', 'inactive', 'resigned', 'retired', 'terminated')),
+  leave_credit_eligible BOOLEAN NOT NULL DEFAULT true,
   separation_date DATE,
 
   biometric_user_id TEXT UNIQUE,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT users_nonactive_access_leave_check
+    CHECK (
+      COALESCE(employment_status, 'active') = 'active'
+      OR (is_active = false AND leave_credit_eligible = false)
+    )
 );
 
 -- =========================================
@@ -356,10 +363,10 @@ CREATE TABLE IF NOT EXISTS leave_types (
   max_days NUMERIC,
   minimum_advance_days INTEGER,
   affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
-  balance_ledger_type TEXT NOT NULL DEFAULT 'others',
+  balance_ledger_type TEXT NOT NULL DEFAULT 'none',
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
-  accrual_monthly_rate NUMERIC(5,2),
-  accrual_annual_cap NUMERIC(8,2),
+  accrual_monthly_rate NUMERIC(6,3),
+  accrual_annual_cap NUMERIC(10,3),
   is_system BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -442,22 +449,8 @@ SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
     ),
     balance_ledger_type = CASE
       WHEN name = 'mandatoryForcedLeave' THEN 'vacationLeave'
-      WHEN name IN (
-        'vacationLeave',
-        'sickLeave',
-        'maternityLeave',
-        'paternityLeave',
-        'specialPrivilegeLeave',
-        'soloParentLeave',
-        'studyLeave',
-        'tenDayVawcLeave',
-        'rehabilitationPrivilege',
-        'specialLeaveBenefitsForWomen',
-        'specialEmergencyCalamityLeave',
-        'adoptionLeave',
-        'others'
-      ) THEN name
-      ELSE 'others'
+      WHEN name IN ('vacationLeave', 'sickLeave') THEN name
+      ELSE 'none'
     END,
     accrues_monthly = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN true ELSE false END,
     accrual_monthly_rate = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN 1.25 ELSE NULL END,
@@ -527,10 +520,10 @@ CREATE TABLE IF NOT EXISTS leave_balances (
   -- leave_type must match a value in leave_types(name).
   -- FK enforces referential integrity; CHECK is a belt-and-suspenders guard.
   leave_type TEXT NOT NULL,
-  earned_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (earned_days >= 0),
-  used_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (used_days >= 0),
-  pending_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (pending_days >= 0),
-  adjusted_days NUMERIC(8,2) NOT NULL DEFAULT 0,
+  earned_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (earned_days >= 0),
+  used_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (used_days >= 0),
+  pending_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (pending_days >= 0),
+  adjusted_days NUMERIC(10,3) NOT NULL DEFAULT 0,
   as_of_date DATE,
   last_accrual_date DATE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -606,6 +599,65 @@ CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_action
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_leave_request
   ON leave_balance_ledger(related_leave_request_id)
   WHERE related_leave_request_id IS NOT NULL;
+
+-- =========================================
+-- MONTHLY LEAVE ACCRUAL POSTINGS
+-- =========================================
+-- One reconcilable earned-credit posting per employee, leave type, and service month.
+CREATE TABLE IF NOT EXISTS leave_monthly_accrual_postings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  service_month DATE NOT NULL,
+  leave_type TEXT NOT NULL,
+  credited_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (credited_days >= 0),
+  accrual_rate NUMERIC(6,3) NOT NULL CHECK (accrual_rate >= 0),
+  metadata_json JSONB,
+  posted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_leave_monthly_accrual_posting
+    UNIQUE (user_id, service_month, leave_type),
+  CONSTRAINT chk_leave_monthly_accrual_service_month
+    CHECK (EXTRACT(DAY FROM service_month) = 1),
+  CONSTRAINT fk_leave_monthly_accrual_posting_leave_type
+    FOREIGN KEY (leave_type) REFERENCES leave_types(name)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_leave_monthly_accrual_postings_month
+  ON leave_monthly_accrual_postings(service_month, user_id);
+
+-- =========================================
+-- MONTH-END DTR LEAVE DEDUCTIONS
+-- =========================================
+-- One idempotent Vacation Leave posting per employee and completed service month.
+CREATE TABLE IF NOT EXISTS leave_attendance_deductions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  service_month DATE NOT NULL,
+  leave_type TEXT NOT NULL DEFAULT 'vacationLeave',
+  late_minutes INT NOT NULL DEFAULT 0 CHECK (late_minutes >= 0),
+  undertime_minutes INT NOT NULL DEFAULT 0 CHECK (undertime_minutes >= 0),
+  absence_minutes INT NOT NULL DEFAULT 0 CHECK (absence_minutes >= 0),
+  computed_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (computed_days >= 0),
+  deducted_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (deducted_days >= 0),
+  without_pay_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (without_pay_days >= 0),
+  source_record_count INT NOT NULL DEFAULT 0 CHECK (source_record_count >= 0),
+  metadata_json JSONB,
+  posted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_leave_attendance_deduction_month
+    UNIQUE (user_id, service_month, leave_type),
+  CONSTRAINT chk_leave_attendance_service_month
+    CHECK (EXTRACT(DAY FROM service_month) = 1),
+  CONSTRAINT chk_leave_attendance_vacation_only
+    CHECK (leave_type = 'vacationLeave'),
+  CONSTRAINT fk_leave_attendance_deduction_leave_type
+    FOREIGN KEY (leave_type) REFERENCES leave_types(name)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_leave_attendance_deductions_month
+  ON leave_attendance_deductions(service_month, user_id);
 
 -- =========================================
 -- IN-APP NOTIFICATIONS (DTR / leave / future modules)
@@ -1891,6 +1943,9 @@ CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_users_employment_status
   ON users (employment_status)
   WHERE employment_status IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
+  ON users (leave_credit_eligible)
+  WHERE leave_credit_eligible = true;
 CREATE INDEX IF NOT EXISTS idx_users_separation_date
   ON users (separation_date)
   WHERE separation_date IS NOT NULL;

@@ -12,6 +12,8 @@ const {
   ensureShiftPunchModeColumn,
   getShiftType: resolveShiftType,
   getExpectedWorkMinutes: resolveExpectedWorkMinutes,
+  getExpectedAmEndMinutes,
+  computeClockOutUndertimeMinutes,
   getExpectedLogsForDay: resolveExpectedLogsForDay,
   computeTotalHoursFromRecord,
 } = require('../services/shiftAttendance');
@@ -434,9 +436,10 @@ async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, st
 }
 
 /**
- * Compute undertime minutes: minutes before shift end when clocking out.
+ * Compute undertime minutes from every required clock-out segment.
  * - AM-only: uses break_out (AM end) vs end_time
- * - PM-only / full-day: uses time_out vs end_time
+ * - Full-day: adds early break_out and early time_out
+ * - PM-only / single-session: uses time_out vs end_time
  * Returns 0 for holiday/on_leave or when no shift. For partial-day suspension (coverage am_only/pm_only),
  * only the non-suspended half is evaluated. Seconds ignored.
  */
@@ -481,20 +484,41 @@ async function computeUndertimeMinutes(
     const hasAmLogs =
       (timeInIso != null || locatorSegSet.has('AM IN')) &&
       (breakOutIso != null || locatorSegSet.has('AM OUT'));
+    const amEndMinutes = getExpectedAmEndMinutes(shiftInfo);
     const pmStartMinutes = shiftInfo.breakEndMinutes ?? NOON_MINUTES;
     const amWindowClosed =
       dateStr < todayStr || (dateStr === todayStr && nowMinutes >= pmStartMinutes);
     if (!hasAmLogs && amWindowClosed) {
-      amUndertimePenalty = Math.max(0, pmStartMinutes - shiftInfo.startMinutes);
+      amUndertimePenalty = Math.max(0, amEndMinutes - shiftInfo.startMinutes);
     }
   }
+  const breakOutMins = breakOutIso
+    ? minutesFromMidnightInTimeZone(breakOutIso)
+    : null;
+  const timeOutMins = timeOutIso
+    ? minutesFromMidnightInTimeZone(timeOutIso)
+    : null;
+  const completedSegmentUndertime = computeClockOutUndertimeMinutes({
+    shiftInfo,
+    breakOutMinutes: breakOutMins,
+    timeOutMinutes: timeOutMins,
+    evaluateAm: evalAm,
+    evaluatePm: evalPm,
+    coveredSegments: [...locatorSegSet],
+  });
   let clockOutMins = null;
-  if (evalAm && type === 'am_only' && breakOutIso) {
-    clockOutMins = minutesFromMidnightInTimeZone(breakOutIso);
-  } else if (evalPm && timeOutIso) {
-    clockOutMins = minutesFromMidnightInTimeZone(timeOutIso);
+  let clockOutCovered = false;
+  if (type === 'am_only') {
+    if (evalAm) clockOutMins = breakOutMins;
+    clockOutCovered = locatorSegSet.has('AM OUT');
+  } else {
+    if (evalPm) clockOutMins = timeOutMins;
+    clockOutCovered = locatorSegSet.has('PM OUT');
   }
   if (clockOutMins == null) {
+    if (clockOutCovered || (type === 'am_only' ? !evalAm : !evalPm)) {
+      return completedSegmentUndertime + amUndertimePenalty;
+    }
     // Incomplete record: employee clocked in but never clocked out.
     // Compute undertime as full shift duration only if:
     //   - The date is in the past, OR
@@ -519,9 +543,7 @@ async function computeUndertimeMinutes(
     }
     return 0;
   }
-  const endMinutes = shiftInfo.endMinutes;
-  if (clockOutMins >= endMinutes) return 0;
-  return (endMinutes - clockOutMins) + amUndertimePenalty;
+  return completedSegmentUndertime + amUndertimePenalty;
 }
 
 /**

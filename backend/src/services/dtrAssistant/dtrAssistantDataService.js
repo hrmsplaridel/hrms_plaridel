@@ -319,6 +319,55 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
   }));
 }
 
+async function loadAnnualLeaveUsage(pool, userId, dateRange) {
+  const year = parseInt(String(dateRange?.startDate || '').slice(0, 4), 10);
+  if (!Number.isInteger(year)) return [];
+  const trackedTypes = ['specialPrivilegeLeave', 'soloParentLeave', 'tenDayVawcLeave'];
+  const result = await pool.query(
+    `SELECT lt.name AS leave_type_key,
+            COALESCE(SUM(COALESCE(lr.number_of_days, lr.total_days, 0)), 0)::float8 AS days,
+            COUNT(*)::int AS request_count
+     FROM leave_requests lr
+     INNER JOIN leave_types lt ON lt.id = lr.leave_type_id
+     WHERE (lr.user_id = $1::uuid OR lr.employee_id = $1::uuid)
+       AND lt.name = ANY($2::text[])
+       AND lr.status = ANY($3::text[])
+       AND lr.start_date <= $5::date
+       AND lr.end_date >= $4::date
+     GROUP BY lt.name
+     ORDER BY lt.name ASC`,
+    [
+      userId,
+      trackedTypes,
+      ['pending', 'pending_department_head', 'pending_hr', 'approved'],
+      `${year}-01-01`,
+      `${year}-12-31`,
+    ]
+  );
+
+  const usageByType = new Map(
+    result.rows.map((row) => [
+      row.leave_type_key,
+      {
+        year,
+        leave_type_key: row.leave_type_key,
+        days: toNumber(row.days) || 0,
+        request_count: row.request_count || 0,
+      },
+    ])
+  );
+
+  return trackedTypes.map(
+    (leaveTypeKey) =>
+      usageByType.get(leaveTypeKey) || {
+        year,
+        leave_type_key: leaveTypeKey,
+        days: 0,
+        request_count: 0,
+      }
+  );
+}
+
 async function loadLeaveTypes(pool) {
   const result = await pool.query(
     `SELECT id,
@@ -483,6 +532,7 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
     dtrCalendarDays,
     leaveBalances,
     leaveRequests,
+    leaveAnnualUsage,
     leaveTypes,
     locatorSlips,
     locatorTypes,
@@ -493,6 +543,7 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
       loadDtrCalendarDays(pool, userId, dateRange),
       loadLeaveBalances(pool, userId),
       loadRecentLeaveRequests(pool, userId, dateRange),
+      loadAnnualLeaveUsage(pool, userId, dateRange),
       loadLeaveTypes(pool),
       loadRecentLocatorSlips(pool, userId, dateRange),
       loadLocatorTypes(pool),
@@ -506,6 +557,7 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
     dtr_calendar_days: dtrCalendarDays,
     leave_balances: leaveBalances,
     recent_leave_requests: leaveRequests,
+    leave_annual_usage: leaveAnnualUsage,
     leave_types: leaveTypes,
     leave_guidelines: buildGuidelinesForTypes(leaveTypes),
     leave_guideline_catalog: buildAllLeaveGuidelines(),

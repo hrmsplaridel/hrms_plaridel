@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_api.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_leave_prefill.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_session_storage.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_input_bar.dart';
@@ -16,7 +17,6 @@ import 'package:hrms_plaridel/features/dtr/dtr_main.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_routes.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
-import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_main.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/responsive_leave_form_host.dart';
@@ -29,10 +29,20 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 class EmployeeDtrAssistantPage extends StatefulWidget {
-  const EmployeeDtrAssistantPage({super.key, DtrAssistantApi? api})
-    : _api = api;
+  const EmployeeDtrAssistantPage({
+    super.key,
+    DtrAssistantApi? api,
+    this.floating = false,
+    this.onMinimize,
+    this.onClose,
+    this.onExpand,
+  }) : _api = api;
 
   final DtrAssistantApi? _api;
+  final bool floating;
+  final FutureOr<void> Function()? onMinimize;
+  final FutureOr<void> Function()? onClose;
+  final FutureOr<void> Function()? onExpand;
 
   @override
   State<EmployeeDtrAssistantPage> createState() =>
@@ -64,6 +74,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   bool _sending = false;
   bool _resettingChat = false;
   bool _sessionLoaded = false;
+  String _conversationId = DtrAssistantSessionStorage.createConversationId();
   final _inputController = TextEditingController();
   CancelToken? _cancelToken;
 
@@ -97,9 +108,15 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       return;
     }
 
-    final restored = await DtrAssistantSessionStorage.loadMessages(userId);
+    final conversationId =
+        await DtrAssistantSessionStorage.loadOrCreateConversationId(userId);
+    final restored = await DtrAssistantSessionStorage.loadMessages(
+      userId,
+      conversationId,
+    );
     if (!mounted) return;
     setState(() {
+      _conversationId = conversationId;
       _messages
         ..clear()
         ..addAll(restored.isEmpty ? [_welcomeMessage()] : restored);
@@ -114,20 +131,37 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     if (!mounted || !_sessionLoaded) return;
     final userId = context.read<AuthProvider>().user?.id;
     if (userId == null || userId.isEmpty) return;
-    await DtrAssistantSessionStorage.saveMessages(userId, _messages);
+    await DtrAssistantSessionStorage.saveMessages(
+      userId,
+      _conversationId,
+      _messages,
+    );
   }
 
   Future<void> _startNewChat() async {
     if (_sending || _resettingChat) return;
     final userId = context.read<AuthProvider>().user?.id;
+    final previousConversationId = _conversationId;
     setState(() => _resettingChat = true);
     try {
-      await _api.resetChat();
+      await _api.resetChat(conversationId: previousConversationId);
     } catch (_) {
       // Local reset still helps even if the backend reset fails.
     }
     if (userId != null && userId.isNotEmpty) {
-      await DtrAssistantSessionStorage.clearMessages(userId);
+      await DtrAssistantSessionStorage.clearMessages(
+        userId,
+        previousConversationId,
+      );
+      final nextConversationId =
+          DtrAssistantSessionStorage.createConversationId();
+      await DtrAssistantSessionStorage.saveConversationId(
+        userId,
+        nextConversationId,
+      );
+      _conversationId = nextConversationId;
+    } else {
+      _conversationId = DtrAssistantSessionStorage.createConversationId();
     }
     if (!mounted) return;
     setState(() {
@@ -179,6 +213,13 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     setState(() => _sending = false);
   }
 
+  Future<void> _runPresentationAction(FutureOr<void> Function()? action) async {
+    if (action == null || _sending || _resettingChat) return;
+    await _persistSession();
+    if (!mounted) return;
+    await action();
+  }
+
   Future<void> _send(String text, {String? intent}) async {
     if (_sending) return;
     setState(() {
@@ -194,6 +235,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         text,
         intent: intent,
         modelProfile: _selectedModelProfile,
+        conversationId: _conversationId,
         cancelToken: _cancelToken,
       );
       if (!mounted) return;
@@ -531,7 +573,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       );
       return;
     }
-    final initialRequest = _initialLeaveRequestFromAction(action, userId);
+    final initialRequest = leaveRequestFromAssistantAction(action, userId);
     final result = await openResponsiveLeaveFormHost<String?>(
       context: context,
       builder: (_) => LeaveRequestFormScreen(
@@ -573,85 +615,49 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     showLeaveFormSuccessSnackBar(context, result);
   }
 
-  LeaveRequest _initialLeaveRequestFromAction(
-    DtrAssistantAction action,
-    String userId,
-  ) {
-    final payload = action.payload;
-    final leaveType = _leaveTypeFromPayload(payload['leaveType']?.toString());
-    final startDate = _dateFromPayload(payload['startDate']);
-    final endDate = _dateFromPayload(payload['endDate']) ?? startDate;
-    final reason = payload['reason']?.toString().trim();
-    final locationDetails = payload['locationDetails']?.toString().trim();
-    final locationOption = _locationOptionFromPayload(
-      payload['locationOption']?.toString(),
-    );
-    return LeaveRequest(
-      userId: userId,
-      leaveType: leaveType,
-      leaveTypeName: leaveType.value,
-      leaveTypeDisplayName: leaveType.displayName,
-      startDate: startDate,
-      endDate: endDate,
-      workingDaysApplied: _calendarDayEstimate(startDate, endDate),
-      reason: reason != null && reason.isNotEmpty ? reason : null,
-      locationOption: locationOption,
-      locationDetails:
-          locationDetails != null && locationDetails.isNotEmpty
-              ? locationDetails
-              : null,
-      status: LeaveRequestStatus.draft,
-    );
-  }
-
-  LeaveLocationOption? _locationOptionFromPayload(String? value) {
-    if (value == null || value.trim().isEmpty) return null;
-    final normalized = value.trim().toLowerCase();
-    if (normalized == 'abroad') return LeaveLocationOption.abroad;
-    if (normalized == 'within_philippines' ||
-        normalized == 'withinphilippines') {
-      return LeaveLocationOption.withinPhilippines;
-    }
-    return leaveLocationOptionFromString(value);
-  }
-
-  LeaveType _leaveTypeFromPayload(String? value) {
-    final normalized = (value ?? '').toLowerCase();
-    if (normalized.contains('sick')) return LeaveType.sickLeave;
-    if (normalized.contains('vacation')) return LeaveType.vacationLeave;
-    return LeaveType.vacationLeave;
-  }
-
-  DateTime? _dateFromPayload(Object? value) {
-    if (value == null) return null;
-    return DateTime.tryParse(value.toString());
-  }
-
-  double? _calendarDayEstimate(DateTime? start, DateTime? end) {
-    if (start == null || end == null) return null;
-    final startOnly = DateTime(start.year, start.month, start.day);
-    final endOnly = DateTime(end.year, end.month, end.day);
-    if (endOnly.isBefore(startOnly)) return null;
-    return endOnly.difference(startOnly).inDays + 1.0;
-  }
-
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
+    final floating = widget.floating;
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
+        automaticallyImplyLeading: !floating,
         title: const Text('HRMS Assistant'),
         backgroundColor: AppTheme.dashPanelOf(context),
         foregroundColor: AppTheme.dashTextPrimaryOf(context),
         elevation: dark ? 0 : 1,
         actions: [
+          if (!floating && widget.onMinimize != null)
+            IconButton(
+              tooltip: 'Minimize to floating assistant',
+              onPressed: (_sending || _resettingChat)
+                  ? null
+                  : () => _runPresentationAction(widget.onMinimize),
+              icon: const Icon(Icons.picture_in_picture_alt_rounded),
+            ),
           IconButton(
             tooltip: 'New chat',
             onPressed: (_sending || _resettingChat) ? null : _startNewChat,
             icon: const Icon(Icons.refresh_rounded),
           ),
+          if (floating && widget.onExpand != null)
+            IconButton(
+              tooltip: 'Open full assistant',
+              onPressed: (_sending || _resettingChat)
+                  ? null
+                  : () => _runPresentationAction(widget.onExpand),
+              icon: const Icon(Icons.open_in_full_rounded),
+            ),
+          if (floating && widget.onClose != null)
+            IconButton(
+              tooltip: 'Close assistant',
+              onPressed: (_sending || _resettingChat)
+                  ? null
+                  : () => _runPresentationAction(widget.onClose),
+              icon: const Icon(Icons.close_rounded),
+            ),
         ],
       ),
       body: SafeArea(
@@ -660,10 +666,17 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
             Expanded(
               child: ListView(
                 controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                padding: EdgeInsets.fromLTRB(
+                  floating ? 12 : 16,
+                  floating ? 12 : 16,
+                  floating ? 12 : 16,
+                  12,
+                ),
                 children: [
-                  _AssistantHeader(sending: _sending),
-                  const SizedBox(height: 16),
+                  if (!floating) ...[
+                    _AssistantHeader(sending: _sending),
+                    const SizedBox(height: 16),
+                  ],
                   DtrAssistantPromptChips(
                     enabled: !_sending,
                     onSelected: (prompt) =>
@@ -861,10 +874,7 @@ class _AssistantActionChips extends StatelessWidget {
 }
 
 class _LocatorActionPage extends StatefulWidget {
-  const _LocatorActionPage({
-    required this.openForm,
-    this.initialValues,
-  });
+  const _LocatorActionPage({required this.openForm, this.initialValues});
 
   final bool openForm;
   final LocatorSlipFormInitialValues? initialValues;

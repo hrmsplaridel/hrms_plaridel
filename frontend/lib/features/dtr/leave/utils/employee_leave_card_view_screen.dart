@@ -89,8 +89,7 @@ class _EmployeeLeaveCardViewScreenState
         LeaveLedgerQuery(
           userId: widget.userId,
           leaveType: LeaveType.vacationLeave.value,
-          action: 'forced_leave_deduction',
-          limit: 100,
+          limit: 500,
         ),
       );
       final totals = _vlSlTotalsFromBalances(balances);
@@ -847,20 +846,19 @@ class _LeaveCardEntry {
     LeaveBalanceLedgerEntry entry, {
     required double vacationBalanceDays,
     required double deductedDays,
+    required double earnedDays,
   }) {
-    final year =
-        entry.metadataJson?['year'] ?? entry.metadataJson?['deduction_year'];
-    final period = year != null ? 'CY $year' : _fmtDate(entry.createdAt);
+    final period = _deductionPeriod(entry);
     final particulars = _forcedDeductionParticulars(entry);
-    final earnedDays = _fmtEarned(_leaveCardMonthlyEarnedDays);
+    final withoutPayDays = _attendanceWithoutPayDays(entry);
 
     return _LeaveCardEntry(
       period: period,
       particulars: particulars,
-      vacEarned: earnedDays,
+      vacEarned: _fmtEarned(earnedDays),
       vacAbsWithPay: _fmtNum(deductedDays),
       vacBalance: _fmtNum(vacationBalanceDays),
-      vacAbsWithoutPay: '',
+      vacAbsWithoutPay: withoutPayDays > 0 ? _fmtNum(withoutPayDays) : '',
       slEarned: '',
       slAbsWithPay: '',
       slBalance: '',
@@ -883,10 +881,13 @@ List<_LeaveCardEntry> _buildLeaveCardEntries(
   final deductions = forcedLeaveDeductions
       .where(
         (entry) =>
-            entry.action == 'forced_leave_deduction' &&
+            _isLeaveCardDeduction(entry) &&
             entry.leaveType == LeaveType.vacationLeave.value,
       )
       .toList();
+  final monthlyVacationEarned = _monthlyVacationEarnedByPeriod(
+    forcedLeaveDeductions,
+  );
   if (cardRequests.isEmpty && deductions.isEmpty) {
     return const [];
   }
@@ -945,6 +946,7 @@ List<_LeaveCardEntry> _buildLeaveCardEntries(
           entry,
           vacationBalanceDays: vacationBalance,
           deductedDays: deductedDays,
+          earnedDays: _earnedDaysForDeduction(entry, monthlyVacationEarned),
         );
       },
     );
@@ -989,6 +991,9 @@ class _LeaveCardTimelineItem {
 }
 
 double _forcedDeductionDays(LeaveBalanceLedgerEntry entry) {
+  if (_isAttendanceDeduction(entry)) {
+    return entry.daysChanged;
+  }
   final meta = entry.metadataJson?['deducted_days'];
   if (meta is num && meta > 0) return meta.toDouble();
   if (entry.affectedBucket.toLowerCase() == 'used' && entry.daysChanged > 0) {
@@ -998,6 +1003,15 @@ double _forcedDeductionDays(LeaveBalanceLedgerEntry entry) {
 }
 
 String _forcedDeductionParticulars(LeaveBalanceLedgerEntry entry) {
+  if (_isAttendanceDeduction(entry)) {
+    final serviceMonth = entry.metadataJson?['service_month']?.toString();
+    final label = entry.action == 'attendance_deduction_adjusted'
+        ? 'DTR Deduction Correction'
+        : 'DTR Late/Undertime Deduction';
+    return serviceMonth == null || serviceMonth.isEmpty
+        ? label
+        : '$label ($serviceMonth)';
+  }
   final year =
       entry.metadataJson?['year'] ?? entry.metadataJson?['deduction_year'];
   if (year != null) {
@@ -1006,6 +1020,69 @@ String _forcedDeductionParticulars(LeaveBalanceLedgerEntry entry) {
   final remarks = entry.remarks?.trim();
   if (remarks != null && remarks.isNotEmpty) return remarks;
   return 'Year-end Mandatory Leave Deduction';
+}
+
+bool _isLeaveCardDeduction(LeaveBalanceLedgerEntry entry) {
+  return entry.action == 'forced_leave_deduction' ||
+      _isAttendanceDeduction(entry);
+}
+
+bool _isAttendanceDeduction(LeaveBalanceLedgerEntry entry) {
+  return entry.action == 'attendance_deduction' ||
+      entry.action == 'attendance_deduction_adjusted';
+}
+
+Map<String, double> _monthlyVacationEarnedByPeriod(
+  List<LeaveBalanceLedgerEntry> entries,
+) {
+  final earnedByPeriod = <String, double>{};
+  for (final entry in entries) {
+    final isAccrual =
+        entry.action == 'monthly_accrual' ||
+        entry.action == 'monthly_accrual_adjusted';
+    if (!isAccrual ||
+        entry.leaveType != LeaveType.vacationLeave.value ||
+        entry.affectedBucket.toLowerCase() != 'earned') {
+      continue;
+    }
+    final period =
+        entry.metadataJson?['target_year_month']?.toString() ??
+        entry.metadataJson?['service_month']?.toString();
+    if (period == null || period.isEmpty) continue;
+    earnedByPeriod.update(
+      period,
+      (value) => value + entry.daysChanged,
+      ifAbsent: () => entry.daysChanged,
+    );
+  }
+  return earnedByPeriod;
+}
+
+double _earnedDaysForDeduction(
+  LeaveBalanceLedgerEntry entry,
+  Map<String, double> monthlyVacationEarned,
+) {
+  if (!_isAttendanceDeduction(entry)) return _leaveCardMonthlyEarnedDays;
+  final period = entry.metadataJson?['service_month']?.toString();
+  final earned = period == null ? null : monthlyVacationEarned[period];
+  return earned == null
+      ? _leaveCardMonthlyEarnedDays
+      : earned.clamp(0, double.infinity).toDouble();
+}
+
+double _attendanceWithoutPayDays(LeaveBalanceLedgerEntry entry) {
+  if (entry.action != 'attendance_deduction') return 0;
+  final value = entry.metadataJson?['without_pay_days'];
+  if (value is num && value > 0) return value.toDouble();
+  return 0;
+}
+
+String _deductionPeriod(LeaveBalanceLedgerEntry entry) {
+  final serviceMonth = entry.metadataJson?['service_month']?.toString();
+  if (serviceMonth != null && serviceMonth.isNotEmpty) return serviceMonth;
+  final year =
+      entry.metadataJson?['year'] ?? entry.metadataJson?['deduction_year'];
+  return year != null ? 'CY $year' : _fmtDate(entry.createdAt);
 }
 
 bool _isLeaveCardRequest(
@@ -1160,7 +1237,10 @@ DateTime? _parseProfileDate(dynamic value) {
 
 String _fmtNum(double value) {
   if (value == value.roundToDouble()) return value.toInt().toString();
-  return value.toStringAsFixed(1);
+  return value
+      .toStringAsFixed(3)
+      .replaceFirst(RegExp(r'0+$'), '')
+      .replaceFirst(RegExp(r'\.$'), '');
 }
 
 String _fmtEarned(double value) => value.toStringAsFixed(3);

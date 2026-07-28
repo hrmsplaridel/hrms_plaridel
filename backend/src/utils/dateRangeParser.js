@@ -107,15 +107,34 @@ const WEEKDAYS = {
 
 const NUMBER_WORDS = {
   one: 1,
+  isa: 1,
+  usa: 1,
+  uno: 1,
   two: 2,
+  duha: 2,
+  dos: 2,
+  dalawa: 2,
   three: 3,
+  tulo: 3,
+  tres: 3,
+  tatlo: 3,
   four: 4,
+  upat: 4,
+  kwatro: 4,
+  apat: 4,
   five: 5,
+  lima: 5,
+  singko: 5,
   six: 6,
+  unom: 6,
   seven: 7,
+  pito: 7,
   eight: 8,
+  walo: 8,
   nine: 9,
+  siyam: 9,
   ten: 10,
+  napulo: 10,
 };
 
 function parsedCount(value) {
@@ -262,6 +281,88 @@ function parseAssistantDateRange(message, options = {}) {
   const today = options.today || todayInHrmsTimezone(options.now);
   const monthNames = Object.keys(MONTHS).join('|');
   const weekdayNames = Object.keys(WEEKDAYS).join('|');
+  const countToken = `(\\d{1,2}|${Object.keys(NUMBER_WORDS).join('|')})`;
+  const dayUnit = '(?:days?|(?:ka\\s+)?adlaw|araw)';
+
+  if (!options.skipDurationRange) {
+    const resolveDurationAnchor = (value) => {
+      const anchor = String(value || '')
+        .trim()
+        .replace(/^(?:on|sa|ng|nga)\s+/, '');
+      if (!anchor) return null;
+
+      const bareWeekday = anchor.match(
+        new RegExp(`^(?:this\\s+|current\\s+)?(${weekdayNames})\\b`)
+      );
+      if (bareWeekday) {
+        const currentWeekday = dayOfWeekMondayIndex(today);
+        const targetWeekday = WEEKDAYS[bareWeekday[1]];
+        const offset = (targetWeekday - currentWeekday + 7) % 7;
+        const date = addDays(today, offset);
+        return {
+          label: bareWeekday[1],
+          startDate: date,
+          endDate: date,
+        };
+      }
+
+      const hasAnchorSignal = new RegExp(
+        `\\b(today|tomorrow|yesterday|karon|ugma|bukas|ngayon|gahapon|kagahapon|kahapon|next\\s+(?:day|${weekdayNames})|last\\s+${weekdayNames}|previous\\s+${weekdayNames}|sunod\\s+(?:adlaw|${weekdayNames})|${monthNames}|\\d{4}-\\d{2}-\\d{2})\\b`
+      ).test(anchor);
+      if (!hasAnchorSignal) return null;
+
+      return parseAssistantDateRange(anchor, {
+        ...options,
+        today,
+        skipDurationRange: true,
+      });
+    };
+
+    const durationStarting = text.match(
+      new RegExp(
+        `\\b${countToken}\\s+${dayUnit}\\s+(?:starting(?:\\s+(?:on|from))?|from|beginning(?:\\s+(?:on|from))?|sugod(?:\\s+(?:sa|ug|karong))?|simula(?:\\s+(?:sa|ng))?)\\s+(.+)$`
+      )
+    );
+    const anchorThenDuration = text.match(
+      new RegExp(`^(.+?)\\s+for\\s+${countToken}\\s+${dayUnit}\\b`)
+    );
+    const count = durationStarting
+      ? parsedCount(durationStarting[1])
+      : anchorThenDuration
+        ? parsedCount(anchorThenDuration[2])
+        : null;
+    const anchor = durationStarting
+      ? durationStarting[2]
+      : anchorThenDuration
+        ? anchorThenDuration[1]
+        : null;
+    const anchorRange = count ? resolveDurationAnchor(anchor) : null;
+    if (anchorRange?.startDate && count > 0) {
+      return {
+        label: `${count} ${count === 1 ? 'day' : 'days'} starting ${anchorRange.label}`,
+        startDate: anchorRange.startDate,
+        endDate: addDays(anchorRange.startDate, count - 1),
+      };
+    }
+  }
+
+  const yearPhrase = text.match(
+    /\b(this|current|last|previous|next)\s+year\b|\b(karong|karon nga|niining)\s+tuiga?\b|\b(niaging|miaging)\s+tuiga?\b|\bngayong\s+taon\b|\bnakaraang\s+taon\b|\bsusunod\s+na\s+taon\b|\bsunod\s+tuiga?\b/
+  );
+  if (yearPhrase) {
+    let year = Number(today.slice(0, 4));
+    if (/\b(last|previous)\s+year\b|\b(niaging|miaging)\s+tuiga?\b|\bnakaraang\s+taon\b/.test(text)) {
+      year -= 1;
+    } else if (/\bnext\s+year\b|\bsusunod\s+na\s+taon\b|\bsunod\s+tuiga?\b/.test(text)) {
+      year += 1;
+    }
+    return {
+      label: `${year}`,
+      startDate: `${year}-01-01`,
+      endDate: `${year}-12-31`,
+    };
+  }
+
   const explicitRange = text.match(
     /\b(\d{4}-\d{2}-\d{2})\s*(?:to|until|through|-|–)\s*(\d{4}-\d{2}-\d{2})\b/
   );
@@ -432,7 +533,6 @@ function parseAssistantDateRange(message, options = {}) {
     return { label: 'yesterday', startDate: date, endDate: date };
   }
 
-  const countToken = '(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)';
   const daysAgo = text.match(new RegExp(`\\b${countToken}\\s+days?\\s+ago\\b`));
   if (daysAgo) {
     const count = parsedCount(daysAgo[1]);

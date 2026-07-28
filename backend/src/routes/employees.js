@@ -5,6 +5,14 @@ const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const { sendSmtpMail, isSmtpConfigured } = require('../utils/smtpMail');
+const {
+  normalizeEmploymentStatus,
+  accountIsActiveForEmploymentStatus,
+  leaveCreditEligibleForEmploymentStatus,
+} = require('../utils/employeeStatus');
+const {
+  validateCreateEmployeePayload,
+} = require('../utils/employeeAccountValidation');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -91,6 +99,22 @@ async function ensureEmployeeProfileColumns() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS civil_status TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
+    ON users (leave_credit_eligible)
+    WHERE leave_credit_eligible = true`);
+}
+
+function boolField(value, fallback = true) {
+  if (value === undefined) return fallback;
+  if (value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  return fallback;
 }
 
 function mapEmployeeListRow(r) {
@@ -117,6 +141,7 @@ function mapEmployeeListRow(r) {
     salary_grade: r.salary_grade,
     date_hired: r.date_hired,
     employment_status: r.employment_status ?? 'active',
+    leave_credit_eligible: r.leave_credit_eligible !== false,
     current_department_id: r.current_department_id ?? null,
     current_department_name: r.current_department_name ?? null,
     current_position_id: r.current_position_id ?? null,
@@ -280,7 +305,7 @@ router.get('/', protect, async (req, res) => {
           `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
                   u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
                   u.civil_status, u.nationality,
-                  u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
+                  u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
                   cur.current_department_name, cur.current_position_name,
                   cur.current_shift_punch_mode
            FROM users u
@@ -338,7 +363,7 @@ router.get('/', protect, async (req, res) => {
       `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
               u.civil_status, u.nationality,
-              u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
+              u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
               cur.current_department_name, cur.current_position_name,
               cur.current_shift_punch_mode
        ${fromSql}
@@ -468,7 +493,7 @@ router.get('/:id', protect, async (req, res) => {
       `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active, u.avatar_path,
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
               u.civil_status, u.nationality,
-              u.employment_type, u.salary_grade, u.date_hired, u.employment_status,
+              u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
               cur.current_department_name, cur.current_position_name,
               cur.current_shift_punch_mode
        FROM users u
@@ -512,6 +537,7 @@ router.get('/:id', protect, async (req, res) => {
       salary_grade: r.salary_grade,
       date_hired: r.date_hired,
       employment_status: r.employment_status ?? 'active',
+      leave_credit_eligible: r.leave_credit_eligible !== false,
       current_department_name: r.current_department_name ?? null,
       current_position_name: r.current_position_name ?? null,
     });
@@ -525,9 +551,10 @@ router.get('/:id', protect, async (req, res) => {
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
     await ensureEmployeeProfileColumns();
-    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, employment_status, biometric_user_id } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
+    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, employment_status, biometric_user_id, leave_credit_eligible } = req.body;
+    const validationError = validateCreateEmployeePayload(req.body);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
     }
     if (!['admin', 'employee'].includes(role)) {
       return res.status(400).json({ error: 'Role must be admin or employee' });
@@ -539,24 +566,35 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         : generateTemporaryPassword();
     const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
     const empNo = await allocateEmployeeNumber();
+    const normalizedEmploymentStatus =
+      normalizeEmploymentStatus(employment_status);
+    const accountIsActive = accountIsActiveForEmploymentStatus(
+      normalizedEmploymentStatus
+    );
+    const normalizedLeaveCreditEligible =
+      leaveCreditEligibleForEmploymentStatus(
+        normalizedEmploymentStatus,
+        boolField(leave_credit_eligible, true)
+      );
 
     const result = await pool.query(
       `INSERT INTO users (
          email, password_hash, role, first_name, full_name, last_name, middle_name,
          suffix, sex, date_of_birth, contact_number, address, civil_status,
          nationality, is_active, employee_number, employment_type, salary_grade,
-         date_hired, employment_status, biometric_user_id
+         date_hired, employment_status, biometric_user_id, leave_credit_eligible
        )
        VALUES (
          $1, $2, $3, $4, $5, $6, $7,
          $8, $9, $10::date, $11, $12, $13,
-         $14, true, $15, $16, $17,
-         COALESCE($18::date, CURRENT_DATE), $19, $20
+         $14, $15, $16, $17, $18,
+         $19::date, $20, $21, $22
        )
        RETURNING id, employee_number, email, role, first_name, full_name, last_name,
                  avatar_path, is_active, middle_name, suffix, sex, date_of_birth,
                  contact_number, address, civil_status, nationality, employment_type,
-                 salary_grade, date_hired, employment_status, biometric_user_id`,
+                 salary_grade, date_hired, employment_status, biometric_user_id,
+                 leave_credit_eligible`,
       [
         email.trim().toLowerCase(),
         passwordHash,
@@ -572,12 +610,14 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         address?.trim() || null,
         civil_status?.trim() || null,
         nationality?.trim() || null,
+        accountIsActive,
         empNo,
         (employment_type && ['regular', 'contractual', 'job_order', 'casual'].includes(employment_type)) ? employment_type : null,
         salary_grade?.trim() || null,
         date_hired || null,
-        (employment_status && ['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(employment_status)) ? employment_status : 'active',
+        normalizedEmploymentStatus,
         biometric_user_id?.trim() || null,
+        normalizedLeaveCreditEligible,
       ]
     );
 
@@ -597,7 +637,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     let accountEmailSent = false;
     let accountEmailError = null;
 
-    if (isSmtpConfigured()) {
+    if (createdEmployee.is_active && isSmtpConfigured()) {
       try {
         const employeeEmail = String(createdEmployee.email || '').trim();
         await sendSmtpMail({
@@ -665,11 +705,12 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       date_hired,
       employment_status,
       biometric_user_id,
+      leave_credit_eligible,
       office_id,
     } = req.body;
 
     const existingRes = await pool.query(
-      'SELECT biometric_user_id FROM users WHERE id = $1::uuid',
+      'SELECT biometric_user_id, employment_status FROM users WHERE id = $1::uuid',
       [id]
     );
     if (existingRes.rowCount === 0) {
@@ -694,6 +735,18 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const updates = [];
     const values = [];
     let i = 1;
+    const validEmploymentStatus =
+      employment_status !== undefined &&
+      normalizeEmploymentStatus(employment_status) === employment_status;
+    const effectiveEmploymentStatus = validEmploymentStatus
+      ? employment_status
+      : normalizeEmploymentStatus(existingRes.rows[0].employment_status);
+    const nonActiveEmploymentStatus =
+      effectiveEmploymentStatus !== 'active';
+    const effectiveIsActive = nonActiveEmploymentStatus ? false : is_active;
+    const effectiveLeaveCreditEligible = nonActiveEmploymentStatus
+      ? false
+      : leave_credit_eligible;
     const canUseOfficeId = office_id !== undefined
       ? await hasUsersOfficeIdColumn()
       : false;
@@ -704,7 +757,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['last_name', last_name],
       ['role', role],
       ['email', email],
-      ['is_active', is_active],
+      ['is_active', effectiveIsActive],
       ['middle_name', middle_name],
       ['suffix', suffix],
       ['sex', sex],
@@ -719,6 +772,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['date_hired', date_hired],
       ['employment_status', employment_status],
       ['biometric_user_id', biometric_user_id],
+      ['leave_credit_eligible', effectiveLeaveCreditEligible],
       ...(canUseOfficeId ? [['office_id', office_id]] : []),
     ];
     for (const [col, val] of fields) {
@@ -726,6 +780,11 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         if (col === 'role' && !['admin', 'employee'].includes(val)) continue;
         if (col === 'employment_type' && val && !['regular', 'contractual', 'job_order', 'casual'].includes(val)) continue;
         if (col === 'employment_status' && val && !['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(val)) continue;
+        if (col === 'leave_credit_eligible') {
+          updates.push(`${col} = $${i++}`);
+          values.push(boolField(val, true));
+          continue;
+        }
         if (col === 'office_id') {
           const raw = val === null || val === '' ? null : String(val).trim();
           updates.push(`office_id = $${i++}::uuid`);
@@ -769,6 +828,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       'date_hired',
       'employment_status',
       'biometric_user_id',
+      'leave_credit_eligible',
       ...(canUseOfficeId ? ['office_id'] : []),
     ];
 

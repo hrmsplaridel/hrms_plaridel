@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_controller.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_bottom_bar.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_drawer.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_nav_items.dart';
@@ -146,14 +147,21 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
             Positioned(right: 16, bottom: 16, child: actionButton),
           if (_showAssistantFab)
             ValueListenableBuilder<bool>(
-              valueListenable: EmployeeTutorialController.coachActive,
-              builder: (context, coachActive, _) => coachActive
+              valueListenable:
+                  EmployeeHrmsAssistantController.instance.floatingVisible,
+              builder: (context, assistantOpen, _) => assistantOpen
                   ? const SizedBox.shrink()
-                  : DraggableDtrAssistantLauncher(
-                      onPressed: onHrmsAssistant,
-                      initialBottom: _useMobileLeaveFab || _useMobileLocatorFab
-                          ? 108
-                          : 16,
+                  : ValueListenableBuilder<bool>(
+                      valueListenable: EmployeeTutorialController.coachActive,
+                      builder: (context, coachActive, _) => coachActive
+                          ? const SizedBox.shrink()
+                          : DraggableDtrAssistantLauncher(
+                              onPressed: onHrmsAssistant,
+                              initialBottom:
+                                  _useMobileLeaveFab || _useMobileLocatorFab
+                                  ? 108
+                                  : 16,
+                            ),
                     ),
             ),
         ],

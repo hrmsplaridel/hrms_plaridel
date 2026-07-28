@@ -194,12 +194,13 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       _error = null;
     });
     try {
+      final adminEmployeeId =
+          _draftEmployeeId != null && _draftEmployeeId!.isNotEmpty
+          ? _draftEmployeeId
+          : null;
       final q = LeaveLedgerQuery(
-        userId: widget.isAdmin
-            ? (_draftEmployeeId != null && _draftEmployeeId!.isNotEmpty
-                  ? _draftEmployeeId
-                  : null)
-            : null,
+        userId: widget.isAdmin ? adminEmployeeId : null,
+        allUsers: widget.isAdmin && adminEmployeeId == null,
         leaveType: widget.isAdmin
             ? (_draftLeaveType != null && _draftLeaveType!.isNotEmpty
                   ? _draftLeaveType
@@ -731,7 +732,10 @@ class _EmployeeEmptyState extends StatelessWidget {
 }
 
 DateTime ledgerDisplayDateForHistory(LeaveBalanceLedgerEntry entry) {
-  if (entry.action.toLowerCase() != 'monthly_accrual') {
+  if (!{
+    'monthly_accrual',
+    'monthly_accrual_adjusted',
+  }.contains(entry.action.toLowerCase())) {
     return entry.createdAt;
   }
   final metadata = entry.metadataJson;
@@ -802,7 +806,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
     final a = d.abs();
     final n = a == a.truncateToDouble()
         ? a.toInt().toString()
-        : a.toStringAsFixed(2);
+        : a.toStringAsFixed(3);
     return '$sign$n days';
   }
 
@@ -814,6 +818,24 @@ class _EmployeeLedgerRow extends StatelessWidget {
     final b = entry.affectedBucket.toLowerCase();
     final d = entry.daysChanged;
 
+    if (a == 'monthly_accrual_adjusted') {
+      final positive = d >= 0;
+      return (
+        bg: dark
+            ? (positive ? Colors.green : Colors.red).shade900.withValues(
+                alpha: 0.4,
+              )
+            : positive
+            ? const Color(0xFFE8F5E9)
+            : const Color(0xFFFFEBEE),
+        fg: dark
+            ? (positive ? Colors.green : Colors.red).shade300
+            : positive
+            ? const Color(0xFF2E7D32)
+            : const Color(0xFFC62828),
+        icon: positive ? Icons.add_rounded : Icons.undo_rounded,
+      );
+    }
     if (a == 'monthly_accrual' || a == 'applied' || (d > 0 && b == 'earned')) {
       return (
         bg: dark
@@ -821,6 +843,15 @@ class _EmployeeLedgerRow extends StatelessWidget {
             : const Color(0xFFE8F5E9),
         fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
         icon: Icons.add_rounded,
+      );
+    }
+    if (a == 'attendance_deduction_adjusted') {
+      return (
+        bg: dark
+            ? Colors.green.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFE8F5E9),
+        fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
+        icon: Icons.undo_rounded,
       );
     }
     if (a == 'admin_adjustment' || a.contains('adjust')) {
@@ -873,6 +904,8 @@ class _EmployeeLedgerRow extends StatelessWidget {
     switch (a) {
       case 'monthly_accrual':
         return 'Monthly Accrual';
+      case 'monthly_accrual_adjusted':
+        return 'Monthly Accrual Corrected';
       case 'leave_approved':
         return 'Leave Approved';
       case 'admin_adjustment':
@@ -881,6 +914,10 @@ class _EmployeeLedgerRow extends StatelessWidget {
         return 'Leave Filed';
       case 'forced_leave_deduction':
         return 'Forced Leave Deduction';
+      case 'attendance_deduction':
+        return 'DTR Leave Deduction';
+      case 'attendance_deduction_adjusted':
+        return 'DTR Deduction Corrected';
       case 'leave_cancelled':
         return 'Leave Cancelled';
       case 'leave_rejected':
@@ -937,6 +974,16 @@ class _EmployeeLedgerRow extends StatelessWidget {
       }
       return 'Monthly leave accrual';
     }
+    if (a == 'monthly_accrual_adjusted') {
+      final previous = meta['previous_credited_days'];
+      final expected = meta['expected_credited_days'];
+      if (previous != null && expected != null) {
+        return 'Credit corrected from $previous to $expected days';
+      }
+      return entry.remarks?.trim().isNotEmpty == true
+          ? entry.remarks!.trim()
+          : 'Monthly earned credit recalculated';
+    }
 
     if (a == 'leave_approved') {
       final bucket = entry.affectedBucket.toLowerCase();
@@ -967,6 +1014,12 @@ class _EmployeeLedgerRow extends StatelessWidget {
     if (a == 'forced_leave_deduction') {
       final r = entry.remarks?.trim();
       return r != null && r.isNotEmpty ? r : 'Forced leave deducted by HR';
+    }
+    if (a == 'attendance_deduction' || a == 'attendance_deduction_adjusted') {
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty
+          ? r
+          : 'DTR equivalent-day charge to Vacation Leave';
     }
 
     if (a == 'leave_cancelled') return 'Leave request cancelled';
@@ -999,7 +1052,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
   double _effectiveDaysForColor() {
     final bucket = entry.affectedBucket.toLowerCase();
     final d = entry.daysChanged;
-    if (bucket == 'used' && d > 0) return -d;
+    if (bucket == 'used') return -d;
     if (bucket == 'pending') return 0;
     return d;
   }
@@ -1135,7 +1188,7 @@ _LedgerSummaryStats _ledgerSummaryStats(List<LeaveBalanceLedgerEntry> rows) {
     final a = e.action.toLowerCase();
     final d = e.daysChanged;
 
-    if (d > 0 && (b == 'earned' || a == 'monthly_accrual')) {
+    if (b == 'earned' || a == 'monthly_accrual') {
       earned += d;
     }
     if (b == 'used') {
@@ -1761,7 +1814,7 @@ class _AdminLedgerTile extends StatelessWidget {
     final a = d.abs();
     final t = a == a.truncateToDouble()
         ? a.toInt().toString()
-        : a.toStringAsFixed(2);
+        : a.toStringAsFixed(3);
     return '$sign$t days';
   }
 
@@ -1770,6 +1823,24 @@ class _AdminLedgerTile extends StatelessWidget {
     final a = entry.action.toLowerCase();
     final d = entry.daysChanged;
 
+    if (a == 'monthly_accrual_adjusted') {
+      final positive = d >= 0;
+      return (
+        bg: dark
+            ? (positive ? Colors.green : Colors.red).shade900.withValues(
+                alpha: 0.4,
+              )
+            : positive
+            ? const Color(0xFFE8F5E9)
+            : const Color(0xFFFFEBEE),
+        fg: dark
+            ? (positive ? Colors.green : Colors.red).shade300
+            : positive
+            ? const Color(0xFF2E7D32)
+            : const Color(0xFFC62828),
+        icon: positive ? Icons.add_rounded : Icons.undo_rounded,
+      );
+    }
     if (a == 'monthly_accrual' ||
         a == 'applied' ||
         (d > 0 && entry.affectedBucket.toLowerCase() == 'earned')) {
@@ -1779,6 +1850,15 @@ class _AdminLedgerTile extends StatelessWidget {
             : const Color(0xFFE8F5E9),
         fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
         icon: Icons.add_rounded,
+      );
+    }
+    if (a == 'attendance_deduction_adjusted') {
+      return (
+        bg: dark
+            ? Colors.green.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFE8F5E9),
+        fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
+        icon: Icons.undo_rounded,
       );
     }
     if (a == 'admin_adjustment' || a.contains('adjust')) {
@@ -1822,6 +1902,8 @@ class _AdminLedgerTile extends StatelessWidget {
     switch (a) {
       case 'monthly_accrual':
         return 'Monthly Accrual';
+      case 'monthly_accrual_adjusted':
+        return 'Monthly Accrual Corrected';
       case 'leave_approved':
         return 'Leave Approved';
       case 'admin_adjustment':
@@ -1830,6 +1912,10 @@ class _AdminLedgerTile extends StatelessWidget {
         return 'Leave Filed';
       case 'forced_leave_deduction':
         return 'Forced Leave Deduction';
+      case 'attendance_deduction':
+        return 'DTR Leave Deduction';
+      case 'attendance_deduction_adjusted':
+        return 'DTR Deduction Corrected';
       case 'leave_cancelled':
         return 'Leave Cancelled';
       case 'leave_rejected':
@@ -1887,6 +1973,16 @@ class _AdminLedgerTile extends StatelessWidget {
       }
       return 'Monthly leave accrual';
     }
+    if (a == 'monthly_accrual_adjusted') {
+      final previous = meta['previous_credited_days'];
+      final expected = meta['expected_credited_days'];
+      if (previous != null && expected != null) {
+        return 'Credit corrected from $previous to $expected days';
+      }
+      return entry.remarks?.trim().isNotEmpty == true
+          ? entry.remarks!.trim()
+          : 'Monthly earned credit recalculated';
+    }
 
     if (a == 'leave_approved') {
       final bucket = entry.affectedBucket.toLowerCase();
@@ -1914,6 +2010,12 @@ class _AdminLedgerTile extends StatelessWidget {
     if (a == 'forced_leave_deduction') {
       final r = entry.remarks?.trim();
       return r != null && r.isNotEmpty ? r : 'Forced leave deducted by HR';
+    }
+    if (a == 'attendance_deduction' || a == 'attendance_deduction_adjusted') {
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty
+          ? r
+          : 'DTR equivalent-day charge to Vacation Leave';
     }
     if (a == 'leave_cancelled') {
       final bucket = entry.affectedBucket.toLowerCase();
@@ -1948,7 +2050,7 @@ class _AdminLedgerTile extends StatelessWidget {
   double _effectiveDaysForColor() {
     final bucket = entry.affectedBucket.toLowerCase();
     final d = entry.daysChanged;
-    if (bucket == 'used' && d > 0) return -d;
+    if (bucket == 'used') return -d;
     if (bucket == 'pending') return 0;
     return d;
   }

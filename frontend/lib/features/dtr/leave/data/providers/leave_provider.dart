@@ -173,6 +173,7 @@ class LeaveProvider extends ChangeNotifier {
   static String _ledgerKey(LeaveLedgerQuery query) {
     return [
       _normalize(query.userId) ?? '',
+      query.allUsers ? 'all' : 'self',
       _normalize(query.leaveType) ?? '',
       _normalize(query.action) ?? '',
       _normalize(query.affectedBucket) ?? '',

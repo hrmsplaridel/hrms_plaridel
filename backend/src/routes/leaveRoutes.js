@@ -8,12 +8,8 @@ const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin, requireAdminOrHr } = require('../middleware/rbac');
 const {
   LEAVE_TYPE_RULES,
-  SPECIAL_PROCESS_PURPOSES,
-  effectiveMaxDaysForRule,
-  leaveEventDateFilingError,
-  minimumAdvanceDaysFilingError,
   mustBlockMissingAttachment,
-  requiredLeaveDetailsFilingError,
+  validateEmployeeLeaveRequestWithRule,
 } = require('./leaveTypeRules');
 const {
   validateEmployeeUpdateTransition,
@@ -41,6 +37,9 @@ const {
 } = require('../services/holidayRangeUtils');
 const leaveNotifications = require('../services/leaveNotifications');
 const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
+const {
+  runMonthlyAttendanceDeductions,
+} = require('../services/leaveAttendanceDeduction');
 const {
   getYearEndForcedLeaveCompliance,
   applyYearEndForcedLeaveDeductions,
@@ -854,39 +853,6 @@ async function getLeaveTypeDefinition(client, name) {
   return leaveTypeRowToApi(found.rows[0]);
 }
 
-function normalizeUserSexForLeave(value) {
-  const sex = (value || '').toString().trim().toLowerCase();
-  if (!sex) return null;
-  if (sex === 'f' || sex === 'female') return 'female';
-  if (sex === 'm' || sex === 'male') return 'male';
-  return sex;
-}
-
-function leaveTypeSexEligibilityError({ leaveType, leaveTypeLabel, sexEligibility, userSex }) {
-  const label = (leaveTypeLabel || systemLeaveTypeDisplayName(leaveType) || 'This leave type')
-    .toString()
-    .trim();
-  const sex = normalizeUserSexForLeave(userSex);
-  const eligibility = normalizeSexEligibility(sexEligibility, leaveType);
-  if (eligibility === 'female') {
-    if (!sex) {
-      return `${label} requires your profile sex to be set to Female. Please update your profile or contact HR.`;
-    }
-    if (sex !== 'female') {
-      return `${label} can only be filed by female accounts.`;
-    }
-  }
-  if (eligibility === 'male') {
-    if (!sex) {
-      return `${label} requires your profile sex to be set to Male. Please update your profile or contact HR.`;
-    }
-    if (sex !== 'male') {
-      return `${label} can only be filed by male accounts.`;
-    }
-  }
-  return null;
-}
-
 async function getUserSexForLeaveValidation(client, userId) {
   if (!userId) return null;
   const result = await client.query(
@@ -968,128 +934,6 @@ function readLeaveEventDates(details) {
       'soloParentIdValidUntil',
     ]),
   };
-}
-
-function validateEmployeeLeaveRequestWithRule(opts) {
-  const {
-    rule,
-    leaveType,
-    otherPurpose,
-    startDateStr,
-    endDateStr,
-    numberOfDays,
-    userSex,
-    maternityDeliveryType,
-    adoptionParentRole,
-    eventDates,
-    details,
-    enforceEventDateRules = false,
-  } = opts;
-
-  if (!rule) return { valid: true };
-  const sexEligibilityError = leaveTypeSexEligibilityError({
-    leaveType,
-    leaveTypeLabel: rule.display_name,
-    sexEligibility: rule.sex_eligibility,
-    userSex,
-  });
-  if (sexEligibilityError) {
-    return {
-      valid: false,
-      error: sexEligibilityError,
-    };
-  }
-  if (rule.admin_only) {
-    return {
-      valid: false,
-      error: 'This leave type cannot be filed by employees. It is admin-assigned only.',
-    };
-  }
-  if (rule.employee_can_file === false) {
-    return {
-      valid: false,
-      error: 'This leave type is not available for employee filing.',
-    };
-  }
-  if (leaveType === 'others' && otherPurpose) {
-    const purpose = String(otherPurpose).trim().toLowerCase();
-    if (
-      SPECIAL_PROCESS_PURPOSES.some((p) =>
-        purpose.includes(p.toLowerCase().replace(/_/g, ''))
-      )
-    ) {
-      return {
-        valid: false,
-        error:
-          'Monetization of Leave Credits and Terminal Leave are HR/admin processes. Please contact HR.',
-      };
-    }
-  }
-  if (rule.allows_past_dates === false && startDateStr) {
-    const today = new Date().toISOString().slice(0, 10);
-    if (startDateStr < today) {
-      return {
-        valid: false,
-        error: 'Past-date filing is not allowed for this leave type. Please file in advance.',
-      };
-    }
-  }
-  const advanceError = minimumAdvanceDaysFilingError({
-    rule,
-    leaveType,
-    leaveTypeLabel: rule.display_name,
-    startDateStr,
-  });
-  if (advanceError) {
-    return {
-      valid: false,
-      error: advanceError,
-    };
-  }
-  if (enforceEventDateRules) {
-    const requiredDetailsError = requiredLeaveDetailsFilingError({
-      leaveType,
-      leaveTypeLabel: rule.display_name,
-      details,
-    });
-    if (requiredDetailsError) {
-      return {
-        valid: false,
-        error: requiredDetailsError,
-      };
-    }
-  }
-  if (enforceEventDateRules) {
-    const eventDateError = leaveEventDateFilingError({
-      leaveType,
-      leaveTypeLabel: rule.display_name,
-      startDateStr,
-      endDateStr,
-      eventDates,
-    });
-    if (eventDateError) {
-      return {
-        valid: false,
-        error: eventDateError,
-      };
-    }
-  }
-  const maxDays = effectiveMaxDaysForRule({
-    rule,
-    leaveType,
-    maternityDeliveryType,
-    adoptionParentRole,
-  });
-  if (maxDays != null && numberOfDays != null) {
-    const days = parseFloat(numberOfDays);
-    if (!Number.isNaN(days) && days > maxDays) {
-      return {
-        valid: false,
-        error: `This leave type allows a maximum of ${maxDays} working days. Requested: ${days.toFixed(1)}.`,
-      };
-    }
-  }
-  return { valid: true };
 }
 
 async function ensureLeaveTypeIdByName(client, name) {
@@ -2982,7 +2826,9 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
   }
 });
 
-// POST /api/leave/admin/monthly-accrual — admin/HR: apply VL + SL monthly accrual (1.25 days each per month credited)
+// POST /api/leave/admin/monthly-accrual — admin/HR month-end processing:
+// credit completed-month VL/SL accrual, then post the completed month's DTR
+// equivalent-day charge to Vacation Leave.
 // Body/query (optional): dry_run, target_month (YYYY-MM), max_catch_up_months (default 1)
 router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res) => {
   try {
@@ -3000,16 +2846,65 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
       req.query?.target_month ??
       req.query?.year_month;
 
-    const result = await runLeaveMonthlyAccrual(pool, {
+    const accrualResult = await runLeaveMonthlyAccrual(pool, {
       dryRun,
       maxCatchUpMonths: Number.isFinite(maxCatchUpMonths) ? maxCatchUpMonths : undefined,
       targetMonth: targetMonth ? String(targetMonth).trim() : undefined,
     });
-    if (!result.dryRun && (result.rowsUpdated > 0 || result.missingBalanceRowsCreated > 0)) {
+
+    const previewEarnedByUser = new Map();
+    if (dryRun) {
+      for (const detail of accrualResult.details || []) {
+        if (
+          detail.leave_type === 'vacationLeave' &&
+          (
+            detail.action === 'would_apply' ||
+            detail.action === 'would_adjust'
+          )
+        ) {
+          const key = String(detail.user_id);
+          const earnedMovement = Number(
+            detail.balance_delta ?? detail.days_added ?? 0
+          );
+          previewEarnedByUser.set(
+            key,
+            (previewEarnedByUser.get(key) || 0) + earnedMovement
+          );
+        }
+      }
+    }
+
+    const attendanceDeductions = await runMonthlyAttendanceDeductions(pool, {
+      dryRun,
+      targetMonth: accrualResult.targetYearMonth,
+      balanceEarnedAdjustmentsByUser: previewEarnedByUser,
+    });
+    const result = { ...accrualResult, attendanceDeductions };
+
+    const attendanceBalanceDetails = (attendanceDeductions.details || []).filter(
+      (item) => Number(item.balance_delta || 0) !== 0
+    );
+    if (
+      !result.dryRun &&
+      (
+        result.rowsUpdated > 0 ||
+        result.missingBalanceRowsCreated > 0 ||
+        attendanceBalanceDetails.length > 0
+      )
+    ) {
       const affectedUserIds = [
         ...new Set(
-          (Array.isArray(result.details) ? result.details : [])
-            .filter((item) => item.action === 'applied' || item.created_balance_row === true)
+          [
+            ...(Array.isArray(result.details) ? result.details : []),
+            ...attendanceBalanceDetails,
+          ]
+            .filter(
+              (item) =>
+                item.action === 'applied' ||
+                item.action === 'adjusted' ||
+                item.created_balance_row === true ||
+                Number(item.balance_delta || 0) !== 0
+            )
             .map((item) => item.user_id)
             .filter(Boolean)
             .map((id) => String(id))
@@ -3023,6 +2918,9 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
           rowsUpdated: result.rowsUpdated,
           rowsSkipped: result.rowsSkipped,
           missingBalanceRowsCreated: result.missingBalanceRowsCreated || 0,
+          attendanceRowsUpdated: attendanceDeductions.rowsUpdated,
+          attendanceDeductedDays: attendanceDeductions.totalDeductedDays,
+          attendanceWithoutPayDays: attendanceDeductions.totalWithoutPayDays,
           leaveTypes: result.leaveTypes,
           balanceChanged: true,
         });
@@ -4083,7 +3981,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
 // BALANCES & LEDGER
 // ============================
 
-// GET /api/leave/ledger — balance movement audit (self: own rows; admin/HR: filterable)
+// GET /api/leave/ledger — balance movement audit (self by default; admin/HR can filter or pass all_users=true)
 router.get('/ledger', protect, async (req, res) => {
   const requesterId = req.user?.id;
   const role = req.user?.role;
@@ -4101,24 +3999,26 @@ router.get('/ledger', protect, async (req, res) => {
   const affectedBucket = (req.query?.affected_bucket || '').toString().trim().toLowerCase() || null;
   const from = (req.query?.from || req.query?.created_from || '').toString().trim() || null;
   const to = (req.query?.to || req.query?.created_to || '').toString().trim() || null;
+  const includeAllUsers = ['1', 'true', 'yes'].includes(
+    (req.query?.all_users || req.query?.include_all_users || '')
+      .toString()
+      .trim()
+      .toLowerCase()
+  );
 
   if (!isPrivileged && filterUserId && filterUserId !== requesterId) {
     return res.status(403).json({ error: 'Not allowed to view ledger for other users' });
   }
 
-  const scopeSelfOnly = !isPrivileged;
-  const scopeAdminAllUsers = isPrivileged && !filterUserId;
+  const scopeAllUsers = isPrivileged && includeAllUsers && !filterUserId;
+  const scopedUserId = filterUserId || requesterId;
 
   const params = [];
   let p = 1;
   const where = [];
-  if (scopeSelfOnly) {
+  if (!scopeAllUsers) {
     where.push(`l.user_id = $${p}::uuid`);
-    params.push(requesterId);
-    p += 1;
-  } else if (!scopeAdminAllUsers) {
-    where.push(`l.user_id = $${p}::uuid`);
-    params.push(filterUserId);
+    params.push(scopedUserId);
     p += 1;
   }
   if (leaveType) {
@@ -4166,8 +4066,8 @@ router.get('/ledger', protect, async (req, res) => {
       pool.query(
         `SELECT
            COALESCE(SUM(CASE
-             WHEN l.days_changed > 0 AND
-                  (LOWER(l.affected_bucket) = 'earned' OR LOWER(l.action) = 'monthly_accrual')
+             WHEN LOWER(l.affected_bucket) = 'earned'
+                  OR LOWER(l.action) = 'monthly_accrual'
              THEN l.days_changed ELSE 0 END), 0)::float8 AS earned,
            GREATEST(COALESCE(SUM(CASE
              WHEN LOWER(l.affected_bucket) = 'used'

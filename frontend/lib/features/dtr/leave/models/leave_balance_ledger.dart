@@ -138,6 +138,7 @@ class LeaveLedgerResult {
 class LeaveLedgerQuery {
   const LeaveLedgerQuery({
     this.userId,
+    this.allUsers = false,
     this.leaveType,
     this.action,
     this.affectedBucket,
@@ -147,8 +148,12 @@ class LeaveLedgerQuery {
     this.offset = 0,
   });
 
-  /// Admin/HR only: filter to one employee. Omit for employees (JWT scopes rows).
+  /// Admin/HR only: filter to one employee. Omit for the logged-in user's own ledger.
   final String? userId;
+
+  /// Admin/HR only: explicitly request all employee ledger rows.
+  final bool allUsers;
+
   final String? leaveType;
   final String? action;
   final String? affectedBucket;
@@ -159,6 +164,8 @@ class LeaveLedgerQuery {
 
   Map<String, dynamic> toQueryParams() => {
     if (userId != null && userId!.trim().isNotEmpty) 'user_id': userId!.trim(),
+    if (allUsers && (userId == null || userId!.trim().isEmpty))
+      'all_users': 'true',
     if (leaveType != null && leaveType!.trim().isNotEmpty)
       'leave_type': leaveType!.trim(),
     if (action != null && action!.trim().isNotEmpty) 'action': action!.trim(),

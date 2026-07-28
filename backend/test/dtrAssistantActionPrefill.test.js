@@ -68,6 +68,69 @@ test('DTR assistant memory: reset clears server-side conversation context', () =
   assert.equal(getAssistantMemory('user-reset-test'), null);
 });
 
+test('DTR assistant memory: conversation IDs isolate context for the same user', () => {
+  const userId = 'user-conversation-isolation';
+  setAssistantMemory(
+    userId,
+    { intent: 'leave_availability_check', leaveType: 'sickLeave' },
+    undefined,
+    'conversation-leave'
+  );
+  setAssistantMemory(
+    userId,
+    { intent: 'locator_availability_check', locatorType: 'work_from_home' },
+    undefined,
+    'conversation-locator'
+  );
+
+  assert.equal(
+    getAssistantMemory(userId, 'conversation-leave').leaveType,
+    'sickLeave'
+  );
+  assert.equal(
+    getAssistantMemory(userId, 'conversation-locator').locatorType,
+    'work_from_home'
+  );
+  clearAssistantMemory(userId, 'conversation-leave');
+  assert.equal(getAssistantMemory(userId, 'conversation-leave'), null);
+  assert.ok(getAssistantMemory(userId, 'conversation-locator'));
+  clearAssistantMemory(userId, 'conversation-locator');
+});
+
+test('DTR assistant action prefill: special-leave details reach the form action', () => {
+  const payload = buildLeaveActionPayload({
+    text: 'open leave form',
+    memory: {
+      topics: {
+        leave: {
+          leavePrefill: {
+            adoptionPlacementDate: '2026-08-01',
+            adoptionParentRole: 'primaryAdoptiveParent',
+            vawcSupportDocumentType: 'protectionOrder',
+            vawcCaseDetails: 'Protection order reference 123',
+            soloParentIdNumber: 'SP-2026-44',
+            soloParentIdExpiryDate: '2027-01-31',
+            studyPurpose: 'completionOfMastersDegree',
+            studyPurposeDetails: 'Thesis completion',
+          },
+        },
+      },
+    },
+    leaveType: 'adoptionLeave',
+    rangePayload: {
+      startDate: '2026-08-01',
+      endDate: '2026-08-10',
+    },
+  });
+
+  assert.equal(payload.leaveType, 'adoptionLeave');
+  assert.equal(payload.adoptionPlacementDate, '2026-08-01');
+  assert.equal(payload.adoptionParentRole, 'primaryAdoptiveParent');
+  assert.equal(payload.vawcSupportDocumentType, 'protectionOrder');
+  assert.equal(payload.soloParentIdNumber, 'SP-2026-44');
+  assert.equal(payload.studyPurposeDetails, 'Thesis completion');
+});
+
 test('DTR assistant regression: buildActions includes richer leave and locator prefill', () => {
   const memory = {
     topics: {

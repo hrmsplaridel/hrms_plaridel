@@ -8,9 +8,17 @@ const {
   countMonthsToCredit,
   firstMonthAccrualAmount,
   separationMonthAccrualAmount,
-  round2,
+  expectedAccrualForServiceMonth,
+  round3,
   startOfMonth,
 } = require('../src/services/leaveMonthlyAccrual');
+const {
+  manilaCompletedYearMonthNow,
+  runScheduledCompletedMonthEnd,
+  CRON_EXPRESSION,
+  RECONCILIATION_CRON_EXPRESSION,
+  MONTH_END_SCHEDULES,
+} = require('../src/jobs/leaveMonthlyAccrualScheduler');
 
 // ─── Mock pool factory ────────────────────────────────────────────────────────
 
@@ -23,7 +31,12 @@ const {
  * @param {Array}  [opts.leaveTypeRows] - Rows returned by the DB-driven accrual config query.
  *                                        Set to [] to exercise the hardcoded fallback path.
  */
-function createMockPool({ missingRows = [], balanceRows = [], leaveTypeRows = null } = {}) {
+function createMockPool({
+  missingRows = [],
+  balanceRows = [],
+  leaveTypeRows = null,
+  postingRows = [],
+} = {}) {
   const calls = [];
 
   // Default: pretend both VL and SL accrue at 1.25 (mimics post-migration DB)
@@ -47,8 +60,17 @@ function createMockPool({ missingRows = [], balanceRows = [], leaveTypeRows = nu
       if (text.includes('FROM users u') && text.includes('CROSS JOIN unnest') && text.includes('lb.id IS NULL')) {
         return { rows: [...missingRows], rowCount: missingRows.length };
       }
+      if (text.includes('WITH legacy AS') && text.includes('effective_postings')) {
+        return { rows: [...postingRows], rowCount: postingRows.length };
+      }
       if (text.includes('FROM leave_balances lb') && text.includes('INNER JOIN users u')) {
         return { rows: [...balanceRows], rowCount: balanceRows.length };
+      }
+      if (text.includes('INSERT INTO leave_monthly_accrual_postings')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes('UPDATE leave_monthly_accrual_postings')) {
+        return { rows: [], rowCount: 1 };
       }
       if (text.includes('UPDATE leave_balances')) {
         return { rows: [], rowCount: 1 };
@@ -101,6 +123,29 @@ function makeBalanceRow(overrides = {}) {
   };
 }
 
+function makePostingRow(overrides = {}) {
+  return {
+    posting_id: '00000000-0000-0000-0000-000000000404',
+    user_id: '00000000-0000-0000-0000-000000000101',
+    service_month: '2026-07-01',
+    leave_type: 'vacationLeave',
+    credited_days: '1.250',
+    accrual_rate: '1.250',
+    metadata_json: {},
+    posting_persisted: true,
+    balance_id: '00000000-0000-0000-0000-000000000303',
+    earned_days: '1.250',
+    used_days: '0',
+    adjusted_days: '0',
+    last_accrual_date: '2026-07-01',
+    full_name: 'Test User',
+    date_hired: '2026-07-01',
+    separation_date: null,
+    target_eligible: true,
+    ...overrides,
+  };
+}
+
 // ─── Existing tests (unchanged) ───────────────────────────────────────────────
 
 test('parseTargetMonth rejects invalid YYYY-MM months', () => {
@@ -114,7 +159,218 @@ test('monthStartInTimeZone uses Asia/Manila for first-of-month cron timing', () 
   assert.equal(monthStart.getMonth(), 5);
 });
 
-test('runLeaveMonthlyAccrual rejects future target months', async () => {
+test('scheduler targets the month completed at the Manila month boundary', () => {
+  assert.equal(
+    manilaCompletedYearMonthNow(new Date('2026-05-31T16:00:00.000Z')),
+    '2026-05'
+  );
+  assert.equal(
+    manilaCompletedYearMonthNow(new Date('2026-01-01T00:00:00.000Z')),
+    '2025-12'
+  );
+});
+
+test('scheduler registers initial and reconciliation month-end runs', () => {
+  assert.equal(CRON_EXPRESSION, '0 0 1 * *');
+  assert.equal(RECONCILIATION_CRON_EXPRESSION, '0 0 15 * *');
+  assert.deepEqual(
+    MONTH_END_SCHEDULES.map((schedule) => schedule.runKind),
+    ['initial', 'reconciliation']
+  );
+});
+
+test('expected monthly accrual recalculates corrected hire and separation dates', () => {
+  const hiredMidMonth = expectedAccrualForServiceMonth({
+    targetMonth: new Date(2026, 6, 1),
+    dateHired: '2026-07-16',
+    separationDate: null,
+    rate: 1.25,
+  });
+  assert.equal(hiredMidMonth.expectedDays, 0.645);
+  assert.equal(hiredMidMonth.hireProrated, true);
+
+  const separatedMidMonth = expectedAccrualForServiceMonth({
+    targetMonth: new Date(2026, 6, 1),
+    dateHired: '2025-01-01',
+    separationDate: '2026-07-10',
+    rate: 1.25,
+  });
+  assert.equal(separatedMidMonth.expectedDays, 0.403);
+  assert.equal(separatedMidMonth.separationProrated, true);
+});
+
+test('both scheduled runs execute accrual before DTR for the previous month', async () => {
+  for (const runKind of ['initial', 'reconciliation']) {
+    const calls = [];
+    const client = {
+      query: async (sql) => {
+        if (sql.includes('pg_try_advisory_lock')) return { rows: [{ got: true }] };
+        if (sql.includes('pg_advisory_unlock')) return { rows: [{ pg_advisory_unlock: true }] };
+        throw new Error(`Unexpected scheduler SQL: ${sql}`);
+      },
+      release: () => calls.push('release'),
+    };
+    const pool = {
+      connect: async () => client,
+    };
+
+    const scheduled = await runScheduledCompletedMonthEnd(pool, {
+      runKind,
+      now: new Date('2026-08-14T16:00:00.000Z'),
+      accrualRunner: async (_pool, options) => {
+        calls.push(`accrual:${options.targetMonth}`);
+        return {
+          targetYearMonth: options.targetMonth,
+          rowsUpdated: 0,
+          rowsSkipped: 2,
+          dryRun: false,
+          rate: 1.25,
+          leaveTypes: ['vacationLeave', 'sickLeave'],
+          details: [],
+        };
+      },
+      attendanceRunner: async (_pool, options) => {
+        calls.push(`attendance:${options.targetMonth}`);
+        return {
+          rowsUpdated: 0,
+          totalDeductedDays: 0,
+          totalWithoutPayDays: 0,
+          details: [],
+        };
+      },
+      resultBroadcaster: (result) => {
+        calls.push(`broadcast:${result.runKind}`);
+        return 0;
+      },
+    });
+
+    assert.equal(scheduled.ran, true);
+    assert.equal(scheduled.runKind, runKind);
+    assert.equal(scheduled.targetYearMonth, '2026-07');
+    assert.deepEqual(calls, [
+      'accrual:2026-07',
+      'attendance:2026-07',
+      `broadcast:${runKind}`,
+      'release',
+    ]);
+  }
+});
+
+test('reconciliation previews only the hire-date accrual difference', async () => {
+  const balanceRow = makeBalanceRow({
+    earned_days: '1.250',
+    last_accrual_date: '2026-07-01',
+    date_hired: '2026-07-16',
+  });
+  const { pool } = createMockPool({
+    balanceRows: [balanceRow],
+    postingRows: [
+      makePostingRow({
+        date_hired: '2026-07-16',
+      }),
+    ],
+  });
+
+  const result = await runLeaveMonthlyAccrual(pool, {
+    dryRun: true,
+    targetMonth: '2026-07',
+    now: new Date('2026-08-15T00:00:00.000Z'),
+  });
+
+  assert.equal(result.rowsUpdated, 1);
+  assert.equal(result.rowsSkipped, 0);
+  assert.equal(result.details.length, 1);
+  assert.equal(result.details[0].action, 'would_adjust');
+  assert.equal(result.details[0].previous_days, 1.25);
+  assert.equal(result.details[0].expected_days, 0.645);
+  assert.equal(result.details[0].balance_delta, -0.605);
+});
+
+test('reconciliation applies a separation-date correction and records its ledger delta', async () => {
+  const balanceRow = makeBalanceRow({
+    earned_days: '1.250',
+    last_accrual_date: '2026-07-01',
+    separation_date: '2026-07-10',
+  });
+  const { pool, calls } = createMockPool({
+    balanceRows: [balanceRow],
+    postingRows: [
+      makePostingRow({
+        separation_date: '2026-07-10',
+      }),
+    ],
+  });
+
+  const result = await runLeaveMonthlyAccrual(pool, {
+    dryRun: false,
+    targetMonth: '2026-07',
+    now: new Date('2026-08-15T00:00:00.000Z'),
+  });
+
+  assert.equal(result.rowsUpdated, 1);
+  assert.equal(result.rowsSkipped, 0);
+  assert.equal(result.details[0].action, 'adjusted');
+  assert.equal(result.details[0].expected_days, 0.403);
+  assert.equal(result.details[0].balance_delta, -0.847);
+
+  const balanceCorrection = calls.find(
+    (call) =>
+      call.target === 'client' &&
+      call.sql.includes('SET earned_days = $3::numeric')
+  );
+  assert.ok(balanceCorrection);
+  assert.equal(balanceCorrection.params[2], 0.403);
+
+  const postingCorrection = calls.find(
+    (call) =>
+      call.target === 'client' &&
+      call.sql.includes('UPDATE leave_monthly_accrual_postings')
+  );
+  assert.ok(postingCorrection);
+  assert.equal(postingCorrection.params[3], 0.403);
+
+  const ledgerCorrection = calls.find(
+    (call) =>
+      call.target === 'client' &&
+      call.sql.includes('INSERT INTO leave_balance_ledger') &&
+      call.params[2] === 'monthly_accrual_adjusted'
+  );
+  assert.ok(ledgerCorrection);
+  assert.equal(ledgerCorrection.params[4], -0.847);
+});
+
+test('reconciliation skips an accrual posting that already matches corrected data', async () => {
+  const balanceRow = makeBalanceRow({
+    earned_days: '0.645',
+    last_accrual_date: '2026-07-01',
+    date_hired: '2026-07-16',
+  });
+  const { pool, calls } = createMockPool({
+    balanceRows: [balanceRow],
+    postingRows: [
+      makePostingRow({
+        credited_days: '0.645',
+        earned_days: '0.645',
+        date_hired: '2026-07-16',
+      }),
+    ],
+  });
+
+  const result = await runLeaveMonthlyAccrual(pool, {
+    dryRun: false,
+    targetMonth: '2026-07',
+    now: new Date('2026-08-15T00:00:00.000Z'),
+  });
+
+  assert.equal(result.rowsUpdated, 0);
+  assert.equal(result.rowsSkipped, 1);
+  assert.equal(
+    calls.some((call) => call.sql.includes('UPDATE leave_monthly_accrual_postings')),
+    false
+  );
+});
+
+test('runLeaveMonthlyAccrual rejects current or future target months', async () => {
   const pool = {
     query: async () => { throw new Error('pool.query should not run for future target guard'); },
     connect: async () => { throw new Error('connect should not run for future target guard'); },
@@ -125,7 +381,7 @@ test('runLeaveMonthlyAccrual rejects future target months', async () => {
         targetMonth: '2026-06',
         now: new Date('2026-05-13T00:00:00.000Z'),
       }),
-    /future/
+    /completed month/
   );
 });
 
@@ -147,7 +403,7 @@ test('dry-run accrual reports missing balance rows and applies hire-date prorati
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-20T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.targetYearMonth, '2026-05');
@@ -161,7 +417,7 @@ test('dry-run accrual reports missing balance rows and applies hire-date prorati
   assert.equal(detail.action, 'would_apply');
   assert.equal(detail.created_balance_row, true);
   assert.equal(detail.hire_prorated, true);
-  assert.equal(detail.days_added, 0.65);  // (31 - 16 + 1) / 31 * 1.25 = 0.65
+  assert.equal(detail.days_added, 0.645);
 });
 
 test('non-dry-run accrual creates missing balance rows before updating credits', async () => {
@@ -191,7 +447,7 @@ test('non-dry-run accrual creates missing balance rows before updating credits',
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: false,
     targetMonth: '2026-05',
-    now: new Date('2026-05-20T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 1);
@@ -216,7 +472,7 @@ test('E1 - resigned employee is excluded from accrual', async () => {
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 0);
@@ -232,7 +488,7 @@ test('E1 - active employees still accrue normally', async () => {
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 1);
@@ -279,7 +535,7 @@ test('E2 - backfill dry-run credits multiple months from hire date', async () =>
     dryRun: true,
     targetMonth: '2026-05',
     maxCatchUpMonths: 5,
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 1);
@@ -311,14 +567,14 @@ test('E3 - backfill prorates the hire month in multi-month catch-up', async () =
     dryRun: true,
     targetMonth: '2026-05',
     maxCatchUpMonths: 5,
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 1);
   const [detail] = result.details;
   assert.equal(detail.months_credited, 5);
   assert.equal(detail.hire_prorated, true);
-  assert.equal(detail.days_added, 5.65);
+  assert.equal(detail.days_added, 5.645);
 });
 
 // ─── Enhancement 4: Annual balance cap ───────────────────────────────────────
@@ -342,7 +598,7 @@ test('E4 - accrual is capped when balance reaches accrual_annual_cap', async () 
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 1);
@@ -369,7 +625,7 @@ test('E4 - employee skipped (not credited) when already at annual cap', async ()
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 0);
@@ -394,7 +650,7 @@ test('E4 - no cap applied when accrual_annual_cap is null', async () => {
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 1);
@@ -411,7 +667,7 @@ test('E5 - separationMonthAccrualAmount prorates correctly', () => {
   assert.equal(result.prorated, true);
   assert.equal(result.days_worked, 15);
   assert.equal(result.days_in_month, 31);
-  assert.equal(result.addDays, round2(15 / 31 * 1.25));
+  assert.equal(result.addDays, round3(15 / 31 * 1.25));
 });
 
 test('E5 - separationMonthAccrualAmount returns full rate when separation is last day', () => {
@@ -436,13 +692,13 @@ test('E5 - accrual run prorates separation month for separating employee', async
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-20T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 1);
   const [detail] = result.details;
   assert.equal(detail.separation_prorated, true);
-  assert.equal(detail.days_added, round2(15 / 31 * 1.25));
+  assert.equal(detail.days_added, round3(15 / 31 * 1.25));
 });
 
 test('E5 - separation date in a different month does not affect target month accrual', async () => {
@@ -458,7 +714,7 @@ test('E5 - separation date in a different month does not affect target month acc
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-20T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   const [detail] = result.details;
@@ -480,7 +736,7 @@ test('E6 - uses DB rate when leave_types returns accrual config', async () => {
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 1);
@@ -498,7 +754,7 @@ test('E6 - falls back to hardcoded 1.25 when DB returns no accrual types', async
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 1);
@@ -515,7 +771,7 @@ test('E7 - flags missing_hire_date when date_hired is null', async () => {
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.rowsUpdated, 1);
@@ -532,7 +788,7 @@ test('E7 - no missing_hire_date flag when date_hired is set', async () => {
   const result = await runLeaveMonthlyAccrual(pool, {
     dryRun: true,
     targetMonth: '2026-05',
-    now: new Date('2026-05-01T00:00:00.000Z'),
+    now: new Date('2026-06-01T00:00:00.000Z'),
   });
 
   assert.equal(result.details[0].missing_hire_date, false);

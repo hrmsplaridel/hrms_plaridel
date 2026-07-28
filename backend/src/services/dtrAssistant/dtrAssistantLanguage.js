@@ -1,12 +1,12 @@
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
 
 const BISAYA_MARKERS = [
-  /\b(unsa|unsay|unsay|ngano|nganu|nganong|pila|naa|wala|akong|nako|nko|imong|nimo|ug|karon|ugma|gahapon|kagahapon|adtong|adtung|atong|niadtong|niadtung|kinsa|asa|unsaon|paunsa|tabangi|tabangan|gusto nako|ana|adto|dili|ning|bulan|bulana|semanaha|adlaw|ka adlaw|kumusta|unsaka|daw|apil|ila|nga|eh)\b/i,
+  /\b(unsa|unsay|unsay|ngano|nganu|nganong|pila|naa|wala|akong|nako|nakog|nko|imong|nimo|ug|sab|sad|karon|ugma|gahapon|kagahapon|adtong|adtung|atong|niadtong|niadtung|kinsa|asa|unsaon|paunsa|tabangi|tabangan|gusto nako|ana|adto|dili|ning|bulan|bulana|semanaha|adlaw|ka adlaw|kumusta|unsaka|daw|apil|ila|nga|eh)\b/i,
   /\b(bisayaa?|binisayaa?|cebuano)\b/i,
 ];
 
 const TAGALOG_MARKERS = [
-  /\b(ano|bakit|bkit|ilan|ngayon|ako|ko|ba|may|wala|kailangan|knse|pasok|noong|nung|paano|pano|mag file|gusto ko|ilagay|ilalagay|araw|buwan|buwana|semana|kanino|saan|nasaan|puwede|pwede|kamusta|sino)\b/i,
+  /\b(ano|bakit|bkit|ilan|ngayon|bukas|kahapon|ako|ko|ba|may|wala|kailangan|knse|maaari|pasok|noong|nung|paano|pano|mag file|gusto ko|ilagay|ilalagay|araw|buwan|buwana|semana|kanino|saan|nasaan|puwede|pwede|kamusta|sino)\b/i,
   /\b(tagaloga?|filipino)\b/i,
 ];
 
@@ -45,6 +45,12 @@ function detectAssistantLanguage(message) {
     return 'tagalog';
   }
   if (/\b(english|ingles)\b/.test(text)) return 'english';
+  if (
+    /\b(?:pwede|puwede|maaari)\s+ba\s+akong\b/.test(text) ||
+    /\b(?:pwede|puwede|maaari)\s+ba\s+ako\b/.test(text)
+  ) {
+    return 'tagalog';
+  }
 
   const bisayaScore = scorePatterns(text, BISAYA_MARKERS);
   const tagalogScore = scorePatterns(text, TAGALOG_MARKERS);

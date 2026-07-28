@@ -418,9 +418,10 @@ class MockLeaveRepository implements LeaveRepository {
     MonthlyLeaveAccrualInput input,
   ) async {
     final now = DateTime.now();
+    final completedMonth = DateTime(now.year, now.month - 1);
     final targetMonth =
         input.targetMonth ??
-        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
+        '${completedMonth.year.toString().padLeft(4, '0')}-${completedMonth.month.toString().padLeft(2, '0')}';
     final details = <MonthlyLeaveAccrualDetail>[];
 
     for (final entry in _balancesByUser.entries) {

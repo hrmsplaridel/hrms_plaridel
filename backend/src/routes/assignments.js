@@ -50,12 +50,13 @@ router.get('/', protect, async (req, res) => {
 
     const result = await pool.query(
       `SELECT a.id, a.employee_id, a.department_id, a.position_id, a.shift_id,
-              a.override_start_time, a.override_end_time,
+              a.override_start_time, a.override_end_time, a.override_break_end,
               a.effective_from::text AS effective_from,
               a.effective_to::text AS effective_to,
               a.is_active, a.remarks,
               d.name AS department_name, p.name AS position_name, s.name AS shift_name,
               s.start_time AS shift_start_time, s.end_time AS shift_end_time,
+              s.break_end AS shift_break_end, s.punch_mode,
               s.working_days AS shift_working_days
        FROM assignments a
        LEFT JOIN departments d ON a.department_id = d.id
@@ -86,6 +87,8 @@ router.get('/', protect, async (req, res) => {
         shift_name: r.shift_name,
         start_time: r.override_start_time || r.shift_start_time,
         end_time: r.override_end_time || r.shift_end_time,
+        break_end: r.override_break_end || r.shift_break_end,
+        punch_mode: r.punch_mode || 'auto',
         date_assigned: r.effective_from,
         working_days: workingDays?.length ? workingDays : [1, 2, 3, 4, 5],
       };

@@ -14,6 +14,7 @@ class DtrAssistantApi {
     String message, {
     String? intent,
     String? modelProfile,
+    String? conversationId,
     CancelToken? cancelToken,
   }) async {
     final res = await _client.post<Map<String, dynamic>>(
@@ -22,6 +23,7 @@ class DtrAssistantApi {
         'message': message,
         if (intent != null) 'intent': intent,
         if (modelProfile != null) 'modelProfile': modelProfile,
+        if (conversationId != null) 'conversationId': conversationId,
       },
       cancelToken: cancelToken,
       // Ollama can take up to 90s to generate a free-form answer locally.
@@ -40,8 +42,11 @@ class DtrAssistantApi {
     throw Exception('Assistant returned an invalid response.');
   }
 
-  Future<void> resetChat() async {
-    await _client.post<Map<String, dynamic>>('/api/dtr-assistant/reset');
+  Future<void> resetChat({String? conversationId}) async {
+    await _client.post<Map<String, dynamic>>(
+      '/api/dtr-assistant/reset',
+      data: {if (conversationId != null) 'conversationId': conversationId},
+    );
   }
 
   Future<({String defaultModelProfile, List<DtrAssistantModelProfile> models})>

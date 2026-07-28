@@ -73,6 +73,17 @@ function resultForSql(sql) {
       ],
     };
   }
+  if (/SUM\(COALESCE\(lr\.number_of_days/i.test(sql)) {
+    return {
+      rows: [
+        {
+          leave_type_key: 'soloParentLeave',
+          days: 2,
+          request_count: 1,
+        },
+      ],
+    };
+  }
   if (/FROM leave_requests/i.test(sql)) {
     return {
       rows: [
@@ -175,7 +186,7 @@ test('DTR assistant data loader scopes every employee query and normalizes rows'
     },
   });
 
-  assert.equal(calls.length, 8);
+  assert.equal(calls.length, 9);
   const globalQueries = calls.filter(
     ({ sql }) =>
       /FROM leave_types/i.test(sql) ||
@@ -200,6 +211,17 @@ test('DTR assistant data loader scopes every employee query and normalizes rows'
   assert.deepEqual(context.recent_leave_requests[0].history, []);
   assert.deepEqual(context.recent_leave_requests[0].details, {});
   assert.equal(context.recent_leave_requests[0].reason, 'Family matter');
+  assert.deepEqual(
+    context.leave_annual_usage.find(
+      (item) => item.leave_type_key === 'soloParentLeave'
+    ),
+    {
+      year: 2026,
+      leave_type_key: 'soloParentLeave',
+      days: 2,
+      request_count: 1,
+    }
+  );
   assert.equal(context.recent_locator_slips[0].coverage.pm_out, true);
   assert.equal(context.locator_types[0].code, 'work_from_home');
   assert.ok(context.leave_guideline_catalog.length > 0);
