@@ -932,6 +932,37 @@ test('DTR assistant regression: leave guideline follow-ups stay in guideline con
   assert.doesNotMatch(reply, /Which one do you want to file/i);
 });
 
+test('DTR assistant regression: completed-month accrual rule is localized', () => {
+  const english = buildFastEmployeeAssistantReply(
+    'How does monthly accrual work?',
+    {},
+    'leave_guideline_section'
+  );
+  assert.match(english, /after a completed service month/i);
+  assert.match(english, /does not grant the new month in advance/i);
+  assert.match(english, /same month on the 15th/i);
+  assert.match(english, /applies only the difference/i);
+  assert.match(english, /DTR late, undertime, and absence equivalents/i);
+
+  const bisaya = buildFastEmployeeAssistantReply(
+    'unsaon pag add sa monthly credits?',
+    {},
+    'leave_guideline_section'
+  );
+  assert.match(bisaya, /human makompleto ang service month/i);
+  assert.match(bisaya, /dili niini i-advance ang bag-ong bulan/i);
+  assert.match(bisaya, /ika-15/i);
+
+  const tagalog = buildFastEmployeeAssistantReply(
+    'paano gumagana ang monthly credits?',
+    {},
+    'leave_guideline_section'
+  );
+  assert.match(tagalog, /pagkatapos makumpleto ang service month/i);
+  assert.match(tagalog, /hindi nito ina-advance ang bagong buwan/i);
+  assert.match(tagalog, /ika-15/i);
+});
+
 test('DTR assistant regression: leave type guideline overview is supported', () => {
   const reply = buildFastEmployeeAssistantReply(
     'explain me the leave types',
