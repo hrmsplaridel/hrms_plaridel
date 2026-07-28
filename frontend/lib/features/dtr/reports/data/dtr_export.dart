@@ -113,6 +113,8 @@ class DtrExportItem {
     this.department,
     this.position,
     this.officialHours,
+    this.scheduledWorkHoursPerDay,
+    this.punchMode,
     this.workingDays,
     this.assignmentEffectiveFrom,
     this.assignmentEffectiveTo,
@@ -123,6 +125,8 @@ class DtrExportItem {
   final String? department;
   final String? position;
   final String? officialHours;
+  final double? scheduledWorkHoursPerDay;
+  final String? punchMode;
   final List<int>? workingDays;
   final DateTime? assignmentEffectiveFrom;
   final DateTime? assignmentEffectiveTo;
@@ -358,7 +362,19 @@ class DtrExport {
     return value;
   }
 
-  /// Returns (hours, minutes) of undertime. Absent = 8h 0m. Non-working day / Holiday / Leave = 0.
+  static (String, String, String, String) _statusPunchCells(
+    String value,
+    String? punchMode,
+  ) {
+    if (value.isEmpty) return ('', '', '', '');
+    if (punchMode?.trim().toLowerCase() == 'pm_only') {
+      return ('', '', value, '');
+    }
+    return (value, '', '', '');
+  }
+
+  /// Returns (hours, minutes) of undertime. A full absence uses the assigned
+  /// shift duration. Non-working days, holidays, and leave return zero.
   static (int, int) _computeUndertime(
     TimeRecord? r,
     DateTime dt,
@@ -593,6 +609,8 @@ class DtrExport {
     String? department,
     String? position,
     String? officialHours,
+    double? scheduledWorkHoursPerDay,
+    String? punchMode,
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
@@ -618,6 +636,8 @@ class DtrExport {
         end: end,
         recordsByDate: recordsByDate,
         policy: policy,
+        scheduledWorkHoursPerDay: scheduledWorkHoursPerDay,
+        punchMode: punchMode,
         workingDays: workingDays,
         assignmentEffectiveFrom: assignmentEffectiveFrom,
         assignmentEffectiveTo: assignmentEffectiveTo,
@@ -709,6 +729,8 @@ class DtrExport {
           end: end,
           recordsByDate: item.recordsByDate,
           policy: policy,
+          scheduledWorkHoursPerDay: item.scheduledWorkHoursPerDay,
+          punchMode: item.punchMode,
           workingDays: item.workingDays,
           assignmentEffectiveFrom: item.assignmentEffectiveFrom,
           assignmentEffectiveTo: item.assignmentEffectiveTo,
@@ -968,6 +990,8 @@ class DtrExport {
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     required _ExportAttendancePolicy policy,
+    double? scheduledWorkHoursPerDay,
+    String? punchMode,
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
@@ -996,7 +1020,7 @@ class DtrExport {
         rec,
         dt,
         isNonScheduled,
-        policy.workHoursPerDay,
+        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
       );
       if (!isNonScheduled) totalUndertimeMin += uh * 60 + um;
       if (!isNonScheduled) totalLateMin += (rec?.lateMinutes ?? 0);
@@ -1033,15 +1057,16 @@ class DtrExport {
         pmInStr = _locatorSlotOrBlank(rec, 'PM IN');
         pmOutStr = _locatorSlotOrBlank(rec, 'PM OUT');
       } else {
-        amInStr = remark.isNotEmpty
+        final statusText = remark.isNotEmpty
             ? remark
             : (displayVal == 'ABSENT' ? 'ABSENT' : '');
-        amOutStr = '';
-        pmInStr = '';
-        pmOutStr = '';
+        (amInStr, amOutStr, pmInStr, pmOutStr) = _statusPunchCells(
+          statusText,
+          punchMode,
+        );
         final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
         statusColor = _pdfColorForStatus(
-          amInStr.isNotEmpty ? amInStr : null,
+          statusText.isNotEmpty ? statusText : null,
           isHoliday: isHoliday,
         );
       }
@@ -1220,6 +1245,8 @@ class DtrExport {
     String? department,
     String? position,
     String? officialHours,
+    double? scheduledWorkHoursPerDay,
+    String? punchMode,
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
@@ -1437,7 +1464,7 @@ class DtrExport {
         rec,
         dt,
         isNonScheduled,
-        policy.workHoursPerDay,
+        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
       );
       if (!isNonScheduled) totalUndertimeMin += uh * 60 + um;
       if (!isNonScheduled) totalLateMin += (rec?.lateMinutes ?? 0);
@@ -1447,33 +1474,42 @@ class DtrExport {
       final hasAnyPunch =
           rec != null && (rec.timeIn != null || rec.breakIn != null);
       final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
-      final exRec = rec; // non-null alias for clean field access
-      final amInStr = exRec != null && exRec.timeIn != null
-          ? (showTimes ? _formatTime(exRec.timeIn) : '')
-          : (_isOnFieldByLocator(rec)
-                ? _locatorSlotOrBlank(rec, 'AM IN')
-                : (showTimes
-                      ? ''
-                      : (remark.isNotEmpty
-                            ? remark
-                            : (displayVal == 'ABSENT' ? 'ABSENT' : ''))));
-      final amOutStr = exRec != null && exRec.breakOut != null
-          ? (showTimes ? _formatTime(exRec.breakOut) : '')
-          : (_isOnFieldByLocator(rec)
-                ? _locatorSlotOrBlank(rec, 'AM OUT')
-                : '');
-      final pmInStr = exRec != null && exRec.breakIn != null
-          ? (showTimes ? _formatTime(exRec.breakIn) : '')
-          : (_isOnFieldByLocator(rec) ? _locatorSlotOrBlank(rec, 'PM IN') : '');
-      final pmOutStr = exRec != null && exRec.timeOut != null
-          ? (showTimes ? _formatTime(exRec.timeOut) : '')
-          : (_isOnFieldByLocator(rec)
-                ? _locatorSlotOrBlank(rec, 'PM OUT')
-                : '');
+      String amInStr;
+      String amOutStr;
+      String pmInStr;
+      String pmOutStr;
+      String statusText = '';
+      if (showTimes) {
+        amInStr = rec.timeIn != null
+            ? _formatTime(rec.timeIn)
+            : _locatorSlotOrBlank(rec, 'AM IN');
+        amOutStr = rec.breakOut != null
+            ? _formatTime(rec.breakOut)
+            : _locatorSlotOrBlank(rec, 'AM OUT');
+        pmInStr = rec.breakIn != null
+            ? _formatTime(rec.breakIn)
+            : _locatorSlotOrBlank(rec, 'PM IN');
+        pmOutStr = rec.timeOut != null
+            ? _formatTime(rec.timeOut)
+            : _locatorSlotOrBlank(rec, 'PM OUT');
+      } else if (_isOnFieldByLocator(rec)) {
+        amInStr = _locatorSlotOrBlank(rec, 'AM IN');
+        amOutStr = _locatorSlotOrBlank(rec, 'AM OUT');
+        pmInStr = _locatorSlotOrBlank(rec, 'PM IN');
+        pmOutStr = _locatorSlotOrBlank(rec, 'PM OUT');
+      } else {
+        statusText = remark.isNotEmpty
+            ? remark
+            : (displayVal == 'ABSENT' ? 'ABSENT' : '');
+        (amInStr, amOutStr, pmInStr, pmOutStr) = _statusPunchCells(
+          statusText,
+          punchMode,
+        );
+      }
 
       final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
       final statusColorHex = _excelColorHexForStatus(
-        amInStr.isNotEmpty ? amInStr : null,
+        statusText.isNotEmpty ? statusText : null,
         isHoliday: isHoliday,
       );
       final statusStyleCenter = statusColorHex != null
@@ -1679,6 +1715,8 @@ class DtrExport {
     String? department,
     String? position,
     String? officialHours,
+    double? scheduledWorkHoursPerDay,
+    String? punchMode,
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
@@ -1759,7 +1797,7 @@ class DtrExport {
         rec,
         dt,
         isNonScheduled,
-        policy.workHoursPerDay,
+        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
       );
       if (!isNonScheduled) totalUndertimeMin += uh * 60 + um;
       if (!isNonScheduled) totalLateMin += (rec?.lateMinutes ?? 0);
@@ -1768,32 +1806,38 @@ class DtrExport {
       final hasAnyPunch =
           rec != null && (rec.timeIn != null || rec.breakIn != null);
       final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
-      final hr = rec; // non-null alias for clean field access
-      final amIn = hr != null && hr.timeIn != null
-          ? (showTimes ? _formatTime(hr.timeIn) : '')
-          : (_isOnFieldByLocator(rec)
-                ? _locatorSlotOrBlank(rec, 'AM IN')
-                : (showTimes
-                      ? ''
-                      : (remark.isNotEmpty
-                            ? remark
-                            : (displayVal == 'ABSENT' ? 'ABSENT' : ''))));
-      final amOut = hr != null && hr.breakOut != null
-          ? (showTimes ? _formatTime(hr.breakOut) : '')
-          : (_isOnFieldByLocator(rec)
-                ? _locatorSlotOrBlank(rec, 'AM OUT')
-                : '');
-      final pmIn = hr != null && hr.breakIn != null
-          ? (showTimes ? _formatTime(hr.breakIn) : '')
-          : (_isOnFieldByLocator(rec) ? _locatorSlotOrBlank(rec, 'PM IN') : '');
-      final pmOut = hr != null && hr.timeOut != null
-          ? (showTimes ? _formatTime(hr.timeOut) : '')
-          : (_isOnFieldByLocator(rec)
-                ? _locatorSlotOrBlank(rec, 'PM OUT')
-                : '');
+      String amIn;
+      String amOut;
+      String pmIn;
+      String pmOut;
+      String statusText = '';
+      if (showTimes) {
+        amIn = rec.timeIn != null
+            ? _formatTime(rec.timeIn)
+            : _locatorSlotOrBlank(rec, 'AM IN');
+        amOut = rec.breakOut != null
+            ? _formatTime(rec.breakOut)
+            : _locatorSlotOrBlank(rec, 'AM OUT');
+        pmIn = rec.breakIn != null
+            ? _formatTime(rec.breakIn)
+            : _locatorSlotOrBlank(rec, 'PM IN');
+        pmOut = rec.timeOut != null
+            ? _formatTime(rec.timeOut)
+            : _locatorSlotOrBlank(rec, 'PM OUT');
+      } else if (_isOnFieldByLocator(rec)) {
+        amIn = _locatorSlotOrBlank(rec, 'AM IN');
+        amOut = _locatorSlotOrBlank(rec, 'AM OUT');
+        pmIn = _locatorSlotOrBlank(rec, 'PM IN');
+        pmOut = _locatorSlotOrBlank(rec, 'PM OUT');
+      } else {
+        statusText = remark.isNotEmpty
+            ? remark
+            : (displayVal == 'ABSENT' ? 'ABSENT' : '');
+        (amIn, amOut, pmIn, pmOut) = _statusPunchCells(statusText, punchMode);
+      }
       final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
       final statusColorHex = _excelColorHexForStatus(
-        amIn.isNotEmpty ? amIn : null,
+        statusText.isNotEmpty ? statusText : null,
         isHoliday: isHoliday,
       );
       final undertimeColorHex = !isNonScheduled && (uh > 0 || um > 0)
@@ -1909,6 +1953,8 @@ class DtrExport {
     String? department,
     String? position,
     String? officialHours,
+    double? scheduledWorkHoursPerDay,
+    String? punchMode,
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
@@ -1989,7 +2035,7 @@ class DtrExport {
         rec,
         dt,
         isNonScheduled,
-        policy.workHoursPerDay,
+        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
       );
       if (!isNonScheduled) totalUndertimeMin += uh * 60 + um;
       if (!isNonScheduled) totalLateMin += (rec?.lateMinutes ?? 0);
@@ -1998,36 +2044,38 @@ class DtrExport {
       final hasAnyPunch =
           rec != null && (rec.timeIn != null || rec.breakIn != null);
       final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
-      // For each slot, prefer the real punch time. If showTimes is true but the
-      // individual slot time is null, fall back to the locator slip segment so
-      // "ON FIELD" appears in the correct column (e.g. AM IN covered by locator
-      // but breakIn/breakOut/timeOut have real punches).
-      final r = rec; // non-null alias used for clean field access below
-      final amIn = r != null && r.timeIn != null
-          ? (showTimes ? _formatTime(r.timeIn) : '')
-          : (_isOnFieldByLocator(rec)
-                ? _locatorSlotOrBlank(rec, 'AM IN')
-                : (showTimes
-                      ? ''
-                      : (remark.isNotEmpty
-                            ? remark
-                            : (displayVal == 'ABSENT' ? 'ABSENT' : ''))));
-      final amOut = r != null && r.breakOut != null
-          ? (showTimes ? _formatTime(r.breakOut) : '')
-          : (_isOnFieldByLocator(rec)
-                ? _locatorSlotOrBlank(rec, 'AM OUT')
-                : '');
-      final pmIn = r != null && r.breakIn != null
-          ? (showTimes ? _formatTime(r.breakIn) : '')
-          : (_isOnFieldByLocator(rec) ? _locatorSlotOrBlank(rec, 'PM IN') : '');
-      final pmOut = r != null && r.timeOut != null
-          ? (showTimes ? _formatTime(r.timeOut) : '')
-          : (_isOnFieldByLocator(rec)
-                ? _locatorSlotOrBlank(rec, 'PM OUT')
-                : '');
+      String amIn;
+      String amOut;
+      String pmIn;
+      String pmOut;
+      String statusText = '';
+      if (showTimes) {
+        amIn = rec.timeIn != null
+            ? _formatTime(rec.timeIn)
+            : _locatorSlotOrBlank(rec, 'AM IN');
+        amOut = rec.breakOut != null
+            ? _formatTime(rec.breakOut)
+            : _locatorSlotOrBlank(rec, 'AM OUT');
+        pmIn = rec.breakIn != null
+            ? _formatTime(rec.breakIn)
+            : _locatorSlotOrBlank(rec, 'PM IN');
+        pmOut = rec.timeOut != null
+            ? _formatTime(rec.timeOut)
+            : _locatorSlotOrBlank(rec, 'PM OUT');
+      } else if (_isOnFieldByLocator(rec)) {
+        amIn = _locatorSlotOrBlank(rec, 'AM IN');
+        amOut = _locatorSlotOrBlank(rec, 'AM OUT');
+        pmIn = _locatorSlotOrBlank(rec, 'PM IN');
+        pmOut = _locatorSlotOrBlank(rec, 'PM OUT');
+      } else {
+        statusText = remark.isNotEmpty
+            ? remark
+            : (displayVal == 'ABSENT' ? 'ABSENT' : '');
+        (amIn, amOut, pmIn, pmOut) = _statusPunchCells(statusText, punchMode);
+      }
       final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
       final statusColorHex = _excelColorHexForStatus(
-        amIn.isNotEmpty ? amIn : null,
+        statusText.isNotEmpty ? statusText : null,
         isHoliday: isHoliday,
       );
       final undertimeColorHex = !isNonScheduled && (uh > 0 || um > 0)

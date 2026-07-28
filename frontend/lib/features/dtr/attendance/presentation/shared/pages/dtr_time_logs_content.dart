@@ -2270,8 +2270,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     TimeOfDay? timeOut = timeOutLocal != null
         ? TimeOfDay(hour: timeOutLocal.hour, minute: timeOutLocal.minute)
         : null;
-    DateTime recordDate = r.recordDate;
-    final originalRecordDate = recordDate;
+    final recordDate = r.recordDate;
     final originalTimeIn = timeIn;
     final originalBreakOut = breakOut;
     final originalBreakIn = breakIn;
@@ -2361,20 +2360,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               }
             }
 
-            final bool hasAnyTime;
-            if (isAmOnly) {
-              hasAnyTime = timeIn != null || breakOut != null;
-            } else if (isPmOnly) {
-              hasAnyTime = breakIn != null || timeOut != null;
-            } else if (isSingleSession) {
-              hasAnyTime = timeIn != null || timeOut != null;
-            } else {
-              hasAnyTime =
-                  timeIn != null ||
-                  breakOut != null ||
-                  breakIn != null ||
-                  timeOut != null;
-            }
             final canSave = validationMessage == null;
             return Material(
               color: AppTheme.dashPanelOf(ctx),
@@ -2460,79 +2445,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   compact: true,
                                 ),
                             ],
-                          ),
-                          const SizedBox(height: 14),
-                          Material(
-                            color: AppTheme.dashInputFillOf(ctx),
-                            borderRadius: BorderRadius.circular(12),
-                            child: InkWell(
-                              onTap: () async {
-                                final d = await showDatePicker(
-                                  context: ctx,
-                                  initialDate: recordDate,
-                                  firstDate: DateTime(2020),
-                                  lastDate: DateTime(2030),
-                                );
-                                if (d != null) {
-                                  setState(() => recordDate = d);
-                                }
-                              },
-                              borderRadius: BorderRadius.circular(12),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 14,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.calendar_today_rounded,
-                                      size: 20,
-                                      color: AppTheme.dashIsDark(ctx)
-                                          ? AppTheme.primaryNavyLight
-                                          : AppTheme.primaryNavy,
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            'Correction date',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                              color:
-                                                  AppTheme.dashTextSecondaryOf(
-                                                    ctx,
-                                                  ),
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            _formatDateWithWeekday(recordDate),
-                                            style: TextStyle(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w600,
-                                              color: AppTheme.dashTextPrimaryOf(
-                                                ctx,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Icon(
-                                      Icons.chevron_right_rounded,
-                                      color: AppTheme.dashTextSecondaryOf(
-                                        ctx,
-                                      ).withValues(alpha: 0.7),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
                           ),
                           const SizedBox(height: 16),
                           Container(
@@ -2729,29 +2641,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               onClear: () => setState(() => timeOut = null),
                             ),
                           ],
-                          if (hasAnyTime) ...[
-                            const SizedBox(height: 8),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton.icon(
-                                onPressed: () => setState(() {
-                                  if (!isPmOnly) timeIn = null;
-                                  if (!isPmOnly && !isSingleSession) {
-                                    breakOut = null;
-                                  }
-                                  if (!isAmOnly && !isSingleSession) {
-                                    breakIn = null;
-                                  }
-                                  if (!isAmOnly) timeOut = null;
-                                }),
-                                icon: const Icon(
-                                  Icons.cleaning_services_rounded,
-                                  size: 18,
-                                ),
-                                label: const Text('Clear all times'),
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                     ),
@@ -2763,7 +2652,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                       children: [
                         TextButton(
                           onPressed: () => setState(() {
-                            recordDate = originalRecordDate;
                             timeIn = originalTimeIn;
                             breakOut = originalBreakOut;
                             breakIn = originalBreakIn;

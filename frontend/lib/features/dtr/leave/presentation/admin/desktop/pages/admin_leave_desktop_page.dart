@@ -1007,10 +1007,13 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           builder: (_) => const AdminMonthlyAccrualDialog(),
         );
     if (!mounted || result == null) return;
+    final attendanceRows = result.attendanceDeductions?.rowsUpdated ?? 0;
     _showMessage(
-      result.rowsUpdated > 0
-          ? 'Monthly accrual applied for ${result.targetYearMonth}: ${result.rowsUpdated} balance rows updated.'
-          : 'Monthly accrual completed. No balances changed.',
+      result.totalRowsUpdated > 0
+          ? 'Month-end processing completed for ${result.targetYearMonth}: '
+                '${result.rowsUpdated} credit row(s) and '
+                '$attendanceRows DTR deduction row(s) updated.'
+          : 'Month-end processing completed. No balances changed.',
     );
     await _loadRequests();
   }
@@ -1247,7 +1250,7 @@ class _AdminHeaderCard extends StatelessWidget {
         ),
       if (onMonthlyAccrual != null)
         _HeaderMenuAction(
-          label: 'Run Monthly Accrual',
+          label: 'Run Month End',
           icon: Icons.event_repeat_rounded,
           onSelected: onMonthlyAccrual!,
         ),

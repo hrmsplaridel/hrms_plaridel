@@ -62,6 +62,8 @@ class _DtrReportsState extends State<DtrReports> {
 
   /// Official hours string from assigned shift, e.g. "8:00AM-12:00PM 01:00PM-5:00PM".
   String? _shiftOfficialHours;
+  double? _shiftWorkHoursPerDay;
+  String? _shiftPunchMode;
 
   /// Active assignment window (calendar dates) for the selected employee; drives export + summary.
   DateTime? _assignmentEffectiveFrom;
@@ -216,12 +218,29 @@ class _DtrReportsState extends State<DtrReports> {
         String? officialHours;
         final st = m['start_time'];
         final et = m['end_time'];
+        final be = m['break_end'];
         if (st != null && et != null) {
           officialHours = _formatOfficialHours(st.toString(), et.toString());
         }
+        final startMinutes = _parseShiftClockMinutes(st);
+        final endMinutes = _parseShiftClockMinutes(et);
+        final breakEndMinutes = _parseShiftClockMinutes(be);
+        final punchMode = _resolveReportPunchMode(
+          m['punch_mode']?.toString(),
+          startMinutes: startMinutes,
+          endMinutes: endMinutes,
+          breakEndMinutes: breakEndMinutes,
+        );
         return _DtrAssignmentInfo(
           workingDays: (days != null && days.isNotEmpty) ? days : null,
           officialHours: officialHours,
+          workHoursPerDay: _reportShiftWorkHours(
+            startMinutes: startMinutes,
+            endMinutes: endMinutes,
+            breakEndMinutes: breakEndMinutes,
+            punchMode: punchMode,
+          ),
+          punchMode: punchMode,
           effectiveFrom: DateTime(from.year, from.month, from.day),
           effectiveTo: to != null ? DateTime(to.year, to.month, to.day) : null,
           department: m['department_name']?.toString().trim(),
@@ -243,6 +262,8 @@ class _DtrReportsState extends State<DtrReports> {
     setState(() {
       _shiftWorkingDays = info.workingDays;
       _shiftOfficialHours = info.officialHours;
+      _shiftWorkHoursPerDay = info.workHoursPerDay;
+      _shiftPunchMode = info.punchMode;
       _assignmentEffectiveFrom = info.effectiveFrom;
       _assignmentEffectiveTo = info.effectiveTo;
     });
@@ -252,6 +273,8 @@ class _DtrReportsState extends State<DtrReports> {
     return _DtrAssignmentInfo(
       workingDays: _shiftWorkingDays,
       officialHours: _shiftOfficialHours,
+      workHoursPerDay: _shiftWorkHoursPerDay,
+      punchMode: _shiftPunchMode,
       effectiveFrom: _assignmentEffectiveFrom,
       effectiveTo: _assignmentEffectiveTo,
     );
@@ -488,6 +511,8 @@ class _DtrReportsState extends State<DtrReports> {
             end: end,
             recordsByDate: recordsByDate,
             officialHours: _shiftOfficialHours,
+            scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+            punchMode: _shiftPunchMode,
             workingDays: _shiftWorkingDays,
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
@@ -504,6 +529,8 @@ class _DtrReportsState extends State<DtrReports> {
             end: end,
             recordsByDate: recordsByDate,
             officialHours: _shiftOfficialHours,
+            scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+            punchMode: _shiftPunchMode,
             workingDays: _shiftWorkingDays,
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
@@ -524,6 +551,8 @@ class _DtrReportsState extends State<DtrReports> {
             end: end,
             recordsByDate: recordsByDate,
             officialHours: _shiftOfficialHours,
+            scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+            punchMode: _shiftPunchMode,
             workingDays: _shiftWorkingDays,
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
@@ -705,6 +734,8 @@ class _DtrReportsState extends State<DtrReports> {
           department: department,
           position: position,
           officialHours: _shiftOfficialHours,
+          scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+          punchMode: _shiftPunchMode,
           workingDays: _shiftWorkingDays,
           assignmentEffectiveFrom: _assignmentEffectiveFrom,
           assignmentEffectiveTo: _assignmentEffectiveTo,
@@ -731,6 +762,8 @@ class _DtrReportsState extends State<DtrReports> {
           department: department,
           position: position,
           officialHours: _shiftOfficialHours,
+          scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+          punchMode: _shiftPunchMode,
           workingDays: _shiftWorkingDays,
           assignmentEffectiveFrom: _assignmentEffectiveFrom,
           assignmentEffectiveTo: _assignmentEffectiveTo,
@@ -896,6 +929,8 @@ class _DtrReportsState extends State<DtrReports> {
       department: _nonEmpty(assignment.department) ?? employee.departmentName,
       position: _nonEmpty(assignment.position),
       officialHours: assignment.officialHours,
+      scheduledWorkHoursPerDay: assignment.workHoursPerDay,
+      punchMode: assignment.punchMode,
       workingDays: assignment.workingDays,
       assignmentEffectiveFrom: assignment.effectiveFrom,
       assignmentEffectiveTo: assignment.effectiveTo,
@@ -2744,10 +2779,70 @@ class _DtrReportsState extends State<DtrReports> {
   }
 }
 
+int? _parseShiftClockMinutes(dynamic value) {
+  if (value == null) return null;
+  final match = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch(value.toString());
+  if (match == null) return null;
+  final hour = int.tryParse(match.group(1)!);
+  final minute = int.tryParse(match.group(2)!);
+  if (hour == null ||
+      minute == null ||
+      hour < 0 ||
+      hour > 23 ||
+      minute < 0 ||
+      minute > 59) {
+    return null;
+  }
+  return hour * 60 + minute;
+}
+
+String _resolveReportPunchMode(
+  String? value, {
+  required int? startMinutes,
+  required int? endMinutes,
+  required int? breakEndMinutes,
+}) {
+  final mode = value?.trim().toLowerCase() ?? 'auto';
+  if (const {
+    'full_day',
+    'am_only',
+    'pm_only',
+    'single_session',
+  }.contains(mode)) {
+    return mode;
+  }
+  if (startMinutes == null) return 'auto';
+  if (startMinutes >= 12 * 60) return 'pm_only';
+  if (breakEndMinutes == null && endMinutes != null && endMinutes <= 13 * 60) {
+    return 'am_only';
+  }
+  return 'full_day';
+}
+
+double? _reportShiftWorkHours({
+  required int? startMinutes,
+  required int? endMinutes,
+  required int? breakEndMinutes,
+  required String punchMode,
+}) {
+  if (startMinutes == null || endMinutes == null) return null;
+  var spanMinutes = endMinutes - startMinutes;
+  if (spanMinutes <= 0) spanMinutes += 24 * 60;
+  if (punchMode == 'full_day') {
+    final lunchMinutes = breakEndMinutes == null
+        ? 60
+        : (breakEndMinutes - 12 * 60).clamp(0, 24 * 60).toInt();
+    spanMinutes = (spanMinutes - lunchMinutes).clamp(0, 24 * 60).toInt();
+  }
+  return spanMinutes / 60;
+}
+
 class _DtrAssignmentInfo {
   const _DtrAssignmentInfo({
     this.workingDays,
     this.officialHours,
+    this.workHoursPerDay,
+    this.punchMode,
     this.effectiveFrom,
     this.effectiveTo,
     this.department,
@@ -2756,6 +2851,8 @@ class _DtrAssignmentInfo {
 
   final List<int>? workingDays;
   final String? officialHours;
+  final double? workHoursPerDay;
+  final String? punchMode;
   final DateTime? effectiveFrom;
   final DateTime? effectiveTo;
   final String? department;

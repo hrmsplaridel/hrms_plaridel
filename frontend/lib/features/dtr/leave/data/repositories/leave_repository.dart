@@ -162,9 +162,13 @@ class MonthlyLeaveAccrualDetail {
     this.reason,
     this.monthsCredited,
     this.daysAdded,
+    this.balanceDelta,
+    this.previousDays,
+    this.expectedDays,
     this.lastAccrualDate,
     this.createdBalanceRow = false,
     this.hireProrated = false,
+    this.separationProrated = false,
     this.daysWorked,
     this.daysInMonth,
   });
@@ -176,13 +180,23 @@ class MonthlyLeaveAccrualDetail {
   final String? reason;
   final int? monthsCredited;
   final double? daysAdded;
+  final double? balanceDelta;
+  final double? previousDays;
+  final double? expectedDays;
   final String? lastAccrualDate;
   final bool createdBalanceRow;
   final bool hireProrated;
+  final bool separationProrated;
   final int? daysWorked;
   final int? daysInMonth;
 
-  bool get willChangeBalance => action == 'would_apply' || action == 'applied';
+  bool get willChangeBalance =>
+      action == 'would_apply' ||
+      action == 'applied' ||
+      action == 'would_adjust' ||
+      action == 'adjusted';
+
+  double get earnedMovement => balanceDelta ?? daysAdded ?? 0;
 
   factory MonthlyLeaveAccrualDetail.fromJson(Map<String, dynamic> json) {
     return MonthlyLeaveAccrualDetail(
@@ -193,11 +207,116 @@ class MonthlyLeaveAccrualDetail {
       reason: json['reason']?.toString(),
       monthsCredited: _parseInt(json['months_credited']),
       daysAdded: _parseDoubleValue(json['days_added']),
+      balanceDelta: _parseDoubleValue(json['balance_delta']),
+      previousDays: _parseDoubleValue(json['previous_days']),
+      expectedDays: _parseDoubleValue(json['expected_days']),
       lastAccrualDate: json['last_accrual_date']?.toString(),
       createdBalanceRow: json['created_balance_row'] == true,
       hireProrated: json['hire_prorated'] == true,
+      separationProrated: json['separation_prorated'] == true,
       daysWorked: _parseInt(json['days_worked']),
       daysInMonth: _parseInt(json['days_in_month']),
+    );
+  }
+}
+
+class MonthlyAttendanceDeductionDetail {
+  const MonthlyAttendanceDeductionDetail({
+    required this.userId,
+    required this.employeeName,
+    required this.action,
+    required this.computedDays,
+    required this.deductedDays,
+    required this.withoutPayDays,
+    required this.balanceDelta,
+    required this.lateMinutes,
+    required this.undertimeMinutes,
+    required this.absenceMinutes,
+  });
+
+  final String userId;
+  final String employeeName;
+  final String action;
+  final double computedDays;
+  final double deductedDays;
+  final double withoutPayDays;
+  final double balanceDelta;
+  final int lateMinutes;
+  final int undertimeMinutes;
+  final int absenceMinutes;
+
+  bool get willChangeBalance =>
+      action == 'would_apply' ||
+      action == 'applied' ||
+      action == 'adjusted' ||
+      balanceDelta != 0;
+
+  factory MonthlyAttendanceDeductionDetail.fromJson(Map<String, dynamic> json) {
+    return MonthlyAttendanceDeductionDetail(
+      userId: json['user_id']?.toString() ?? '',
+      employeeName: json['employee_name']?.toString() ?? 'Unnamed employee',
+      action: json['action']?.toString() ?? '',
+      computedDays: _parseDoubleValue(json['computed_days']) ?? 0,
+      deductedDays: _parseDoubleValue(json['deducted_days']) ?? 0,
+      withoutPayDays: _parseDoubleValue(json['without_pay_days']) ?? 0,
+      balanceDelta: _parseDoubleValue(json['balance_delta']) ?? 0,
+      lateMinutes: _parseInt(json['late_minutes']) ?? 0,
+      undertimeMinutes: _parseInt(json['undertime_minutes']) ?? 0,
+      absenceMinutes: _parseInt(json['absence_minutes']) ?? 0,
+    );
+  }
+}
+
+class MonthlyAttendanceDeductionResult {
+  const MonthlyAttendanceDeductionResult({
+    required this.rowsUpdated,
+    required this.rowsSkipped,
+    required this.totalComputedDays,
+    required this.totalDeductedDays,
+    required this.totalWithoutPayDays,
+    required this.details,
+  });
+
+  final int rowsUpdated;
+  final int rowsSkipped;
+  final double totalComputedDays;
+  final double totalDeductedDays;
+  final double totalWithoutPayDays;
+  final List<MonthlyAttendanceDeductionDetail> details;
+
+  factory MonthlyAttendanceDeductionResult.fromJson(Map<String, dynamic> json) {
+    final rawDetails = json['details'];
+    return MonthlyAttendanceDeductionResult(
+      rowsUpdated:
+          _parseInt(json['rowsUpdated']) ??
+          _parseInt(json['rows_updated']) ??
+          0,
+      rowsSkipped:
+          _parseInt(json['rowsSkipped']) ??
+          _parseInt(json['rows_skipped']) ??
+          0,
+      totalComputedDays:
+          _parseDoubleValue(json['totalComputedDays']) ??
+          _parseDoubleValue(json['total_computed_days']) ??
+          0,
+      totalDeductedDays:
+          _parseDoubleValue(json['totalDeductedDays']) ??
+          _parseDoubleValue(json['total_deducted_days']) ??
+          0,
+      totalWithoutPayDays:
+          _parseDoubleValue(json['totalWithoutPayDays']) ??
+          _parseDoubleValue(json['total_without_pay_days']) ??
+          0,
+      details: rawDetails is List
+          ? rawDetails
+                .whereType<Map>()
+                .map(
+                  (item) => MonthlyAttendanceDeductionDetail.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .toList()
+          : const <MonthlyAttendanceDeductionDetail>[],
     );
   }
 }
@@ -215,6 +334,7 @@ class MonthlyLeaveAccrualResult {
     required this.missingBalanceRowsCreated,
     required this.missingBalanceRowsDetected,
     required this.details,
+    this.attendanceDeductions,
   });
 
   final String targetYearMonth;
@@ -227,6 +347,10 @@ class MonthlyLeaveAccrualResult {
   final int missingBalanceRowsCreated;
   final int missingBalanceRowsDetected;
   final List<MonthlyLeaveAccrualDetail> details;
+  final MonthlyAttendanceDeductionResult? attendanceDeductions;
+
+  int get totalRowsUpdated =>
+      rowsUpdated + (attendanceDeductions?.rowsUpdated ?? 0);
 
   factory MonthlyLeaveAccrualResult.fromJson(Map<String, dynamic> json) {
     final rawLeaveTypes = json['leaveTypes'] ?? json['leave_types'];
@@ -273,6 +397,15 @@ class MonthlyLeaveAccrualResult {
                 )
                 .toList()
           : const <MonthlyLeaveAccrualDetail>[],
+      attendanceDeductions: json['attendanceDeductions'] is Map
+          ? MonthlyAttendanceDeductionResult.fromJson(
+              Map<String, dynamic>.from(json['attendanceDeductions'] as Map),
+            )
+          : json['attendance_deductions'] is Map
+          ? MonthlyAttendanceDeductionResult.fromJson(
+              Map<String, dynamic>.from(json['attendance_deductions'] as Map),
+            )
+          : null,
     );
   }
 }
