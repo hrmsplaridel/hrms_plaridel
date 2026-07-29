@@ -657,11 +657,14 @@ function bulletLines(items, limit = 7) {
 
 function structuredReply(language, { title, summary, details = [], nextStep, limit = 7 }) {
   const labels = responseLabels(language);
-  const parts = [
-    localizeTitle(title, language),
-    '',
-    friendlyText(summary, language),
-  ].filter((part) => part != null && part !== '');
+  const parts = [];
+  const localizedTitle = localizeTitle(title, language);
+  const localizedSummary = friendlyText(summary, language);
+  if (localizedTitle) parts.push(localizedTitle);
+  if (localizedSummary) {
+    if (parts.length > 0) parts.push('');
+    parts.push(localizedSummary);
+  }
   const lines = bulletLines(
     details.map((detail) => friendlyDetailLine(detail, language)),
     limit
@@ -1960,7 +1963,12 @@ function dtrRangeSummaryReply(context, message) {
       : `Your DTR statuses for ${label} have no obvious issues.`;
   })();
   const statusLines = [
-    ...records.map((record) => {
+    ...records.map((record) => ({ record, date: fmtDate(record.attendance_date) })),
+    ...noRecords.map((day) => ({ day, date: fmtDate(day.attendance_date) })),
+  ]
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .map(({ record, day }) => {
+      if (record) {
       const date = fmtFriendlyDate(record.attendance_date);
       const status = lower(record.status);
       if (status === 'on_leave' || record.leave_type) {
@@ -1986,16 +1994,12 @@ function dtrRangeSummaryReply(context, message) {
         return `${date}: Incomplete${missing.length > 0 ? ` - missing ${missing.join(', ')}` : ''}`;
       }
       return `${date}: ${statusLabel(record.status)}`;
-    }),
-    ...noRecords.map(
-      (day) => {
-        const date = fmtFriendlyDate(day.attendance_date);
-        if (language === 'bisaya') return `${date}: Walay DTR record (possible absent)`;
-        if (language === 'tagalog') return `${date}: Walang DTR record (possible absent)`;
-        return `${date}: No DTR record (possible absence)`;
       }
-    ),
-  ].sort((a, b) => a.localeCompare(b));
+      const date = fmtFriendlyDate(day.attendance_date);
+      if (language === 'bisaya') return `${date}: Walay DTR record (possible absent)`;
+      if (language === 'tagalog') return `${date}: Walang DTR record (possible absent)`;
+      return `${date}: No DTR record (possible absence)`;
+    });
   const countLines = [
     totals.present > 0 ? `Present/complete: ${totals.present}` : null,
     totals.incomplete > 0 ? `Incomplete: ${totals.incomplete}` : null,
@@ -2021,14 +2025,26 @@ function dtrRangeSummaryReply(context, message) {
           ? 'Pumili ng isang issue date kung gusto mong i-check ang missing logs, leave, o locator coverage.'
           : 'Choose an issue date if you want me to check its missing logs, leave, or locator coverage.'
       : null;
+  const details = wantsDetailedBreakdown
+    ? [...countLines, ...statusLines, ...metricLines]
+    : statusLines;
+  const startMs = Date.parse(`${context.date_range?.startDate || ''}T00:00:00Z`);
+  const endMs = Date.parse(`${context.date_range?.endDate || ''}T00:00:00Z`);
+  const rangeDayCount =
+    Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+      ? Math.floor((endMs - startMs) / 86400000) + 1
+      : null;
+  const showCompleteShortRange = rangeDayCount != null && rangeDayCount <= 16;
   return structuredReply(language, {
     title: `DTR status for ${label}`,
     summary,
-    details: wantsDetailedBreakdown
-      ? [...countLines, ...statusLines, ...metricLines]
-      : statusLines,
+    details,
     nextStep: issueNextStep,
-    limit: wantsDetailedBreakdown ? 14 : 10,
+    limit: showCompleteShortRange
+      ? details.filter(Boolean).length
+      : wantsDetailedBreakdown
+        ? 14
+        : 10,
   });
 }
 

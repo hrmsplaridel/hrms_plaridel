@@ -64,6 +64,82 @@ function sortByLoggedAtAsc(items, getLoggedAt) {
 }
 
 /**
+ * GET /api/biometric-attendance-logs
+ * Paginated admin view of raw punches already synchronized into HRMS.
+ */
+router.get('/', protect, requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const search = String(req.query.search || '').trim();
+    const source = String(req.query.source || '').trim();
+    const dateFrom = String(req.query.date_from || '').trim();
+    const dateTo = String(req.query.date_to || '').trim();
+    const conditions = [];
+    const values = [];
+
+    const addValue = (value) => {
+      values.push(value);
+      return `$${values.length}`;
+    };
+    if (search) {
+      const p = addValue(`%${search}%`);
+      conditions.push(`(
+        l.biometric_user_id ILIKE ${p}
+        OR COALESCE(u.full_name, '') ILIKE ${p}
+        OR COALESCE(u.employee_number::text, '') ILIKE ${p}
+      )`);
+    }
+    if (source) {
+      const p = addValue(source);
+      conditions.push(`l.source_file_name = ${p}`);
+    }
+    if (dateFrom) {
+      const p = addValue(dateFrom);
+      conditions.push(`(l.logged_at AT TIME ZONE 'Asia/Manila')::date >= ${p}::date`);
+    }
+    if (dateTo) {
+      const p = addValue(dateTo);
+      conditions.push(`(l.logged_at AT TIME ZONE 'Asia/Manila')::date <= ${p}::date`);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM biometric_attendance_logs l
+       JOIN users u ON u.id = l.user_id
+       ${where}`,
+      values
+    );
+    const limitParam = addValue(limit);
+    const offsetParam = addValue(offset);
+    const rowsResult = await pool.query(
+      `SELECT l.id, l.user_id, l.biometric_user_id, l.logged_at,
+              l.verify_code, l.punch_code, l.work_code,
+              l.source_file_name, l.imported_at,
+              u.full_name AS employee_name,
+              u.employee_number
+       FROM biometric_attendance_logs l
+       JOIN users u ON u.id = l.user_id
+       ${where}
+       ORDER BY l.logged_at DESC, l.id DESC
+       LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      values
+    );
+
+    res.json({
+      total: countResult.rows[0]?.total || 0,
+      limit,
+      offset,
+      rows: rowsResult.rows,
+    });
+  } catch (err) {
+    console.error('[biometric-attendance-logs GET]', err);
+    res.status(500).json({ error: 'Failed to fetch biometric attendance logs' });
+  }
+});
+
+/**
  * GET /api/biometric-attendance-logs/devices
  * Fetch active biometric devices for the external sync service.
  * Auth: X-Api-Key header

@@ -111,18 +111,20 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   final GlobalKey _profileHeroKey = GlobalKey();
   final GlobalKey _profileTabsKey = GlobalKey();
   final GlobalKey _profileContentKey = GlobalKey();
+  late final Widget _settingsPanelWidget;
 
-  Widget _settingsPanel() => DashboardProfilePanel(
-    key: _settingsPanelKey,
-    onBack: _closeMyProfile,
-    tutorialHeroKey: _profileHeroKey,
-    tutorialTabsKey: _profileTabsKey,
-    tutorialContentKey: _profileContentKey,
-  );
+  Widget _settingsPanel() => _settingsPanelWidget;
 
   @override
   void initState() {
     super.initState();
+    _settingsPanelWidget = DashboardProfilePanel(
+      key: _settingsPanelKey,
+      onBack: _closeMyProfile,
+      tutorialHeroKey: _profileHeroKey,
+      tutorialTabsKey: _profileTabsKey,
+      tutorialContentKey: _profileContentKey,
+    );
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
