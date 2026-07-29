@@ -18,38 +18,57 @@ class _HrmsAssistantFloatingFrameState
     extends State<HrmsAssistantFloatingFrame> {
   static const double _desktopBreakpoint = 700;
   static const double _edgePadding = 16;
+  static const double _mobileEdgePadding = 12;
   static const double _desktopPanelWidth = 440;
   static const double _desktopPanelMaxHeight = 720;
+  static const double _mobilePanelMaxWidth = 360;
+  static const double _mobilePanelMaxHeight = 560;
 
   Offset? _position;
 
-  Offset _clampPosition(Offset value, Size viewport, Size panel) {
+  Offset _clampPosition(
+    Offset value,
+    Size viewport,
+    Size panel, {
+    double edgePadding = _edgePadding,
+  }) {
     final maxX = math.max(
-      _edgePadding,
-      viewport.width - panel.width - _edgePadding,
+      edgePadding,
+      viewport.width - panel.width - edgePadding,
     );
     final maxY = math.max(
-      _edgePadding,
-      viewport.height - panel.height - _edgePadding,
+      edgePadding,
+      viewport.height - panel.height - edgePadding,
     );
     return Offset(
-      value.dx.clamp(_edgePadding, maxX).toDouble(),
-      value.dy.clamp(_edgePadding, maxY).toDouble(),
+      value.dx.clamp(edgePadding, maxX).toDouble(),
+      value.dy.clamp(edgePadding, maxY).toDouble(),
     );
   }
 
-  void _movePanel(DragUpdateDetails details, Size viewport, Size panel) {
+  void _movePanel(
+    DragUpdateDetails details,
+    Size viewport,
+    Size panel, {
+    double edgePadding = _edgePadding,
+  }) {
     final current = _clampPosition(
       _position ??
           Offset(
-            viewport.width - panel.width - _edgePadding,
-            math.min(72.0, viewport.height - panel.height - _edgePadding),
+            viewport.width - panel.width - edgePadding,
+            math.min(72.0, viewport.height - panel.height - edgePadding),
           ),
       viewport,
       panel,
+      edgePadding: edgePadding,
     );
     setState(() {
-      _position = _clampPosition(current + details.delta, viewport, panel);
+      _position = _clampPosition(
+        current + details.delta,
+        viewport,
+        panel,
+        edgePadding: edgePadding,
+      );
     });
   }
 
@@ -60,12 +79,19 @@ class _HrmsAssistantFloatingFrameState
         builder: (context, constraints) {
           final viewport = Size(constraints.maxWidth, constraints.maxHeight);
           final mobile = viewport.width < _desktopBreakpoint;
+          final edgePadding = mobile ? _mobileEdgePadding : _edgePadding;
           final panel = mobile
               ? Size(
-                  math.max(0.0, viewport.width - 16.0),
                   math.min(
-                    math.max(360.0, viewport.height * 0.78),
-                    math.max(0.0, viewport.height - 16.0),
+                    _mobilePanelMaxWidth,
+                    math.max(0.0, viewport.width - (edgePadding * 2)),
+                  ),
+                  math.min(
+                    _mobilePanelMaxHeight,
+                    math.min(
+                      math.max(400.0, viewport.height * 0.62),
+                      math.max(0.0, viewport.height - (edgePadding * 2)),
+                    ),
                   ),
                 )
               : Size(
@@ -78,20 +104,21 @@ class _HrmsAssistantFloatingFrameState
                     math.max(0.0, viewport.height - (_edgePadding * 2)),
                   ),
                 );
-          final position = mobile
-              ? Offset(8.0, math.max(8.0, viewport.height - panel.height - 8.0))
-              : _clampPosition(
-                  _position ??
-                      Offset(
-                        viewport.width - panel.width - _edgePadding,
-                        math.min(
+          final position = _clampPosition(
+            _position ??
+                Offset(
+                  viewport.width - panel.width - edgePadding,
+                  mobile
+                      ? viewport.height - panel.height - edgePadding
+                      : math.min(
                           72.0,
-                          viewport.height - panel.height - _edgePadding,
+                          viewport.height - panel.height - edgePadding,
                         ),
-                      ),
-                  viewport,
-                  panel,
-                );
+                ),
+            viewport,
+            panel,
+            edgePadding: edgePadding,
+          );
 
           return Stack(
             children: [
@@ -118,24 +145,27 @@ class _HrmsAssistantFloatingFrameState
                           child: widget.child,
                         ),
                       ),
-                      if (!mobile)
-                        Positioned(
-                          key: const ValueKey(
-                            'hrms-assistant-floating-drag-handle',
-                          ),
-                          left: 0,
-                          top: 0,
-                          right: 152,
-                          height: 56,
-                          child: MouseRegion(
-                            cursor: SystemMouseCursors.move,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.translucent,
-                              onPanUpdate: (details) =>
-                                  _movePanel(details, viewport, panel),
+                      Positioned(
+                        key: const ValueKey(
+                          'hrms-assistant-floating-drag-handle',
+                        ),
+                        left: 0,
+                        top: 0,
+                        right: mobile ? 136 : 152,
+                        height: 56,
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.move,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onPanUpdate: (details) => _movePanel(
+                              details,
+                              viewport,
+                              panel,
+                              edgePadding: edgePadding,
                             ),
                           ),
                         ),
+                      ),
                     ],
                   ),
                 ),
