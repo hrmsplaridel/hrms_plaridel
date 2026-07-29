@@ -454,7 +454,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   ) async {
     switch (action.type) {
       case 'send_prompt':
-        final prompt = action.prompt?.trim();
+        final prompt = _resolvedActionPrompt(action);
         if (prompt == null || prompt.isEmpty) return;
         await _send(prompt, intent: action.intent);
         return;
@@ -507,6 +507,20 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         );
         return;
     }
+  }
+
+  String? _resolvedActionPrompt(DtrAssistantAction action) {
+    if (action.id == 'generate_dtr_export') {
+      final startDate = action.payload['startDate']?.toString().trim();
+      final endDate = action.payload['endDate']?.toString().trim();
+      if (startDate != null && startDate.isNotEmpty) {
+        if (endDate == null || endDate.isEmpty || endDate == startDate) {
+          return 'Generate my DTR export for $startDate.';
+        }
+        return 'Generate my DTR export from $startDate to $endDate.';
+      }
+    }
+    return action.prompt?.trim();
   }
 
   void _runAutoAction(DtrAssistantMessage message) {
