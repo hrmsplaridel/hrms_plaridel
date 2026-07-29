@@ -90,11 +90,14 @@ class _DtrReportsState extends State<DtrReports> {
     if (!mounted) return;
     if (dtr.employees.isNotEmpty) {
       final availableIds = dtr.employees.map((e) => e.id).toSet();
+      final employeesByDisplayedOrder = List<EmployeeOption>.from(
+        dtr.employees,
+      )..sort(_compareEmployeesByNumber);
       setState(() {
         _selectedEmployeeIds.removeWhere((id) => !availableIds.contains(id));
         if (_selectedEmployeeId == null ||
             !availableIds.contains(_selectedEmployeeId)) {
-          _selectedEmployeeId = dtr.employees.first.id;
+          _selectedEmployeeId = employeesByDisplayedOrder.first.id;
         }
       });
       _loadEmployeeRecords();

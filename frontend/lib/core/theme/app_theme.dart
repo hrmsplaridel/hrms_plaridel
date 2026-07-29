@@ -214,6 +214,7 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
+      fontFamily: fontFamily,
       colorScheme: ColorScheme.fromSeed(
         seedColor: primaryNavy,
         primary: primaryNavy,
@@ -264,6 +265,7 @@ class AppTheme {
     const canvas = Color(0xFF12151C);
     return ThemeData(
       useMaterial3: true,
+      fontFamily: fontFamily,
       brightness: Brightness.dark,
       colorScheme: ColorScheme.dark(
         primary: primaryNavyLight,

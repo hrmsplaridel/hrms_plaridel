@@ -522,16 +522,13 @@ class DtrExport {
   }) {
     const double lineWidth = 170;
 
-    final whLabel = policy.workHoursPerDay % 1 == 0
-        ? policy.workHoursPerDay.toStringAsFixed(0)
-        : policy.workHoursPerDay.toStringAsFixed(2);
     final hasMultiplier = (policy.deductionMultiplier - 1.0).abs() > 0.0001;
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
         pw.Text(
-          'Equivalent Day (deduction, $whLabel hr/day): ${totals.equivalentDay.toStringAsFixed(3)}'
+          'Equivalent Day (deduction): ${totals.equivalentDay.toStringAsFixed(3)}'
           '${hasMultiplier ? '  |  Adjusted: ${totals.adjustedEquivalentDay.toStringAsFixed(3)}' : ''}',
           style: const pw.TextStyle(fontSize: 6),
         ),
@@ -836,7 +833,7 @@ class DtrExport {
     if (center) align = pw.TextAlign.center;
     if (right) align = pw.TextAlign.right;
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 8.5),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 6.0),
       child: pw.Text(
         text,
         style: pw.TextStyle(
@@ -1120,7 +1117,6 @@ class DtrExport {
     final undertimeDeductMin = policy.deductUndertime ? totalUndertimeMin : 0;
     final lateDeductMin = policy.deductLate ? totalLateMin : 0;
     final totalDeductMin = undertimeDeductMin + lateDeductMin;
-
     final (eq, adj) = _computeEquivalentDay(
       minutes: totalDeductMin,
       workHoursPerDay: policy.workHoursPerDay,
@@ -1586,9 +1582,6 @@ class DtrExport {
       useEquivalentDayConversion: policy.useEquivalentDayConversion,
       deductionMultiplier: policy.deductionMultiplier,
     );
-    final whLabel = policy.workHoursPerDay % 1 == 0
-        ? policy.workHoursPerDay.toStringAsFixed(0)
-        : policy.workHoursPerDay.toStringAsFixed(2);
     final hasMultiplier = (policy.deductionMultiplier - 1.0).abs() > 0.0001;
     final footerCenterStyle = CellStyle(
       fontSize: 9,
@@ -1598,7 +1591,7 @@ class DtrExport {
       0,
       row,
       TextCellValue(
-        'Equivalent Day (deduction, $whLabel hr/day): ${equivalentDay.toStringAsFixed(3)}'
+        'Equivalent Day (deduction): ${equivalentDay.toStringAsFixed(3)}'
         '${hasMultiplier ? '  |  Adjusted: ${adjustedEquivalentDay.toStringAsFixed(3)}' : ''}',
       ),
       footerCenterStyle,
@@ -1866,15 +1859,12 @@ class DtrExport {
       useEquivalentDayConversion: policy.useEquivalentDayConversion,
       deductionMultiplier: policy.deductionMultiplier,
     );
-    final whLabel = policy.workHoursPerDay % 1 == 0
-        ? policy.workHoursPerDay.toStringAsFixed(0)
-        : policy.workHoursPerDay.toStringAsFixed(2);
     final hasMultiplier = (policy.deductionMultiplier - 1.0).abs() > 0.0001;
     oneCopy.writeln(
       '<div style="text-align:center;font-size:10pt;margin-top:12px;line-height:1.4;">',
     );
     oneCopy.writeln(
-      '<p style="text-align:center;font-size:10pt;margin:4px 0;">Equivalent Day (deduction, $whLabel hr/day): ${equivalentDay.toStringAsFixed(3)}${hasMultiplier ? '  |  Adjusted: ${adjustedEquivalentDay.toStringAsFixed(3)}' : ''}</p>',
+      '<p style="text-align:center;font-size:10pt;margin:4px 0;">Equivalent Day (deduction): ${equivalentDay.toStringAsFixed(3)}${hasMultiplier ? '  |  Adjusted: ${adjustedEquivalentDay.toStringAsFixed(3)}' : ''}</p>',
     );
     oneCopy.writeln(
       '<p style="text-align:center;font-size:10pt;margin:4px 0;">I certify on my honor that the above is a true and correct report of the hours of work performed, record of which was made daily at the time of arrival and departure from office.</p>',
@@ -2104,15 +2094,12 @@ class DtrExport {
       useEquivalentDayConversion: policy.useEquivalentDayConversion,
       deductionMultiplier: policy.deductionMultiplier,
     );
-    final whLabel = policy.workHoursPerDay % 1 == 0
-        ? policy.workHoursPerDay.toStringAsFixed(0)
-        : policy.workHoursPerDay.toStringAsFixed(2);
     final hasMultiplier = (policy.deductionMultiplier - 1.0).abs() > 0.0001;
     oneCopy.writeln(
       '<div style="text-align:center;font-size:10pt;margin-top:12px;line-height:1.4;">',
     );
     oneCopy.writeln(
-      '<p style="text-align:center;font-size:10pt;margin:4px 0;">Equivalent Day (deduction, $whLabel hr/day): ${equivalentDay.toStringAsFixed(3)}${hasMultiplier ? '  |  Adjusted: ${adjustedEquivalentDay.toStringAsFixed(3)}' : ''}</p>',
+      '<p style="text-align:center;font-size:10pt;margin:4px 0;">Equivalent Day (deduction): ${equivalentDay.toStringAsFixed(3)}${hasMultiplier ? '  |  Adjusted: ${adjustedEquivalentDay.toStringAsFixed(3)}' : ''}</p>',
     );
     oneCopy.writeln(
       '<p style="text-align:center;font-size:10pt;margin:4px 0;">I certify on my honor that the above is a true and correct report of the hours of work performed, record of which was made daily at the time of arrival and departure from office.</p>',
