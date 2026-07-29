@@ -1869,6 +1869,70 @@ test('DTR assistant regression: range DTR status questions summarize the full ra
   assert.doesNotMatch(reply, /DTR explanation for June 2, 2026/i);
 });
 
+test('DTR assistant regression: short range status is complete, chronological, and sectioned', () => {
+  const scheduledNoRecordDates = [
+    '2026-07-02',
+    '2026-07-03',
+    '2026-07-06',
+    '2026-07-07',
+    '2026-07-08',
+    '2026-07-09',
+    '2026-07-10',
+    '2026-07-13',
+    '2026-07-14',
+    '2026-07-15',
+  ];
+  const reply = buildFastEmployeeAssistantReply(
+    'what are my dtr status in july 1 to 15',
+    {
+      date_range: {
+        label: '2026-07-01 to 2026-07-15',
+        startDate: '2026-07-01',
+        endDate: '2026-07-15',
+      },
+      dtr_records: [
+        {
+          attendance_date: '2026-07-01',
+          status: 'present',
+          time_in: '08:00',
+          time_out: '17:00',
+          total_hours: 8,
+        },
+      ],
+      dtr_calendar_days: scheduledNoRecordDates.map((attendanceDate) => ({
+        attendance_date: attendanceDate,
+        shift_id: 'shift-1',
+        shift_name: 'Regular Shift',
+        start_time: '08:00',
+        end_time: '17:00',
+      })),
+    },
+    'dtr_range_summary'
+  );
+
+  assert.match(reply, /^DTR status for .+\n\nFor /);
+  assert.doesNotMatch(reply, /Plus \d+ more/);
+  for (const date of [
+    'July 1, 2026',
+    'July 2, 2026',
+    'July 3, 2026',
+    'July 6, 2026',
+    'July 7, 2026',
+    'July 8, 2026',
+    'July 9, 2026',
+    'July 10, 2026',
+    'July 13, 2026',
+    'July 14, 2026',
+    'July 15, 2026',
+  ]) {
+    assert.match(reply, new RegExp(date));
+  }
+  assert.ok(
+    reply.indexOf('July 9, 2026') < reply.indexOf('July 10, 2026'),
+    reply
+  );
+});
+
 test('DTR assistant regression: detailed range breakdown includes only useful metrics', () => {
   const reply = buildFastEmployeeAssistantReply(
     'show my detailed DTR breakdown with hours, late, and undertime this week',
