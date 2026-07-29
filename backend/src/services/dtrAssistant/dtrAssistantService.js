@@ -957,11 +957,17 @@ function buildActions(intent, context, text, attachments = [], memory = null) {
       );
     }
     if (value !== 'dtr_export_guidance') {
+      const exportPrompt =
+        rangePayload.startDate && rangePayload.endDate
+          ? rangePayload.startDate === rangePayload.endDate
+            ? `Generate my DTR export for ${rangePayload.startDate}.`
+            : `Generate my DTR export from ${rangePayload.startDate} to ${rangePayload.endDate}.`
+          : 'Generate my DTR export for this period.';
       actions.push(
         action('generate_dtr_export', 'Generate DTR export', 'send_prompt', {
           icon: 'file_download',
           intent: 'dtr_export_guidance',
-          prompt: 'Generate my DTR export for this period.',
+          prompt: exportPrompt,
           payload: rangePayload,
         })
       );

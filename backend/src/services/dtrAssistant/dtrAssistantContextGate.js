@@ -67,6 +67,13 @@ function isContextDependentMessage(message) {
     return true;
   }
   if (/\b(instead|same one|same date|same day)\b/.test(text)) return true;
+  if (
+    /\b(?:this|that|same|selected|current)\s+(?:period|date range|range|cutoff|pay\s*period|payroll\s*period)\b/.test(
+      text
+    )
+  ) {
+    return true;
+  }
   if (/^(why|ngano|bakit)\b/.test(text)) return true;
   if (
     /\b(again|another example|same field|that field|this field|translate|bisayaa?|binisayaa?|cebuano|tagaloga?|filipino|english|ingles)\b/.test(

@@ -82,6 +82,21 @@ test('DTR assistant regression: context gate only reuses memory for real follow-
   );
   assert.equal(
     contextGate({
+      message: 'Generate my DTR export for this period.',
+      memory: {
+        intent: 'dtr_range_summary',
+        topic: 'dtr',
+        dateRange: {
+          startDate: '2026-07-01',
+          endDate: '2026-07-15',
+        },
+      },
+      scoredIntent: { intent: 'dtr_export_guidance', confidence: 0.98 },
+    }).kind,
+    'follow_up'
+  );
+  assert.equal(
+    contextGate({
       message: 'can I file WFH tomorrow?',
       memory: leaveMemory,
       scoredIntent: { intent: 'locator_availability_check', confidence: 0.98 },
@@ -2272,6 +2287,29 @@ test('DTR assistant regression: action metadata is generated for next-step work'
   assert.equal(dtrActions[0].type, 'open_dtr_time_logs');
   assert.equal(dtrActions[1].type, 'send_prompt');
   assert.match(dtrActions[1].prompt, /PM out on 2026-06-10/);
+
+  const rangeActions = assistantServiceTest.buildActions(
+    'dtr_range_summary',
+    {
+      date_range: {
+        label: 'July 1 to July 15, 2026',
+        startDate: '2026-07-01',
+        endDate: '2026-07-15',
+      },
+    },
+    'what is my DTR status from July 1 to July 15?',
+    []
+  );
+  const generateExport = rangeActions.find(
+    (action) => action.id === 'generate_dtr_export'
+  );
+  assert.ok(generateExport);
+  assert.equal(
+    generateExport.prompt,
+    'Generate my DTR export from 2026-07-01 to 2026-07-15.'
+  );
+  assert.equal(generateExport.payload.startDate, '2026-07-01');
+  assert.equal(generateExport.payload.endDate, '2026-07-15');
 
   const exportActions = assistantServiceTest.buildActions(
     'dtr_export_guidance',
