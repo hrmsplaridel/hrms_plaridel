@@ -462,14 +462,18 @@ class _AdminDashboardState extends State<AdminDashboard>
       GlobalKey<_DtrContentState>();
   static const _settingsPanelKey = PageStorageKey<String>('admin_settings');
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+  late final Widget _settingsPanelWidget;
 
-  Widget _settingsPanel() =>
-      DashboardProfilePanel(key: _settingsPanelKey, onBack: _closeMyProfile);
+  Widget _settingsPanel() => _settingsPanelWidget;
   Timer? _notificationPollTimer;
 
   @override
   void initState() {
     super.initState();
+    _settingsPanelWidget = DashboardProfilePanel(
+      key: _settingsPanelKey,
+      onBack: _closeMyProfile,
+    );
     WidgetsBinding.instance.addObserver(this);
     unawaited(FormPdf.warmupPrintAssets());
     WidgetsBinding.instance.addPostFrameCallback((_) {
