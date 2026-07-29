@@ -75,6 +75,7 @@ docs/private/
 .pub/
 build/
 coverage/
+frontend/windows/installer/output/
 
 # Symbolication related
 app.*.symbols
