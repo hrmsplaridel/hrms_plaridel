@@ -2262,12 +2262,13 @@ class _DtrReportsState extends State<DtrReports> {
     bool hasRecords = true,
     bool fullWidth = false,
     bool isResponsive = false,
+    bool dense = false,
     required Map<DateTime, TimeRecord> recordsByDate,
     required DateTime start,
     required DateTime end,
   }) {
     final dark = AppTheme.dashIsDark(context);
-    final compactPanel = !fullWidth;
+    final compactPanel = dense || !fullWidth;
     return Container(
       width: fullWidth ? null : 200,
       constraints: fullWidth
@@ -2611,12 +2612,44 @@ class _DtrReportsState extends State<DtrReports> {
         final availableWidth = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : 800.0;
+        final employeePanelWidth = (availableWidth * 0.38)
+            .clamp(250.0, 360.0)
+            .toDouble();
+        final topPanelHeight = availableWidth < 760 ? 380.0 : 340.0;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              height: 240,
-              child: _buildEmployeeListCompact(context, employees),
+              height: topPanelHeight,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    width: employeePanelWidth,
+                    child: _buildEmployeeListCompact(context, employees),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildSummaryCard(
+                      selectedName: selectedName,
+                      workingDays: workingDays,
+                      lateCount: lateCount,
+                      absentCount: absentCount,
+                      tardyCount: tardyCount,
+                      tardinessPct: tardinessPct,
+                      totalLateMinutes: totalLateMinutes,
+                      totalUndertimeMinutes: totalUndertimeMinutes,
+                      hasRecords: hasRecords,
+                      fullWidth: true,
+                      isResponsive: true,
+                      dense: true,
+                      recordsByDate: recordsByDate,
+                      start: start,
+                      end: end,
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             SizedBox(
@@ -2629,23 +2662,6 @@ class _DtrReportsState extends State<DtrReports> {
                 dtr: dtr,
                 availableWidth: availableWidth,
               ),
-            ),
-            const SizedBox(height: 16),
-            _buildSummaryCard(
-              selectedName: selectedName,
-              workingDays: workingDays,
-              lateCount: lateCount,
-              absentCount: absentCount,
-              tardyCount: tardyCount,
-              tardinessPct: tardinessPct,
-              totalLateMinutes: totalLateMinutes,
-              totalUndertimeMinutes: totalUndertimeMinutes,
-              hasRecords: hasRecords,
-              fullWidth: true,
-              isResponsive: true,
-              recordsByDate: recordsByDate,
-              start: start,
-              end: end,
             ),
           ],
         );
