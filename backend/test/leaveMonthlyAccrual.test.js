@@ -15,6 +15,9 @@ const {
 const {
   manilaCompletedYearMonthNow,
   runScheduledCompletedMonthEnd,
+  scheduleLeaveMonthlyAccrualStartupRecovery,
+  startupRecoveryDelayMs,
+  DEFAULT_STARTUP_RECOVERY_DELAY_MS,
   CRON_EXPRESSION,
   RECONCILIATION_CRON_EXPRESSION,
   MONTH_END_SCHEDULES,
@@ -177,6 +180,56 @@ test('scheduler registers initial and reconciliation month-end runs', () => {
     MONTH_END_SCHEDULES.map((schedule) => schedule.runKind),
     ['initial', 'reconciliation']
   );
+});
+
+test('startup recovery delay is configurable and safely bounded', () => {
+  assert.equal(startupRecoveryDelayMs(undefined), DEFAULT_STARTUP_RECOVERY_DELAY_MS);
+  assert.equal(startupRecoveryDelayMs('2500'), 2500);
+  assert.equal(startupRecoveryDelayMs('-1'), 0);
+  assert.equal(startupRecoveryDelayMs('999999'), 300000);
+  assert.equal(startupRecoveryDelayMs('invalid'), DEFAULT_STARTUP_RECOVERY_DELAY_MS);
+});
+
+test('startup recovery runs the shared completed-month job in the background', async () => {
+  const calls = [];
+  let scheduledCallback;
+  let scheduledDelay;
+  let unrefCalled = false;
+  const timer = {
+    unref: () => {
+      unrefCalled = true;
+    },
+  };
+  const pool = {};
+
+  const returnedTimer = scheduleLeaveMonthlyAccrualStartupRecovery(pool, {
+    enabled: true,
+    delayMs: 25,
+    timerScheduler: (callback, delay) => {
+      scheduledCallback = callback;
+      scheduledDelay = delay;
+      return timer;
+    },
+    recoveryRunner: async (receivedPool, options) => {
+      calls.push({ receivedPool, options });
+      return {
+        ran: true,
+        targetYearMonth: '2026-07',
+      };
+    },
+  });
+
+  assert.equal(returnedTimer, timer);
+  assert.equal(scheduledDelay, 25);
+  assert.equal(unrefCalled, true);
+  assert.equal(typeof scheduledCallback, 'function');
+  await scheduledCallback();
+  assert.deepEqual(calls, [
+    {
+      receivedPool: pool,
+      options: { runKind: 'startup_recovery' },
+    },
+  ]);
 });
 
 test('expected monthly accrual recalculates corrected hire and separation dates', () => {
