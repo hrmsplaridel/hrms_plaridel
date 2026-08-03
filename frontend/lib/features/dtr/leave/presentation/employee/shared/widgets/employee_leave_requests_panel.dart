@@ -231,7 +231,13 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     final reviewed = request.reviewedAt;
     final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
         ? request.reviewerName!.trim()
-        : 'Approver';
+        : 'HR/Admin';
+    final departmentHeadReviewer =
+        (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
+        ? request.departmentHeadReviewerName!.trim()
+        : 'Department Head';
+    final departmentHeadReviewedAt =
+        request.departmentHeadReviewedAt ?? reviewed;
 
     final events = [
       LeaveHistoryEvent(
@@ -245,9 +251,9 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
         dateTime:
             request.status == LeaveRequestStatus.pendingHr ||
                 request.status == LeaveRequestStatus.approved
-            ? reviewed
+            ? departmentHeadReviewedAt
             : null,
-        actor: reviewer,
+        actor: departmentHeadReviewer,
         completed:
             request.status == LeaveRequestStatus.pendingHr ||
             request.status == LeaveRequestStatus.approved,
@@ -257,9 +263,9 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
         dateTime:
             request.status == LeaveRequestStatus.pendingHr ||
                 request.status == LeaveRequestStatus.approved
-            ? reviewed
+            ? departmentHeadReviewedAt
             : null,
-        actor: reviewer,
+        actor: departmentHeadReviewer,
         completed:
             request.status == LeaveRequestStatus.pendingHr ||
             request.status == LeaveRequestStatus.approved,

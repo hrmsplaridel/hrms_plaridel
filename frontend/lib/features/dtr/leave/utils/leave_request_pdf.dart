@@ -235,6 +235,40 @@ class LeaveRequestPdf {
     );
   }
 
+  static pw.Widget _approvalValueLine({
+    required String? value,
+    required String label,
+    double valueWidth = 42,
+    double fontSize = 10.2,
+  }) {
+    final displayedValue = value?.trim() ?? '';
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.end,
+      children: [
+        pw.Container(
+          width: valueWidth,
+          padding: const pw.EdgeInsets.only(bottom: 1),
+          alignment: pw.Alignment.bottomCenter,
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              bottom: pw.BorderSide(color: _borderColor, width: 0.7),
+            ),
+          ),
+          child: pw.Text(
+            displayedValue.isEmpty ? ' ' : displayedValue,
+            textAlign: pw.TextAlign.center,
+            style: pw.TextStyle(fontSize: fontSize),
+            maxLines: 1,
+          ),
+        ),
+        pw.SizedBox(width: 3),
+        pw.Expanded(
+          child: pw.Text(label, style: pw.TextStyle(fontSize: fontSize)),
+        ),
+      ],
+    );
+  }
+
   static Future<pw.Document> buildPdf({
     required LeaveRequest request,
     List<LeaveBalance>? balances,
@@ -1156,35 +1190,22 @@ class LeaveRequestPdf {
                                       crossAxisAlignment:
                                           pw.CrossAxisAlignment.start,
                                       children: [
-                                        pw.Text(
-                                          request.approvedDaysWithPay != null
-                                              ? '${request.approvedDaysWithPay!.toStringAsFixed(1)} days with pay'
-                                              : '_______ days with pay',
-                                          style: const pw.TextStyle(
-                                            fontSize: 10.2,
-                                          ),
+                                        _approvalValueLine(
+                                          value: request.approvedDaysWithPay
+                                              ?.toStringAsFixed(1),
+                                          label: 'days with pay',
                                         ),
                                         pw.SizedBox(height: 8),
-                                        pw.Text(
-                                          request.approvedDaysWithoutPay != null
-                                              ? '${request.approvedDaysWithoutPay!.toStringAsFixed(1)} days without pay'
-                                              : '_______ days without pay',
-                                          style: const pw.TextStyle(
-                                            fontSize: 10.2,
-                                          ),
+                                        _approvalValueLine(
+                                          value: request.approvedDaysWithoutPay
+                                              ?.toStringAsFixed(1),
+                                          label: 'days without pay',
                                         ),
                                         pw.SizedBox(height: 8),
-                                        pw.Text(
-                                          request.approvedOtherDetails
-                                                      ?.trim()
-                                                      .isNotEmpty ==
-                                                  true
-                                              ? request.approvedOtherDetails!
-                                                    .trim()
-                                              : '_______ others (Specify)',
-                                          style: const pw.TextStyle(
-                                            fontSize: 10.2,
-                                          ),
+                                        _approvalValueLine(
+                                          value: request.approvedOtherDetails,
+                                          label: 'others (Specify)',
+                                          valueWidth: 58,
                                         ),
                                       ],
                                     ),
@@ -1432,6 +1453,39 @@ class _LeaveRequestPdfFixedEngine {
           style: const pw.TextStyle(fontSize: _fontSize),
         ),
       );
+
+  static pw.Widget _approvalValueLine({
+    required String? value,
+    required String label,
+    double valueWidth = 34,
+  }) {
+    final displayedValue = value?.trim() ?? '';
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.end,
+      children: [
+        pw.Container(
+          width: valueWidth,
+          padding: const pw.EdgeInsets.only(bottom: 0.5),
+          alignment: pw.Alignment.bottomCenter,
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              bottom: pw.BorderSide(color: _borderColor, width: 0.7),
+            ),
+          ),
+          child: pw.Text(
+            displayedValue.isEmpty ? ' ' : displayedValue,
+            textAlign: pw.TextAlign.center,
+            style: const pw.TextStyle(fontSize: _small),
+            maxLines: 1,
+          ),
+        ),
+        pw.SizedBox(width: 3),
+        pw.Expanded(
+          child: pw.Text(label, style: const pw.TextStyle(fontSize: _small)),
+        ),
+      ],
+    );
+  }
 
   static pw.Widget _sectionHeader(String t) => pw.Container(
     // padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
@@ -2619,34 +2673,23 @@ class _LeaveRequestPdfFixedEngine {
                                         children: [
                                           _sectionHeader('7.C APPROVED FOR'),
                                           pw.SizedBox(height: 2),
-                                          pw.Text(
-                                            request.approvedDaysWithPay != null
-                                                ? '_____ ${request.approvedDaysWithPay!.toStringAsFixed(1)} days with pay'
-                                                : '_____ days with pay',
-                                            style: const pw.TextStyle(
-                                              fontSize: _small,
-                                            ),
+                                          _approvalValueLine(
+                                            value: request.approvedDaysWithPay
+                                                ?.toStringAsFixed(1),
+                                            label: 'days with pay',
                                           ),
                                           pw.SizedBox(height: 2),
-                                          pw.Text(
-                                            request.approvedDaysWithoutPay !=
-                                                    null
-                                                ? '_____ ${request.approvedDaysWithoutPay!.toStringAsFixed(1)} days without pay'
-                                                : '_____ days without pay',
-                                            style: const pw.TextStyle(
-                                              fontSize: _small,
-                                            ),
+                                          _approvalValueLine(
+                                            value: request
+                                                .approvedDaysWithoutPay
+                                                ?.toStringAsFixed(1),
+                                            label: 'days without pay',
                                           ),
                                           pw.SizedBox(height: 2),
-                                          pw.Text(
-                                            _s(
-                                                  request.approvedOtherDetails,
-                                                ).isNotEmpty
-                                                ? '_____ ${_s(request.approvedOtherDetails)}'
-                                                : '_____ others (Specify)',
-                                            style: const pw.TextStyle(
-                                              fontSize: _small,
-                                            ),
+                                          _approvalValueLine(
+                                            value: request.approvedOtherDetails,
+                                            label: 'others (Specify)',
+                                            valueWidth: 52,
                                           ),
                                         ],
                                       ),
