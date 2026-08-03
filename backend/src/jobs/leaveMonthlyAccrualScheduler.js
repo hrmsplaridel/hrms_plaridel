@@ -28,6 +28,7 @@ const CRON_EXPRESSION = '0 0 1 * *';
 /** Full reconciliation: 00:00 on the 15th, every month. */
 const RECONCILIATION_CRON_EXPRESSION = '0 0 15 * *';
 const CRON_TIMEZONE = 'Asia/Manila';
+const DEFAULT_STARTUP_RECOVERY_DELAY_MS = 15_000;
 const MONTH_END_SCHEDULES = Object.freeze([
   Object.freeze({ runKind: 'initial', expression: CRON_EXPRESSION }),
   Object.freeze({
@@ -49,6 +50,15 @@ const CRON_MAX_CATCH_UP_MONTHS = Math.max(
     parseInt(process.env.LEAVE_ACCRUAL_MAX_CATCH_UP_MONTHS || '3', 10) || 3
   )
 );
+
+function startupRecoveryDelayMs(value = process.env.LEAVE_ACCRUAL_STARTUP_RECOVERY_DELAY_MS) {
+  if (value == null || String(value).trim() === '') {
+    return DEFAULT_STARTUP_RECOVERY_DELAY_MS;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_STARTUP_RECOVERY_DELAY_MS;
+  return Math.max(0, Math.min(300_000, Math.trunc(parsed)));
+}
 
 /**
  * Calendar year-month in Asia/Manila as YYYY-MM.
@@ -238,6 +248,57 @@ async function runScheduledCompletedMonthEnd(
   };
 }
 
+/**
+ * Reconciles the latest completed month shortly after the API starts. This
+ * recovers a cron tick missed while the backend was offline without delaying
+ * server startup. The shared runner remains protected by the PostgreSQL
+ * advisory lock and its month-level idempotency safeguards.
+ */
+function scheduleLeaveMonthlyAccrualStartupRecovery(
+  pool,
+  {
+    enabled = process.env.LEAVE_ACCRUAL_STARTUP_RECOVERY_ENABLED !== 'false',
+    delayMs = startupRecoveryDelayMs(),
+    timerScheduler = setTimeout,
+    recoveryRunner = runScheduledCompletedMonthEnd,
+  } = {}
+) {
+  if (!enabled) {
+    console.log(
+      '[leaveMonthlyAccrual][startup_recovery] disabled ' +
+        '(LEAVE_ACCRUAL_STARTUP_RECOVERY_ENABLED=false)',
+    );
+    return null;
+  }
+
+  const safeDelayMs = startupRecoveryDelayMs(delayMs);
+  const timer = timerScheduler(async () => {
+    try {
+      const recovery = await recoveryRunner(pool, {
+        runKind: 'startup_recovery',
+      });
+      console.log(
+        '[leaveMonthlyAccrual][startup_recovery] completed',
+        JSON.stringify({
+          ran: recovery?.ran === true,
+          reason: recovery?.reason || null,
+          targetYearMonth: recovery?.targetYearMonth || null,
+        }),
+      );
+    } catch (err) {
+      console.error(
+        '[leaveMonthlyAccrual][startup_recovery] error',
+        err && err.stack ? err.stack : err,
+      );
+    }
+  }, safeDelayMs);
+  if (timer && typeof timer.unref === 'function') timer.unref();
+  console.log(
+    `[leaveMonthlyAccrual][startup_recovery] scheduled delayMs=${safeDelayMs}`,
+  );
+  return timer;
+}
+
 function scheduleLeaveMonthlyAccrualCron(pool) {
   if (process.env.LEAVE_ACCRUAL_CRON_ENABLED === 'false') {
     console.log(
@@ -270,6 +331,7 @@ function scheduleLeaveMonthlyAccrualCron(pool) {
       `[leaveMonthlyAccrual][cron] scheduled kind=${schedule.runKind} expr="${schedule.expression}" timezone=${CRON_TIMEZONE} maxCatchUpMonths=${CRON_MAX_CATCH_UP_MONTHS}`,
     );
   }
+  tasks.startupRecovery = scheduleLeaveMonthlyAccrualStartupRecovery(pool);
   return tasks;
 }
 
@@ -279,6 +341,7 @@ module.exports = {
   manilaYearMonthNow,
   manilaCompletedYearMonthNow,
   runScheduledCompletedMonthEnd,
+  scheduleLeaveMonthlyAccrualStartupRecovery,
   monthlyAccrualAffectedUserIds,
   broadcastMonthlyAccrualResult,
   CRON_EXPRESSION,
@@ -286,4 +349,6 @@ module.exports = {
   MONTH_END_SCHEDULES,
   CRON_TIMEZONE,
   CRON_MAX_CATCH_UP_MONTHS,
+  DEFAULT_STARTUP_RECOVERY_DELAY_MS,
+  startupRecoveryDelayMs,
 };

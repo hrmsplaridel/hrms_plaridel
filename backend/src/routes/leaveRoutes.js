@@ -2626,10 +2626,35 @@ router.get('/my', protect, async (req, res) => {
     const limitRaw = req.query?.limit ? parseInt(req.query.limit, 10) : 100;
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 100;
     const rows = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
+              rv.full_name AS reviewer_name,
+              rv.role AS reviewer_role,
+              dhh.department_head_action,
+              dhh.department_head_reviewer_id,
+              dhh.department_head_reviewer_name,
+              dhh.department_head_reviewed_at,
+              dhh.department_head_remarks
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
+       LEFT JOIN users rv ON rv.id = COALESCE(lr.reviewer_id, lr.approved_by)
+       LEFT JOIN LATERAL (
+         SELECT h.action AS department_head_action,
+                h.acted_by AS department_head_reviewer_id,
+                actor.full_name AS department_head_reviewer_name,
+                h.acted_at AS department_head_reviewed_at,
+                h.remarks AS department_head_remarks
+         FROM leave_request_history h
+         LEFT JOIN users actor ON actor.id = h.acted_by
+         WHERE h.leave_request_id = lr.id
+           AND h.action IN (
+             'department_head_approved',
+             'department_head_rejected',
+             'department_head_returned'
+           )
+         ORDER BY h.acted_at DESC
+         LIMIT 1
+       ) dhh ON true
        WHERE (lr.user_id = $1 OR lr.employee_id = $1)
          AND ($2::text IS NULL OR lr.status = $2)
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
@@ -2952,11 +2977,36 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
 
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
-              d.name AS assignment_department_name
+              d.name AS assignment_department_name,
+              rv.full_name AS reviewer_name,
+              rv.role AS reviewer_role,
+              dhh.department_head_action,
+              dhh.department_head_reviewer_id,
+              dhh.department_head_reviewer_name,
+              dhh.department_head_reviewed_at,
+              dhh.department_head_remarks
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
        ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
+       LEFT JOIN users rv ON rv.id = COALESCE(lr.reviewer_id, lr.approved_by)
+       LEFT JOIN LATERAL (
+         SELECT h.action AS department_head_action,
+                h.acted_by AS department_head_reviewer_id,
+                actor.full_name AS department_head_reviewer_name,
+                h.acted_at AS department_head_reviewed_at,
+                h.remarks AS department_head_remarks
+         FROM leave_request_history h
+         LEFT JOIN users actor ON actor.id = h.acted_by
+         WHERE h.leave_request_id = lr.id
+           AND h.action IN (
+             'department_head_approved',
+             'department_head_rejected',
+             'department_head_returned'
+           )
+         ORDER BY h.acted_at DESC
+         LIMIT 1
+       ) dhh ON true
        WHERE ($1::text IS NULL OR lr.status = $1)
          AND ($2::text IS NULL OR lt.name = $2)
          AND ($3::uuid IS NULL OR lr.user_id = $3 OR lr.employee_id = $3)
@@ -2980,11 +3030,36 @@ router.get('/pending', protect, requireAdminOrHr, async (_req, res) => {
   try {
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
-              d.name AS assignment_department_name
+              d.name AS assignment_department_name,
+              rv.full_name AS reviewer_name,
+              rv.role AS reviewer_role,
+              dhh.department_head_action,
+              dhh.department_head_reviewer_id,
+              dhh.department_head_reviewer_name,
+              dhh.department_head_reviewed_at,
+              dhh.department_head_remarks
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
        ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
+       LEFT JOIN users rv ON rv.id = COALESCE(lr.reviewer_id, lr.approved_by)
+       LEFT JOIN LATERAL (
+         SELECT h.action AS department_head_action,
+                h.acted_by AS department_head_reviewer_id,
+                actor.full_name AS department_head_reviewer_name,
+                h.acted_at AS department_head_reviewed_at,
+                h.remarks AS department_head_remarks
+         FROM leave_request_history h
+         LEFT JOIN users actor ON actor.id = h.acted_by
+         WHERE h.leave_request_id = lr.id
+           AND h.action IN (
+             'department_head_approved',
+             'department_head_rejected',
+             'department_head_returned'
+           )
+         ORDER BY h.acted_at DESC
+         LIMIT 1
+       ) dhh ON true
        WHERE lr.status IN ('pending', 'pending_hr')
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
        LIMIT 200`

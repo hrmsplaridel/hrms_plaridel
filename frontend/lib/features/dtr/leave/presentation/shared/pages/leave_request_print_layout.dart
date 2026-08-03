@@ -1309,21 +1309,19 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _approvalLine(
-          withPay != null
-              ? '${withPay.toStringAsFixed(1)} days with pay'
-              : '_______ days with pay',
+          value: withPay?.toStringAsFixed(1),
+          label: 'days with pay',
         ),
         const SizedBox(height: 8),
         _approvalLine(
-          withoutPay != null
-              ? '${withoutPay.toStringAsFixed(1)} days without pay'
-              : '_______ days without pay',
+          value: withoutPay?.toStringAsFixed(1),
+          label: 'days without pay',
         ),
         const SizedBox(height: 8),
         _approvalLine(
-          others != null && others.isNotEmpty
-              ? others
-              : '_______ others (Specify)',
+          value: others?.trim(),
+          label: 'others (Specify)',
+          valueWidth: 72,
         ),
       ],
     );
@@ -1681,10 +1679,35 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     return _placeholderLines(minLines);
   }
 
-  Widget _approvalLine(String text) {
-    return Text(
-      text,
-      style: TextStyle(color: AppTheme.textPrimary, fontSize: 12.5),
+  Widget _approvalLine({
+    required String? value,
+    required String label,
+    double valueWidth = 48,
+  }) {
+    final displayedValue = value?.trim() ?? '';
+    final style = TextStyle(color: AppTheme.textPrimary, fontSize: 12.5);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        SizedBox(
+          width: valueWidth,
+          child: Container(
+            padding: const EdgeInsets.only(bottom: 1),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: Colors.black54)),
+            ),
+            child: Text(
+              displayedValue.isEmpty ? ' ' : displayedValue,
+              textAlign: TextAlign.center,
+              style: style,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Expanded(child: Text(label, style: style)),
+      ],
     );
   }
 

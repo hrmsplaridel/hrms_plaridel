@@ -90,9 +90,8 @@ class _DtrReportsState extends State<DtrReports> {
     if (!mounted) return;
     if (dtr.employees.isNotEmpty) {
       final availableIds = dtr.employees.map((e) => e.id).toSet();
-      final employeesByDisplayedOrder = List<EmployeeOption>.from(
-        dtr.employees,
-      )..sort(_compareEmployeesByNumber);
+      final employeesByDisplayedOrder = List<EmployeeOption>.from(dtr.employees)
+        ..sort(_compareEmployeesByNumber);
       setState(() {
         _selectedEmployeeIds.removeWhere((id) => !availableIds.contains(id));
         if (_selectedEmployeeId == null ||
@@ -1987,7 +1986,7 @@ class _DtrReportsState extends State<DtrReports> {
     final colDate = compactColumns ? 80.0 : 90.0;
     final colTime = compactColumns ? 58.0 : 70.0;
     final colLate = compactColumns ? 48.0 : 58.0;
-    final colUndertime = compactColumns ? 55.0 : 65.0;
+    final colUndertime = compactColumns ? 72.0 : 78.0;
     final minTableWidth = compactColumns
         ? (colDate + colTime * 4 + colLate + colUndertime + 70)
         : 550.0 + colLate + colUndertime;
@@ -2057,7 +2056,15 @@ class _DtrReportsState extends State<DtrReports> {
                     ),
                     SizedBox(
                       width: colUndertime,
-                      child: Text('Undertime', style: headerStyle),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Undertime',
+                          style: headerStyle,
+                          maxLines: 1,
+                        ),
+                      ),
                     ),
                     Expanded(child: Text('Remarks', style: headerStyle)),
                   ],
@@ -2262,12 +2269,13 @@ class _DtrReportsState extends State<DtrReports> {
     bool hasRecords = true,
     bool fullWidth = false,
     bool isResponsive = false,
+    bool dense = false,
     required Map<DateTime, TimeRecord> recordsByDate,
     required DateTime start,
     required DateTime end,
   }) {
     final dark = AppTheme.dashIsDark(context);
-    final compactPanel = !fullWidth;
+    final compactPanel = dense || !fullWidth;
     return Container(
       width: fullWidth ? null : 200,
       constraints: fullWidth
@@ -2403,8 +2411,11 @@ class _DtrReportsState extends State<DtrReports> {
                 ];
                 if (compactPanel || isResponsive) {
                   final gap = compactPanel ? 8.0 : 12.0;
+                  final columns = dense && constraints.maxWidth >= 330 ? 3 : 2;
                   final width = compactPanel
-                      ? ((constraints.maxWidth - gap) / 2).clamp(72.0, 140.0)
+                      ? ((constraints.maxWidth - (gap * (columns - 1))) /
+                                columns)
+                            .clamp(72.0, 140.0)
                       : 140.0;
                   return Wrap(
                     spacing: gap,
@@ -2611,12 +2622,44 @@ class _DtrReportsState extends State<DtrReports> {
         final availableWidth = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : 800.0;
+        final summaryPanelWidth = (availableWidth * 0.43)
+            .clamp(330.0, 420.0)
+            .toDouble();
+        final topPanelHeight = availableWidth < 760 ? 380.0 : 360.0;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              height: 240,
-              child: _buildEmployeeListCompact(context, employees),
+              height: topPanelHeight,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _buildEmployeeListCompact(context, employees),
+                  ),
+                  const SizedBox(width: 16),
+                  SizedBox(
+                    width: summaryPanelWidth,
+                    child: _buildSummaryCard(
+                      selectedName: selectedName,
+                      workingDays: workingDays,
+                      lateCount: lateCount,
+                      absentCount: absentCount,
+                      tardyCount: tardyCount,
+                      tardinessPct: tardinessPct,
+                      totalLateMinutes: totalLateMinutes,
+                      totalUndertimeMinutes: totalUndertimeMinutes,
+                      hasRecords: hasRecords,
+                      fullWidth: true,
+                      isResponsive: true,
+                      dense: true,
+                      recordsByDate: recordsByDate,
+                      start: start,
+                      end: end,
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             SizedBox(
@@ -2629,23 +2672,6 @@ class _DtrReportsState extends State<DtrReports> {
                 dtr: dtr,
                 availableWidth: availableWidth,
               ),
-            ),
-            const SizedBox(height: 16),
-            _buildSummaryCard(
-              selectedName: selectedName,
-              workingDays: workingDays,
-              lateCount: lateCount,
-              absentCount: absentCount,
-              tardyCount: tardyCount,
-              tardinessPct: tardinessPct,
-              totalLateMinutes: totalLateMinutes,
-              totalUndertimeMinutes: totalUndertimeMinutes,
-              hasRecords: hasRecords,
-              fullWidth: true,
-              isResponsive: true,
-              recordsByDate: recordsByDate,
-              start: start,
-              end: end,
             ),
           ],
         );

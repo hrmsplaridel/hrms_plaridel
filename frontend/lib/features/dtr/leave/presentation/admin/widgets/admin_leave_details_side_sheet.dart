@@ -293,13 +293,11 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
   List<LeaveHistoryEvent> _buildHistoryEvents(LeaveRequest request) {
     final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
         ? request.reviewerName!.trim()
-        : 'Approver';
+        : 'HR/Admin';
     final departmentHeadReviewer =
         (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
         ? request.departmentHeadReviewerName!.trim()
-        : (request.departmentHeadReviewerId != null
-              ? 'Department Head'
-              : reviewer);
+        : 'Department Head';
     final departmentHeadReviewedAt =
         request.departmentHeadReviewedAt ??
         (request.status == LeaveRequestStatus.pendingHr ||

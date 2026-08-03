@@ -553,26 +553,24 @@ class DtrExport {
           style: const pw.TextStyle(fontSize: 5.5),
         ),
         pw.SizedBox(height: 6),
-        // First signature block: line above MEEDO A-Manager.
-        pw.Container(width: lineWidth, height: 1, color: PdfColors.black),
-        // Extra space for handwritten signature above HR officer title.
-        pw.SizedBox(height: 8),
+        // Printed name sits on the signature line; position stays below it.
         pw.Text(
           signatories.meedoManager.displayName,
           style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
         ),
+        pw.Container(width: lineWidth, height: 1, color: PdfColors.black),
+        pw.SizedBox(height: 2),
         pw.Text(
           signatories.meedoManager.positionTitle,
           style: const pw.TextStyle(fontSize: 5.5),
         ),
         pw.SizedBox(height: 6),
-        // Second signature block: line above Human Resource Mgt. and Dev't. Officer.
-        pw.Container(width: lineWidth, height: 1, color: PdfColors.black),
-        pw.SizedBox(height: 3),
         pw.Text(
           signatories.hrOfficer.displayName,
           style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
         ),
+        pw.Container(width: lineWidth, height: 1, color: PdfColors.black),
+        pw.SizedBox(height: 2),
         pw.Text(
           signatories.hrOfficer.positionTitle,
           style: const pw.TextStyle(fontSize: 5.5),
@@ -1627,20 +1625,20 @@ class DtrExport {
     setCellBoth(
       0,
       row,
-      TextCellValue('_________________________'),
-      footerCenterStyle,
-    );
-    mergeBoth(0, row, 6, row);
-    row++;
-    setCellBoth(
-      0,
-      row,
       TextCellValue(exportSignatories.meedoManager.displayName),
       CellStyle(
         fontSize: 9,
         bold: true,
         horizontalAlign: HorizontalAlign.Center,
       ),
+    );
+    mergeBoth(0, row, 6, row);
+    row++;
+    setCellBoth(
+      0,
+      row,
+      TextCellValue('_________________________'),
+      footerCenterStyle,
     );
     mergeBoth(0, row, 6, row);
     row++;
@@ -1655,20 +1653,20 @@ class DtrExport {
     setCellBoth(
       0,
       row,
-      TextCellValue('_________________________'),
-      footerCenterStyle,
-    );
-    mergeBoth(0, row, 6, row);
-    row++;
-    setCellBoth(
-      0,
-      row,
       TextCellValue(exportSignatories.hrOfficer.displayName),
       CellStyle(
         fontSize: 9,
         bold: true,
         horizontalAlign: HorizontalAlign.Center,
       ),
+    );
+    mergeBoth(0, row, 6, row);
+    row++;
+    setCellBoth(
+      0,
+      row,
+      TextCellValue('_________________________'),
+      footerCenterStyle,
     );
     mergeBoth(0, row, 6, row);
     row++;
@@ -1880,16 +1878,16 @@ class DtrExport {
       '<div style="text-align:center;margin-top:16px;font-size:10pt;line-height:1.4;">',
     );
     oneCopy.writeln(
-      '<p style="margin:0 0 4px;border-top:1px solid #000;width:180px;margin-left:auto;margin-right:auto;"></p>',
+      '<p style="margin:0 auto;border-bottom:1px solid #000;width:180px;"><strong>${_escapeHtml(exportSignatories.meedoManager.displayName)}</strong></p>',
     );
     oneCopy.writeln(
-      '<p style="margin:0 0 16px;"><strong>${_escapeHtml(exportSignatories.meedoManager.displayName)}</strong><br>${_escapeHtml(exportSignatories.meedoManager.positionTitle)}</p>',
+      '<p style="margin:2px 0 16px;">${_escapeHtml(exportSignatories.meedoManager.positionTitle)}</p>',
     );
     oneCopy.writeln(
-      '<p style="margin:0 0 4px;border-top:1px solid #000;width:180px;margin-left:auto;margin-right:auto;"></p>',
+      '<p style="margin:0 auto;border-bottom:1px solid #000;width:180px;"><strong>${_escapeHtml(exportSignatories.hrOfficer.displayName)}</strong></p>',
     );
     oneCopy.writeln(
-      '<p style="margin:0;"><strong>${_escapeHtml(exportSignatories.hrOfficer.displayName)}</strong><br>${_escapeHtml(exportSignatories.hrOfficer.positionTitle)}</p>',
+      '<p style="margin:2px 0 0;">${_escapeHtml(exportSignatories.hrOfficer.positionTitle)}</p>',
     );
     if (noteLines.isNotEmpty) {
       oneCopy.writeln(
@@ -2115,16 +2113,16 @@ class DtrExport {
       '<div style="text-align:center;margin-top:16px;font-size:10pt;line-height:1.4;">',
     );
     oneCopy.writeln(
-      '<p style="margin:0 0 4px;border-top:1px solid #000;width:180px;margin-left:auto;margin-right:auto;"></p>',
+      '<p style="margin:0 auto;border-bottom:1px solid #000;width:180px;"><strong>${_escapeHtml(signatories.meedoManager.displayName)}</strong></p>',
     );
     oneCopy.writeln(
-      '<p style="margin:0 0 16px;"><strong>${_escapeHtml(signatories.meedoManager.displayName)}</strong><br>${_escapeHtml(signatories.meedoManager.positionTitle)}</p>',
+      '<p style="margin:2px 0 16px;">${_escapeHtml(signatories.meedoManager.positionTitle)}</p>',
     );
     oneCopy.writeln(
-      '<p style="margin:0 0 4px;border-top:1px solid #000;width:180px;margin-left:auto;margin-right:auto;"></p>',
+      '<p style="margin:0 auto;border-bottom:1px solid #000;width:180px;"><strong>${_escapeHtml(signatories.hrOfficer.displayName)}</strong></p>',
     );
     oneCopy.writeln(
-      '<p style="margin:0;"><strong>${_escapeHtml(signatories.hrOfficer.displayName)}</strong><br>${_escapeHtml(signatories.hrOfficer.positionTitle)}</p>',
+      '<p style="margin:2px 0 0;">${_escapeHtml(signatories.hrOfficer.positionTitle)}</p>',
     );
     if (noteLines.isNotEmpty) {
       oneCopy.writeln(

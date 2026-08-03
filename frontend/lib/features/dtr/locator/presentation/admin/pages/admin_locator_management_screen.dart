@@ -44,6 +44,8 @@ class _AdminLocatorManagementScreenState
     extends State<AdminLocatorManagementScreen> {
   static const int _rowsPerPage = 10;
   final ScrollController _adminListScrollController = ScrollController();
+  final ScrollController _adminTableHorizontalScrollController =
+      ScrollController();
 
   _LocatorAdminQueue _queue = _LocatorAdminQueue.all;
   LocatorRequestType? _requestTypeFilter;
@@ -89,6 +91,7 @@ class _AdminLocatorManagementScreenState
   void dispose() {
     _locatorRealtimeSub?.cancel();
     _adminListScrollController.dispose();
+    _adminTableHorizontalScrollController.dispose();
     super.dispose();
   }
 
@@ -158,12 +161,6 @@ class _AdminLocatorManagementScreenState
                       ),
                     ),
                   ),
-                  if (_loading)
-                    const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
                 ],
               ),
               const SizedBox(height: 8),
@@ -181,7 +178,21 @@ class _AdminLocatorManagementScreenState
                     style: TextStyle(color: Colors.red.shade900, fontSize: 12),
                   ),
                 ),
-              if (visibleItems.isEmpty && !_loading)
+              if (_loading && visibleItems.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 220,
+                    child: Center(
+                      child: Semantics(
+                        label: 'Loading locator requests',
+                        child: const CircularProgressIndicator(),
+                      ),
+                    ),
+                  ),
+                )
+              else if (visibleItems.isEmpty)
                 Text(
                   'No locator request records in this queue.',
                   style: TextStyle(
@@ -196,10 +207,28 @@ class _AdminLocatorManagementScreenState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _adminItemsTable(
-                        items: pageItems,
-                        maxHeight: maxListHeight,
-                        useScrollableList: useScrollableList,
+                      Stack(
+                        children: [
+                          _adminItemsTable(
+                            items: pageItems,
+                            maxHeight: maxListHeight,
+                            useScrollableList: useScrollableList,
+                          ),
+                          if (_loading)
+                            Positioned.fill(
+                              child: ColoredBox(
+                                color: AppTheme.dashPanelOf(
+                                  context,
+                                ).withValues(alpha: 0.72),
+                                child: Center(
+                                  child: Semantics(
+                                    label: 'Refreshing locator requests',
+                                    child: const CircularProgressIndicator(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                       if (visibleItems.length > _rowsPerPage) ...[
                         const SizedBox(height: 12),
@@ -487,22 +516,27 @@ class _AdminLocatorManagementScreenState
         final tableWidth = constraints.maxWidth < 1040
             ? 1040.0
             : constraints.maxWidth;
+        final hasHorizontalOverflow =
+            constraints.maxWidth.isFinite && tableWidth > constraints.maxWidth;
         final purposeWidth = tableWidth - 740;
         final content = SizedBox(
           width: tableWidth,
-          child: Column(
-            children: [
-              _adminTableHeader(context, purposeWidth),
-              for (var index = 0; index < items.length; index++)
-                _adminTableRow(
-                  context,
-                  items[index],
-                  purposeWidth: purposeWidth,
-                  isLast: index == items.length - 1,
-                  isSelected: items[index].id == _selectedItemId,
-                  onTap: () => _openItemDetailsFromRow(items[index]),
-                ),
-            ],
+          child: Padding(
+            padding: EdgeInsets.only(bottom: hasHorizontalOverflow ? 10 : 0),
+            child: Column(
+              children: [
+                _adminTableHeader(context, purposeWidth),
+                for (var index = 0; index < items.length; index++)
+                  _adminTableRow(
+                    context,
+                    items[index],
+                    purposeWidth: purposeWidth,
+                    isLast: index == items.length - 1,
+                    isSelected: items[index].id == _selectedItemId,
+                    onTap: () => _openItemDetailsFromRow(items[index]),
+                  ),
+              ],
+            ),
           ),
         );
 
@@ -513,9 +547,17 @@ class _AdminLocatorManagementScreenState
               border: Border.all(color: AppTheme.dashHairlineOf(context)),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: content,
+            child: Scrollbar(
+              controller: _adminTableHorizontalScrollController,
+              thumbVisibility: hasHorizontalOverflow,
+              trackVisibility: hasHorizontalOverflow,
+              scrollbarOrientation: ScrollbarOrientation.bottom,
+              child: SingleChildScrollView(
+                controller: _adminTableHorizontalScrollController,
+                primary: false,
+                scrollDirection: Axis.horizontal,
+                child: content,
+              ),
             ),
           ),
         );

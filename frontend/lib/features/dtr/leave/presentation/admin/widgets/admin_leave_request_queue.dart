@@ -480,6 +480,7 @@ class _AdminLeaveRequestQueuePanelState
   static const int _rowsPerPage = 10;
 
   final ScrollController _queueScrollController = ScrollController();
+  final ScrollController _queueHorizontalScrollController = ScrollController();
   int _page = 0;
 
   @override
@@ -495,6 +496,7 @@ class _AdminLeaveRequestQueuePanelState
   @override
   void dispose() {
     _queueScrollController.dispose();
+    _queueHorizontalScrollController.dispose();
     super.dispose();
   }
 
@@ -594,33 +596,50 @@ class _AdminLeaveRequestQueuePanelState
                       : (maxW < kAdminTableMinWidth
                             ? kAdminTableMinWidth
                             : maxW);
+                  final hasHorizontalOverflow =
+                      maxW.isFinite && tableWidth > maxW;
                   return Scrollbar(
                     controller: _queueScrollController,
                     thumbVisibility: true,
                     child: SingleChildScrollView(
                       controller: _queueScrollController,
                       primary: false,
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: SizedBox(
-                          width: tableWidth,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const AdminTableHeader(),
-                              ...pageRequests.map(
-                                (request) => AdminRow(
-                                  request: request,
-                                  statusLabel: adminLeaveStatusLabel(
-                                    request.status,
-                                    isDepartmentHead: widget.isDepartmentHead,
-                                  ),
-                                  highlighted:
-                                      request.id == widget.selectedRequest?.id,
-                                  onView: () => widget.onSelect(request),
-                                ),
+                      child: Scrollbar(
+                        controller: _queueHorizontalScrollController,
+                        thumbVisibility: hasHorizontalOverflow,
+                        trackVisibility: hasHorizontalOverflow,
+                        scrollbarOrientation: ScrollbarOrientation.bottom,
+                        child: SingleChildScrollView(
+                          controller: _queueHorizontalScrollController,
+                          primary: false,
+                          scrollDirection: Axis.horizontal,
+                          child: SizedBox(
+                            width: tableWidth,
+                            child: Padding(
+                              padding: EdgeInsets.only(
+                                bottom: hasHorizontalOverflow ? 10 : 0,
                               ),
-                            ],
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  const AdminTableHeader(),
+                                  ...pageRequests.map(
+                                    (request) => AdminRow(
+                                      request: request,
+                                      statusLabel: adminLeaveStatusLabel(
+                                        request.status,
+                                        isDepartmentHead:
+                                            widget.isDepartmentHead,
+                                      ),
+                                      highlighted:
+                                          request.id ==
+                                          widget.selectedRequest?.id,
+                                      onView: () => widget.onSelect(request),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
