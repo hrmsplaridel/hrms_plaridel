@@ -498,6 +498,11 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   reviewer_remarks TEXT,
   reviewed_at TIMESTAMPTZ,
 
+  -- Authoritative final HR allocation. Only paid days consume leave credits.
+  approved_days_with_pay NUMERIC(5,2),
+  approved_days_without_pay NUMERIC(5,2),
+  approved_other_details TEXT,
+
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
 
@@ -508,6 +513,10 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   CONSTRAINT chk_leave_total_days CHECK (
     (total_days IS NULL OR total_days >= 0)
     AND (number_of_days IS NULL OR number_of_days >= 0)
+  ),
+  CONSTRAINT chk_leave_approved_days_nonnegative CHECK (
+    (approved_days_with_pay IS NULL OR approved_days_with_pay >= 0)
+    AND (approved_days_without_pay IS NULL OR approved_days_without_pay >= 0)
   )
 );
 

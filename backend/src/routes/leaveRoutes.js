@@ -41,6 +41,10 @@ const {
   runMonthlyAttendanceDeductions,
 } = require('../services/leaveAttendanceDeduction');
 const {
+  approvedPaidDaysForRevoke,
+  resolveApprovalAllocation,
+} = require('../services/leaveApprovalAllocation');
+const {
   getYearEndForcedLeaveCompliance,
   applyYearEndForcedLeaveDeductions,
   manilaYearNow: yearEndManilaYearNow,
@@ -957,6 +961,7 @@ function mapLeaveRowToApi(row) {
   // Keep response aligned with Flutter LeaveRequest.fromJson keys.
   // Spread details FIRST so canonical DB fields (status, etc.) take precedence and are not overwritten.
   const details = row.details && typeof row.details === 'object' ? row.details : {};
+  const legacyApprovalDetails = row.status === 'approved' ? details : {};
   const employeeName = row.employee_name || row.full_name || row.employee_full_name || details.employee_name || details.employeeName || null;
   return {
     ...details,
@@ -992,23 +997,23 @@ function mapLeaveRowToApi(row) {
     approved_days_with_pay:
       row.approved_days_with_pay != null
         ? parseFloat(row.approved_days_with_pay)
-        : (details.approved_days_with_pay != null
-            ? parseFloat(details.approved_days_with_pay)
-            : (details.approvedDaysWithPay != null
-                ? parseFloat(details.approvedDaysWithPay)
+        : (legacyApprovalDetails.approved_days_with_pay != null
+            ? parseFloat(legacyApprovalDetails.approved_days_with_pay)
+            : (legacyApprovalDetails.approvedDaysWithPay != null
+                ? parseFloat(legacyApprovalDetails.approvedDaysWithPay)
                 : null)),
     approved_days_without_pay:
       row.approved_days_without_pay != null
         ? parseFloat(row.approved_days_without_pay)
-        : (details.approved_days_without_pay != null
-            ? parseFloat(details.approved_days_without_pay)
-            : (details.approvedDaysWithoutPay != null
-                ? parseFloat(details.approvedDaysWithoutPay)
+        : (legacyApprovalDetails.approved_days_without_pay != null
+            ? parseFloat(legacyApprovalDetails.approved_days_without_pay)
+            : (legacyApprovalDetails.approvedDaysWithoutPay != null
+                ? parseFloat(legacyApprovalDetails.approvedDaysWithoutPay)
                 : null)),
     approved_other_details:
       row.approved_other_details ||
-      details.approved_other_details ||
-      details.approvedOtherDetails ||
+      legacyApprovalDetails.approved_other_details ||
+      legacyApprovalDetails.approvedOtherDetails ||
       null,
     reviewed_at: row.reviewed_at || row.approved_at || null,
     created_at: row.created_at || null,
@@ -1480,10 +1485,15 @@ async function upsertLeaveBalanceDeduction(
 ) {
   if (!userId || !leaveTypeName) return;
   const days = daysToDeduct != null ? parseFloat(daysToDeduct) : 0;
-  if (!Number.isFinite(days) || days <= 0) return;
   const allowNegative = options.allowNegative === true;
   /** When true (HR final approval only): clear the submit-time pending reservation before adding used_days. */
   const decrementPendingDays = options.decrementPendingDays === true;
+  const pendingDaysToRelease = decrementPendingDays
+    ? parseFloat(options.pendingDaysToRelease ?? days)
+    : 0;
+  if (!Number.isFinite(days) || days < 0) return;
+  if (!Number.isFinite(pendingDaysToRelease) || pendingDaysToRelease < 0) return;
+  if (days <= 0 && pendingDaysToRelease <= 0) return;
 
   const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
   if (!ledgerType) return null;
@@ -1522,23 +1532,25 @@ async function upsertLeaveBalanceDeduction(
     }
   }
 
-  await client.query(
-    `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
-     VALUES ($1::uuid, $2::text, 0, $3::numeric, 0, 0, now()::date, now()::date, now(), now())
-     ON CONFLICT (user_id, leave_type)
-     DO UPDATE SET used_days = COALESCE(leave_balances.used_days, 0) + EXCLUDED.used_days,
-                   updated_at = now()`,
-    [userId, ledgerType, days]
-  );
+  if (days > 0) {
+    await client.query(
+      `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
+       VALUES ($1::uuid, $2::text, 0, $3::numeric, 0, 0, now()::date, now()::date, now(), now())
+       ON CONFLICT (user_id, leave_type)
+       DO UPDATE SET used_days = COALESCE(leave_balances.used_days, 0) + EXCLUDED.used_days,
+                     updated_at = now()`,
+      [userId, ledgerType, days]
+    );
+  }
 
   // Final approval: move days out of pending (submit-time reservation) into used — same ledger row as submit/PUT.
-  if (decrementPendingDays) {
+  if (decrementPendingDays && pendingDaysToRelease > 0) {
     await client.query(
       `UPDATE leave_balances
        SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
            updated_at = now()
        WHERE user_id = $1::uuid AND leave_type = $2::text`,
-      [userId, ledgerType, days]
+      [userId, ledgerType, pendingDaysToRelease]
     );
   }
 
@@ -1550,20 +1562,22 @@ async function upsertLeaveBalanceDeduction(
   if (lc) {
     const beforeSnap = balanceRowToSnapshot(bal.rows[0]);
     if (decrementPendingDays) {
-      await insertLeaveBalanceLedger(client, {
-        userId,
-        leaveType: ledgerType,
-        action: lc.action || 'leave_approved',
-        affectedBucket: 'used',
-        daysChanged: afterSnap.used_days - beforeSnap.used_days,
-        oldValue: beforeSnap.used_days,
-        newValue: afterSnap.used_days,
-        relatedLeaveRequestId: lc.leaveRequestId || null,
-        actorUserId: lc.actorUserId || null,
-        actorKind: lc.actorKind || 'admin',
-        remarks: lc.remarks || null,
-        metadataJson: lc.metadataJson || null,
-      });
+      if (afterSnap.used_days !== beforeSnap.used_days) {
+        await insertLeaveBalanceLedger(client, {
+          userId,
+          leaveType: ledgerType,
+          action: lc.action || 'leave_approved',
+          affectedBucket: 'used',
+          daysChanged: afterSnap.used_days - beforeSnap.used_days,
+          oldValue: beforeSnap.used_days,
+          newValue: afterSnap.used_days,
+          relatedLeaveRequestId: lc.leaveRequestId || null,
+          actorUserId: lc.actorUserId || null,
+          actorKind: lc.actorKind || 'admin',
+          remarks: lc.remarks || null,
+          metadataJson: lc.metadataJson || null,
+        });
+      }
       await insertLeaveBalanceLedger(client, {
         userId,
         leaveType: ledgerType,
@@ -3491,21 +3505,9 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
   const approvedOtherDetails = (req.body?.approved_other_details || req.body?.approvedOtherDetails || '').toString().trim() || null;
   const approvedDaysWithPayRaw = req.body?.approved_days_with_pay ?? req.body?.approvedDaysWithPay;
   const approvedDaysWithoutPayRaw = req.body?.approved_days_without_pay ?? req.body?.approvedDaysWithoutPay;
-  const approvedDaysWithPay = approvedDaysWithPayRaw != null && approvedDaysWithPayRaw !== ''
-    ? parseFloat(approvedDaysWithPayRaw)
-    : null;
-  const approvedDaysWithoutPay = approvedDaysWithoutPayRaw != null && approvedDaysWithoutPayRaw !== ''
-    ? parseFloat(approvedDaysWithoutPayRaw)
-    : null;
   const reviewDetailsPatch = {};
   if (recommendationRemarks) reviewDetailsPatch.recommendation_remarks = recommendationRemarks;
   if (approvedOtherDetails) reviewDetailsPatch.approved_other_details = approvedOtherDetails;
-  if (approvedDaysWithPay != null && !Number.isNaN(approvedDaysWithPay)) {
-    reviewDetailsPatch.approved_days_with_pay = approvedDaysWithPay;
-  }
-  if (approvedDaysWithoutPay != null && !Number.isNaN(approvedDaysWithoutPay)) {
-    reviewDetailsPatch.approved_days_without_pay = approvedDaysWithoutPay;
-  }
   try {
     const client = await pool.connect();
     try {
@@ -3538,6 +3540,13 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         );
         return res.json(mapLeaveRowToApi(out.rows[0]));
       }
+      const allocation = resolveApprovalAllocation({
+        requestedDays: r.days,
+        approvedDaysWithPay: approvedDaysWithPayRaw,
+        approvedDaysWithoutPay: approvedDaysWithoutPayRaw,
+      });
+      reviewDetailsPatch.approved_days_with_pay = allocation.approvedDaysWithPay;
+      reviewDetailsPatch.approved_days_without_pay = allocation.approvedDaysWithoutPay;
       const { historyAction } = validateAdminTransition({
         currentStatus: r.status,
         desiredStatus: 'approved',
@@ -3549,19 +3558,30 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
              reviewer_id = $2::uuid,
              reviewer_remarks = $3::text,
              details = COALESCE(details, '{}'::jsonb) || $4::jsonb,
+             approved_days_with_pay = $5::numeric,
+             approved_days_without_pay = $6::numeric,
+             approved_other_details = $7::text,
              reviewed_at = now(),
-             approved_by = COALESCE(approved_by, $2::uuid),
-             approved_at = COALESCE(approved_at, now()),
+             approved_by = $2::uuid,
+             approved_at = now(),
              updated_at = now()
          WHERE id = $1
          RETURNING *`,
-        [id, reviewerId, remarks, JSON.stringify(reviewDetailsPatch)]
+         [
+           id,
+           reviewerId,
+           remarks,
+           JSON.stringify(reviewDetailsPatch),
+           allocation.approvedDaysWithPay,
+           allocation.approvedDaysWithoutPay,
+           approvedOtherDetails,
+         ]
       );
       const row = updated.rows[0];
       const targetUserId = row.user_id || row.employee_id;
       const startStr = toIsoDateStr(row.start_date);
       const endStr = toIsoDateStr(row.end_date);
-      const days = row.number_of_days != null ? parseFloat(row.number_of_days) : (row.total_days != null ? parseFloat(row.total_days) : null);
+      const days = allocation.requestedDays;
       const leaveTypeName = r.leave_type_name || null;
 
       // Prevent approving if another pending/approved leave overlaps this range.
@@ -3579,17 +3599,29 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         excludeId: id,
       });
 
-      // Deduct balance ONLY on approval (and only once because we block re-approving approved status).
-      // Clear submit-time pending_days and add to used_days (same days, same balanceLedgerLeaveType as submit).
-      await upsertLeaveBalanceDeduction(client, targetUserId, leaveTypeName, days, {
-        decrementPendingDays: true,
-        ledgerContext: {
-          action: 'leave_approved',
-          leaveRequestId: id,
-          actorUserId: reviewerId,
-          actorKind: 'admin',
-        },
-      });
+      // Final approval releases the full pending reservation but charges only
+      // the days HR classified as paid against the configured balance bucket.
+      await upsertLeaveBalanceDeduction(
+        client,
+        targetUserId,
+        leaveTypeName,
+        allocation.usedDaysToDeduct,
+        {
+          decrementPendingDays: true,
+          pendingDaysToRelease: allocation.pendingDaysToRelease,
+          ledgerContext: {
+            action: 'leave_approved',
+            leaveRequestId: id,
+            actorUserId: reviewerId,
+            actorKind: 'admin',
+            metadataJson: {
+              requested_days: allocation.requestedDays,
+              approved_days_with_pay: allocation.approvedDaysWithPay,
+              approved_days_without_pay: allocation.approvedDaysWithoutPay,
+            },
+          },
+        }
+      );
 
       // DTR integration: mark each date as on_leave and link leave_request_id when the leave type affects DTR.
       const leaveTypeRuleForDtr = leaveTypeName
@@ -3611,6 +3643,8 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
           start_date: startStr,
           end_date: endStr,
           number_of_days: days,
+          approved_days_with_pay: allocation.approvedDaysWithPay,
+          approved_days_without_pay: allocation.approvedDaysWithoutPay,
         },
       });
 
@@ -3794,6 +3828,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
               lr.user_id, lr.employee_id,
               lr.start_date, lr.end_date,
               lr.approved_at, lr.reviewed_at,
+              lr.approved_days_with_pay, lr.approved_days_without_pay,
               lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -3831,6 +3866,13 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
 
     const targetUserId = r.user_id || r.employee_id;
     const revokeDays = r.days != null ? parseFloat(r.days) : null;
+    const revokePaidDays = approvedPaidDaysForRevoke({
+      requestedDays: revokeDays,
+      approvedDaysWithPay: r.approved_days_with_pay,
+    });
+    const revokeWithoutPayDays = r.approved_days_without_pay != null
+      ? parseFloat(r.approved_days_without_pay)
+      : Math.max(0, (revokeDays || 0) - revokePaidDays);
     const ltName = r.leave_type_name || null;
     const startStr = toIsoDateStr(r.start_date);
     const endStr = toIsoDateStr(r.end_date);
@@ -3841,6 +3883,9 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
        SET status = 'returned',
            reviewer_id   = $2::uuid,
            reviewer_remarks = $3::text,
+           approved_days_with_pay = NULL,
+           approved_days_without_pay = NULL,
+           approved_other_details = NULL,
            reviewed_at   = now(),
            updated_at    = now()
        WHERE id = $1`,
@@ -3849,7 +3894,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
 
     // 2. Restore used_days balance (reverse final approval). Pending was cleared on approve; do not re-add to pending
     //    — request status is 'returned', not a pending workflow; employee may resubmit (submit adds pending again).
-    if (revokeDays && revokeDays > 0 && targetUserId && ltName) {
+    if (revokePaidDays > 0 && targetUserId && ltName) {
       const ledgerType = await resolveBalanceLedgerLeaveType(client, ltName);
       if (ledgerType) {
         const beforeRev = await fetchBalanceSnapshot(client, targetUserId, ledgerType);
@@ -3858,7 +3903,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
            SET used_days = GREATEST(0, COALESCE(used_days, 0) - $3::numeric),
                updated_at = now()
            WHERE user_id = $1::uuid AND leave_type = $2::text`,
-          [targetUserId, ledgerType, revokeDays]
+          [targetUserId, ledgerType, revokePaidDays]
         );
         const afterRev = await fetchBalanceSnapshot(client, targetUserId, ledgerType);
         await insertLeaveBalanceLedger(client, {
@@ -3873,7 +3918,11 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
           actorUserId: reviewerId,
           actorKind: 'admin',
           remarks: remarks || null,
-          metadataJson: { revoke_days: revokeDays },
+          metadataJson: {
+            requested_days: revokeDays,
+            restored_paid_days: revokePaidDays,
+            approved_days_without_pay: revokeWithoutPayDays,
+          },
         });
       }
     }
@@ -3901,6 +3950,8 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
         start_date: startStr,
         end_date: endStr,
         number_of_days: revokeDays,
+        restored_paid_days: revokePaidDays,
+        approved_days_without_pay: revokeWithoutPayDays,
         revoked_by: reviewerId,
       },
     });
