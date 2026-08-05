@@ -45,6 +45,11 @@ const {
   resolveApprovalAllocation,
 } = require('../services/leaveApprovalAllocation');
 const {
+  assertCoverageMatchesRequestedDays,
+  removeApprovedLeaveCoverage,
+  replaceApprovedLeaveCoverage,
+} = require('../services/leaveDtrCoverage');
+const {
   getYearEndForcedLeaveCompliance,
   applyYearEndForcedLeaveDeductions,
   manilaYearNow: yearEndManilaYearNow,
@@ -1683,60 +1688,6 @@ async function releasePendingLeaveBalance(
     metadataJson,
   });
   return ledgerType;
-}
-
-async function applyApprovedLeaveToDtr(client, userId, leaveRequestId, startDateStr, endDateStr) {
-  if (!userId || !leaveRequestId || !startDateStr || !endDateStr) return;
-  await client.query(
-    `INSERT INTO dtr_daily_summary (
-        employee_id,
-        attendance_date,
-        status,
-        leave_request_id,
-        source,
-        created_at,
-        updated_at
-      )
-      SELECT
-        $1::uuid AS employee_id,
-        gs::date AS attendance_date,
-        'on_leave'::text AS status,
-        $2::uuid AS leave_request_id,
-        'adjusted'::text AS source,
-        now() AS created_at,
-        now() AS updated_at
-      FROM generate_series($3::date, $4::date, '1 day'::interval) AS gs
-      -- Shift-aware leave marking:
-      -- 1) resolve effective assignment for each date
-      -- 2) use shift.working_days when present
-      -- 3) fallback to Mon-Fri only when assignment/shift schedule is unavailable
-      LEFT JOIN LATERAL (
-        SELECT a.id AS assignment_id, a.shift_id
-        FROM assignments a
-        WHERE a.employee_id = $1::uuid
-          AND (a.is_active IS NULL OR a.is_active = true)
-          AND a.effective_from <= gs::date
-          AND (a.effective_to IS NULL OR a.effective_to >= gs::date)
-        ORDER BY a.effective_from DESC
-        LIMIT 1
-      ) eff ON TRUE
-      LEFT JOIN shifts s ON s.id = eff.shift_id
-      WHERE (
-        CASE
-          WHEN s.working_days IS NOT NULL AND array_length(s.working_days, 1) > 0
-            THEN EXTRACT(ISODOW FROM gs::date)::int = ANY(s.working_days)
-          ELSE EXTRACT(ISODOW FROM gs::date) < 6
-        END
-      )
-      ON CONFLICT (employee_id, attendance_date)
-      DO UPDATE SET
-        status = 'on_leave',
-        leave_request_id = EXCLUDED.leave_request_id,
-        source = 'adjusted',
-        updated_at = now()
-      WHERE dtr_daily_summary.status IS DISTINCT FROM 'present'`,
-    [userId, leaveRequestId, startDateStr, endDateStr]
-  );
 }
 
 // ============================
@@ -3540,8 +3491,24 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         );
         return res.json(mapLeaveRowToApi(out.rows[0]));
       }
+      const targetUserId = r.user_id || r.employee_id;
+      const startStr = toIsoDateStr(r.start_date);
+      const endStr = toIsoDateStr(r.end_date);
+      const workingDayResult = await computeEmployeeLeaveWorkingDays(
+        client,
+        targetUserId,
+        startStr,
+        endStr
+      );
+      const storedRequestedDays = r.days != null ? parseFloat(r.days) : null;
+      const approvalCoverage = assertCoverageMatchesRequestedDays(
+        workingDayResult.countedDates,
+        storedRequestedDays
+      );
+      const approvalDates = approvalCoverage.dates;
+      const approvalDays = approvalCoverage.days;
       const allocation = resolveApprovalAllocation({
-        requestedDays: r.days,
+        requestedDays: approvalDays,
         approvedDaysWithPay: approvedDaysWithPayRaw,
         approvedDaysWithoutPay: approvedDaysWithoutPayRaw,
       });
@@ -3578,9 +3545,6 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
          ]
       );
       const row = updated.rows[0];
-      const targetUserId = row.user_id || row.employee_id;
-      const startStr = toIsoDateStr(row.start_date);
-      const endStr = toIsoDateStr(row.end_date);
       const days = allocation.requestedDays;
       const leaveTypeName = r.leave_type_name || null;
 
@@ -3598,6 +3562,18 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         endStr,
         excludeId: id,
       });
+
+      const leaveTypeRuleForDtr = leaveTypeName
+        ? await getLeaveTypeDefinition(client, leaveTypeName)
+        : null;
+      if (leaveTypeRuleForDtr?.affects_dtr_normally !== false) {
+        await replaceApprovedLeaveCoverage(client, {
+          employeeId: targetUserId,
+          leaveRequestId: id,
+          dates: approvalDates,
+          actorUserId: reviewerId,
+        });
+      }
 
       // Final approval releases the full pending reservation but charges only
       // the days HR classified as paid against the configured balance bucket.
@@ -3623,14 +3599,6 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         }
       );
 
-      // DTR integration: mark each date as on_leave and link leave_request_id when the leave type affects DTR.
-      const leaveTypeRuleForDtr = leaveTypeName
-        ? await getLeaveTypeDefinition(client, leaveTypeName)
-        : null;
-      if (leaveTypeRuleForDtr?.affects_dtr_normally !== false) {
-        await applyApprovedLeaveToDtr(client, targetUserId, id, startStr, endStr);
-      }
-
       await insertLeaveRequestHistory(client, {
         leaveRequestId: id,
         action: historyAction,
@@ -3643,6 +3611,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
           start_date: startStr,
           end_date: endStr,
           number_of_days: days,
+          covered_work_dates: approvalDates,
           approved_days_with_pay: allocation.approvedDaysWithPay,
           approved_days_without_pay: allocation.approvedDaysWithoutPay,
         },
@@ -3683,7 +3652,10 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
     }
   } catch (err) {
     if (err && err.statusCode) {
-      return res.status(err.statusCode).json({ error: err.message });
+      return res.status(err.statusCode).json({
+        error: err.message,
+        ...(err.details && typeof err.details === 'object' ? err.details : {}),
+      });
     }
     console.error('[leave PATCH /:id/approve]', err);
     const msg = err && err.message ? err.message : 'Failed to approve leave request';
@@ -3927,15 +3899,18 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
       }
     }
 
-    // 3. Remove DTR on_leave entries that were written by this approval.
-    //    Only removes rows that are still 'on_leave' and linked to this request.
-    //    Rows already changed to 'present' (employee actually showed up) are untouched.
-    await client.query(
-      `DELETE FROM dtr_daily_summary
-       WHERE leave_request_id = $1
-         AND status = 'on_leave'`,
-      [id]
-    );
+    // 3. Remove only the leave overlay. Underlying attendance/holiday rows remain intact.
+    // Older approvals predate the coverage table, so clean up their generated DTR rows
+    // only when no separate coverage record existed.
+    const removedCoverageRows = await removeApprovedLeaveCoverage(client, id);
+    if (removedCoverageRows === 0) {
+      await client.query(
+        `DELETE FROM dtr_daily_summary
+         WHERE leave_request_id = $1
+           AND status = 'on_leave'`,
+        [id]
+      );
+    }
 
     // 4. Audit trail.
     await insertLeaveRequestHistory(client, {

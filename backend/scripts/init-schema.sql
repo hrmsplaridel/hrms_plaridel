@@ -927,6 +927,21 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
   CONSTRAINT uq_dtr_daily_summary_employee_date UNIQUE (employee_id, attendance_date)
 );
 
+-- Approved leave is an overlay on DTR. Keeping it separate preserves punches,
+-- holidays, absences, and incomplete records when approval is later revoked.
+CREATE TABLE IF NOT EXISTS dtr_leave_coverage (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leave_request_id UUID NOT NULL REFERENCES leave_requests(id) ON DELETE CASCADE,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attendance_date DATE NOT NULL,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_dtr_leave_coverage_request_date
+    UNIQUE (leave_request_id, attendance_date),
+  CONSTRAINT uq_dtr_leave_coverage_employee_date
+    UNIQUE (employee_id, attendance_date)
+);
+
 -- =========================================
 -- DTR CORRECTION REQUESTS
 -- =========================================
@@ -2033,6 +2048,10 @@ CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date_time
 ON dtr_daily_summary(attendance_date DESC, time_in DESC);
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date_employee
 ON dtr_daily_summary(attendance_date, employee_id);
+CREATE INDEX IF NOT EXISTS idx_dtr_leave_coverage_employee_date
+ON dtr_leave_coverage(employee_id, attendance_date);
+CREATE INDEX IF NOT EXISTS idx_dtr_leave_coverage_request
+ON dtr_leave_coverage(leave_request_id);
 
 CREATE INDEX IF NOT EXISTS idx_locator_slips_status_employee_date
 ON locator_slips(status, employee_id, slip_date);

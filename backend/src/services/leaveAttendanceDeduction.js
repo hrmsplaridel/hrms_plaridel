@@ -380,7 +380,21 @@ async function loadApprovedLeaveKeys(client, employeeIds, startStr, endStr) {
   const keys = new Set();
   if (employeeIds.length === 0) return keys;
   const result = await client.query(
-    `SELECT lr.employee_id, lr.start_date::text AS start_date,
+    `SELECT c.employee_id,
+            c.attendance_date::text AS attendance_date,
+            NULL::text AS start_date,
+            NULL::text AS end_date
+     FROM dtr_leave_coverage c
+     JOIN leave_requests lr ON lr.id = c.leave_request_id AND lr.status = 'approved'
+     WHERE c.employee_id = ANY($1::uuid[])
+       AND c.attendance_date >= $2::date
+       AND c.attendance_date <= $3::date
+
+     UNION ALL
+
+     SELECT lr.employee_id,
+            NULL::text AS attendance_date,
+            lr.start_date::text AS start_date,
             lr.end_date::text AS end_date
      FROM leave_requests lr
      LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -388,11 +402,19 @@ async function loadApprovedLeaveKeys(client, employeeIds, startStr, endStr) {
        AND COALESCE(lt.affects_dtr_normally, true) = true
        AND lr.employee_id = ANY($1::uuid[])
        AND lr.start_date <= $3::date
-       AND lr.end_date >= $2::date`,
+       AND lr.end_date >= $2::date
+       AND NOT EXISTS (
+         SELECT 1 FROM dtr_leave_coverage c
+         WHERE c.leave_request_id = lr.id
+       )`,
     [employeeIds, startStr, endStr]
   );
   for (const row of result.rows) {
     const employeeId = String(row.employee_id);
+    if (row.attendance_date) {
+      keys.add(`${employeeId}|${dateOnly(row.attendance_date)}`);
+      continue;
+    }
     const rangeStart = dateOnly(row.start_date) < startStr ? startStr : dateOnly(row.start_date);
     const rangeEnd = dateOnly(row.end_date) > endStr ? endStr : dateOnly(row.end_date);
     for (const dateStr of datesInRange(rangeStart, rangeEnd)) {
