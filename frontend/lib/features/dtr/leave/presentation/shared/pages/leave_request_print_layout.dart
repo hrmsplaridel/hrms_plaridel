@@ -478,6 +478,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     final current = _savedRequest ?? widget.initialRequest;
     final requestId = current?.id;
     final hasAttachment = (current?.attachmentName ?? '').trim().isNotEmpty;
+    final canModifyAttachment = _canModifyAttachment();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -493,7 +494,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
           ),
         ),
         const SizedBox(height: 12),
-        if (requestId == null || requestId.isEmpty)
+        if ((requestId == null || requestId.isEmpty) && canModifyAttachment)
           Text(
             'Save draft first to add an attachment.',
             style: TextStyle(
@@ -527,38 +528,48 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                 ],
               ),
             ),
-          Row(
-            children: [
-              OutlinedButton.icon(
-                onPressed: (_busy || _attachmentUploading)
-                    ? null
-                    : _pickAndUploadAttachment,
-                icon: _attachmentUploading
-                    ? SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(Icons.upload_file, size: 18),
-                label: Text(hasAttachment ? 'Replace' : 'Add attachment'),
-              ),
-              if (hasAttachment) ...[
-                const SizedBox(width: 8),
-                TextButton(
+          if (canModifyAttachment)
+            Row(
+              children: [
+                OutlinedButton.icon(
                   onPressed: (_busy || _attachmentUploading)
                       ? null
-                      : _removeAttachment,
-                  child: const Text('Remove'),
+                      : _pickAndUploadAttachment,
+                  icon: _attachmentUploading
+                      ? SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(Icons.upload_file, size: 18),
+                  label: Text(hasAttachment ? 'Replace' : 'Add attachment'),
                 ),
+                if (hasAttachment) ...[
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: (_busy || _attachmentUploading)
+                        ? null
+                        : _removeAttachment,
+                    child: const Text('Remove'),
+                  ),
+                ],
               ],
-            ],
-          ),
+            ),
         ],
       ],
     );
   }
 
+  bool _canModifyAttachment() {
+    final current = _savedRequest ?? widget.initialRequest;
+    final status = current?.status;
+    return status == null ||
+        status == LeaveRequestStatus.draft ||
+        status == LeaveRequestStatus.returned;
+  }
+
   Future<void> _pickAndUploadAttachment() async {
+    if (!_canModifyAttachment()) return;
     final current = _savedRequest ?? widget.initialRequest;
     final requestId = current?.id;
     if (requestId == null || requestId.isEmpty) {
@@ -610,6 +621,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
   }
 
   Future<void> _removeAttachment() async {
+    if (!_canModifyAttachment()) return;
     final current = _savedRequest ?? widget.initialRequest;
     final requestId = current?.id;
     if (requestId == null || requestId.isEmpty) return;

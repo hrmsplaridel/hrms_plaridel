@@ -713,6 +713,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return id != null && id.trim().isNotEmpty;
   }
 
+  bool _canModifyAttachment() {
+    final status = (_savedRequest ?? widget.initialRequest)?.status;
+    return status == null ||
+        status == LeaveRequestStatus.draft ||
+        status == LeaveRequestStatus.returned;
+  }
+
   /// Visible only when an attachment is mandatory: sick leave ≥5 working days,
   /// or any non–sick type with [LeaveType.requiresAttachment].
   bool _shouldShowAttachmentSection() {
@@ -2072,6 +2079,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Widget _buildAttachmentSection() {
     final current = _savedRequest ?? widget.initialRequest;
+    final canModifyAttachment = _canModifyAttachment();
     final pendingName = _pendingAttachmentName?.trim();
     final hasPendingAttachment =
         pendingName != null &&
@@ -2160,39 +2168,40 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               ],
             ),
           ),
-        Row(
-          children: [
-            OutlinedButton.icon(
-              onPressed: (_busy || _attachmentUploading)
-                  ? null
-                  : _pickAndUploadAttachment,
-              icon: _attachmentUploading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.upload_file, size: 18),
-              label: Text(hasAttachment ? 'Replace File' : 'Upload File'),
-            ),
-            if (hasAttachment) ...[
-              const SizedBox(width: 12),
-              TextButton(
+        if (canModifyAttachment)
+          Row(
+            children: [
+              OutlinedButton.icon(
                 onPressed: (_busy || _attachmentUploading)
                     ? null
-                    : _removeAttachment,
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
-                child: const Text('Remove'),
+                    : _pickAndUploadAttachment,
+                icon: _attachmentUploading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.upload_file, size: 18),
+                label: Text(hasAttachment ? 'Replace File' : 'Upload File'),
               ),
+              if (hasAttachment) ...[
+                const SizedBox(width: 12),
+                TextButton(
+                  onPressed: (_busy || _attachmentUploading)
+                      ? null
+                      : _removeAttachment,
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  child: const Text('Remove'),
+                ),
+              ],
             ],
-          ],
-        ),
+          ),
       ],
     );
   }
 
   Future<void> _pickAndUploadAttachment() async {
-    if (!_shouldShowAttachmentSection()) return;
+    if (!_shouldShowAttachmentSection() || !_canModifyAttachment()) return;
 
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -2285,7 +2294,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Future<void> _removeAttachment() async {
-    if (!_shouldShowAttachmentSection()) return;
+    if (!_shouldShowAttachmentSection() || !_canModifyAttachment()) return;
 
     final current = _savedRequest ?? widget.initialRequest;
     final requestId = current?.id;
