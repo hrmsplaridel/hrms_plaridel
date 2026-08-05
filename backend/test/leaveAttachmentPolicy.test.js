@@ -1,0 +1,67 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+  assertRequiredLeaveAttachment,
+  canModifyLeaveAttachment,
+} = require('../src/services/leaveAttachmentPolicy');
+
+test('attachments can be changed only while a leave request is draft or returned', () => {
+  assert.equal(canModifyLeaveAttachment('draft'), true);
+  assert.equal(canModifyLeaveAttachment('returned'), true);
+
+  for (const status of [
+    'pending',
+    'pending_department_head',
+    'pending_hr',
+    'approved',
+    'rejected',
+    'rejected_by_department_head',
+    'rejected_by_hr',
+    'cancelled',
+  ]) {
+    assert.equal(canModifyLeaveAttachment(status), false, status);
+  }
+});
+
+test('final approval blocks a generally required attachment when it is missing', () => {
+  assert.throws(
+    () => assertRequiredLeaveAttachment({
+      rule: { requires_attachment: true },
+      leaveType: 'maternityLeave',
+      days: 10,
+      hasAttachment: false,
+    }),
+    /requires a supporting document.*missing/i
+  );
+
+  assert.doesNotThrow(() => assertRequiredLeaveAttachment({
+    rule: { requires_attachment: true },
+    leaveType: 'maternityLeave',
+    days: 10,
+    hasAttachment: true,
+  }));
+});
+
+test('final approval applies the sick-leave attachment threshold', () => {
+  const rule = {
+    requires_attachment: false,
+    requires_attachment_when_over_days: 5,
+  };
+
+  assert.doesNotThrow(() => assertRequiredLeaveAttachment({
+    rule,
+    leaveType: 'sickLeave',
+    days: 4,
+    hasAttachment: false,
+  }));
+  assert.throws(
+    () => assertRequiredLeaveAttachment({
+      rule,
+      leaveType: 'sickLeave',
+      days: 5,
+      hasAttachment: false,
+    }),
+    /requires a supporting document/i
+  );
+});

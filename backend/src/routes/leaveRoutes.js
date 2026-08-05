@@ -45,6 +45,10 @@ const {
   resolveApprovalAllocation,
 } = require('../services/leaveApprovalAllocation');
 const {
+  assertRequiredLeaveAttachment,
+  canModifyLeaveAttachment,
+} = require('../services/leaveAttachmentPolicy');
+const {
   assertCoverageMatchesRequestedDays,
   removeApprovedLeaveCoverage,
   replaceApprovedLeaveCoverage,
@@ -1131,10 +1135,28 @@ function storedLeaveAttachmentFromMemoryFile(file) {
 function cleanupStoredLeaveAttachment(relPath) {
   if (!relPath) return;
   try {
-    const filePath = path.join(UPLOAD_DIR, relPath);
+    const uploadRoot = path.resolve(UPLOAD_DIR);
+    const filePath = path.resolve(uploadRoot, String(relPath));
+    if (filePath !== uploadRoot && !filePath.startsWith(`${uploadRoot}${path.sep}`)) {
+      return;
+    }
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   } catch (err) {
     console.error('[leave attachment cleanup]', err);
+  }
+}
+
+function storedLeaveAttachmentExists(relPath) {
+  if (!relPath) return false;
+  try {
+    const uploadRoot = path.resolve(UPLOAD_DIR);
+    const filePath = path.resolve(uploadRoot, String(relPath));
+    if (filePath !== uploadRoot && !filePath.startsWith(`${uploadRoot}${path.sep}`)) {
+      return false;
+    }
+    return fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+  } catch (_) {
+    return false;
   }
 }
 
@@ -1377,19 +1399,6 @@ async function canAccessLeaveRequest(requestId, userId, isAdmin) {
     [requestId, isAdmin, userId]
   );
   return q.rows.length > 0;
-}
-
-/** Check if attachment can be modified (draft, any pending, returned, rejected). */
-function canModifyAttachment(status) {
-  return (
-    status === 'draft' ||
-    status === 'pending' ||
-    status === 'pending_department_head' ||
-    status === 'pending_hr' ||
-    status === 'returned' ||
-    status === 'rejected_by_department_head' ||
-    status === 'rejected_by_hr'
-  );
 }
 
 /**
@@ -3464,8 +3473,9 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
     try {
       await client.query('BEGIN');
       const existing = await client.query(
-        `SELECT lr.id, lr.status, lr.user_id, lr.employee_id, lr.start_date, lr.end_date,
-                COALESCE(lr.number_of_days, lr.total_days) AS days,
+       `SELECT lr.id, lr.status, lr.user_id, lr.employee_id, lr.start_date, lr.end_date,
+               lr.attachment_path,
+               COALESCE(lr.number_of_days, lr.total_days) AS days,
                 lt.name AS leave_type_name
          FROM leave_requests lr
          LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -3507,6 +3517,15 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
       );
       const approvalDates = approvalCoverage.dates;
       const approvalDays = approvalCoverage.days;
+      const leaveTypeRule = r.leave_type_name
+        ? await getLeaveTypeDefinition(client, r.leave_type_name)
+        : null;
+      assertRequiredLeaveAttachment({
+        rule: leaveTypeRule,
+        leaveType: r.leave_type_name,
+        days: approvalDays,
+        hasAttachment: storedLeaveAttachmentExists(r.attachment_path),
+      });
       const allocation = resolveApprovalAllocation({
         requestedDays: approvalDays,
         approvedDaysWithPay: approvedDaysWithPayRaw,
@@ -3563,10 +3582,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         excludeId: id,
       });
 
-      const leaveTypeRuleForDtr = leaveTypeName
-        ? await getLeaveTypeDefinition(client, leaveTypeName)
-        : null;
-      if (leaveTypeRuleForDtr?.affects_dtr_normally !== false) {
+      if (leaveTypeRule?.affects_dtr_normally !== false) {
         await replaceApprovedLeaveCoverage(client, {
           employeeId: targetUserId,
           leaveRequestId: id,
@@ -4570,39 +4586,52 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
   }
 });
 
-// POST /api/leave/:id/attachment - upload attachment (owner or admin; draft/pending/returned only)
+// POST /api/leave/:id/attachment - upload/replace while the request is draft or returned.
 router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res) => {
   const userId = req.user?.id;
   const role = req.user?.role;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded. Allowed: PDF, JPG, JPEG, PNG (max 10MB).' });
+  }
+  const newRelPath = `${LEAVE_ATTACHMENT_SUBDIR}/${req.file.filename}`;
+  let client = null;
+  let committed = false;
+  let oldAttachmentPath = null;
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded. Allowed: PDF, JPG, JPEG, PNG (max 10MB).' });
-    }
+    client = await pool.connect();
+    await client.query('BEGIN');
     const isAdmin = role === 'admin' || role === 'hr';
-    const existing = await pool.query(
-      'SELECT id, status, attachment_path FROM leave_requests WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)',
+    const existing = await client.query(
+      `SELECT id, status, attachment_path
+       FROM leave_requests
+       WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)
+       FOR UPDATE`,
       [id, isAdmin, userId]
     );
-    if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
+    if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      cleanupStoredLeaveAttachment(newRelPath);
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
     const row = existing.rows[0];
-    if (!canModifyAttachment(row.status)) {
-      return res.status(400).json({ error: 'Attachment cannot be changed for this request status.' });
+    if (!canModifyLeaveAttachment(row.status)) {
+      await client.query('ROLLBACK');
+      cleanupStoredLeaveAttachment(newRelPath);
+      return res.status(409).json({
+        error: 'Attachment is locked after submission. It can only be changed while the request is a draft or has been returned.',
+      });
     }
-    const relPath = `${LEAVE_ATTACHMENT_SUBDIR}/${req.file.filename}`;
+    oldAttachmentPath = row.attachment_path || null;
     const mimeType = req.file.mimetype || null;
-    if (row.attachment_path) {
-      const oldPath = path.join(UPLOAD_DIR, row.attachment_path);
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-    }
-    await pool.query(
+    await client.query(
       `UPDATE leave_requests
        SET attachment_name = $1, attachment_path = $2, attachment_mime_type = $3, attachment_uploaded_at = now(), updated_at = now()
        WHERE id = $4`,
-      [req.file.originalname || req.file.filename, relPath, mimeType, id]
+      [req.file.originalname || req.file.filename, newRelPath, mimeType, id]
     );
-    const out = await pool.query(
+    const out = await client.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -4610,43 +4639,64 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
        WHERE lr.id = $1`,
       [id]
     );
+    await client.query('COMMIT');
+    committed = true;
+    if (oldAttachmentPath && oldAttachmentPath !== newRelPath) {
+      cleanupStoredLeaveAttachment(oldAttachmentPath);
+    }
     const mapped = mapLeaveRowToApi(out.rows[0]);
     broadcastLeaveUpdated('attachment_uploaded', mapped);
     res.json(mapped);
   } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) { }
+    }
+    if (!committed) cleanupStoredLeaveAttachment(newRelPath);
     console.error('[leave POST /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
+  } finally {
+    if (client) client.release();
   }
 });
 
-// DELETE /api/leave/:id/attachment - remove attachment
+// DELETE /api/leave/:id/attachment - remove while the request is draft or returned.
 router.delete('/:id/attachment', protect, async (req, res) => {
   const userId = req.user?.id;
   const role = req.user?.role;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
+  let client = null;
+  let oldAttachmentPath = null;
   try {
+    client = await pool.connect();
+    await client.query('BEGIN');
     const isAdmin = role === 'admin' || role === 'hr';
-    const existing = await pool.query(
-      'SELECT id, status, attachment_path FROM leave_requests WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)',
+    const existing = await client.query(
+      `SELECT id, status, attachment_path
+       FROM leave_requests
+       WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)
+       FOR UPDATE`,
       [id, isAdmin, userId]
     );
-    if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
+    if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
     const row = existing.rows[0];
-    if (!canModifyAttachment(row.status)) {
-      return res.status(400).json({ error: 'Attachment cannot be changed for this request status.' });
+    if (!canModifyLeaveAttachment(row.status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Attachment is locked after submission. It can only be changed while the request is a draft or has been returned.',
+      });
     }
-    if (row.attachment_path) {
-      const filePath = path.join(UPLOAD_DIR, row.attachment_path);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    }
-    await pool.query(
+    oldAttachmentPath = row.attachment_path || null;
+    await client.query(
       `UPDATE leave_requests
        SET attachment_name = NULL, attachment_path = NULL, attachment_mime_type = NULL, attachment_uploaded_at = NULL, updated_at = now()
        WHERE id = $1`,
       [id]
     );
-    const out = await pool.query(
+    const out = await client.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -4654,12 +4704,19 @@ router.delete('/:id/attachment', protect, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
+    await client.query('COMMIT');
+    if (oldAttachmentPath) cleanupStoredLeaveAttachment(oldAttachmentPath);
     const mapped = mapLeaveRowToApi(out.rows[0]);
     broadcastLeaveUpdated('attachment_removed', mapped);
     res.json(mapped);
   } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) { }
+    }
     console.error('[leave DELETE /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to remove attachment' });
+  } finally {
+    if (client) client.release();
   }
 });
 
