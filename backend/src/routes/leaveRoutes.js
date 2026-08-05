@@ -49,6 +49,12 @@ const {
   canModifyLeaveAttachment,
 } = require('../services/leaveAttachmentPolicy');
 const {
+  DEPARTMENT_HEAD_HISTORY_ACTIONS,
+  initLeaveAttachmentAccessLog,
+  recordLeaveAttachmentAccess,
+  resolveLeaveAttachmentAccess,
+} = require('../services/leaveAttachmentAccess');
+const {
   assertCoverageMatchesRequestedDays,
   removeApprovedLeaveCoverage,
   replaceApprovedLeaveCoverage,
@@ -294,6 +300,7 @@ const ANNUAL_QUOTA_LEAVE_USAGE_STATUSES = [
 
 initLeaveRequestHistory(pool);
 initLeaveBalanceLedger(pool);
+initLeaveAttachmentAccessLog(pool);
 pool
   .query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`)
   .then(async () => {
@@ -4727,30 +4734,92 @@ router.get('/:id/attachment', protect, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
   try {
-    const isAdmin = role === 'admin' || role === 'hr';
     const rows = await pool.query(
-      'SELECT user_id, employee_id, attachment_path, attachment_name, attachment_mime_type FROM leave_requests WHERE id = $1',
+      `SELECT user_id, employee_id, status, attachment_path, attachment_name,
+              attachment_mime_type
+       FROM leave_requests
+       WHERE id = $1`,
       [id]
     );
     if (rows.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
     const row = rows.rows[0];
     const targetUserId = row.user_id || row.employee_id;
-    let canAccess = isAdmin || targetUserId === userId;
-    if (!canAccess) {
-      const deptInfo = await isDepartmentHead(pool, userId);
-      if (deptInfo?.isDeptHead && deptInfo.departmentId && targetUserId) {
-        const employeeDept = await getEmployeeDepartment(pool, targetUserId);
-        canAccess = employeeDept?.departmentId === deptInfo.departmentId;
-      }
+    let assignedDepartmentHeadId = null;
+    let historicalDepartmentHeadAction = null;
+    const isOwner = targetUserId === userId;
+    const isHrOrAdmin = role === 'admin' || role === 'hr';
+    if (!isOwner && !isHrOrAdmin) {
+      const [assignment, history] = await Promise.all([
+        row.status === 'pending_department_head' && targetUserId
+          ? getDepartmentHeadForEmployee(pool, targetUserId)
+          : Promise.resolve(null),
+        pool.query(
+          `SELECT action
+           FROM leave_request_history
+           WHERE leave_request_id = $1
+             AND acted_by = $2
+             AND action = ANY($3::text[])
+           ORDER BY acted_at DESC
+           LIMIT 1`,
+          [id, userId, Array.from(DEPARTMENT_HEAD_HISTORY_ACTIONS)]
+        ),
+      ]);
+      assignedDepartmentHeadId = assignment?.departmentHeadUserId || null;
+      historicalDepartmentHeadAction = history.rows[0]?.action || null;
     }
-    if (!canAccess) return res.status(404).json({ error: 'Leave request not found' });
-    if (!row.attachment_path) return res.status(404).json({ error: 'No attachment for this request' });
-    const filePath = path.join(UPLOAD_DIR, row.attachment_path);
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Attachment file not found' });
+    const access = resolveLeaveAttachmentAccess({
+      role,
+      userId,
+      ownerUserId: targetUserId,
+      requestStatus: row.status,
+      assignedDepartmentHeadId,
+      historicalDepartmentHeadAction,
+    });
+    const auditBase = {
+      leaveRequestId: id,
+      attachmentName: row.attachment_name || null,
+      accessedBy: userId,
+      actorRole: role || null,
+      accessReason: access.reason,
+      ipAddress: req.ip || req.socket?.remoteAddress || null,
+      userAgent: req.get('user-agent') || null,
+    };
+    if (!access.allowed) {
+      await recordLeaveAttachmentAccess(pool, {
+        ...auditBase,
+        accessOutcome: 'denied',
+      });
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
+    if (!row.attachment_path) {
+      await recordLeaveAttachmentAccess(pool, {
+        ...auditBase,
+        accessOutcome: 'missing_attachment',
+      });
+      return res.status(404).json({ error: 'No attachment for this request' });
+    }
+    const uploadRoot = path.resolve(UPLOAD_DIR);
+    const filePath = path.resolve(uploadRoot, String(row.attachment_path));
+    const isStoredFile =
+      filePath !== uploadRoot &&
+      filePath.startsWith(`${uploadRoot}${path.sep}`) &&
+      fs.existsSync(filePath) &&
+      fs.statSync(filePath).isFile();
+    if (!isStoredFile) {
+      await recordLeaveAttachmentAccess(pool, {
+        ...auditBase,
+        accessOutcome: 'missing_file',
+      });
+      return res.status(404).json({ error: 'Attachment file not found' });
+    }
+    await recordLeaveAttachmentAccess(pool, {
+      ...auditBase,
+      accessOutcome: 'allowed',
+    });
     const filename = row.attachment_name || 'attachment';
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
     if (row.attachment_mime_type) res.setHeader('Content-Type', row.attachment_mime_type);
-    res.sendFile(path.resolve(filePath));
+    res.sendFile(filePath);
   } catch (err) {
     console.error('[leave GET /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to fetch attachment' });
