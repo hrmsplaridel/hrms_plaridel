@@ -42,7 +42,11 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
   try {
     final res = await ApiClient.instance.get<Map<String, dynamic>>(
       '/api/leave/signatories',
-      queryParameters: {'employee_id': request.userId},
+      queryParameters: {
+        'employee_id': request.userId,
+        if (request.id != null && request.id!.isNotEmpty)
+          'leave_request_id': request.id,
+      },
     );
     final data = res.data ?? const <String, dynamic>{};
     certification = LeaveFormSignatoryInfo.fromJson(
