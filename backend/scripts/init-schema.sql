@@ -498,6 +498,10 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   reviewer_remarks TEXT,
   reviewed_at TIMESTAMPTZ,
 
+  -- Review routing is frozen when the employee submits or resubmits.
+  review_department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  assigned_department_head_id UUID REFERENCES users(id) ON DELETE SET NULL,
+
   -- Authoritative final HR allocation. Only paid days consume leave credits.
   approved_days_with_pay NUMERIC(5,2),
   approved_days_without_pay NUMERIC(5,2),
@@ -519,6 +523,10 @@ CREATE TABLE IF NOT EXISTS leave_requests (
     AND (approved_days_without_pay IS NULL OR approved_days_without_pay >= 0)
   )
 );
+CREATE INDEX IF NOT EXISTS idx_leave_requests_review_department
+  ON leave_requests(review_department_id);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_assigned_department_head
+  ON leave_requests(assigned_department_head_id, status);
 
 -- =========================================
 -- LEAVE BALANCES
