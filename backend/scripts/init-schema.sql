@@ -478,8 +478,10 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   attachment_path TEXT,
   attachment_mime_type TEXT,
   attachment_uploaded_at TIMESTAMPTZ,
-  -- Flexible payload for form fields (office_department, position_title, commutation, etc.)
+  -- Whitelisted employee-editable leave-specific fields only.
   details JSONB,
+  -- Server-generated official identity/assignment fields used by forms and exports.
+  employee_official_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN (
       'draft',
@@ -496,6 +498,8 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 
   reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
   reviewer_remarks TEXT,
+  recommendation_remarks TEXT,
+  disapproval_reason TEXT,
   reviewed_at TIMESTAMPTZ,
 
   -- Review routing is frozen when the employee submits or resubmits.
@@ -517,6 +521,9 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   CONSTRAINT chk_leave_total_days CHECK (
     (total_days IS NULL OR total_days >= 0)
     AND (number_of_days IS NULL OR number_of_days >= 0)
+  ),
+  CONSTRAINT chk_leave_employee_official_snapshot_object CHECK (
+    jsonb_typeof(employee_official_snapshot) = 'object'
   ),
   CONSTRAINT chk_leave_approved_days_nonnegative CHECK (
     (approved_days_with_pay IS NULL OR approved_days_with_pay >= 0)
