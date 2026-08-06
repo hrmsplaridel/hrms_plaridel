@@ -235,7 +235,6 @@ async function loadEmployees(client, startStr, endStr) {
          )
          OR u.separation_date >= $1::date
        )
-       AND (a.is_active IS NULL OR a.is_active = true)
        AND a.effective_from <= $2::date
        AND (a.effective_to IS NULL OR a.effective_to >= $1::date)
      ORDER BY u.full_name`,
@@ -261,7 +260,6 @@ async function loadAssignments(client, employeeIds, startStr, endStr) {
      FROM assignments a
      LEFT JOIN shifts s ON s.id = a.shift_id
      WHERE a.employee_id = ANY($1::uuid[])
-       AND (a.is_active IS NULL OR a.is_active = true)
        AND a.effective_from <= $3::date
        AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
      ORDER BY a.employee_id, a.effective_from DESC, a.created_at DESC`,
@@ -944,4 +942,8 @@ module.exports = {
   equivalentDaysFromMinutes,
   expectedMinutesForCoverage,
   desiredPosting,
+  /** @internal exported for regression tests */
+  assignmentForDate,
+  loadAssignments,
+  loadEmployees,
 };

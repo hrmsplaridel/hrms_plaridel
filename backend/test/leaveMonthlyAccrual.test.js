@@ -11,6 +11,7 @@ const {
   expectedAccrualForServiceMonth,
   round3,
   startOfMonth,
+  serviceMonthAssignmentExistsSql,
 } = require('../src/services/leaveMonthlyAccrual');
 const {
   manilaCompletedYearMonthNow,
@@ -22,6 +23,13 @@ const {
   RECONCILIATION_CRON_EXPRESSION,
   MONTH_END_SCHEDULES,
 } = require('../src/jobs/leaveMonthlyAccrualScheduler');
+
+test('completed-month accrual accepts an assignment closed by a later transfer', () => {
+  const sql = serviceMonthAssignmentExistsSql('u', '$2', '$3');
+  assert.match(sql, /a\.effective_from/);
+  assert.match(sql, /a\.effective_to/);
+  assert.doesNotMatch(sql, /a\.is_active/i);
+});
 
 // ─── Mock pool factory ────────────────────────────────────────────────────────
 
