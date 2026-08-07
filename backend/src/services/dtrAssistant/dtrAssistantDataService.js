@@ -7,6 +7,9 @@ const {
   buildAllLeaveGuidelines,
   buildGuidelinesForTypes,
 } = require('./leaveFilingGuidelines');
+const {
+  sanitizeEmployeeLeaveDetails,
+} = require('../leaveRequestDetailsPolicy');
 
 function toNumber(value) {
   if (value == null) return null;
@@ -230,6 +233,8 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
             lr.attachment_path,
             lr.details,
             lr.reviewer_remarks,
+            lr.recommendation_remarks,
+            lr.disapproval_reason,
             lr.reviewed_at,
             lr.approved_at,
             reviewer.full_name AS reviewer_name,
@@ -301,8 +306,10 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
     reason: compactText(row.reason),
     has_attachment: !!row.attachment_path,
     attachment_name: compactText(row.attachment_name, 120),
-    details: row.details && typeof row.details === 'object' ? row.details : {},
+    details: sanitizeEmployeeLeaveDetails(row.details),
     reviewer_remarks: compactText(row.reviewer_remarks),
+    recommendation_remarks: compactText(row.recommendation_remarks),
+    disapproval_reason: compactText(row.disapproval_reason),
     reviewer_name: row.reviewer_name,
     approver_name: row.approver_name,
     reviewed_at: toIso(row.reviewed_at),

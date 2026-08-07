@@ -1411,16 +1411,13 @@ function workflowStatusText(status) {
 }
 
 function firstReviewReason(request) {
-  const details = request?.details || {};
   return (
     request?.reviewer_remarks ||
     request?.hr_remarks ||
+    request?.disapproval_reason ||
+    request?.recommendation_remarks ||
     request?.dept_head_remarks ||
     request?.latest_history?.remarks ||
-    details.disapproval_reason ||
-    details.disapprovalReason ||
-    details.recommendation_remarks ||
-    details.recommendationRemarks ||
     null
   );
 }
