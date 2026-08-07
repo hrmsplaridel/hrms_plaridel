@@ -61,6 +61,12 @@ const {
   replaceApprovedLeaveCoverage,
 } = require('../services/leaveDtrCoverage');
 const {
+  employeeLeaveDetailsFromPayload,
+  loadEmployeeOfficialSnapshot,
+  normalizeEmployeeOfficialSnapshot,
+  sanitizeEmployeeLeaveDetails,
+} = require('../services/leaveRequestDetailsPolicy');
+const {
   getYearEndForcedLeaveCompliance,
   applyYearEndForcedLeaveDeductions,
   manilaYearNow: yearEndManilaYearNow,
@@ -984,11 +990,18 @@ LEFT JOIN LATERAL (
 LEFT JOIN departments d ON d.id = COALESCE(lr.review_department_id, a.department_id)`;
 
 function mapLeaveRowToApi(row) {
-  // Keep response aligned with Flutter LeaveRequest.fromJson keys.
-  // Spread details FIRST so canonical DB fields (status, etc.) take precedence and are not overwritten.
-  const details = row.details && typeof row.details === 'object' ? row.details : {};
-  const legacyApprovalDetails = row.status === 'approved' ? details : {};
-  const employeeName = row.employee_name || row.full_name || row.employee_full_name || details.employee_name || details.employeeName || null;
+  // Employee details are whitelisted again on output so legacy untrusted keys
+  // cannot appear as official or review fields before the cleanup migration runs.
+  const details = sanitizeEmployeeLeaveDetails(row.details);
+  const official = normalizeEmployeeOfficialSnapshot(
+    row.employee_official_snapshot
+  );
+  const employeeName =
+    official.employee_name ||
+    row.employee_name ||
+    row.full_name ||
+    row.employee_full_name ||
+    null;
   return {
     ...details,
     id: row.id,
@@ -1011,38 +1024,17 @@ function mapLeaveRowToApi(row) {
     department_head_remarks: row.department_head_remarks || null,
     department_head_action: row.department_head_action || null,
     hr_remarks: row.reviewer_remarks || null,
-    recommendation_remarks:
-      row.recommendation_remarks ||
-      details.recommendation_remarks ||
-      details.recommendationRemarks ||
-      null,
-    disapproval_reason:
-      row.disapproval_reason ||
-      details.disapproval_reason ||
-      details.disapprovalReason ||
-      row.reviewer_remarks ||
-      null,
+    recommendation_remarks: row.recommendation_remarks || null,
+    disapproval_reason: row.disapproval_reason || null,
     approved_days_with_pay:
       row.approved_days_with_pay != null
         ? parseFloat(row.approved_days_with_pay)
-        : (legacyApprovalDetails.approved_days_with_pay != null
-            ? parseFloat(legacyApprovalDetails.approved_days_with_pay)
-            : (legacyApprovalDetails.approvedDaysWithPay != null
-                ? parseFloat(legacyApprovalDetails.approvedDaysWithPay)
-                : null)),
+        : null,
     approved_days_without_pay:
       row.approved_days_without_pay != null
         ? parseFloat(row.approved_days_without_pay)
-        : (legacyApprovalDetails.approved_days_without_pay != null
-            ? parseFloat(legacyApprovalDetails.approved_days_without_pay)
-            : (legacyApprovalDetails.approvedDaysWithoutPay != null
-                ? parseFloat(legacyApprovalDetails.approvedDaysWithoutPay)
-                : null)),
-    approved_other_details:
-      row.approved_other_details ||
-      legacyApprovalDetails.approved_other_details ||
-      legacyApprovalDetails.approvedOtherDetails ||
-      null,
+        : null,
+    approved_other_details: row.approved_other_details || null,
     reviewed_at: row.reviewed_at || row.approved_at || null,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
@@ -1060,10 +1052,12 @@ function mapLeaveRowToApi(row) {
     attachment_mime_type: row.attachment_mime_type || null,
     attachment_uploaded_at: row.attachment_uploaded_at || null,
     office_department:
-      details.office_department ||
-      details.officeDepartment ||
+      official.office_department ||
       row.assignment_department_name ||
       null,
+    position_title: official.position_title || null,
+    salary: official.salary,
+    date_filed: official.date_filed || toIsoDateStr(row.created_at),
   };
 }
 
@@ -1781,9 +1775,8 @@ router.post('/draft', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       const adoptionParentRole = readAdoptionParentRole(payloadDetails);
@@ -1827,13 +1820,27 @@ router.post('/draft', protect, async (req, res) => {
             number_of_days,
             reason,
             details,
+            employee_official_snapshot,
             status,
             created_at,
             updated_at
           )
-          VALUES ($1::uuid, $1::uuid, $2::uuid, $3::date, $4::date, $5::numeric, $5::numeric, $6::text, $7::jsonb, 'draft', now(), now())
+          VALUES (
+            $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
+            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb,
+            'draft', now(), now()
+          )
           RETURNING *`,
-        [userId, leaveTypeId, startStr, endStr, effectiveDaysDraft, reason || null, payloadDetails]
+        [
+          userId,
+          leaveTypeId,
+          startStr,
+          endStr,
+          effectiveDaysDraft,
+          reason || null,
+          payloadDetails,
+          officialSnapshot,
+        ]
       );
 
       const row = q.rows[0];
@@ -1897,9 +1904,8 @@ router.post('/submit', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       const adoptionParentRole = readAdoptionParentRole(payloadDetails);
@@ -1967,13 +1973,27 @@ router.post('/submit', protect, async (req, res) => {
             number_of_days,
             reason,
             details,
+            employee_official_snapshot,
             status,
             created_at,
             updated_at
           )
-          VALUES ($1::uuid, $1::uuid, $2::uuid, $3::date, $4::date, $5::numeric, $5::numeric, $6::text, $7::jsonb, 'draft', now(), now())
+          VALUES (
+            $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
+            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb,
+            'draft', now(), now()
+          )
           RETURNING *`,
-        [userId, leaveTypeId, startStr, endStr, effectiveDaysSubmit, reason || null, payloadDetails]
+        [
+          userId,
+          leaveTypeId,
+          startStr,
+          endStr,
+          effectiveDaysSubmit,
+          reason || null,
+          payloadDetails,
+          officialSnapshot,
+        ]
       );
 
       const row = q.rows[0];
@@ -2107,9 +2127,8 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         return res.status(400).json({ error: 'Invalid leave type' });
       }
 
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       const adoptionParentRole = readAdoptionParentRole(payloadDetails);
@@ -2182,6 +2201,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
             number_of_days,
             reason,
             details,
+            employee_official_snapshot,
             attachment_name,
             attachment_path,
             attachment_mime_type,
@@ -2192,8 +2212,8 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
           )
           VALUES (
             $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
-            $5::numeric, $5::numeric, $6::text, $7::jsonb,
-            $8::text, $9::text, $10::text, now(),
+            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb,
+            $9::text, $10::text, $11::text, now(),
             'draft', now(), now()
           )
           RETURNING *`,
@@ -2205,6 +2225,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
           effectiveDaysSubmit,
           reason || null,
           payloadDetails,
+          officialSnapshot,
           storedAttachment.originalName,
           storedAttachment.relPath,
           storedAttachment.mimeType,
@@ -2319,7 +2340,9 @@ router.put('/:id', protect, async (req, res) => {
   const { id } = req.params;
   try {
     const existing = await pool.query(
-      'SELECT id, status FROM leave_requests WHERE id = $1 AND (user_id = $2 OR employee_id = $2)',
+      `SELECT id, status, employee_official_snapshot
+       FROM leave_requests
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
       [id, userId]
     );
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
@@ -2352,9 +2375,14 @@ router.put('/:id', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
+      const existingOfficialSnapshot = normalizeEmployeeOfficialSnapshot(
+        existing.rows[0].employee_official_snapshot
+      );
+      if (existingOfficialSnapshot.date_filed) {
+        officialSnapshot.date_filed = existingOfficialSnapshot.date_filed;
+      }
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       const adoptionParentRole = readAdoptionParentRole(payloadDetails);
@@ -2461,6 +2489,7 @@ router.put('/:id', protect, async (req, res) => {
                 WHEN $10::boolean THEN $12::uuid
                 ELSE assigned_department_head_id
               END,
+              employee_official_snapshot = $13::jsonb,
               updated_at = now()
          WHERE id = $7 AND (user_id = $8 OR employee_id = $8)
          RETURNING *`,
@@ -2477,6 +2506,7 @@ router.put('/:id', protect, async (req, res) => {
           refreshReviewSnapshot,
           reviewSnapshot?.departmentId || null,
           reviewSnapshot?.departmentHeadUserId || null,
+          officialSnapshot,
         ]
       );
       const row = q.rows[0];
@@ -3590,9 +3620,6 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
   const approvedOtherDetails = (req.body?.approved_other_details || req.body?.approvedOtherDetails || '').toString().trim() || null;
   const approvedDaysWithPayRaw = req.body?.approved_days_with_pay ?? req.body?.approvedDaysWithPay;
   const approvedDaysWithoutPayRaw = req.body?.approved_days_without_pay ?? req.body?.approvedDaysWithoutPay;
-  const reviewDetailsPatch = {};
-  if (recommendationRemarks) reviewDetailsPatch.recommendation_remarks = recommendationRemarks;
-  if (approvedOtherDetails) reviewDetailsPatch.approved_other_details = approvedOtherDetails;
   try {
     const client = await pool.connect();
     try {
@@ -3656,8 +3683,6 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         approvedDaysWithPay: approvedDaysWithPayRaw,
         approvedDaysWithoutPay: approvedDaysWithoutPayRaw,
       });
-      reviewDetailsPatch.approved_days_with_pay = allocation.approvedDaysWithPay;
-      reviewDetailsPatch.approved_days_without_pay = allocation.approvedDaysWithoutPay;
       const { historyAction } = validateAdminTransition({
         currentStatus: r.status,
         desiredStatus: 'approved',
@@ -3668,7 +3693,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
          SET status = 'approved',
              reviewer_id = $2::uuid,
              reviewer_remarks = $3::text,
-             details = COALESCE(details, '{}'::jsonb) || $4::jsonb,
+             recommendation_remarks = $4::text,
              approved_days_with_pay = $5::numeric,
              approved_days_without_pay = $6::numeric,
              approved_other_details = $7::text,
@@ -3682,7 +3707,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
            id,
            reviewerId,
            remarks,
-           JSON.stringify(reviewDetailsPatch),
+           recommendationRemarks,
            allocation.approvedDaysWithPay,
            allocation.approvedDaysWithoutPay,
            approvedOtherDetails,
@@ -3811,8 +3836,6 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
   const { id } = req.params;
   const remarks = (req.body?.reviewer_remarks || req.body?.reason || req.body?.hr_remarks || '').toString().trim() || null;
   const disapprovalReason = (req.body?.disapproval_reason || req.body?.disapprovalReason || req.body?.reason || req.body?.reviewer_remarks || '').toString().trim() || null;
-  const rejectDetailsPatch = {};
-  if (disapprovalReason) rejectDetailsPatch.disapproval_reason = disapprovalReason;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -3845,11 +3868,11 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
        SET status = $4::text,
            reviewer_id = $2::uuid,
            reviewer_remarks = $3::text,
-           details = COALESCE(details, '{}'::jsonb) || $5::jsonb,
+           disapproval_reason = $5::text,
            reviewed_at = now(),
            updated_at = now()
        WHERE id = $1`,
-      [id, reviewerId, remarks, rejectNextStatus, JSON.stringify(rejectDetailsPatch)]
+      [id, reviewerId, remarks, rejectNextStatus, disapprovalReason]
     );
 
     await insertLeaveRequestHistory(client, {
@@ -3999,6 +4022,8 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
            approved_days_with_pay = NULL,
            approved_days_without_pay = NULL,
            approved_other_details = NULL,
+           recommendation_remarks = NULL,
+           disapproval_reason = NULL,
            reviewed_at   = now(),
            updated_at    = now()
        WHERE id = $1`,
