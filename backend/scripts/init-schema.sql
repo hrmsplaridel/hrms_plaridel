@@ -478,8 +478,10 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   attachment_path TEXT,
   attachment_mime_type TEXT,
   attachment_uploaded_at TIMESTAMPTZ,
-  -- Flexible payload for form fields (office_department, position_title, commutation, etc.)
+  -- Whitelisted employee-editable leave-specific fields only.
   details JSONB,
+  -- Server-generated official identity/assignment fields used by forms and exports.
+  employee_official_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN (
       'draft',
@@ -496,7 +498,18 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 
   reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
   reviewer_remarks TEXT,
+  recommendation_remarks TEXT,
+  disapproval_reason TEXT,
   reviewed_at TIMESTAMPTZ,
+
+  -- Review routing is frozen when the employee submits or resubmits.
+  review_department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  assigned_department_head_id UUID REFERENCES users(id) ON DELETE SET NULL,
+
+  -- Authoritative final HR allocation. Only paid days consume leave credits.
+  approved_days_with_pay NUMERIC(5,2),
+  approved_days_without_pay NUMERIC(5,2),
+  approved_other_details TEXT,
 
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
@@ -508,8 +521,19 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   CONSTRAINT chk_leave_total_days CHECK (
     (total_days IS NULL OR total_days >= 0)
     AND (number_of_days IS NULL OR number_of_days >= 0)
+  ),
+  CONSTRAINT chk_leave_employee_official_snapshot_object CHECK (
+    jsonb_typeof(employee_official_snapshot) = 'object'
+  ),
+  CONSTRAINT chk_leave_approved_days_nonnegative CHECK (
+    (approved_days_with_pay IS NULL OR approved_days_with_pay >= 0)
+    AND (approved_days_without_pay IS NULL OR approved_days_without_pay >= 0)
   )
 );
+CREATE INDEX IF NOT EXISTS idx_leave_requests_review_department
+  ON leave_requests(review_department_id);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_assigned_department_head
+  ON leave_requests(assigned_department_head_id, status);
 
 -- =========================================
 -- LEAVE BALANCES
@@ -571,6 +595,27 @@ CREATE TABLE IF NOT EXISTS leave_request_history (
 );
 CREATE INDEX IF NOT EXISTS idx_leave_request_history_leave_request_id
   ON leave_request_history(leave_request_id);
+
+-- =========================================
+-- LEAVE ATTACHMENT ACCESS LOG (SENSITIVE-DOCUMENT AUDIT)
+-- =========================================
+CREATE TABLE IF NOT EXISTS leave_attachment_access_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leave_request_id UUID REFERENCES leave_requests(id) ON DELETE SET NULL,
+  attachment_name TEXT,
+  accessed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  actor_role TEXT,
+  access_reason TEXT NOT NULL,
+  access_outcome TEXT NOT NULL
+    CHECK (access_outcome IN ('allowed', 'denied', 'missing_attachment', 'missing_file')),
+  ip_address TEXT,
+  user_agent TEXT,
+  accessed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_leave_attachment_access_request_time
+  ON leave_attachment_access_logs(leave_request_id, accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leave_attachment_access_actor_time
+  ON leave_attachment_access_logs(accessed_by, accessed_at DESC);
 
 -- =========================================
 -- LEAVE BALANCE LEDGER (append-only audit of bucket changes)
@@ -916,6 +961,21 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT uq_dtr_daily_summary_employee_date UNIQUE (employee_id, attendance_date)
+);
+
+-- Approved leave is an overlay on DTR. Keeping it separate preserves punches,
+-- holidays, absences, and incomplete records when approval is later revoked.
+CREATE TABLE IF NOT EXISTS dtr_leave_coverage (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leave_request_id UUID NOT NULL REFERENCES leave_requests(id) ON DELETE CASCADE,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attendance_date DATE NOT NULL,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_dtr_leave_coverage_request_date
+    UNIQUE (leave_request_id, attendance_date),
+  CONSTRAINT uq_dtr_leave_coverage_employee_date
+    UNIQUE (employee_id, attendance_date)
 );
 
 -- =========================================
@@ -2024,6 +2084,10 @@ CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date_time
 ON dtr_daily_summary(attendance_date DESC, time_in DESC);
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date_employee
 ON dtr_daily_summary(attendance_date, employee_id);
+CREATE INDEX IF NOT EXISTS idx_dtr_leave_coverage_employee_date
+ON dtr_leave_coverage(employee_id, attendance_date);
+CREATE INDEX IF NOT EXISTS idx_dtr_leave_coverage_request
+ON dtr_leave_coverage(leave_request_id);
 
 CREATE INDEX IF NOT EXISTS idx_locator_slips_status_employee_date
 ON locator_slips(status, employee_id, slip_date);

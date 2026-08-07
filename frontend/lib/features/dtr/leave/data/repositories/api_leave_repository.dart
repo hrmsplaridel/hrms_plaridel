@@ -10,6 +10,36 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
 class ApiLeaveRepository implements LeaveRepository {
+  static const Set<String> _employeePayloadKeys = {
+    'leave_type',
+    'custom_leave_type_text',
+    'start_date',
+    'end_date',
+    'reason',
+    'location_option',
+    'location_details',
+    'sick_leave_nature',
+    'sick_illness_details',
+    'maternity_delivery_type',
+    'expected_delivery_date',
+    'child_delivery_date',
+    'accident_date',
+    'calamity_date',
+    'adoption_parent_role',
+    'adoption_placement_date',
+    'vawc_support_document_type',
+    'vawc_case_details',
+    'solo_parent_id_number',
+    'solo_parent_id_expiry_date',
+    'women_illness_details',
+    'study_purpose',
+    'study_purpose_details',
+    'other_purpose',
+    'other_purpose_details',
+    'commutation',
+    'status',
+  };
+
   const ApiLeaveRepository();
 
   static Map<String, dynamic> _asMap(dynamic v) =>
@@ -26,9 +56,11 @@ class ApiLeaveRepository implements LeaveRepository {
 
   static Map<String, dynamic> _toApiPayload(LeaveRequest request) {
     final json = request.toJson();
-    // Backend expects leave_type as text name, and start/end dates in date-only string.
     json['leave_type'] = request.effectiveLeaveTypeName;
-    return json;
+    return {
+      for (final entry in json.entries)
+        if (_employeePayloadKeys.contains(entry.key)) entry.key: entry.value,
+    };
   }
 
   static Map<String, dynamic> _toMultipartFields(LeaveRequest request) {

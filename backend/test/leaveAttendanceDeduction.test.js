@@ -6,6 +6,9 @@ const {
   equivalentDaysFromMinutes,
   expectedMinutesForCoverage,
   desiredPosting,
+  assignmentForDate,
+  loadAssignments,
+  loadEmployees,
 } = require('../src/services/leaveAttendanceDeduction');
 
 const USER_ID = '00000000-0000-0000-0000-000000000101';
@@ -128,6 +131,54 @@ test('partial holiday coverage removes only the covered shift session', () => {
   assert.equal(expectedMinutesForCoverage(assignment, 'whole_day'), 0);
   assert.equal(expectedMinutesForCoverage(assignment, 'am_only'), 240);
   assert.equal(expectedMinutesForCoverage(assignment, 'pm_only'), 240);
+});
+
+test('completed-month DTR processing includes closed historical assignments', async () => {
+  const sqlCalls = [];
+  const client = {
+    async query(sql) {
+      const text = String(sql);
+      sqlCalls.push(text);
+      if (text.includes('SELECT DISTINCT u.id AS user_id')) {
+        return {
+          rows: [{ user_id: USER_ID, full_name: 'Transferred Employee' }],
+        };
+      }
+      if (text.includes('FROM assignments a')) {
+        return {
+          rows: [{
+            employee_id: USER_ID,
+            department_id: '00000000-0000-0000-0000-000000000301',
+            shift_id: '00000000-0000-0000-0000-000000000401',
+            effective_from: '2026-06-01',
+            effective_to: '2026-06-30',
+            start_time: '08:00:00',
+            end_time: '17:00:00',
+            break_end: '13:00:00',
+            punch_mode: 'full_day',
+            working_days: [1, 2, 3, 4, 5],
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${text.slice(0, 80)}`);
+    },
+  };
+
+  const employees = await loadEmployees(client, '2026-06-01', '2026-06-30');
+  const assignments = await loadAssignments(
+    client,
+    [USER_ID],
+    '2026-06-01',
+    '2026-06-30'
+  );
+
+  assert.equal(employees.length, 1);
+  assert.equal(assignmentForDate(assignments, USER_ID, '2026-06-16')?.startMinutes, 480);
+  assert.equal(
+    sqlCalls.some((sql) => /a\.is_active/i.test(sql)),
+    false,
+    'historical assignment queries must not filter out closed rows'
+  );
 });
 
 test('DTR posting uses available Vacation Leave and records the excess separately', () => {

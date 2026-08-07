@@ -172,12 +172,11 @@ async function ensureMonthlyAccrualPostingTable(db) {
   `);
 }
 
-function activeAssignmentExistsSql(userAlias, targetStartParam, targetEndParam) {
+function serviceMonthAssignmentExistsSql(userAlias, targetStartParam, targetEndParam) {
   return `EXISTS (
     SELECT 1
     FROM assignments a
     WHERE a.employee_id = ${userAlias}.id
-      AND (a.is_active IS NULL OR a.is_active = true)
       AND (a.effective_from IS NULL OR a.effective_from <= ${targetEndParam}::date)
       AND (a.effective_to IS NULL OR a.effective_to >= ${targetStartParam}::date)
   )`;
@@ -596,7 +595,7 @@ async function loadAccrualPostingsForReconciliation(
             (
               u.leave_credit_eligible = true
               AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
-              AND ${activeAssignmentExistsSql('u', '$2', '$3')}
+              AND ${serviceMonthAssignmentExistsSql('u', '$2', '$3')}
             ) AS target_eligible
      FROM effective_postings ep
      INNER JOIN users u ON u.id = ep.user_id
@@ -872,7 +871,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
         AND lb.leave_type = t.leave_type
        WHERE u.leave_credit_eligible = true
          AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
-         AND ${activeAssignmentExistsSql('u', '$2', '$3')}
+         AND ${serviceMonthAssignmentExistsSql('u', '$2', '$3')}
          AND lb.id IS NULL`,
       [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
     );
@@ -894,7 +893,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
           AND lb.leave_type = t.leave_type
          WHERE u.leave_credit_eligible = true
            AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
-           AND ${activeAssignmentExistsSql('u', '$2', '$3')}
+           AND ${serviceMonthAssignmentExistsSql('u', '$2', '$3')}
            AND lb.id IS NULL
          ON CONFLICT (user_id, leave_type) DO NOTHING`,
         [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
@@ -921,7 +920,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
          WHERE lb.leave_type = ANY($1::text[])
            AND u.leave_credit_eligible = true
            AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
-           AND ${activeAssignmentExistsSql('u', '$2', '$3')}
+           AND ${serviceMonthAssignmentExistsSql('u', '$2', '$3')}
          ${dryRun ? '' : 'FOR UPDATE OF lb'}`,
         [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
       ));
@@ -945,7 +944,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
                  AND COALESCE(u.employment_status, 'active') = 'active'
                )
              )
-             AND ${activeAssignmentExistsSql('u', '$2', '$3')}
+             AND ${serviceMonthAssignmentExistsSql('u', '$2', '$3')}
            ${dryRun ? '' : 'FOR UPDATE OF lb'}`,
           [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
         ));
@@ -1274,4 +1273,5 @@ module.exports = {
   monthStartInTimeZone,
   completedMonthStartInTimeZone,
   round3,
+  serviceMonthAssignmentExistsSql,
 };

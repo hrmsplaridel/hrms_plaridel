@@ -20,6 +20,7 @@ const {
 const {
   getEmployeeDepartment,
   getDepartmentHeadForEmployee,
+  getDepartmentReviewSnapshot,
   isDepartmentHead,
 } = require('../services/departmentHeadService');
 const {
@@ -40,6 +41,31 @@ const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
 const {
   runMonthlyAttendanceDeductions,
 } = require('../services/leaveAttendanceDeduction');
+const {
+  approvedPaidDaysForRevoke,
+  resolveApprovalAllocation,
+} = require('../services/leaveApprovalAllocation');
+const {
+  assertRequiredLeaveAttachment,
+  canModifyLeaveAttachment,
+} = require('../services/leaveAttachmentPolicy');
+const {
+  DEPARTMENT_HEAD_HISTORY_ACTIONS,
+  initLeaveAttachmentAccessLog,
+  recordLeaveAttachmentAccess,
+  resolveLeaveAttachmentAccess,
+} = require('../services/leaveAttachmentAccess');
+const {
+  assertCoverageMatchesRequestedDays,
+  removeApprovedLeaveCoverage,
+  replaceApprovedLeaveCoverage,
+} = require('../services/leaveDtrCoverage');
+const {
+  employeeLeaveDetailsFromPayload,
+  loadEmployeeOfficialSnapshot,
+  normalizeEmployeeOfficialSnapshot,
+  sanitizeEmployeeLeaveDetails,
+} = require('../services/leaveRequestDetailsPolicy');
 const {
   getYearEndForcedLeaveCompliance,
   applyYearEndForcedLeaveDeductions,
@@ -97,7 +123,7 @@ function broadcastDtrLeaveRefresh(action, { userId, leaveRequestId, dateFrom, da
 }
 const protect = [authMiddleware];
 
-async function findActiveAssignmentProfileByUserId(db, userId) {
+async function findAssignmentProfileByUserIdAtDate(db, userId, effectiveDate = null) {
   if (!userId) return null;
   const result = await db.query(
     `SELECT u.id AS user_id,
@@ -110,15 +136,18 @@ async function findActiveAssignmentProfileByUserId(db, userId) {
        SELECT a.department_id, a.position_id, a.effective_from
        FROM assignments a
        WHERE a.employee_id = u.id
-         AND (a.is_active IS NULL OR a.is_active = true)
-       ORDER BY a.effective_from DESC NULLS LAST, a.created_at DESC NULLS LAST
+         AND (a.effective_from IS NULL OR a.effective_from <= COALESCE($2::date, CURRENT_DATE))
+         AND (a.effective_to IS NULL OR a.effective_to >= COALESCE($2::date, CURRENT_DATE))
+       ORDER BY a.effective_from DESC NULLS LAST,
+                a.created_at DESC NULLS LAST,
+                a.id DESC
        LIMIT 1
      ) a ON true
      LEFT JOIN departments d ON d.id = a.department_id
      LEFT JOIN positions p ON p.id = a.position_id
      WHERE u.id = $1
      LIMIT 1`,
-    [userId]
+    [userId, effectiveDate]
   );
   return result.rows[0] || null;
 }
@@ -281,6 +310,7 @@ const ANNUAL_QUOTA_LEAVE_USAGE_STATUSES = [
 
 initLeaveRequestHistory(pool);
 initLeaveBalanceLedger(pool);
+initLeaveAttachmentAccessLog(pool);
 pool
   .query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`)
   .then(async () => {
@@ -532,10 +562,9 @@ async function computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr)
        SELECT a.id AS assignment_id, a.shift_id
        FROM assignments a
        WHERE a.employee_id = $1::uuid
-         AND (a.is_active IS NULL OR a.is_active = true)
          AND a.effective_from <= gs::date
          AND (a.effective_to IS NULL OR a.effective_to >= gs::date)
-       ORDER BY a.effective_from DESC
+       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
        LIMIT 1
      ) eff ON TRUE
      LEFT JOIN shifts s ON s.id = eff.shift_id
@@ -947,17 +976,32 @@ async function ensureLeaveTypeIdByName(client, name) {
   return null;
 }
 
-/** Active assignment → department (employee-filed requests store office in details; admin-assigned MFL often does not). */
+/** Snapshotted review department, with an effective-date fallback for legacy rows. */
 const SQL_LEAVE_ASSIGNMENT_DEPT_JOIN = `
-LEFT JOIN assignments a ON a.employee_id = COALESCE(lr.user_id, lr.employee_id)
-  AND (a.is_active IS NULL OR a.is_active = true)
-LEFT JOIN departments d ON d.id = a.department_id`;
+LEFT JOIN LATERAL (
+  SELECT hist_a.department_id
+  FROM assignments hist_a
+  WHERE hist_a.employee_id = COALESCE(lr.user_id, lr.employee_id)
+    AND hist_a.effective_from <= lr.start_date
+    AND (hist_a.effective_to IS NULL OR hist_a.effective_to >= lr.start_date)
+  ORDER BY hist_a.effective_from DESC, hist_a.created_at DESC, hist_a.id DESC
+  LIMIT 1
+) a ON true
+LEFT JOIN departments d ON d.id = COALESCE(lr.review_department_id, a.department_id)`;
 
 function mapLeaveRowToApi(row) {
-  // Keep response aligned with Flutter LeaveRequest.fromJson keys.
-  // Spread details FIRST so canonical DB fields (status, etc.) take precedence and are not overwritten.
-  const details = row.details && typeof row.details === 'object' ? row.details : {};
-  const employeeName = row.employee_name || row.full_name || row.employee_full_name || details.employee_name || details.employeeName || null;
+  // Employee details are whitelisted again on output so legacy untrusted keys
+  // cannot appear as official or review fields before the cleanup migration runs.
+  const details = sanitizeEmployeeLeaveDetails(row.details);
+  const official = normalizeEmployeeOfficialSnapshot(
+    row.employee_official_snapshot
+  );
+  const employeeName =
+    official.employee_name ||
+    row.employee_name ||
+    row.full_name ||
+    row.employee_full_name ||
+    null;
   return {
     ...details,
     id: row.id,
@@ -972,44 +1016,25 @@ function mapLeaveRowToApi(row) {
     reviewer_name: row.reviewer_name || row.reviewer_full_name || null,
     reviewer_role: row.reviewer_role || null,
     reviewer_title: row.reviewer_title || null,
+    review_department_id: row.review_department_id || null,
+    assigned_department_head_id: row.assigned_department_head_id || null,
     department_head_reviewer_id: row.department_head_reviewer_id || null,
     department_head_reviewer_name: row.department_head_reviewer_name || null,
     department_head_reviewed_at: row.department_head_reviewed_at || null,
     department_head_remarks: row.department_head_remarks || null,
     department_head_action: row.department_head_action || null,
     hr_remarks: row.reviewer_remarks || null,
-    recommendation_remarks:
-      row.recommendation_remarks ||
-      details.recommendation_remarks ||
-      details.recommendationRemarks ||
-      null,
-    disapproval_reason:
-      row.disapproval_reason ||
-      details.disapproval_reason ||
-      details.disapprovalReason ||
-      row.reviewer_remarks ||
-      null,
+    recommendation_remarks: row.recommendation_remarks || null,
+    disapproval_reason: row.disapproval_reason || null,
     approved_days_with_pay:
       row.approved_days_with_pay != null
         ? parseFloat(row.approved_days_with_pay)
-        : (details.approved_days_with_pay != null
-            ? parseFloat(details.approved_days_with_pay)
-            : (details.approvedDaysWithPay != null
-                ? parseFloat(details.approvedDaysWithPay)
-                : null)),
+        : null,
     approved_days_without_pay:
       row.approved_days_without_pay != null
         ? parseFloat(row.approved_days_without_pay)
-        : (details.approved_days_without_pay != null
-            ? parseFloat(details.approved_days_without_pay)
-            : (details.approvedDaysWithoutPay != null
-                ? parseFloat(details.approvedDaysWithoutPay)
-                : null)),
-    approved_other_details:
-      row.approved_other_details ||
-      details.approved_other_details ||
-      details.approvedOtherDetails ||
-      null,
+        : null,
+    approved_other_details: row.approved_other_details || null,
     reviewed_at: row.reviewed_at || row.approved_at || null,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
@@ -1027,10 +1052,12 @@ function mapLeaveRowToApi(row) {
     attachment_mime_type: row.attachment_mime_type || null,
     attachment_uploaded_at: row.attachment_uploaded_at || null,
     office_department:
-      details.office_department ||
-      details.officeDepartment ||
+      official.office_department ||
       row.assignment_department_name ||
       null,
+    position_title: official.position_title || null,
+    salary: official.salary,
+    date_filed: official.date_filed || toIsoDateStr(row.created_at),
   };
 }
 
@@ -1121,10 +1148,28 @@ function storedLeaveAttachmentFromMemoryFile(file) {
 function cleanupStoredLeaveAttachment(relPath) {
   if (!relPath) return;
   try {
-    const filePath = path.join(UPLOAD_DIR, relPath);
+    const uploadRoot = path.resolve(UPLOAD_DIR);
+    const filePath = path.resolve(uploadRoot, String(relPath));
+    if (filePath !== uploadRoot && !filePath.startsWith(`${uploadRoot}${path.sep}`)) {
+      return;
+    }
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   } catch (err) {
     console.error('[leave attachment cleanup]', err);
+  }
+}
+
+function storedLeaveAttachmentExists(relPath) {
+  if (!relPath) return false;
+  try {
+    const uploadRoot = path.resolve(UPLOAD_DIR);
+    const filePath = path.resolve(uploadRoot, String(relPath));
+    if (filePath !== uploadRoot && !filePath.startsWith(`${uploadRoot}${path.sep}`)) {
+      return false;
+    }
+    return fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+  } catch (_) {
+    return false;
   }
 }
 
@@ -1369,19 +1414,6 @@ async function canAccessLeaveRequest(requestId, userId, isAdmin) {
   return q.rows.length > 0;
 }
 
-/** Check if attachment can be modified (draft, any pending, returned, rejected). */
-function canModifyAttachment(status) {
-  return (
-    status === 'draft' ||
-    status === 'pending' ||
-    status === 'pending_department_head' ||
-    status === 'pending_hr' ||
-    status === 'returned' ||
-    status === 'rejected_by_department_head' ||
-    status === 'rejected_by_hr'
-  );
-}
-
 /**
  * CSC practice: mandatory/forced leave is charged against vacation leave credits.
  * Maps a leave_requests.leave type name to a leave_balances row key, or null
@@ -1480,10 +1512,15 @@ async function upsertLeaveBalanceDeduction(
 ) {
   if (!userId || !leaveTypeName) return;
   const days = daysToDeduct != null ? parseFloat(daysToDeduct) : 0;
-  if (!Number.isFinite(days) || days <= 0) return;
   const allowNegative = options.allowNegative === true;
   /** When true (HR final approval only): clear the submit-time pending reservation before adding used_days. */
   const decrementPendingDays = options.decrementPendingDays === true;
+  const pendingDaysToRelease = decrementPendingDays
+    ? parseFloat(options.pendingDaysToRelease ?? days)
+    : 0;
+  if (!Number.isFinite(days) || days < 0) return;
+  if (!Number.isFinite(pendingDaysToRelease) || pendingDaysToRelease < 0) return;
+  if (days <= 0 && pendingDaysToRelease <= 0) return;
 
   const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
   if (!ledgerType) return null;
@@ -1522,23 +1559,25 @@ async function upsertLeaveBalanceDeduction(
     }
   }
 
-  await client.query(
-    `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
-     VALUES ($1::uuid, $2::text, 0, $3::numeric, 0, 0, now()::date, now()::date, now(), now())
-     ON CONFLICT (user_id, leave_type)
-     DO UPDATE SET used_days = COALESCE(leave_balances.used_days, 0) + EXCLUDED.used_days,
-                   updated_at = now()`,
-    [userId, ledgerType, days]
-  );
+  if (days > 0) {
+    await client.query(
+      `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
+       VALUES ($1::uuid, $2::text, 0, $3::numeric, 0, 0, now()::date, now()::date, now(), now())
+       ON CONFLICT (user_id, leave_type)
+       DO UPDATE SET used_days = COALESCE(leave_balances.used_days, 0) + EXCLUDED.used_days,
+                     updated_at = now()`,
+      [userId, ledgerType, days]
+    );
+  }
 
   // Final approval: move days out of pending (submit-time reservation) into used — same ledger row as submit/PUT.
-  if (decrementPendingDays) {
+  if (decrementPendingDays && pendingDaysToRelease > 0) {
     await client.query(
       `UPDATE leave_balances
        SET pending_days = GREATEST(0, COALESCE(pending_days, 0) - $3::numeric),
            updated_at = now()
        WHERE user_id = $1::uuid AND leave_type = $2::text`,
-      [userId, ledgerType, days]
+      [userId, ledgerType, pendingDaysToRelease]
     );
   }
 
@@ -1550,20 +1589,22 @@ async function upsertLeaveBalanceDeduction(
   if (lc) {
     const beforeSnap = balanceRowToSnapshot(bal.rows[0]);
     if (decrementPendingDays) {
-      await insertLeaveBalanceLedger(client, {
-        userId,
-        leaveType: ledgerType,
-        action: lc.action || 'leave_approved',
-        affectedBucket: 'used',
-        daysChanged: afterSnap.used_days - beforeSnap.used_days,
-        oldValue: beforeSnap.used_days,
-        newValue: afterSnap.used_days,
-        relatedLeaveRequestId: lc.leaveRequestId || null,
-        actorUserId: lc.actorUserId || null,
-        actorKind: lc.actorKind || 'admin',
-        remarks: lc.remarks || null,
-        metadataJson: lc.metadataJson || null,
-      });
+      if (afterSnap.used_days !== beforeSnap.used_days) {
+        await insertLeaveBalanceLedger(client, {
+          userId,
+          leaveType: ledgerType,
+          action: lc.action || 'leave_approved',
+          affectedBucket: 'used',
+          daysChanged: afterSnap.used_days - beforeSnap.used_days,
+          oldValue: beforeSnap.used_days,
+          newValue: afterSnap.used_days,
+          relatedLeaveRequestId: lc.leaveRequestId || null,
+          actorUserId: lc.actorUserId || null,
+          actorKind: lc.actorKind || 'admin',
+          remarks: lc.remarks || null,
+          metadataJson: lc.metadataJson || null,
+        });
+      }
       await insertLeaveBalanceLedger(client, {
         userId,
         leaveType: ledgerType,
@@ -1671,60 +1712,6 @@ async function releasePendingLeaveBalance(
   return ledgerType;
 }
 
-async function applyApprovedLeaveToDtr(client, userId, leaveRequestId, startDateStr, endDateStr) {
-  if (!userId || !leaveRequestId || !startDateStr || !endDateStr) return;
-  await client.query(
-    `INSERT INTO dtr_daily_summary (
-        employee_id,
-        attendance_date,
-        status,
-        leave_request_id,
-        source,
-        created_at,
-        updated_at
-      )
-      SELECT
-        $1::uuid AS employee_id,
-        gs::date AS attendance_date,
-        'on_leave'::text AS status,
-        $2::uuid AS leave_request_id,
-        'adjusted'::text AS source,
-        now() AS created_at,
-        now() AS updated_at
-      FROM generate_series($3::date, $4::date, '1 day'::interval) AS gs
-      -- Shift-aware leave marking:
-      -- 1) resolve effective assignment for each date
-      -- 2) use shift.working_days when present
-      -- 3) fallback to Mon-Fri only when assignment/shift schedule is unavailable
-      LEFT JOIN LATERAL (
-        SELECT a.id AS assignment_id, a.shift_id
-        FROM assignments a
-        WHERE a.employee_id = $1::uuid
-          AND (a.is_active IS NULL OR a.is_active = true)
-          AND a.effective_from <= gs::date
-          AND (a.effective_to IS NULL OR a.effective_to >= gs::date)
-        ORDER BY a.effective_from DESC
-        LIMIT 1
-      ) eff ON TRUE
-      LEFT JOIN shifts s ON s.id = eff.shift_id
-      WHERE (
-        CASE
-          WHEN s.working_days IS NOT NULL AND array_length(s.working_days, 1) > 0
-            THEN EXTRACT(ISODOW FROM gs::date)::int = ANY(s.working_days)
-          ELSE EXTRACT(ISODOW FROM gs::date) < 6
-        END
-      )
-      ON CONFLICT (employee_id, attendance_date)
-      DO UPDATE SET
-        status = 'on_leave',
-        leave_request_id = EXCLUDED.leave_request_id,
-        source = 'adjusted',
-        updated_at = now()
-      WHERE dtr_daily_summary.status IS DISTINCT FROM 'present'`,
-    [userId, leaveRequestId, startDateStr, endDateStr]
-  );
-}
-
 // ============================
 // EMPLOYEE ENDPOINTS
 // ============================
@@ -1788,9 +1775,8 @@ router.post('/draft', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       const adoptionParentRole = readAdoptionParentRole(payloadDetails);
@@ -1834,13 +1820,27 @@ router.post('/draft', protect, async (req, res) => {
             number_of_days,
             reason,
             details,
+            employee_official_snapshot,
             status,
             created_at,
             updated_at
           )
-          VALUES ($1::uuid, $1::uuid, $2::uuid, $3::date, $4::date, $5::numeric, $5::numeric, $6::text, $7::jsonb, 'draft', now(), now())
+          VALUES (
+            $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
+            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb,
+            'draft', now(), now()
+          )
           RETURNING *`,
-        [userId, leaveTypeId, startStr, endStr, effectiveDaysDraft, reason || null, payloadDetails]
+        [
+          userId,
+          leaveTypeId,
+          startStr,
+          endStr,
+          effectiveDaysDraft,
+          reason || null,
+          payloadDetails,
+          officialSnapshot,
+        ]
       );
 
       const row = q.rows[0];
@@ -1904,9 +1904,8 @@ router.post('/submit', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       const adoptionParentRole = readAdoptionParentRole(payloadDetails);
@@ -1974,26 +1973,55 @@ router.post('/submit', protect, async (req, res) => {
             number_of_days,
             reason,
             details,
+            employee_official_snapshot,
             status,
             created_at,
             updated_at
           )
-          VALUES ($1::uuid, $1::uuid, $2::uuid, $3::date, $4::date, $5::numeric, $5::numeric, $6::text, $7::jsonb, 'draft', now(), now())
+          VALUES (
+            $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
+            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb,
+            'draft', now(), now()
+          )
           RETURNING *`,
-        [userId, leaveTypeId, startStr, endStr, effectiveDaysSubmit, reason || null, payloadDetails]
+        [
+          userId,
+          leaveTypeId,
+          startStr,
+          endStr,
+          effectiveDaysSubmit,
+          reason || null,
+          payloadDetails,
+          officialSnapshot,
+        ]
       );
 
       const row = q.rows[0];
 
       // Two-stage workflow: determine initial submitted status.
-      const deptHeadInfo = await getDepartmentHeadForEmployee(client, userId);
-      const submitStatus = deptHeadInfo ? 'pending_department_head' : 'pending_hr';
+      const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+      const submitStatus = reviewSnapshot?.departmentHeadUserId
+        ? 'pending_department_head'
+        : 'pending_hr';
 
       await client.query(
-        `UPDATE leave_requests SET status = $1 WHERE id = $2`,
-        [submitStatus, row.id]
+        `UPDATE leave_requests
+         SET status = $1,
+             review_department_id = $2::uuid,
+             assigned_department_head_id = $3::uuid,
+             updated_at = now()
+         WHERE id = $4`,
+        [
+          submitStatus,
+          reviewSnapshot?.departmentId || null,
+          reviewSnapshot?.departmentHeadUserId || null,
+          row.id,
+        ]
       );
       row.status = submitStatus;
+      row.review_department_id = reviewSnapshot?.departmentId || null;
+      row.assigned_department_head_id =
+        reviewSnapshot?.departmentHeadUserId || null;
 
       await insertLeaveRequestHistory(client, {
         leaveRequestId: row.id,
@@ -2007,7 +2035,8 @@ router.post('/submit', protect, async (req, res) => {
           start_date: startStr,
           end_date: endStr,
           number_of_days: effectiveDaysSubmit,
-          department_head: deptHeadInfo ? deptHeadInfo.departmentHeadUserId : null,
+          review_department_id: reviewSnapshot?.departmentId || null,
+          department_head: reviewSnapshot?.departmentHeadUserId || null,
         },
       });
       // FIX #5a: Increment pending_days on direct submit (no existing draft ID).
@@ -2040,7 +2069,7 @@ router.post('/submit', protect, async (req, res) => {
           leaveTypeName: typeName,
           startDateStr: startStr,
           endDateStr: endStr,
-          departmentHeadUserId: deptHeadInfo?.departmentHeadUserId ?? null,
+          departmentHeadUserId: reviewSnapshot?.departmentHeadUserId ?? null,
         })
       );
       const mapped = mapLeaveRowToApi({ ...row, leave_type_name: typeName });
@@ -2098,9 +2127,8 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         return res.status(400).json({ error: 'Invalid leave type' });
       }
 
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       const adoptionParentRole = readAdoptionParentRole(payloadDetails);
@@ -2173,6 +2201,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
             number_of_days,
             reason,
             details,
+            employee_official_snapshot,
             attachment_name,
             attachment_path,
             attachment_mime_type,
@@ -2183,8 +2212,8 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
           )
           VALUES (
             $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
-            $5::numeric, $5::numeric, $6::text, $7::jsonb,
-            $8::text, $9::text, $10::text, now(),
+            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb,
+            $9::text, $10::text, $11::text, now(),
             'draft', now(), now()
           )
           RETURNING *`,
@@ -2196,6 +2225,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
           effectiveDaysSubmit,
           reason || null,
           payloadDetails,
+          officialSnapshot,
           storedAttachment.originalName,
           storedAttachment.relPath,
           storedAttachment.mimeType,
@@ -2203,14 +2233,29 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       );
 
       const row = q.rows[0];
-      const deptHeadInfo = await getDepartmentHeadForEmployee(client, userId);
-      const submitStatus = deptHeadInfo ? 'pending_department_head' : 'pending_hr';
+      const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+      const submitStatus = reviewSnapshot?.departmentHeadUserId
+        ? 'pending_department_head'
+        : 'pending_hr';
 
       await client.query(
-        `UPDATE leave_requests SET status = $1, updated_at = now() WHERE id = $2`,
-        [submitStatus, row.id]
+        `UPDATE leave_requests
+         SET status = $1,
+             review_department_id = $2::uuid,
+             assigned_department_head_id = $3::uuid,
+             updated_at = now()
+         WHERE id = $4`,
+        [
+          submitStatus,
+          reviewSnapshot?.departmentId || null,
+          reviewSnapshot?.departmentHeadUserId || null,
+          row.id,
+        ]
       );
       row.status = submitStatus;
+      row.review_department_id = reviewSnapshot?.departmentId || null;
+      row.assigned_department_head_id =
+        reviewSnapshot?.departmentHeadUserId || null;
 
       await insertLeaveRequestHistory(client, {
         leaveRequestId: row.id,
@@ -2225,7 +2270,8 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
           end_date: endStr,
           number_of_days: effectiveDaysSubmit,
           attachment_name: storedAttachment.originalName,
-          department_head: deptHeadInfo ? deptHeadInfo.departmentHeadUserId : null,
+          review_department_id: reviewSnapshot?.departmentId || null,
+          department_head: reviewSnapshot?.departmentHeadUserId || null,
         },
       });
 
@@ -2263,7 +2309,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
           leaveTypeName: typeName,
           startDateStr: startStr,
           endDateStr: endStr,
-          departmentHeadUserId: deptHeadInfo?.departmentHeadUserId ?? null,
+          departmentHeadUserId: reviewSnapshot?.departmentHeadUserId ?? null,
         })
       );
       const mapped = mapLeaveRowToApi({ ...row, leave_type_name: typeName });
@@ -2294,7 +2340,9 @@ router.put('/:id', protect, async (req, res) => {
   const { id } = req.params;
   try {
     const existing = await pool.query(
-      'SELECT id, status FROM leave_requests WHERE id = $1 AND (user_id = $2 OR employee_id = $2)',
+      `SELECT id, status, employee_official_snapshot
+       FROM leave_requests
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
       [id, userId]
     );
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
@@ -2315,6 +2363,8 @@ router.put('/:id', protect, async (req, res) => {
     const endStr = toIsoDateStr(end_date);
     const days = computeNumberOfDaysSync(startStr, endStr);
     let effectiveDays = days;
+    let refreshReviewSnapshot = false;
+    let reviewSnapshot = null;
 
     const client = await pool.connect();
     try {
@@ -2325,9 +2375,14 @@ router.put('/:id', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
-      const payloadDetails = details && typeof details === 'object'
-        ? details
-        : { ...rest, leave_type, start_date: startStr, end_date: endStr };
+      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
+      const existingOfficialSnapshot = normalizeEmployeeOfficialSnapshot(
+        existing.rows[0].employee_official_snapshot
+      );
+      if (existingOfficialSnapshot.date_filed) {
+        officialSnapshot.date_filed = existingOfficialSnapshot.date_filed;
+      }
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       const adoptionParentRole = readAdoptionParentRole(payloadDetails);
@@ -2385,8 +2440,11 @@ router.put('/:id', protect, async (req, res) => {
           }
 
           // Two-stage workflow: resolve actual target status.
-          const deptHeadInfo = await getDepartmentHeadForEmployee(client, userId);
-          nextStatus = deptHeadInfo ? 'pending_department_head' : 'pending_hr';
+          reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+          refreshReviewSnapshot = true;
+          nextStatus = reviewSnapshot?.departmentHeadUserId
+            ? 'pending_department_head'
+            : 'pending_hr';
         }
       }
       // Prevent overlapping ranges when dates are being set/changed.
@@ -2421,12 +2479,35 @@ router.put('/:id', protect, async (req, res) => {
              total_days = COALESCE($4::numeric, total_days),
              number_of_days = COALESCE($4::numeric, number_of_days),
              reason = $5::text,
-             details = COALESCE($6::jsonb, details),
-             status = $9::text,
-             updated_at = now()
+              details = COALESCE($6::jsonb, details),
+              status = $9::text,
+              review_department_id = CASE
+                WHEN $10::boolean THEN $11::uuid
+                ELSE review_department_id
+              END,
+              assigned_department_head_id = CASE
+                WHEN $10::boolean THEN $12::uuid
+                ELSE assigned_department_head_id
+              END,
+              employee_official_snapshot = $13::jsonb,
+              updated_at = now()
          WHERE id = $7 AND (user_id = $8 OR employee_id = $8)
          RETURNING *`,
-        [leaveTypeId, startStr, endStr, effectiveDays, reason || null, payloadDetails, id, userId, nextStatus]
+        [
+          leaveTypeId,
+          startStr,
+          endStr,
+          effectiveDays,
+          reason || null,
+          payloadDetails,
+          id,
+          userId,
+          nextStatus,
+          refreshReviewSnapshot,
+          reviewSnapshot?.departmentId || null,
+          reviewSnapshot?.departmentHeadUserId || null,
+          officialSnapshot,
+        ]
       );
       const row = q.rows[0];
       await insertLeaveRequestHistory(client, {
@@ -2441,6 +2522,12 @@ router.put('/:id', protect, async (req, res) => {
           start_date: startStr,
           end_date: endStr,
           number_of_days: effectiveDays,
+          review_department_id: refreshReviewSnapshot
+            ? reviewSnapshot?.departmentId || null
+            : row.review_department_id || null,
+          department_head: refreshReviewSnapshot
+            ? reviewSnapshot?.departmentHeadUserId || null
+            : row.assigned_department_head_id || null,
         },
       });
       // FIX #5b: Update pending_days when status transitions to a pending status via PUT.
@@ -2469,7 +2556,6 @@ router.put('/:id', protect, async (req, res) => {
         (historyAction === 'submitted' || historyAction === 'resubmitted') &&
         ['pending', 'pending_department_head', 'pending_hr'].includes(row.status)
       ) {
-        const dhPut = await getDepartmentHeadForEmployee(pool, userId);
         const namePut = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
         const putEmpName = namePut.rows[0]?.full_name || 'Employee';
         notifySafe(() =>
@@ -2482,7 +2568,9 @@ router.put('/:id', protect, async (req, res) => {
             startDateStr: startStr,
             endDateStr: endStr,
             departmentHeadUserId:
-              row.status === 'pending_department_head' ? dhPut?.departmentHeadUserId ?? null : null,
+              row.status === 'pending_department_head'
+                ? row.assigned_department_head_id || null
+                : null,
           })
         );
       }
@@ -2585,9 +2673,8 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     await client.query('COMMIT');
     const mappedCancel = mapLeaveRowToApi(out.rows[0]);
     if (status === 'pending' || status === 'pending_department_head' || status === 'pending_hr') {
-      notifySafe(async () => {
-        const dhCancel = await getDepartmentHeadForEmployee(pool, userId);
-        await leaveNotifications.notifyStakeholdersLeaveCancelled(pool, {
+      notifySafe(() =>
+        leaveNotifications.notifyStakeholdersLeaveCancelled(pool, {
           leaveRequestId: id,
           employeeUserId: userId,
           employeeName: mappedCancel.employee_name,
@@ -2597,9 +2684,11 @@ router.patch('/:id/cancel', protect, async (req, res) => {
           endDateStr: mappedCancel.end_date,
           cancelReason: reason,
           departmentHeadUserId:
-            status === 'pending_department_head' ? dhCancel?.departmentHeadUserId ?? null : null,
-        });
-      });
+            status === 'pending_department_head'
+              ? mappedCancel.assigned_department_head_id || null
+              : null,
+        })
+      );
     }
     broadcastLeaveUpdated('cancelled', mappedCancel, { previousStatus: status });
     res.json(mappedCancel);
@@ -2668,20 +2757,71 @@ router.get('/my', protect, async (req, res) => {
   }
 });
 
-// GET /api/leave/signatories?employee_id=uuid
+// GET /api/leave/signatories?employee_id=uuid&leave_request_id=uuid
 // Printable leave form signatories:
 // 7.A = active employee with Administrative Officer V position.
-// 7.B = department head of the requesting employee's current department.
+// 7.B = department head snapshotted when the leave request was submitted.
 router.get('/signatories', protect, async (req, res) => {
   const requesterId = req.user?.id;
   const role = req.user?.role;
   if (!requesterId) return res.status(401).json({ error: 'Not authenticated' });
   const employeeId = (req.query?.employee_id || '').toString().trim();
+  const leaveRequestId = (req.query?.leave_request_id || '').toString().trim() || null;
   if (!employeeId) return res.status(400).json({ error: 'employee_id is required' });
 
   try {
     const privileged = role === 'admin' || role === 'hr';
-    if (!privileged && requesterId !== employeeId) {
+    let requestContext = null;
+    if (leaveRequestId) {
+      const requestResult = await pool.query(
+        `SELECT lr.id,
+                COALESCE(lr.user_id, lr.employee_id) AS employee_id,
+                lr.status,
+                COALESCE(
+                  (
+                    SELECT h.acted_at
+                    FROM leave_request_history h
+                    WHERE h.leave_request_id = lr.id
+                      AND h.action IN ('submitted', 'resubmitted')
+                    ORDER BY h.acted_at DESC
+                    LIMIT 1
+                  ),
+                  lr.created_at
+                )::date::text AS submitted_on,
+                lr.review_department_id,
+                lr.assigned_department_head_id,
+                d.name AS review_department_name,
+                EXISTS (
+                  SELECT 1
+                  FROM leave_request_history h
+                  WHERE h.leave_request_id = lr.id
+                    AND h.acted_by = $2::uuid
+                    AND h.action IN (
+                      'department_head_approved',
+                      'department_head_rejected',
+                      'department_head_returned'
+                    )
+                ) AS requester_reviewed
+         FROM leave_requests lr
+         LEFT JOIN departments d ON d.id = lr.review_department_id
+         WHERE lr.id = $1::uuid
+         LIMIT 1`,
+        [leaveRequestId, requesterId]
+      );
+      requestContext = requestResult.rows[0] || null;
+      if (!requestContext) {
+        return res.status(404).json({ error: 'Leave request not found' });
+      }
+      if (String(requestContext.employee_id) !== employeeId) {
+        return res.status(400).json({ error: 'employee_id does not match the leave request' });
+      }
+      const canReviewRequest =
+        requestContext.assigned_department_head_id === requesterId ||
+        requestContext.requester_reviewed === true;
+      if (!privileged && requesterId !== employeeId && !canReviewRequest) {
+        return res.status(403).json({ error: 'Not authorized to view leave form signatories' });
+      }
+    } else if (!privileged && requesterId !== employeeId) {
       const requesterDept = await isDepartmentHead(pool, requesterId);
       const employeeDept = await getEmployeeDepartment(pool, employeeId);
       if (
@@ -2698,9 +2838,21 @@ router.get('/signatories', protect, async (req, res) => {
       pool,
       HR_CERTIFICATION_POSITION_TITLE
     );
-    const departmentHeadInfo = await getDepartmentHeadForEmployee(pool, employeeId);
+    const departmentHeadInfo = requestContext
+      ? requestContext.assigned_department_head_id
+        ? {
+            departmentHeadUserId: requestContext.assigned_department_head_id,
+            departmentId: requestContext.review_department_id || null,
+            departmentName: requestContext.review_department_name || null,
+          }
+        : null
+      : await getDepartmentHeadForEmployee(pool, employeeId);
     const departmentHeadProfile = departmentHeadInfo?.departmentHeadUserId
-      ? await findActiveAssignmentProfileByUserId(pool, departmentHeadInfo.departmentHeadUserId)
+      ? await findAssignmentProfileByUserIdAtDate(
+          pool,
+          departmentHeadInfo.departmentHeadUserId,
+          requestContext?.submitted_on || null
+        )
       : null;
 
     res.json({
@@ -3098,10 +3250,6 @@ router.get('/department-head', protect, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const client = await pool.connect();
   try {
-    const deptInfo = await isDepartmentHead(client, userId);
-    if (!deptInfo.isDeptHead) {
-      return res.status(403).json({ error: 'You are not a department head' });
-    }
     const status = (req.query?.status || '').toString().trim() || null;
     const leaveType = (req.query?.leave_type || '').toString().trim() || null;
     const employeeUserId = (req.query?.user_id || '').toString().trim() || null;
@@ -3135,8 +3283,8 @@ router.get('/department-head', protect, async (req, res) => {
                 h.remarks AS department_head_remarks
          FROM leave_request_history h
          LEFT JOIN users actor ON actor.id = h.acted_by
-         WHERE h.leave_request_id = lr.id
-           AND h.acted_by = $2::uuid
+          WHERE h.leave_request_id = lr.id
+            AND h.acted_by = $1::uuid
            AND h.action IN (
              'department_head_approved',
              'department_head_rejected',
@@ -3145,22 +3293,23 @@ router.get('/department-head', protect, async (req, res) => {
          ORDER BY h.acted_at DESC
          LIMIT 1
        ) dhh ON true
-       WHERE a.department_id = $1
-         AND (
-           lr.status = 'pending_department_head'
-           OR dhh.department_head_reviewer_id IS NOT NULL
-         )
-         AND ($3::text IS NULL OR lr.status = $3)
-         AND ($4::text IS NULL OR lt.name = $4)
-         AND ($5::uuid IS NULL OR lr.user_id = $5 OR lr.employee_id = $5)
-         AND ($6::date IS NULL OR lr.start_date >= $6)
-         AND ($7::date IS NULL OR lr.start_date <= $7)
-         AND ($8::timestamptz IS NULL OR lr.created_at >= $8)
-         AND ($9::timestamptz IS NULL OR lr.created_at <= $9)
+        WHERE (
+            (
+              lr.status = 'pending_department_head'
+              AND lr.assigned_department_head_id = $1::uuid
+            )
+            OR dhh.department_head_reviewer_id IS NOT NULL
+          )
+          AND ($2::text IS NULL OR lr.status = $2)
+          AND ($3::text IS NULL OR lt.name = $3)
+          AND ($4::uuid IS NULL OR lr.user_id = $4 OR lr.employee_id = $4)
+          AND ($5::date IS NULL OR lr.start_date >= $5)
+          AND ($6::date IS NULL OR lr.start_date <= $6)
+          AND ($7::timestamptz IS NULL OR lr.created_at >= $7)
+          AND ($8::timestamptz IS NULL OR lr.created_at <= $8)
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
        LIMIT ${limit}`,
       [
-        deptInfo.departmentId,
         userId,
         status,
         leaveType,
@@ -3189,29 +3338,21 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // Verify caller is a department head
-    const deptInfo = await isDepartmentHead(client, reviewerId);
-    if (!deptInfo.isDeptHead) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'You are not a department head' });
-    }
     const existing = await client.query(
       `SELECT lr.id, lr.status, lr.user_id, lr.employee_id,
-              lr.start_date, lr.end_date,
+              lr.start_date, lr.end_date, lr.review_department_id,
               COALESCE(lr.number_of_days, lr.total_days) AS days,
               lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       LEFT JOIN assignments a ON a.employee_id = COALESCE(lr.user_id, lr.employee_id)
-                              AND (a.is_active IS NULL OR a.is_active = true)
        WHERE lr.id = $1
-         AND a.department_id = $2
+         AND lr.assigned_department_head_id = $2::uuid
        FOR UPDATE OF lr`,
-      [id, deptInfo.departmentId]
+      [id, reviewerId]
     );
     if (existing.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Leave request not found or not in your department' });
+      return res.status(404).json({ error: 'Leave request not found or not assigned to you' });
     }
     const r = existing.rows[0];
     const { nextStatus, historyAction } = validateDepartmentHeadTransition({
@@ -3238,7 +3379,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       toStatus: nextStatus,
       actedBy: reviewerId,
       remarks,
-      metadataJson: { department_id: deptInfo.departmentId },
+      metadataJson: { department_id: r.review_department_id || null },
     });
     await client.query('COMMIT');
     const out = await pool.query(
@@ -3292,25 +3433,19 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const deptInfo = await isDepartmentHead(client, reviewerId);
-    if (!deptInfo.isDeptHead) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'You are not a department head' });
-    }
     const existing = await client.query(
       `SELECT lr.id, lr.status, lr.user_id, lr.employee_id,
+              lr.review_department_id,
               COALESCE(lr.number_of_days, lr.total_days) AS days, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       LEFT JOIN assignments a ON a.employee_id = COALESCE(lr.user_id, lr.employee_id)
-                              AND (a.is_active IS NULL OR a.is_active = true)
-       WHERE lr.id = $1 AND a.department_id = $2
+       WHERE lr.id = $1 AND lr.assigned_department_head_id = $2::uuid
        FOR UPDATE OF lr`,
-      [id, deptInfo.departmentId]
+      [id, reviewerId]
     );
     if (existing.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Leave request not found or not in your department' });
+      return res.status(404).json({ error: 'Leave request not found or not assigned to you' });
     }
     const r = existing.rows[0];
     const { nextStatus, historyAction } = validateDepartmentHeadTransition({
@@ -3330,7 +3465,7 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
       toStatus: nextStatus,
       actedBy: reviewerId,
       remarks,
-      metadataJson: null,
+      metadataJson: { department_id: r.review_department_id || null },
     });
     // Decrement pending_days on dept head reject
     const rejectDays = r.days != null ? parseFloat(r.days) : null;
@@ -3391,25 +3526,19 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const deptInfo = await isDepartmentHead(client, reviewerId);
-    if (!deptInfo.isDeptHead) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'You are not a department head' });
-    }
     const existing = await client.query(
       `SELECT lr.id, lr.status, lr.user_id, lr.employee_id,
+              lr.review_department_id,
               COALESCE(lr.number_of_days, lr.total_days) AS days, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       LEFT JOIN assignments a ON a.employee_id = COALESCE(lr.user_id, lr.employee_id)
-                              AND (a.is_active IS NULL OR a.is_active = true)
-       WHERE lr.id = $1 AND a.department_id = $2
+       WHERE lr.id = $1 AND lr.assigned_department_head_id = $2::uuid
        FOR UPDATE OF lr`,
-      [id, deptInfo.departmentId]
+      [id, reviewerId]
     );
     if (existing.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Leave request not found or not in your department' });
+      return res.status(404).json({ error: 'Leave request not found or not assigned to you' });
     }
     const r = existing.rows[0];
     const { nextStatus, historyAction } = validateDepartmentHeadTransition({
@@ -3429,7 +3558,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
       toStatus: nextStatus,
       actedBy: reviewerId,
       remarks,
-      metadataJson: null,
+      metadataJson: { department_id: r.review_department_id || null },
     });
     // Decrement pending_days on dept head return
     const returnDays = r.days != null ? parseFloat(r.days) : null;
@@ -3491,28 +3620,14 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
   const approvedOtherDetails = (req.body?.approved_other_details || req.body?.approvedOtherDetails || '').toString().trim() || null;
   const approvedDaysWithPayRaw = req.body?.approved_days_with_pay ?? req.body?.approvedDaysWithPay;
   const approvedDaysWithoutPayRaw = req.body?.approved_days_without_pay ?? req.body?.approvedDaysWithoutPay;
-  const approvedDaysWithPay = approvedDaysWithPayRaw != null && approvedDaysWithPayRaw !== ''
-    ? parseFloat(approvedDaysWithPayRaw)
-    : null;
-  const approvedDaysWithoutPay = approvedDaysWithoutPayRaw != null && approvedDaysWithoutPayRaw !== ''
-    ? parseFloat(approvedDaysWithoutPayRaw)
-    : null;
-  const reviewDetailsPatch = {};
-  if (recommendationRemarks) reviewDetailsPatch.recommendation_remarks = recommendationRemarks;
-  if (approvedOtherDetails) reviewDetailsPatch.approved_other_details = approvedOtherDetails;
-  if (approvedDaysWithPay != null && !Number.isNaN(approvedDaysWithPay)) {
-    reviewDetailsPatch.approved_days_with_pay = approvedDaysWithPay;
-  }
-  if (approvedDaysWithoutPay != null && !Number.isNaN(approvedDaysWithoutPay)) {
-    reviewDetailsPatch.approved_days_without_pay = approvedDaysWithoutPay;
-  }
   try {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const existing = await client.query(
-        `SELECT lr.id, lr.status, lr.user_id, lr.employee_id, lr.start_date, lr.end_date,
-                COALESCE(lr.number_of_days, lr.total_days) AS days,
+       `SELECT lr.id, lr.status, lr.user_id, lr.employee_id, lr.start_date, lr.end_date,
+               lr.attachment_path,
+               COALESCE(lr.number_of_days, lr.total_days) AS days,
                 lt.name AS leave_type_name
          FROM leave_requests lr
          LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -3538,6 +3653,36 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         );
         return res.json(mapLeaveRowToApi(out.rows[0]));
       }
+      const targetUserId = r.user_id || r.employee_id;
+      const startStr = toIsoDateStr(r.start_date);
+      const endStr = toIsoDateStr(r.end_date);
+      const workingDayResult = await computeEmployeeLeaveWorkingDays(
+        client,
+        targetUserId,
+        startStr,
+        endStr
+      );
+      const storedRequestedDays = r.days != null ? parseFloat(r.days) : null;
+      const approvalCoverage = assertCoverageMatchesRequestedDays(
+        workingDayResult.countedDates,
+        storedRequestedDays
+      );
+      const approvalDates = approvalCoverage.dates;
+      const approvalDays = approvalCoverage.days;
+      const leaveTypeRule = r.leave_type_name
+        ? await getLeaveTypeDefinition(client, r.leave_type_name)
+        : null;
+      assertRequiredLeaveAttachment({
+        rule: leaveTypeRule,
+        leaveType: r.leave_type_name,
+        days: approvalDays,
+        hasAttachment: storedLeaveAttachmentExists(r.attachment_path),
+      });
+      const allocation = resolveApprovalAllocation({
+        requestedDays: approvalDays,
+        approvedDaysWithPay: approvedDaysWithPayRaw,
+        approvedDaysWithoutPay: approvedDaysWithoutPayRaw,
+      });
       const { historyAction } = validateAdminTransition({
         currentStatus: r.status,
         desiredStatus: 'approved',
@@ -3548,20 +3693,28 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
          SET status = 'approved',
              reviewer_id = $2::uuid,
              reviewer_remarks = $3::text,
-             details = COALESCE(details, '{}'::jsonb) || $4::jsonb,
+             recommendation_remarks = $4::text,
+             approved_days_with_pay = $5::numeric,
+             approved_days_without_pay = $6::numeric,
+             approved_other_details = $7::text,
              reviewed_at = now(),
-             approved_by = COALESCE(approved_by, $2::uuid),
-             approved_at = COALESCE(approved_at, now()),
+             approved_by = $2::uuid,
+             approved_at = now(),
              updated_at = now()
          WHERE id = $1
          RETURNING *`,
-        [id, reviewerId, remarks, JSON.stringify(reviewDetailsPatch)]
+         [
+           id,
+           reviewerId,
+           remarks,
+           recommendationRemarks,
+           allocation.approvedDaysWithPay,
+           allocation.approvedDaysWithoutPay,
+           approvedOtherDetails,
+         ]
       );
       const row = updated.rows[0];
-      const targetUserId = row.user_id || row.employee_id;
-      const startStr = toIsoDateStr(row.start_date);
-      const endStr = toIsoDateStr(row.end_date);
-      const days = row.number_of_days != null ? parseFloat(row.number_of_days) : (row.total_days != null ? parseFloat(row.total_days) : null);
+      const days = allocation.requestedDays;
       const leaveTypeName = r.leave_type_name || null;
 
       // Prevent approving if another pending/approved leave overlaps this range.
@@ -3579,25 +3732,38 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         excludeId: id,
       });
 
-      // Deduct balance ONLY on approval (and only once because we block re-approving approved status).
-      // Clear submit-time pending_days and add to used_days (same days, same balanceLedgerLeaveType as submit).
-      await upsertLeaveBalanceDeduction(client, targetUserId, leaveTypeName, days, {
-        decrementPendingDays: true,
-        ledgerContext: {
-          action: 'leave_approved',
+      if (leaveTypeRule?.affects_dtr_normally !== false) {
+        await replaceApprovedLeaveCoverage(client, {
+          employeeId: targetUserId,
           leaveRequestId: id,
+          dates: approvalDates,
           actorUserId: reviewerId,
-          actorKind: 'admin',
-        },
-      });
-
-      // DTR integration: mark each date as on_leave and link leave_request_id when the leave type affects DTR.
-      const leaveTypeRuleForDtr = leaveTypeName
-        ? await getLeaveTypeDefinition(client, leaveTypeName)
-        : null;
-      if (leaveTypeRuleForDtr?.affects_dtr_normally !== false) {
-        await applyApprovedLeaveToDtr(client, targetUserId, id, startStr, endStr);
+        });
       }
+
+      // Final approval releases the full pending reservation but charges only
+      // the days HR classified as paid against the configured balance bucket.
+      await upsertLeaveBalanceDeduction(
+        client,
+        targetUserId,
+        leaveTypeName,
+        allocation.usedDaysToDeduct,
+        {
+          decrementPendingDays: true,
+          pendingDaysToRelease: allocation.pendingDaysToRelease,
+          ledgerContext: {
+            action: 'leave_approved',
+            leaveRequestId: id,
+            actorUserId: reviewerId,
+            actorKind: 'admin',
+            metadataJson: {
+              requested_days: allocation.requestedDays,
+              approved_days_with_pay: allocation.approvedDaysWithPay,
+              approved_days_without_pay: allocation.approvedDaysWithoutPay,
+            },
+          },
+        }
+      );
 
       await insertLeaveRequestHistory(client, {
         leaveRequestId: id,
@@ -3611,6 +3777,9 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
           start_date: startStr,
           end_date: endStr,
           number_of_days: days,
+          covered_work_dates: approvalDates,
+          approved_days_with_pay: allocation.approvedDaysWithPay,
+          approved_days_without_pay: allocation.approvedDaysWithoutPay,
         },
       });
 
@@ -3649,7 +3818,10 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
     }
   } catch (err) {
     if (err && err.statusCode) {
-      return res.status(err.statusCode).json({ error: err.message });
+      return res.status(err.statusCode).json({
+        error: err.message,
+        ...(err.details && typeof err.details === 'object' ? err.details : {}),
+      });
     }
     console.error('[leave PATCH /:id/approve]', err);
     const msg = err && err.message ? err.message : 'Failed to approve leave request';
@@ -3664,8 +3836,6 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
   const { id } = req.params;
   const remarks = (req.body?.reviewer_remarks || req.body?.reason || req.body?.hr_remarks || '').toString().trim() || null;
   const disapprovalReason = (req.body?.disapproval_reason || req.body?.disapprovalReason || req.body?.reason || req.body?.reviewer_remarks || '').toString().trim() || null;
-  const rejectDetailsPatch = {};
-  if (disapprovalReason) rejectDetailsPatch.disapproval_reason = disapprovalReason;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -3698,11 +3868,11 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
        SET status = $4::text,
            reviewer_id = $2::uuid,
            reviewer_remarks = $3::text,
-           details = COALESCE(details, '{}'::jsonb) || $5::jsonb,
+           disapproval_reason = $5::text,
            reviewed_at = now(),
            updated_at = now()
        WHERE id = $1`,
-      [id, reviewerId, remarks, rejectNextStatus, JSON.stringify(rejectDetailsPatch)]
+      [id, reviewerId, remarks, rejectNextStatus, disapprovalReason]
     );
 
     await insertLeaveRequestHistory(client, {
@@ -3794,6 +3964,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
               lr.user_id, lr.employee_id,
               lr.start_date, lr.end_date,
               lr.approved_at, lr.reviewed_at,
+              lr.approved_days_with_pay, lr.approved_days_without_pay,
               lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -3831,6 +4002,13 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
 
     const targetUserId = r.user_id || r.employee_id;
     const revokeDays = r.days != null ? parseFloat(r.days) : null;
+    const revokePaidDays = approvedPaidDaysForRevoke({
+      requestedDays: revokeDays,
+      approvedDaysWithPay: r.approved_days_with_pay,
+    });
+    const revokeWithoutPayDays = r.approved_days_without_pay != null
+      ? parseFloat(r.approved_days_without_pay)
+      : Math.max(0, (revokeDays || 0) - revokePaidDays);
     const ltName = r.leave_type_name || null;
     const startStr = toIsoDateStr(r.start_date);
     const endStr = toIsoDateStr(r.end_date);
@@ -3841,6 +4019,11 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
        SET status = 'returned',
            reviewer_id   = $2::uuid,
            reviewer_remarks = $3::text,
+           approved_days_with_pay = NULL,
+           approved_days_without_pay = NULL,
+           approved_other_details = NULL,
+           recommendation_remarks = NULL,
+           disapproval_reason = NULL,
            reviewed_at   = now(),
            updated_at    = now()
        WHERE id = $1`,
@@ -3849,7 +4032,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
 
     // 2. Restore used_days balance (reverse final approval). Pending was cleared on approve; do not re-add to pending
     //    — request status is 'returned', not a pending workflow; employee may resubmit (submit adds pending again).
-    if (revokeDays && revokeDays > 0 && targetUserId && ltName) {
+    if (revokePaidDays > 0 && targetUserId && ltName) {
       const ledgerType = await resolveBalanceLedgerLeaveType(client, ltName);
       if (ledgerType) {
         const beforeRev = await fetchBalanceSnapshot(client, targetUserId, ledgerType);
@@ -3858,7 +4041,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
            SET used_days = GREATEST(0, COALESCE(used_days, 0) - $3::numeric),
                updated_at = now()
            WHERE user_id = $1::uuid AND leave_type = $2::text`,
-          [targetUserId, ledgerType, revokeDays]
+          [targetUserId, ledgerType, revokePaidDays]
         );
         const afterRev = await fetchBalanceSnapshot(client, targetUserId, ledgerType);
         await insertLeaveBalanceLedger(client, {
@@ -3873,20 +4056,27 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
           actorUserId: reviewerId,
           actorKind: 'admin',
           remarks: remarks || null,
-          metadataJson: { revoke_days: revokeDays },
+          metadataJson: {
+            requested_days: revokeDays,
+            restored_paid_days: revokePaidDays,
+            approved_days_without_pay: revokeWithoutPayDays,
+          },
         });
       }
     }
 
-    // 3. Remove DTR on_leave entries that were written by this approval.
-    //    Only removes rows that are still 'on_leave' and linked to this request.
-    //    Rows already changed to 'present' (employee actually showed up) are untouched.
-    await client.query(
-      `DELETE FROM dtr_daily_summary
-       WHERE leave_request_id = $1
-         AND status = 'on_leave'`,
-      [id]
-    );
+    // 3. Remove only the leave overlay. Underlying attendance/holiday rows remain intact.
+    // Older approvals predate the coverage table, so clean up their generated DTR rows
+    // only when no separate coverage record existed.
+    const removedCoverageRows = await removeApprovedLeaveCoverage(client, id);
+    if (removedCoverageRows === 0) {
+      await client.query(
+        `DELETE FROM dtr_daily_summary
+         WHERE leave_request_id = $1
+           AND status = 'on_leave'`,
+        [id]
+      );
+    }
 
     // 4. Audit trail.
     await insertLeaveRequestHistory(client, {
@@ -3901,6 +4091,8 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
         start_date: startStr,
         end_date: endStr,
         number_of_days: revokeDays,
+        restored_paid_days: revokePaidDays,
+        approved_days_without_pay: revokeWithoutPayDays,
         revoked_by: reviewerId,
       },
     });
@@ -4544,39 +4736,52 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
   }
 });
 
-// POST /api/leave/:id/attachment - upload attachment (owner or admin; draft/pending/returned only)
+// POST /api/leave/:id/attachment - upload/replace while the request is draft or returned.
 router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res) => {
   const userId = req.user?.id;
   const role = req.user?.role;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded. Allowed: PDF, JPG, JPEG, PNG (max 10MB).' });
+  }
+  const newRelPath = `${LEAVE_ATTACHMENT_SUBDIR}/${req.file.filename}`;
+  let client = null;
+  let committed = false;
+  let oldAttachmentPath = null;
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded. Allowed: PDF, JPG, JPEG, PNG (max 10MB).' });
-    }
+    client = await pool.connect();
+    await client.query('BEGIN');
     const isAdmin = role === 'admin' || role === 'hr';
-    const existing = await pool.query(
-      'SELECT id, status, attachment_path FROM leave_requests WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)',
+    const existing = await client.query(
+      `SELECT id, status, attachment_path
+       FROM leave_requests
+       WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)
+       FOR UPDATE`,
       [id, isAdmin, userId]
     );
-    if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
+    if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      cleanupStoredLeaveAttachment(newRelPath);
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
     const row = existing.rows[0];
-    if (!canModifyAttachment(row.status)) {
-      return res.status(400).json({ error: 'Attachment cannot be changed for this request status.' });
+    if (!canModifyLeaveAttachment(row.status)) {
+      await client.query('ROLLBACK');
+      cleanupStoredLeaveAttachment(newRelPath);
+      return res.status(409).json({
+        error: 'Attachment is locked after submission. It can only be changed while the request is a draft or has been returned.',
+      });
     }
-    const relPath = `${LEAVE_ATTACHMENT_SUBDIR}/${req.file.filename}`;
+    oldAttachmentPath = row.attachment_path || null;
     const mimeType = req.file.mimetype || null;
-    if (row.attachment_path) {
-      const oldPath = path.join(UPLOAD_DIR, row.attachment_path);
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-    }
-    await pool.query(
+    await client.query(
       `UPDATE leave_requests
        SET attachment_name = $1, attachment_path = $2, attachment_mime_type = $3, attachment_uploaded_at = now(), updated_at = now()
        WHERE id = $4`,
-      [req.file.originalname || req.file.filename, relPath, mimeType, id]
+      [req.file.originalname || req.file.filename, newRelPath, mimeType, id]
     );
-    const out = await pool.query(
+    const out = await client.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -4584,43 +4789,64 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
        WHERE lr.id = $1`,
       [id]
     );
+    await client.query('COMMIT');
+    committed = true;
+    if (oldAttachmentPath && oldAttachmentPath !== newRelPath) {
+      cleanupStoredLeaveAttachment(oldAttachmentPath);
+    }
     const mapped = mapLeaveRowToApi(out.rows[0]);
     broadcastLeaveUpdated('attachment_uploaded', mapped);
     res.json(mapped);
   } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) { }
+    }
+    if (!committed) cleanupStoredLeaveAttachment(newRelPath);
     console.error('[leave POST /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
+  } finally {
+    if (client) client.release();
   }
 });
 
-// DELETE /api/leave/:id/attachment - remove attachment
+// DELETE /api/leave/:id/attachment - remove while the request is draft or returned.
 router.delete('/:id/attachment', protect, async (req, res) => {
   const userId = req.user?.id;
   const role = req.user?.role;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
+  let client = null;
+  let oldAttachmentPath = null;
   try {
+    client = await pool.connect();
+    await client.query('BEGIN');
     const isAdmin = role === 'admin' || role === 'hr';
-    const existing = await pool.query(
-      'SELECT id, status, attachment_path FROM leave_requests WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)',
+    const existing = await client.query(
+      `SELECT id, status, attachment_path
+       FROM leave_requests
+       WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)
+       FOR UPDATE`,
       [id, isAdmin, userId]
     );
-    if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
+    if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
     const row = existing.rows[0];
-    if (!canModifyAttachment(row.status)) {
-      return res.status(400).json({ error: 'Attachment cannot be changed for this request status.' });
+    if (!canModifyLeaveAttachment(row.status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Attachment is locked after submission. It can only be changed while the request is a draft or has been returned.',
+      });
     }
-    if (row.attachment_path) {
-      const filePath = path.join(UPLOAD_DIR, row.attachment_path);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    }
-    await pool.query(
+    oldAttachmentPath = row.attachment_path || null;
+    await client.query(
       `UPDATE leave_requests
        SET attachment_name = NULL, attachment_path = NULL, attachment_mime_type = NULL, attachment_uploaded_at = NULL, updated_at = now()
        WHERE id = $1`,
       [id]
     );
-    const out = await pool.query(
+    const out = await client.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -4628,12 +4854,19 @@ router.delete('/:id/attachment', protect, async (req, res) => {
        WHERE lr.id = $1`,
       [id]
     );
+    await client.query('COMMIT');
+    if (oldAttachmentPath) cleanupStoredLeaveAttachment(oldAttachmentPath);
     const mapped = mapLeaveRowToApi(out.rows[0]);
     broadcastLeaveUpdated('attachment_removed', mapped);
     res.json(mapped);
   } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) { }
+    }
     console.error('[leave DELETE /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to remove attachment' });
+  } finally {
+    if (client) client.release();
   }
 });
 
@@ -4644,30 +4877,89 @@ router.get('/:id/attachment', protect, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
   try {
-    const isAdmin = role === 'admin' || role === 'hr';
     const rows = await pool.query(
-      'SELECT user_id, employee_id, attachment_path, attachment_name, attachment_mime_type FROM leave_requests WHERE id = $1',
+      `SELECT user_id, employee_id, status, assigned_department_head_id,
+              attachment_path, attachment_name, attachment_mime_type
+       FROM leave_requests
+       WHERE id = $1`,
       [id]
     );
     if (rows.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
     const row = rows.rows[0];
     const targetUserId = row.user_id || row.employee_id;
-    let canAccess = isAdmin || targetUserId === userId;
-    if (!canAccess) {
-      const deptInfo = await isDepartmentHead(pool, userId);
-      if (deptInfo?.isDeptHead && deptInfo.departmentId && targetUserId) {
-        const employeeDept = await getEmployeeDepartment(pool, targetUserId);
-        canAccess = employeeDept?.departmentId === deptInfo.departmentId;
-      }
+    const assignedDepartmentHeadId =
+      row.status === 'pending_department_head'
+        ? row.assigned_department_head_id || null
+        : null;
+    let historicalDepartmentHeadAction = null;
+    const isOwner = targetUserId === userId;
+    const isHrOrAdmin = role === 'admin' || role === 'hr';
+    if (!isOwner && !isHrOrAdmin) {
+      const history = await pool.query(
+        `SELECT action
+         FROM leave_request_history
+         WHERE leave_request_id = $1
+           AND acted_by = $2
+           AND action = ANY($3::text[])
+         ORDER BY acted_at DESC
+         LIMIT 1`,
+        [id, userId, Array.from(DEPARTMENT_HEAD_HISTORY_ACTIONS)]
+      );
+      historicalDepartmentHeadAction = history.rows[0]?.action || null;
     }
-    if (!canAccess) return res.status(404).json({ error: 'Leave request not found' });
-    if (!row.attachment_path) return res.status(404).json({ error: 'No attachment for this request' });
-    const filePath = path.join(UPLOAD_DIR, row.attachment_path);
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Attachment file not found' });
+    const access = resolveLeaveAttachmentAccess({
+      role,
+      userId,
+      ownerUserId: targetUserId,
+      requestStatus: row.status,
+      assignedDepartmentHeadId,
+      historicalDepartmentHeadAction,
+    });
+    const auditBase = {
+      leaveRequestId: id,
+      attachmentName: row.attachment_name || null,
+      accessedBy: userId,
+      actorRole: role || null,
+      accessReason: access.reason,
+      ipAddress: req.ip || req.socket?.remoteAddress || null,
+      userAgent: req.get('user-agent') || null,
+    };
+    if (!access.allowed) {
+      await recordLeaveAttachmentAccess(pool, {
+        ...auditBase,
+        accessOutcome: 'denied',
+      });
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
+    if (!row.attachment_path) {
+      await recordLeaveAttachmentAccess(pool, {
+        ...auditBase,
+        accessOutcome: 'missing_attachment',
+      });
+      return res.status(404).json({ error: 'No attachment for this request' });
+    }
+    const uploadRoot = path.resolve(UPLOAD_DIR);
+    const filePath = path.resolve(uploadRoot, String(row.attachment_path));
+    const isStoredFile =
+      filePath !== uploadRoot &&
+      filePath.startsWith(`${uploadRoot}${path.sep}`) &&
+      fs.existsSync(filePath) &&
+      fs.statSync(filePath).isFile();
+    if (!isStoredFile) {
+      await recordLeaveAttachmentAccess(pool, {
+        ...auditBase,
+        accessOutcome: 'missing_file',
+      });
+      return res.status(404).json({ error: 'Attachment file not found' });
+    }
+    await recordLeaveAttachmentAccess(pool, {
+      ...auditBase,
+      accessOutcome: 'allowed',
+    });
     const filename = row.attachment_name || 'attachment';
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
     if (row.attachment_mime_type) res.setHeader('Content-Type', row.attachment_mime_type);
-    res.sendFile(path.resolve(filePath));
+    res.sendFile(filePath);
   } catch (err) {
     console.error('[leave GET /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to fetch attachment' });
@@ -4683,9 +4975,6 @@ router.get('/:id', protect, async (req, res) => {
   const { id } = req.params;
   try {
     const isAdmin = role === 'admin' || role === 'hr';
-    const deptInfo = isAdmin
-      ? { isDeptHead: false, departmentId: null }
-      : await isDepartmentHead(pool, userId);
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
               d.name AS assignment_department_name,
@@ -4723,17 +5012,14 @@ router.get('/:id', protect, async (req, res) => {
          AND (
            $2::boolean = true
            OR (lr.user_id = $3 OR lr.employee_id = $3)
-           OR (
-             $4::uuid IS NOT NULL
-             AND a.department_id = $4
-             AND (
-               lr.status = 'pending_department_head'
-               OR dhh.department_head_reviewer_id IS NOT NULL
-             )
-           )
-         )
-       LIMIT 1`,
-      [id, isAdmin, userId, deptInfo.departmentId]
+            OR (
+              lr.status = 'pending_department_head'
+              AND lr.assigned_department_head_id = $3::uuid
+            )
+            OR dhh.department_head_reviewer_id IS NOT NULL
+          )
+        LIMIT 1`,
+      [id, isAdmin, userId]
     );
     if (rows.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
     res.json(mapLeaveRowToApi(rows.rows[0]));

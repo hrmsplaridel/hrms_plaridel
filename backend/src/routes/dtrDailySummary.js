@@ -687,12 +687,18 @@ async function getApprovedLeaveKeysInRange(employeeIds, startStr, endStr) {
   if (!startStr || !endStr) return new Set();
   if (!employeeIds || employeeIds.length === 0) return new Set();
   const res = await pool.query(
-    `SELECT employee_id, start_date::text AS start_str, end_date::text AS end_str
-     FROM leave_requests
-     WHERE status = 'approved'
-       AND employee_id = ANY($1::uuid[])
-       AND start_date <= $3::date
-       AND end_date >= $2::date`,
+    `SELECT lr.employee_id, lr.start_date::text AS start_str, lr.end_date::text AS end_str
+     FROM leave_requests lr
+     LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+     WHERE lr.status = 'approved'
+       AND COALESCE(lt.affects_dtr_normally, true) = true
+       AND lr.employee_id = ANY($1::uuid[])
+       AND lr.start_date <= $3::date
+       AND lr.end_date >= $2::date
+       AND NOT EXISTS (
+         SELECT 1 FROM dtr_leave_coverage c
+         WHERE c.leave_request_id = lr.id
+       )`,
     [employeeIds, startStr, endStr]
   );
   const out = new Set();
@@ -709,6 +715,52 @@ async function getApprovedLeaveKeysInRange(employeeIds, startStr, endStr) {
     }
   }
   return out;
+}
+
+/** Exact server-approved leave coverage keyed by "employeeId|YYYY-MM-DD". */
+async function getApprovedLeaveCoverageInRange(employeeIds, startStr, endStr) {
+  const out = new Map();
+  if (!startStr || !endStr || !employeeIds || employeeIds.length === 0) {
+    return out;
+  }
+  const result = await pool.query(
+    `SELECT c.id AS leave_coverage_id,
+            c.employee_id,
+            c.attendance_date::text AS attendance_date,
+            c.leave_request_id,
+            COALESCE(NULLIF(lt.display_name, ''), NULLIF(lt.description, ''), lt.name) AS leave_type_name
+     FROM dtr_leave_coverage c
+     JOIN leave_requests lr ON lr.id = c.leave_request_id AND lr.status = 'approved'
+     LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+     WHERE c.employee_id = ANY($1::uuid[])
+       AND c.attendance_date >= $2::date
+       AND c.attendance_date <= $3::date
+     ORDER BY c.attendance_date`,
+    [employeeIds, startStr, endStr]
+  );
+  for (const row of result.rows) {
+    const dateStr = String(row.attendance_date).slice(0, 10);
+    out.set(`${row.employee_id}|${dateStr}`, {
+      ...row,
+      attendance_date: dateStr,
+    });
+  }
+  return out;
+}
+
+async function getApprovedLeaveCoverageForDate(employeeId, dateStr) {
+  if (!employeeId || !dateStr) return null;
+  const result = await pool.query(
+    `SELECT c.id, c.leave_request_id
+     FROM dtr_leave_coverage c
+     JOIN leave_requests lr ON lr.id = c.leave_request_id
+     WHERE c.employee_id = $1::uuid
+       AND c.attendance_date = $2::date
+       AND lr.status = 'approved'
+     LIMIT 1`,
+    [employeeId, dateStr]
+  );
+  return result.rows[0] || null;
 }
 
 /**
@@ -914,7 +966,10 @@ router.get('/', protect, async (req, res) => {
       : 'h.name AS holiday_name, h.holiday_type AS holiday_type, NULL::text AS holiday_coverage';
     const result = await pool.query(
       `SELECT d.id, d.employee_id, d.attendance_date, d.attendance_date::text AS attendance_date_iso, d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours,
-              d.late_minutes, d.undertime_minutes, d.status, d.pm_status, d.remarks, d.source, d.holiday_id, d.leave_request_id,
+              d.late_minutes, d.undertime_minutes, d.status, d.pm_status, d.remarks, d.source, d.holiday_id,
+              d.leave_request_id AS base_leave_request_id,
+              dlc.id AS leave_coverage_id,
+              COALESCE(dlc.leave_request_id, d.leave_request_id) AS leave_request_id,
               d.created_at, d.updated_at,
               u.full_name AS employee_name,
               ${joinCols},
@@ -922,7 +977,15 @@ router.get('/', protect, async (req, res) => {
        FROM dtr_daily_summary d
        LEFT JOIN users u ON u.id = d.employee_id
        LEFT JOIN holidays h ON h.id = d.holiday_id
-       LEFT JOIN leave_requests lr ON lr.id = d.leave_request_id
+       LEFT JOIN dtr_leave_coverage dlc
+         ON dlc.employee_id = d.employee_id
+        AND dlc.attendance_date = d.attendance_date
+        AND EXISTS (
+          SELECT 1 FROM leave_requests approved_request
+          WHERE approved_request.id = dlc.leave_request_id
+            AND approved_request.status = 'approved'
+        )
+       LEFT JOIN leave_requests lr ON lr.id = COALESCE(dlc.leave_request_id, d.leave_request_id)
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        ${where}
        ORDER BY d.attendance_date DESC, d.time_in DESC NULLS LAST
@@ -956,10 +1019,16 @@ router.get('/', protect, async (req, res) => {
         )
         : null;
       const coverage = r.holiday_coverage || 'whole_day';
-      const isPartialSuspension = r.status === 'holiday' && (coverage === 'am_only' || coverage === 'pm_only');
-      let lateMinutes = r.late_minutes != null ? parseInt(r.late_minutes, 10) : 0;
-      let undertimeMinutes = r.undertime_minutes != null ? parseInt(r.undertime_minutes, 10) : 0;
-      if (recomputeExistingRows && dateStr && r.status !== 'on_leave' && (r.status !== 'holiday' || isPartialSuspension)) {
+      const hasLeaveCoverage = r.leave_coverage_id != null;
+      const effectiveStatus = hasLeaveCoverage ? 'on_leave' : r.status;
+      const isPartialSuspension = effectiveStatus === 'holiday' && (coverage === 'am_only' || coverage === 'pm_only');
+      let lateMinutes = hasLeaveCoverage
+        ? 0
+        : (r.late_minutes != null ? parseInt(r.late_minutes, 10) : 0);
+      let undertimeMinutes = hasLeaveCoverage
+        ? 0
+        : (r.undertime_minutes != null ? parseInt(r.undertime_minutes, 10) : 0);
+      if (recomputeExistingRows && dateStr && effectiveStatus !== 'on_leave' && (effectiveStatus !== 'holiday' || isPartialSuspension)) {
         // Optional expensive path for after schedule/policy changes. The normal
         // Time Logs view uses stored summary values for fast reads.
         lateMinutes = await computeLateMinutes(
@@ -967,7 +1036,7 @@ router.get('/', protect, async (req, res) => {
           dateStr,
           r.time_in,
           r.break_in,
-          r.status,
+          effectiveStatus,
           r.holiday_id,
           coverage
         );
@@ -976,7 +1045,7 @@ router.get('/', protect, async (req, res) => {
           dateStr,
           r.time_out,
           r.break_out,
-          r.status,
+          effectiveStatus,
           r.holiday_id,
           coverage,
           r.time_in,
@@ -998,7 +1067,7 @@ router.get('/', protect, async (req, res) => {
         time_out: r.time_out,
         late_minutes: lateMinutes,
         undertime_minutes: undertimeMinutes,
-        status: r.status,
+        status: effectiveStatus,
         holiday_id: r.holiday_id,
         leave_request_id: r.leave_request_id,
         leave_type_name: r.leave_type_name,
@@ -1017,7 +1086,7 @@ router.get('/', protect, async (req, res) => {
         total_hours: r.total_hours != null ? parseFloat(r.total_hours) : null,
         late_minutes: lateMinutes,
         undertime_minutes: undertimeMinutes,
-        status: r.status,
+        status: effectiveStatus,
         pm_status: r.pm_status,
         remarks: r.remarks,
         attendance_remark: attendanceRemark,
@@ -1027,7 +1096,8 @@ router.get('/', protect, async (req, res) => {
         holiday_type: r.holiday_type,
         coverage,
         leave_type_name: r.leave_type_name || null,
-        source: r.source || null,
+        source: hasLeaveCoverage ? 'adjusted' : (r.source || null),
+        leave_coverage_id: r.leave_coverage_id || null,
         created_at: r.created_at,
         updated_at: r.updated_at,
         employee_name: r.employee_name,
@@ -1096,6 +1166,13 @@ router.get('/', protect, async (req, res) => {
       const holidaysInRange = await getHolidaysInRange(startStr, endStr);
       const holidayByDate = new Map();
       for (const h of holidaysInRange) holidayByDate.set(h.dateStr, h);
+      const leaveCoverageByKey = await getApprovedLeaveCoverageInRange(
+        employeeIds,
+        startStr,
+        endStr
+      );
+      const legacyLeaveKeys = await getApprovedLeaveKeysInRange(employeeIds, startStr, endStr);
+      const leaveKeys = new Set([...legacyLeaveKeys, ...leaveCoverageByKey.keys()]);
 
       // 1) Inject synthetic holiday rows for dates with no record — only for employees
       //    scheduled that calendar day (same working-day + assignment rules as absent injection).
@@ -1149,12 +1226,48 @@ router.get('/', protect, async (req, res) => {
         }
       }
 
-      // 2) Inject synthetic "Absent" rows for working days with no record, only after shift end / for past dates
+      // 2) Inject exact approved leave coverage where no underlying DTR row exists.
+      for (const [key, leave] of leaveCoverageByKey.entries()) {
+        if (existingKeys.has(key)) continue;
+        const [empId, dateStr] = key.split('|');
+        existingKeys.add(key);
+        rows.push({
+          id: null,
+          user_id: empId,
+          record_date: dateStr,
+          time_in: null,
+          break_out: null,
+          break_in: null,
+          time_out: null,
+          total_hours: null,
+          late_minutes: 0,
+          undertime_minutes: 0,
+          status: 'on_leave',
+          pm_status: null,
+          remarks: null,
+          source: 'adjusted',
+          attendance_remark: leave.leave_type_name || 'Leave',
+          holiday_id: null,
+          leave_request_id: leave.leave_request_id,
+          leave_coverage_id: leave.leave_coverage_id,
+          holiday_name: null,
+          holiday_type: null,
+          coverage: null,
+          leave_type_name: leave.leave_type_name || null,
+          created_at: null,
+          updated_at: null,
+          employee_name: userIdToName[empId] || null,
+          shift_punch_mode:
+            getShiftInfoForDateFromAssignments(assignmentsByEmployee, empId, dateStr)?.punchMode ||
+            'auto',
+        });
+      }
+
+      // 3) Inject synthetic "Absent" rows for working days with no record, only after shift end / for past dates
       // Use HRMS_TIMEZONE so "today" matches the business calendar date, not the server's UTC date.
       const todayStr = todayInHrmsTimezone();
       const nowMinutes = nowMinutesInHrmsTimezone();
 
-      const leaveKeys = await getApprovedLeaveKeysInRange(employeeIds, startStr, endStr);
       const locatorByKey = await getApprovedLocatorByDateInRange(
         employeeIds,
         startStr,
@@ -1238,7 +1351,7 @@ router.get('/', protect, async (req, res) => {
         }
       }
 
-      // 3) Inject synthetic rows for approved locator slips with no existing DTR row.
+      // 4) Inject synthetic rows for approved locator slips with no existing DTR row.
       for (const [key, locator] of locatorByKey.entries()) {
         if (!hasFullDayLocatorCoverage(locator)) continue;
         if (existingKeys.has(key)) continue;
@@ -1277,7 +1390,7 @@ router.get('/', protect, async (req, res) => {
         });
       }
 
-      // 4) Annotate existing rows with locator metadata for transparency.
+      // 5) Annotate existing rows with locator metadata for transparency.
       for (const row of rows) {
         const rowKey = `${row.user_id}|${row.record_date}`;
         const locator = locatorByKey.get(rowKey);
@@ -1389,11 +1502,28 @@ router.get('/summary', protect, requireAdminOrSupervisor, async (req, res) => {
     let onLeaveToday = 0;
     try {
       const onLeave = await pool.query(
-        `SELECT COUNT(DISTINCT COALESCE(user_id, employee_id)) AS c
-         FROM leave_requests
-         WHERE status = 'approved'
-           AND start_date <= $1::date
-           AND end_date >= $1::date`,
+        `SELECT COUNT(DISTINCT employee_id) AS c
+         FROM (
+           SELECT c.employee_id
+           FROM dtr_leave_coverage c
+           JOIN leave_requests lr ON lr.id = c.leave_request_id
+           WHERE lr.status = 'approved'
+             AND c.attendance_date = $1::date
+
+           UNION
+
+           SELECT COALESCE(lr.user_id, lr.employee_id) AS employee_id
+           FROM leave_requests lr
+           LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+           WHERE lr.status = 'approved'
+             AND COALESCE(lt.affects_dtr_normally, true) = true
+             AND lr.start_date <= $1::date
+             AND lr.end_date >= $1::date
+             AND NOT EXISTS (
+               SELECT 1 FROM dtr_leave_coverage c
+               WHERE c.leave_request_id = lr.id
+             )
+         ) covered_employees`,
         [today]
       );
       onLeaveToday = parseInt(onLeave.rows[0]?.c ?? 0, 10);
@@ -1457,13 +1587,39 @@ router.get('/today', protect, async (req, res) => {
       ? 'h.name AS holiday_name, h.holiday_type AS holiday_type, h.coverage AS holiday_coverage'
       : 'h.name AS holiday_name, h.holiday_type AS holiday_type, NULL::text AS holiday_coverage';
     const result = await pool.query(
-      `SELECT d.id, d.employee_id, d.attendance_date, d.attendance_date::text AS attendance_date_iso, d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours, d.status, d.pm_status, d.remarks, d.source, d.holiday_id, d.created_at, d.updated_at,
+      `WITH target AS (
+         SELECT $1::uuid AS employee_id, $2::date AS attendance_date
+       )
+       SELECT d.id,
+              target.employee_id,
+              target.attendance_date,
+              target.attendance_date::text AS attendance_date_iso,
+              d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours,
+              CASE WHEN dlc.id IS NOT NULL THEN 'on_leave' ELSE d.status END AS status,
+              d.pm_status, d.remarks,
+              CASE WHEN dlc.id IS NOT NULL THEN 'adjusted' ELSE d.source END AS source,
+              d.holiday_id, d.created_at, d.updated_at,
+              dlc.id AS leave_coverage_id,
+              COALESCE(dlc.leave_request_id, d.leave_request_id) AS leave_request_id,
+              COALESCE(NULLIF(lt.display_name, ''), NULLIF(lt.description, ''), lt.name) AS leave_type_name,
               u.full_name AS employee_name,
               ${joinCols}
-       FROM dtr_daily_summary d
-       LEFT JOIN users u ON u.id = d.employee_id
+       FROM target
+       LEFT JOIN dtr_daily_summary d
+         ON d.employee_id = target.employee_id AND d.attendance_date = target.attendance_date
+       LEFT JOIN dtr_leave_coverage dlc
+         ON dlc.employee_id = target.employee_id
+        AND dlc.attendance_date = target.attendance_date
+        AND EXISTS (
+          SELECT 1 FROM leave_requests approved_request
+          WHERE approved_request.id = dlc.leave_request_id
+            AND approved_request.status = 'approved'
+        )
+       LEFT JOIN leave_requests lr ON lr.id = COALESCE(dlc.leave_request_id, d.leave_request_id)
+       LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+       LEFT JOIN users u ON u.id = target.employee_id
        LEFT JOIN holidays h ON h.id = d.holiday_id
-       WHERE d.employee_id = $1 AND d.attendance_date = $2::date`,
+       WHERE d.id IS NOT NULL OR dlc.id IS NOT NULL`,
       [userId, today]
     );
     const r = result.rows[0];
@@ -1492,6 +1648,9 @@ router.get('/today', protect, async (req, res) => {
       holiday_name: r.holiday_name,
       holiday_type: r.holiday_type,
       coverage: r.holiday_coverage || 'whole_day',
+      leave_request_id: r.leave_request_id || null,
+      leave_coverage_id: r.leave_coverage_id || null,
+      leave_type_name: r.leave_type_name || null,
       created_at: r.created_at,
       updated_at: r.updated_at,
       employee_name: r.employee_name,
@@ -1526,6 +1685,13 @@ router.post('/', protect, async (req, res) => {
     if (!isAdmin && targetId !== userId) return res.status(403).json({ error: 'Can only create your own record' });
 
     const date = attendance_date || new Date().toISOString().slice(0, 10);
+    const leaveCoverage = await getApprovedLeaveCoverageForDate(targetId, date);
+    if (leaveCoverage) {
+      return res.status(409).json({
+        error: 'An approved leave already covers this date. Revoke or return the leave approval before adding attendance.',
+        leave_request_id: leaveCoverage.leave_request_id,
+      });
+    }
     const isAfternoonOnly = break_in && (time_in === null || time_in === undefined);
     const timeIn = isAfternoonOnly ? null : (time_in || new Date().toISOString());
     const holiday = await getHolidayByDate(date);
@@ -1637,6 +1803,13 @@ router.put('/:id', protect, async (req, res) => {
     const existingCoverage = existing.holiday_coverage || 'whole_day';
     const employeeId = existing.employee_id;
     const dateStr = toIsoDateStr(existing.attendance_date);
+    const leaveCoverage = await getApprovedLeaveCoverageForDate(employeeId, dateStr);
+    if (leaveCoverage) {
+      return res.status(409).json({
+        error: 'An approved leave covers this date. Revoke or return the leave approval before editing attendance.',
+        leave_request_id: leaveCoverage.leave_request_id,
+      });
+    }
 
     // Reject PM In (break_in) if after shift end time
     if (break_in !== undefined && break_in != null && existing.holiday_id == null) {
@@ -1883,6 +2056,22 @@ async function applyApprovedCorrectionToSummary(client, correctionRow) {
   const employeeId = correctionRow.employee_id;
   const dateStr = toIsoDateStr(correctionRow.attendance_date);
   if (!dateStr) return { error: 'Invalid attendance date' };
+
+  const leaveCoverage = await client.query(
+    `SELECT c.leave_request_id
+     FROM dtr_leave_coverage c
+     JOIN leave_requests lr ON lr.id = c.leave_request_id
+     WHERE c.employee_id = $1::uuid
+       AND c.attendance_date = $2::date
+       AND lr.status = 'approved'
+     LIMIT 1`,
+    [employeeId, dateStr]
+  );
+  if (leaveCoverage.rowCount > 0) {
+    return {
+      error: 'An approved leave covers this date. Revoke or return the leave approval before approving a DTR correction.',
+    };
+  }
 
   const reqIn = correctionRow.requested_time_in;
   const reqOut = correctionRow.requested_time_out;

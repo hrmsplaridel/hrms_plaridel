@@ -1,7 +1,7 @@
 // Department Head detection service.
 //
 // Determines whether a user is a department head by inspecting their
-// active assignment + position name.  Uses EXACT match against known
+// assignment effective today + position name. Uses EXACT match against known
 // position names first, then falls back to case-insensitive LIKE.
 
 /**
@@ -14,7 +14,7 @@ const DEPARTMENT_HEAD_POSITION_NAMES = [
 ];
 
 /**
- * Get the active department_id for an employee.
+ * Get the department_id effective today for an employee.
  * @param {import('pg').PoolClient} client
  * @param {string} employeeUserId
  * @returns {Promise<{departmentId: string, departmentName: string|null} | null>}
@@ -25,9 +25,12 @@ async function getEmployeeDepartment(client, employeeUserId) {
      FROM assignments a
      LEFT JOIN departments d ON d.id = a.department_id
      WHERE a.employee_id = $1
-       AND (a.is_active IS NULL OR a.is_active = true)
        AND a.department_id IS NOT NULL
-     ORDER BY a.effective_from DESC
+       AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
+       AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+     ORDER BY a.effective_from DESC NULLS LAST,
+              a.created_at DESC NULLS LAST,
+              a.id DESC
      LIMIT 1`,
     [employeeUserId]
   );
@@ -58,10 +61,14 @@ async function findDepartmentHeadUserId(client, departmentId) {
        FROM assignments a
        JOIN positions p ON a.position_id = p.id
        WHERE a.department_id = $1
-         AND (a.is_active IS NULL OR a.is_active = true)
-         AND (p.is_active IS NULL OR p.is_active = true)
-         AND LOWER(p.name) = ANY($2::text[])
-       LIMIT 1`,
+          AND (p.is_active IS NULL OR p.is_active = true)
+          AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
+          AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+          AND LOWER(p.name) = ANY($2::text[])
+        ORDER BY a.effective_from DESC NULLS LAST,
+                 a.created_at DESC NULLS LAST,
+                 a.id DESC
+        LIMIT 1`,
       [departmentId, lowerNames]
     );
     if (exact.rows.length > 0) return exact.rows[0].employee_id;
@@ -73,9 +80,13 @@ async function findDepartmentHeadUserId(client, departmentId) {
      FROM assignments a
      JOIN positions p ON a.position_id = p.id
      WHERE a.department_id = $1
-       AND (a.is_active IS NULL OR a.is_active = true)
        AND (p.is_active IS NULL OR p.is_active = true)
+       AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
+       AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
        AND p.name ILIKE '%department head%'
+     ORDER BY a.effective_from DESC NULLS LAST,
+              a.created_at DESC NULLS LAST,
+              a.id DESC
      LIMIT 1`,
     [departmentId]
   );
@@ -87,7 +98,7 @@ async function findDepartmentHeadUserId(client, departmentId) {
 /**
  * High-level: given an employee user ID, find their department head.
  * Returns null if:
- *  - employee has no active assignment / no department
+ *  - employee has no assignment effective today / no department
  *  - no department head position found in that department
  *  - employee IS the department head (self-approval prevention)
  *
@@ -96,17 +107,26 @@ async function findDepartmentHeadUserId(client, departmentId) {
  * @returns {Promise<{departmentHeadUserId: string, departmentId: string, departmentName: string|null} | null>}
  */
 async function getDepartmentHeadForEmployee(client, employeeUserId) {
+  const snapshot = await getDepartmentReviewSnapshot(client, employeeUserId);
+  if (!snapshot?.departmentHeadUserId) return null;
+  return snapshot;
+}
+
+/**
+ * Resolve and snapshot the employee's current reviewing department and head.
+ * Unlike getDepartmentHeadForEmployee, the department is retained when the
+ * department has no designated head so HR-only routing is still auditable.
+ */
+async function getDepartmentReviewSnapshot(client, employeeUserId) {
   const dept = await getEmployeeDepartment(client, employeeUserId);
   if (!dept) return null;
 
   const headUserId = await findDepartmentHeadUserId(client, dept.departmentId);
-  if (!headUserId) return null;
-
-  // Self-approval prevention: if the employee IS the dept head, skip.
-  if (headUserId === employeeUserId) return null;
+  const departmentHeadUserId =
+    headUserId && headUserId !== employeeUserId ? headUserId : null;
 
   return {
-    departmentHeadUserId: headUserId,
+    departmentHeadUserId,
     departmentId: dept.departmentId,
     departmentName: dept.departmentName,
   };
@@ -127,9 +147,13 @@ async function isDepartmentHead(client, userId) {
      JOIN positions p ON a.position_id = p.id
      LEFT JOIN departments d ON d.id = a.department_id
      WHERE a.employee_id = $1
-       AND (a.is_active IS NULL OR a.is_active = true)
        AND (p.is_active IS NULL OR p.is_active = true)
+       AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
+       AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
        AND LOWER(p.name) = ANY($2::text[])
+     ORDER BY a.effective_from DESC NULLS LAST,
+              a.created_at DESC NULLS LAST,
+              a.id DESC
      LIMIT 1`,
     [userId, lowerNames]
   );
@@ -148,9 +172,13 @@ async function isDepartmentHead(client, userId) {
      JOIN positions p ON a.position_id = p.id
      LEFT JOIN departments d ON d.id = a.department_id
      WHERE a.employee_id = $1
-       AND (a.is_active IS NULL OR a.is_active = true)
        AND (p.is_active IS NULL OR p.is_active = true)
+       AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
+       AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
        AND p.name ILIKE '%department head%'
+     ORDER BY a.effective_from DESC NULLS LAST,
+              a.created_at DESC NULLS LAST,
+              a.id DESC
      LIMIT 1`,
     [userId]
   );
@@ -168,6 +196,7 @@ async function isDepartmentHead(client, userId) {
 module.exports = {
   DEPARTMENT_HEAD_POSITION_NAMES,
   getEmployeeDepartment,
+  getDepartmentReviewSnapshot,
   findDepartmentHeadUserId,
   getDepartmentHeadForEmployee,
   isDepartmentHead,

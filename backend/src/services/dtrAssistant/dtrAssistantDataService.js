@@ -7,6 +7,9 @@ const {
   buildAllLeaveGuidelines,
   buildGuidelinesForTypes,
 } = require('./leaveFilingGuidelines');
+const {
+  sanitizeEmployeeLeaveDetails,
+} = require('../leaveRequestDetailsPolicy');
 
 function toNumber(value) {
   if (value == null) return null;
@@ -63,30 +66,41 @@ async function loadEmployeeProfile(pool, userId) {
 
 async function loadDtrRecords(pool, userId, dateRange) {
   const result = await pool.query(
-    `SELECT d.id,
-            d.attendance_date::text AS attendance_date,
+    `WITH active_leave_coverage AS (
+       SELECT c.*
+       FROM dtr_leave_coverage c
+       JOIN leave_requests request ON request.id = c.leave_request_id
+       WHERE request.status = 'approved'
+     )
+     SELECT COALESCE(d.id, coverage.id) AS id,
+            COALESCE(d.attendance_date, coverage.attendance_date)::text AS attendance_date,
             d.time_in,
             d.break_out,
             d.break_in,
             d.time_out,
             d.total_hours,
-            d.late_minutes,
-            d.undertime_minutes,
-            d.overtime_minutes,
-            d.status,
+            CASE WHEN coverage.id IS NOT NULL THEN 0 ELSE d.late_minutes END AS late_minutes,
+            CASE WHEN coverage.id IS NOT NULL THEN 0 ELSE d.undertime_minutes END AS undertime_minutes,
+            CASE WHEN coverage.id IS NOT NULL THEN 0 ELSE d.overtime_minutes END AS overtime_minutes,
+            CASE WHEN coverage.id IS NOT NULL THEN 'on_leave' ELSE d.status END AS status,
             d.pm_status,
             d.remarks,
-            d.source,
+            CASE WHEN coverage.id IS NOT NULL THEN 'adjusted' ELSE d.source END AS source,
             h.name AS holiday_name,
             h.holiday_type,
             lt.name AS leave_type
      FROM dtr_daily_summary d
+     FULL OUTER JOIN active_leave_coverage coverage
+       ON coverage.employee_id = d.employee_id
+      AND coverage.attendance_date = d.attendance_date
      LEFT JOIN holidays h ON h.id = d.holiday_id
-     LEFT JOIN leave_requests lr ON lr.id = d.leave_request_id
+     LEFT JOIN leave_requests lr
+       ON lr.id = COALESCE(coverage.leave_request_id, d.leave_request_id)
      LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-     WHERE d.employee_id = $1::uuid
-       AND d.attendance_date BETWEEN $2::date AND $3::date
-     ORDER BY d.attendance_date DESC
+     WHERE COALESCE(d.employee_id, coverage.employee_id) = $1::uuid
+       AND COALESCE(d.attendance_date, coverage.attendance_date)
+         BETWEEN $2::date AND $3::date
+     ORDER BY COALESCE(d.attendance_date, coverage.attendance_date) DESC
      LIMIT 70`,
     [userId, dateRange.startDate, dateRange.endDate]
   );
@@ -219,6 +233,8 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
             lr.attachment_path,
             lr.details,
             lr.reviewer_remarks,
+            lr.recommendation_remarks,
+            lr.disapproval_reason,
             lr.reviewed_at,
             lr.approved_at,
             reviewer.full_name AS reviewer_name,
@@ -290,8 +306,10 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
     reason: compactText(row.reason),
     has_attachment: !!row.attachment_path,
     attachment_name: compactText(row.attachment_name, 120),
-    details: row.details && typeof row.details === 'object' ? row.details : {},
+    details: sanitizeEmployeeLeaveDetails(row.details),
     reviewer_remarks: compactText(row.reviewer_remarks),
+    recommendation_remarks: compactText(row.recommendation_remarks),
+    disapproval_reason: compactText(row.disapproval_reason),
     reviewer_name: row.reviewer_name,
     approver_name: row.approver_name,
     reviewed_at: toIso(row.reviewed_at),
