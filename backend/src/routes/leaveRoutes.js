@@ -61,10 +61,13 @@ const {
   replaceApprovedLeaveCoverage,
 } = require('../services/leaveDtrCoverage');
 const {
+  customLeaveDetailValues,
   employeeLeaveDetailsFromPayload,
   loadEmployeeOfficialSnapshot,
+  normalizeEmployeeDetailSchema,
   normalizeEmployeeOfficialSnapshot,
   sanitizeEmployeeLeaveDetails,
+  serializeEmployeeDetailSchema,
 } = require('../services/leaveRequestDetailsPolicy');
 const {
   getYearEndForcedLeaveCompliance,
@@ -327,6 +330,7 @@ pool
         ADD COLUMN IF NOT EXISTS affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
         ADD COLUMN IF NOT EXISTS balance_ledger_type TEXT NOT NULL DEFAULT 'none',
         ADD COLUMN IF NOT EXISTS sex_eligibility TEXT NOT NULL DEFAULT 'any',
+        ADD COLUMN IF NOT EXISTS employee_detail_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
     `);
@@ -863,6 +867,9 @@ function leaveTypeRowToApi(row = {}) {
       row.sex_eligibility ?? fallback.sex_eligibility,
       name
     ),
+    employee_detail_schema: normalizeEmployeeDetailSchema(
+      row.employee_detail_schema
+    ),
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
   };
@@ -992,7 +999,13 @@ LEFT JOIN departments d ON d.id = COALESCE(lr.review_department_id, a.department
 function mapLeaveRowToApi(row) {
   // Employee details are whitelisted again on output so legacy untrusted keys
   // cannot appear as official or review fields before the cleanup migration runs.
-  const details = sanitizeEmployeeLeaveDetails(row.details);
+  const customFieldSchema = normalizeEmployeeDetailSchema(
+    row.employee_detail_schema_snapshot
+  );
+  const details = sanitizeEmployeeLeaveDetails(
+    row.details,
+    customFieldSchema
+  );
   const official = normalizeEmployeeOfficialSnapshot(
     row.employee_official_snapshot
   );
@@ -1004,6 +1017,9 @@ function mapLeaveRowToApi(row) {
     null;
   return {
     ...details,
+    details,
+    custom_details: customLeaveDetailValues(details, customFieldSchema),
+    employee_detail_schema_snapshot: customFieldSchema,
     id: row.id,
     user_id: row.user_id || row.employee_id,
     employee_name: employeeName,
@@ -1252,7 +1268,33 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
         base.sex_eligibility,
       name
     ),
+    employeeDetailSchema: normalizeEmployeeDetailSchema(
+      bodyField('employee_detail_schema') ??
+        existing?.employee_detail_schema ??
+        [],
+      { strict: true }
+    ),
   };
+}
+
+function sendLeaveTypeWriteError(res, err, action) {
+  if (err && err.statusCode) {
+    return res.status(err.statusCode).json({ error: err.message });
+  }
+  if (err?.code === '23505') {
+    return res.status(409).json({ error: 'Leave type key already exists' });
+  }
+  if (err?.code === '22P02' || err?.code === '23514') {
+    return res.status(400).json({
+      error: 'Leave type settings contain an invalid custom-field configuration.',
+    });
+  }
+  if (err?.code === '42703') {
+    return res.status(500).json({
+      error: 'Leave type database setup is outdated. Apply the latest database migration.',
+    });
+  }
+  return res.status(500).json({ error: `Failed to ${action} leave type` });
 }
 
 // GET /api/leave/types — active leave types for forms, or all for admin management.
@@ -1293,7 +1335,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
           employee_can_file, admin_only, allows_past_dates,
           requires_attachment, requires_attachment_when_over_days,
           max_days, minimum_advance_days, affects_dtr_normally, balance_ledger_type,
-          sex_eligibility,
+          sex_eligibility, employee_detail_schema,
           created_at, updated_at
         )
         VALUES (
@@ -1301,7 +1343,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
           $5, $6, $7,
           $8, $9,
           $10, $11, $12, $13,
-          $14,
+          $14, $15::jsonb,
           now(), now()
         )
         RETURNING *`,
@@ -1320,15 +1362,13 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
         payload.affectsDtrNormally,
         payload.balanceLedgerType,
         payload.sexEligibility,
+        serializeEmployeeDetailSchema(payload.employeeDetailSchema),
       ]
     );
     res.status(201).json(leaveTypeRowToApi(q.rows[0]));
   } catch (err) {
     console.error('[leave POST /types]', err);
-    if (err.code === '23505') {
-      return res.status(409).json({ error: 'Leave type key already exists' });
-    }
-    res.status(500).json({ error: 'Failed to create leave type' });
+    return sendLeaveTypeWriteError(res, err, 'create');
   }
 });
 
@@ -1372,8 +1412,9 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
            affects_dtr_normally = $13,
            balance_ledger_type = $14,
            sex_eligibility = $15,
+           employee_detail_schema = $16::jsonb,
            updated_at = now()
-       WHERE id = $16::uuid
+       WHERE id = $17::uuid
        RETURNING *`,
       [
         nextName,
@@ -1391,16 +1432,18 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
         payload.affectsDtrNormally,
         nextBalanceLedgerType,
         isSystem ? defaultSexEligibilityForLeaveType(nextName) : payload.sexEligibility,
+        serializeEmployeeDetailSchema(
+          isSystem
+            ? normalizeEmployeeDetailSchema(existing.employee_detail_schema)
+            : payload.employeeDetailSchema
+        ),
         req.params.id,
       ]
     );
     res.json(leaveTypeRowToApi(q.rows[0]));
   } catch (err) {
     console.error('[leave PUT /types/:id]', err);
-    if (err.code === '23505') {
-      return res.status(409).json({ error: 'Leave type key already exists' });
-    }
-    res.status(500).json({ error: 'Failed to update leave type' });
+    return sendLeaveTypeWriteError(res, err, 'update');
   }
 });
 
@@ -1775,13 +1818,20 @@ router.post('/draft', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
-      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      const customFieldSchema = normalizeEmployeeDetailSchema(
+        leaveRule?.employee_detail_schema
+      );
+      const payloadDetails = employeeLeaveDetailsFromPayload({
+        details,
+        rest,
+        customFieldSchema,
+      });
       const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
       const adoptionParentRole = readAdoptionParentRole(payloadDetails);
       const eventDates = readLeaveEventDates(payloadDetails);
-      const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       const userSex = await getUserSexForLeaveValidation(client, userId);
       const validation = validateEmployeeLeaveRequestWithRule({
         rule: leaveRule,
@@ -1821,13 +1871,14 @@ router.post('/draft', protect, async (req, res) => {
             reason,
             details,
             employee_official_snapshot,
+            employee_detail_schema_snapshot,
             status,
             created_at,
             updated_at
           )
           VALUES (
             $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
-            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb,
+            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb, $9::jsonb,
             'draft', now(), now()
           )
           RETURNING *`,
@@ -1840,6 +1891,7 @@ router.post('/draft', protect, async (req, res) => {
           reason || null,
           payloadDetails,
           officialSnapshot,
+          serializeEmployeeDetailSchema(customFieldSchema),
         ]
       );
 
@@ -1872,6 +1924,7 @@ router.post('/draft', protect, async (req, res) => {
     }
   } catch (err) {
     console.error('[leave POST /draft]', err);
+    if (err && err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to save draft' });
   }
 });
@@ -1904,7 +1957,15 @@ router.post('/submit', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
-      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      const customFieldSchema = normalizeEmployeeDetailSchema(
+        leaveRule?.employee_detail_schema
+      );
+      const payloadDetails = employeeLeaveDetailsFromPayload({
+        details,
+        rest,
+        customFieldSchema,
+      });
       const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
@@ -1918,7 +1979,6 @@ router.post('/submit', protect, async (req, res) => {
         return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
       }
 
-      const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       const userSex = await getUserSexForLeaveValidation(client, userId);
       const validation = validateEmployeeLeaveRequestWithRule({
         rule: leaveRule,
@@ -1974,13 +2034,14 @@ router.post('/submit', protect, async (req, res) => {
             reason,
             details,
             employee_official_snapshot,
+            employee_detail_schema_snapshot,
             status,
             created_at,
             updated_at
           )
           VALUES (
             $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
-            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb,
+            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb, $9::jsonb,
             'draft', now(), now()
           )
           RETURNING *`,
@@ -1993,6 +2054,7 @@ router.post('/submit', protect, async (req, res) => {
           reason || null,
           payloadDetails,
           officialSnapshot,
+          serializeEmployeeDetailSchema(customFieldSchema),
         ]
       );
 
@@ -2127,7 +2189,15 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         return res.status(400).json({ error: 'Invalid leave type' });
       }
 
-      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      const customFieldSchema = normalizeEmployeeDetailSchema(
+        leaveRule?.employee_detail_schema
+      );
+      const payloadDetails = employeeLeaveDetailsFromPayload({
+        details,
+        rest,
+        customFieldSchema,
+      });
       const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
       const maternityDeliveryType = readMaternityDeliveryType(payloadDetails);
@@ -2140,7 +2210,6 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
       }
 
-      const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       const userSex = await getUserSexForLeaveValidation(client, userId);
       const validation = validateEmployeeLeaveRequestWithRule({
         rule: leaveRule,
@@ -2202,6 +2271,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
             reason,
             details,
             employee_official_snapshot,
+            employee_detail_schema_snapshot,
             attachment_name,
             attachment_path,
             attachment_mime_type,
@@ -2212,8 +2282,8 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
           )
           VALUES (
             $1::uuid, $1::uuid, $2::uuid, $3::date, $4::date,
-            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb,
-            $9::text, $10::text, $11::text, now(),
+            $5::numeric, $5::numeric, $6::text, $7::jsonb, $8::jsonb, $9::jsonb,
+            $10::text, $11::text, $12::text, now(),
             'draft', now(), now()
           )
           RETURNING *`,
@@ -2226,6 +2296,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
           reason || null,
           payloadDetails,
           officialSnapshot,
+          serializeEmployeeDetailSchema(customFieldSchema),
           storedAttachment.originalName,
           storedAttachment.relPath,
           storedAttachment.mimeType,
@@ -2375,7 +2446,17 @@ router.put('/:id', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
-      const payloadDetails = employeeLeaveDetailsFromPayload({ details, rest });
+      const leaveRule = leave_type
+        ? await getLeaveTypeDefinition(client, leave_type)
+        : null;
+      const customFieldSchema = normalizeEmployeeDetailSchema(
+        leaveRule?.employee_detail_schema
+      );
+      const payloadDetails = employeeLeaveDetailsFromPayload({
+        details,
+        rest,
+        customFieldSchema,
+      });
       const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const existingOfficialSnapshot = normalizeEmployeeOfficialSnapshot(
         existing.rows[0].employee_official_snapshot
@@ -2400,7 +2481,6 @@ router.put('/:id', protect, async (req, res) => {
 
       if (leave_type && startStr && endStr) {
 
-        const leaveRule = await getLeaveTypeDefinition(client, leave_type);
         const userSex = await getUserSexForLeaveValidation(client, userId);
         const validation = validateEmployeeLeaveRequestWithRule({
           rule: leaveRule,
@@ -2490,6 +2570,7 @@ router.put('/:id', protect, async (req, res) => {
                 ELSE assigned_department_head_id
               END,
               employee_official_snapshot = $13::jsonb,
+              employee_detail_schema_snapshot = $14::jsonb,
               updated_at = now()
          WHERE id = $7 AND (user_id = $8 OR employee_id = $8)
          RETURNING *`,
@@ -2507,6 +2588,7 @@ router.put('/:id', protect, async (req, res) => {
           reviewSnapshot?.departmentId || null,
           reviewSnapshot?.departmentHeadUserId || null,
           officialSnapshot,
+          serializeEmployeeDetailSchema(customFieldSchema),
         ]
       );
       const row = q.rows[0];
