@@ -28,6 +28,7 @@ const {
   insertLeaveRequestHistory,
 } = require('../services/leaveRequestHistory');
 const {
+  applyAdminLeaveBalanceAdjustment,
   initLeaveBalanceLedger,
   insertLeaveBalanceLedger,
   fetchBalanceSnapshot,
@@ -4391,7 +4392,7 @@ router.get('/ledger', protect, async (req, res) => {
   const summaryParams = [...params];
 
   if (affectedBucket) {
-    if (!['earned', 'used', 'pending'].includes(affectedBucket)) {
+    if (!['earned', 'used', 'pending', 'adjusted'].includes(affectedBucket)) {
       return res.status(400).json({ error: 'Invalid affected_bucket filter' });
     }
     where.push(`LOWER(l.affected_bucket) = $${p}`);
@@ -4423,7 +4424,10 @@ router.get('/ledger', protect, async (req, res) => {
              THEN l.days_changed ELSE 0 END), 0), 0)::float8 AS used,
            GREATEST(COALESCE(SUM(CASE
              WHEN LOWER(l.affected_bucket) = 'pending'
-             THEN l.days_changed ELSE 0 END), 0), 0)::float8 AS pending
+             THEN l.days_changed ELSE 0 END), 0), 0)::float8 AS pending,
+           COALESCE(SUM(CASE
+             WHEN LOWER(l.affected_bucket) = 'adjusted'
+             THEN l.days_changed ELSE 0 END), 0)::float8 AS adjusted
          FROM leave_balance_ledger l
          WHERE ${summaryWhereSql}`,
         summaryParams
@@ -4452,9 +4456,10 @@ router.get('/ledger', protect, async (req, res) => {
       limit,
       offset,
       summary: {
-        earned: Number(summary.earned || 0),
-        used: Number(summary.used || 0),
-        pending: Number(summary.pending || 0),
+         earned: Number(summary.earned || 0),
+         used: Number(summary.used || 0),
+         pending: Number(summary.pending || 0),
+         adjusted: Number(summary.adjusted || 0),
       },
       rows: list.rows.map((r) => ({
         id: r.id,
@@ -4663,8 +4668,8 @@ router.get('/balances/:userId', protect, async (req, res) => {
   }
 });
 
-// PUT /api/leave/balances/:userId — admin/HR: create or replace one leave_balances row
-router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
+// POST /api/leave/balances/:userId/adjustments — admin/HR: append an audited correction.
+router.post('/balances/:userId/adjustments', protect, requireAdminOrHr, async (req, res) => {
   const reviewerId = req.user?.id;
   const targetId = req.params.userId;
   const b = req.body || {};
@@ -4672,44 +4677,13 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
   if (!leaveType) {
     return res.status(400).json({ error: 'Invalid or missing leave_type' });
   }
-  const earned = parseFloat(b.earned_days ?? b.earnedDays);
-  const used = parseFloat(b.used_days ?? b.usedDays);
-  const pending = parseFloat(b.pending_days ?? b.pendingDays);
-  const adjusted = parseFloat(b.adjusted_days ?? b.adjustedDays ?? 0);
-  if (!Number.isFinite(earned) || earned < 0) {
-    return res.status(400).json({ error: 'earned_days must be a number >= 0' });
-  }
-  if (!Number.isFinite(used) || used < 0) {
-    return res.status(400).json({ error: 'used_days must be a number >= 0' });
-  }
-  if (!Number.isFinite(pending) || pending < 0) {
-    return res.status(400).json({ error: 'pending_days must be a number >= 0' });
-  }
-  if (!Number.isFinite(adjusted)) {
-    return res.status(400).json({ error: 'adjusted_days must be a number' });
-  }
   let asOf = b.as_of_date ?? b.asOfDate;
-  let lastAccrual = b.last_accrual_date ?? b.lastAccrualDate;
   if (asOf === '' || asOf === undefined) asOf = null;
-  if (lastAccrual === '' || lastAccrual === undefined) lastAccrual = null;
-
-  // Enhancement 9 — last_accrual_date edit guard:
-  // Prevent setting last_accrual_date to a future date; this would silently skip
-  // upcoming automated accrual runs for the employee.
-  if (lastAccrual != null) {
-    const parsedLastAccrual = new Date(lastAccrual);
-    if (!Number.isNaN(parsedLastAccrual.getTime())) {
-      const todayUtc = new Date();
-      todayUtc.setHours(0, 0, 0, 0);
-      if (parsedLastAccrual > todayUtc) {
-        return res.status(400).json({
-          error:
-            'last_accrual_date cannot be set to a future date. ' +
-            'Setting it in the future would cause the automated accrual cron to skip upcoming months for this employee.',
-        });
-      }
-    }
+  if (asOf != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(asOf))) {
+    return res.status(400).json({ error: 'as_of_date must use YYYY-MM-DD' });
   }
+  const daysChanged = b.adjustment_days ?? b.adjustmentDays;
+  const remarks = b.remarks ?? b.reason;
 
   const client = await pool.connect();
   try {
@@ -4718,76 +4692,33 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
     if (!balanceBucket) {
       await client.query('ROLLBACK');
       return res.status(400).json({
-        error: 'This leave type does not use leave credits and cannot have a leave balance row.',
+        error: 'This leave type does not use leave credits and cannot be adjusted.',
       });
     }
     if (balanceBucket !== leaveType) {
       await client.query('ROLLBACK');
       return res.status(400).json({
-        error: `${systemLeaveTypeDisplayName(leaveType)} uses the ${creditBalanceLabel(balanceBucket, leaveType)} balance bucket. Update that bucket instead.`,
+        error: `${systemLeaveTypeDisplayName(leaveType)} uses the ${creditBalanceLabel(balanceBucket, leaveType)} balance bucket. Adjust that bucket instead.`,
       });
     }
-    const prev = await client.query(
-      `SELECT earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date
-       FROM leave_balances
-       WHERE user_id = $1::uuid AND leave_type = $2::text
-       FOR UPDATE`,
-      [targetId, leaveType]
-    );
-    const beforeSnap = balanceRowToSnapshot(prev.rows[0]);
 
-    const out = await client.query(
-      `INSERT INTO leave_balances (
-         user_id, leave_type, earned_days, used_days, pending_days, adjusted_days,
-         as_of_date, last_accrual_date, created_at, updated_at
-       )
-       VALUES (
-         $1::uuid, $2, $3, $4, $5, $6,
-         $7::date, $8::date, now(), now()
-       )
-       ON CONFLICT (user_id, leave_type)
-       DO UPDATE SET
-         earned_days = EXCLUDED.earned_days,
-         used_days = EXCLUDED.used_days,
-         pending_days = EXCLUDED.pending_days,
-         adjusted_days = EXCLUDED.adjusted_days,
-         as_of_date = EXCLUDED.as_of_date,
-         last_accrual_date = EXCLUDED.last_accrual_date,
-         updated_at = now()
-       RETURNING *`,
-      [targetId, leaveType, earned, used, pending, adjusted, asOf, lastAccrual],
-    );
-    if (out.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(500).json({ error: 'Failed to save leave balance' });
-    }
-    const r = out.rows[0];
-    const afterSnap = balanceRowToSnapshot(r);
-
-    await insertLeaveBalanceLedger(client, {
+    const result = await applyAdminLeaveBalanceAdjustment(client, {
       userId: targetId,
       leaveType,
-      action: 'admin_adjustment',
-      affectedBucket: 'multiple',
-      daysChanged: 0,
-      oldValue: null,
-      newValue: null,
-      relatedLeaveRequestId: null,
+      daysChanged,
       actorUserId: reviewerId || null,
-      actorKind: 'admin',
-      remarks: (b.remarks || b.ledger_remarks || '').toString().trim() || null,
-      metadataJson: {
-        before: beforeSnap,
-        after: afterSnap,
-        as_of_date: asOf,
-        last_accrual_date: lastAccrual,
-      },
+      actorKind: req.user?.role || 'admin',
+      remarks,
+      asOfDate: asOf,
     });
-
+    const r = result.row;
+    const nameRow = await client.query(
+      'SELECT full_name FROM users WHERE id = $1::uuid',
+      [targetId]
+    );
+    const employeeName = nameRow.rows[0]?.full_name || null;
     await client.query('COMMIT');
 
-    const nameRow = await pool.query('SELECT full_name FROM users WHERE id = $1::uuid', [targetId]);
-    const employeeName = nameRow.rows[0]?.full_name || null;
     const response = {
       id: r.id,
       user_id: r.user_id,
@@ -4803,19 +4734,34 @@ router.put('/balances/:userId', protect, requireAdminOrHr, async (req, res) => {
       updated_at: r.updated_at,
     };
     broadcastLeaveUpdated('balance_updated', { user_id: targetId }, response);
-    res.json(response);
+    res.status(201).json(response);
   } catch (err) {
     try {
       await client.query('ROLLBACK');
     } catch (_) { }
-    console.error('[leave PUT /balances/:userId]', err);
+    console.error('[leave POST /balances/:userId/adjustments]', err);
+    if (err && err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     if (err && err.code === '23503') {
       return res.status(400).json({ error: 'Invalid user or leave type reference' });
     }
-    res.status(500).json({ error: err.message || 'Failed to save leave balance' });
+    if (err && err.code === '22007') {
+      return res.status(400).json({ error: 'Invalid adjustment date' });
+    }
+    res.status(500).json({ error: err.message || 'Failed to adjust leave balance' });
   } finally {
     client.release();
   }
+});
+
+// Direct bucket replacement is intentionally disabled. Pending, earned, and used
+// remain owned by leave workflow, accrual, and month-end posting transactions.
+router.put('/balances/:userId', protect, requireAdminOrHr, (_req, res) => {
+  res.set('Allow', 'GET, POST');
+  return res.status(405).json({
+    error: 'Direct balance replacement is disabled. Submit an audited balance adjustment instead.',
+  });
 });
 
 // POST /api/leave/:id/attachment - upload/replace while the request is draft or returned.
