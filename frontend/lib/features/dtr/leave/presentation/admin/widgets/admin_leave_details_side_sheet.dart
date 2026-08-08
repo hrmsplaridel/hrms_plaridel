@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_web.dart'
     as open_attachment;
@@ -619,7 +620,27 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
       applies: leaveType == LeaveType.others,
     );
 
+    for (final field in request.employeeDetailSchemaSnapshot) {
+      final value = request.customDetails[field.key];
+      if (value == null || value.toString().trim().isEmpty) continue;
+      rows.add((label: field.label, value: _displayCustomValue(field, value)));
+    }
+
     return rows;
+  }
+
+  static String _displayCustomValue(
+    LeaveCustomFieldDefinition field,
+    dynamic value,
+  ) {
+    if (field.type == LeaveCustomFieldType.boolean) {
+      return value == true ? 'Yes' : 'No';
+    }
+    if (field.type == LeaveCustomFieldType.date) {
+      final date = DateTime.tryParse(value.toString());
+      if (date != null) return formatAdminLeaveDate(date);
+    }
+    return value.toString();
   }
 
   static bool _hasValue(String? value) =>

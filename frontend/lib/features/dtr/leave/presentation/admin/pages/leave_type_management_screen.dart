@@ -39,6 +39,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   bool _affectsDtrNormally = true;
   String _balanceLedgerType = 'none';
   String _sexEligibility = 'any';
+  List<LeaveCustomFieldDefinition> _customFields = const [];
+  List<int> _customFieldUiIds = const [];
+  Set<int> _autoCustomFieldUiIds = const {};
+  int _nextCustomFieldUiId = 1;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -148,6 +152,14 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _sexEligibility = _sexEligibilityTypes.containsKey(item.sexEligibility)
         ? item.sexEligibility
         : 'any';
+    _customFields = List<LeaveCustomFieldDefinition>.from(
+      item.employeeDetailSchema,
+    );
+    _customFieldUiIds = List<int>.generate(
+      _customFields.length,
+      (_) => _nextCustomFieldUiId++,
+    );
+    _autoCustomFieldUiIds = const {};
   }
 
   void _applySavedType(LeaveTypeDefinition item) {
@@ -184,6 +196,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _affectsDtrNormally = true;
       _balanceLedgerType = 'none';
       _sexEligibility = 'any';
+      _customFields = const [];
+      _customFieldUiIds = const [];
+      _autoCustomFieldUiIds = const {};
     });
   }
 
@@ -322,6 +337,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       'affects_dtr_normally': _affectsDtrNormally,
       'balance_ledger_type': _balanceLedgerType,
       'sex_eligibility': _sexEligibility,
+      'employee_detail_schema': _customFields
+          .map((field) => field.toJson())
+          .toList(growable: false),
     };
   }
 
@@ -330,6 +348,112 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _requiresAttachment = value;
       if (!value) _attachmentOverDaysController.clear();
     });
+  }
+
+  void _addCustomField() {
+    if (_customFields.length >= 20) {
+      _showMessage('A leave type can have at most 20 custom fields.');
+      return;
+    }
+    setState(() {
+      final nextNumber = _customFields.length + 1;
+      final uiId = _nextCustomFieldUiId++;
+      _customFields = [
+        ..._customFields,
+        LeaveCustomFieldDefinition(
+          key: _uniqueCustomFieldKey('field_$nextNumber'),
+          label: '',
+          maxLength: 255,
+        ),
+      ];
+      _customFieldUiIds = [..._customFieldUiIds, uiId];
+      _autoCustomFieldUiIds = {..._autoCustomFieldUiIds, uiId};
+    });
+  }
+
+  void _replaceCustomField(int index, LeaveCustomFieldDefinition next) {
+    final fields = List<LeaveCustomFieldDefinition>.from(_customFields);
+    fields[index] = next;
+    setState(() => _customFields = fields);
+  }
+
+  void _removeCustomField(int index) {
+    final removedId = _customFieldUiIds[index];
+    final fields = List<LeaveCustomFieldDefinition>.from(_customFields)
+      ..removeAt(index);
+    final ids = List<int>.from(_customFieldUiIds)..removeAt(index);
+    setState(() {
+      _customFields = fields;
+      _customFieldUiIds = ids;
+      _autoCustomFieldUiIds = {..._autoCustomFieldUiIds}..remove(removedId);
+    });
+  }
+
+  void _moveCustomField(int index, int offset) {
+    final destination = index + offset;
+    if (destination < 0 || destination >= _customFields.length) return;
+    final fields = List<LeaveCustomFieldDefinition>.from(_customFields);
+    final item = fields.removeAt(index);
+    fields.insert(destination, item);
+    final ids = List<int>.from(_customFieldUiIds);
+    final id = ids.removeAt(index);
+    ids.insert(destination, id);
+    setState(() {
+      _customFields = fields;
+      _customFieldUiIds = ids;
+    });
+  }
+
+  String _uniqueCustomFieldKey(String candidate, {int? excludingIndex}) {
+    final normalized = _customFieldKey(candidate);
+    final base = normalized.isEmpty ? 'field' : normalized;
+    var key = base;
+    var suffix = 2;
+    while (_customFields.asMap().entries.any(
+      (entry) => entry.key != excludingIndex && entry.value.key == key,
+    )) {
+      key = '${base}_$suffix';
+      suffix += 1;
+    }
+    return key;
+  }
+
+  String _customFieldKey(String label) {
+    final words = RegExp(
+      r'[A-Za-z0-9]+',
+    ).allMatches(label).map((match) => match.group(0)!.toLowerCase());
+    final key = words.join('_');
+    if (key.isEmpty) return '';
+    final safeKey = RegExp(r'^[a-z]').hasMatch(key) ? key : 'field_$key';
+    return safeKey.startsWith('custom_') ? safeKey : 'custom_$safeKey';
+  }
+
+  LeaveCustomFieldDefinition _updatedCustomField(
+    LeaveCustomFieldDefinition field, {
+    String? key,
+    String? label,
+    LeaveCustomFieldType? type,
+    bool? required,
+    int? maxLength,
+    List<String>? options,
+  }) {
+    final nextType = type ?? field.type;
+    return LeaveCustomFieldDefinition(
+      key: key ?? field.key,
+      label: label ?? field.label,
+      type: nextType,
+      required: required ?? field.required,
+      maxLength:
+          nextType == LeaveCustomFieldType.text ||
+              nextType == LeaveCustomFieldType.longText
+          ? (maxLength ??
+                field.maxLength ??
+                (nextType == LeaveCustomFieldType.longText ? 2000 : 255))
+          : null,
+      options: nextType == LeaveCustomFieldType.select
+          ? (options ?? field.options)
+          : const [],
+    );
   }
 
   @override
@@ -344,48 +468,45 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-              Row(
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Leave Type Settings',
+                    style: TextStyle(
+                      color: _headingColor(context),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _saving ? null : _newCustom,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('New custom leave type'),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Close',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icon(Icons.close_rounded, color: _mutedColor(context)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: Text(
-                      'Leave Type Settings',
-                      style: TextStyle(
-                        color: _headingColor(context),
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: _saving ? null : _newCustom,
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('New custom leave type'),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: Icon(
-                      Icons.close_rounded,
-                      color: _mutedColor(context),
-                    ),
-                  ),
+                  SizedBox(width: 360, child: _buildList()),
+                  const SizedBox(width: 18),
+                  Expanded(child: _buildForm(systemLocked)),
                 ],
               ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(width: 360, child: _buildList()),
-                    const SizedBox(width: 18),
-                    Expanded(child: _buildForm(systemLocked)),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
     );
   }
 
@@ -733,6 +854,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           : 'Turn on Require attachment first',
                     ),
                   ),
+                  if (!systemLocked) ...[
+                    const SizedBox(height: 24),
+                    _buildCustomFieldsSection(),
+                  ],
                   const SizedBox(height: 24),
                   _sectionTitle(Icons.sync_alt_rounded, 'Balance and DTR'),
                   _ruleChip(
@@ -792,6 +917,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
 
   Widget _buildFooter(bool systemLocked) {
     final selected = _selected;
+    final isCreating = selected == null;
     final canToggleActive =
         selected?.id != null && selected?.isSystem != true && !_saving;
     final isSelectedActive = selected?.isActive == true;
@@ -817,6 +943,8 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             child: Text(
               systemLocked
                   ? 'Protected CSC leave types cannot be edited.'
+                  : isCreating
+                  ? 'Create this leave type to make it available under the configured filing rules.'
                   : isSelectedActive
                   ? 'Changes affect future filing rules after saving.'
                   : 'Inactive types stay in history, but employees cannot file them.',
@@ -842,9 +970,260 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.save_rounded),
-            label: Text(_saving ? 'Saving...' : 'Save Changes'),
+                : Icon(
+                    isCreating
+                        ? Icons.add_circle_outline_rounded
+                        : Icons.save_rounded,
+                  ),
+            label: Text(
+              _saving
+                  ? (isCreating ? 'Creating...' : 'Saving...')
+                  : (isCreating ? 'Create Leave Type' : 'Save Changes'),
+            ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCustomFieldsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _sectionTitle(
+                Icons.dynamic_form_outlined,
+                'Custom Form Fields',
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: _saving || _customFields.length >= 20
+                  ? null
+                  : _addCustomField,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add field'),
+            ),
+          ],
+        ),
+        if (_customFields.isEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+            decoration: BoxDecoration(
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: _hairline(context)),
+            ),
+            child: Text(
+              'No additional fields configured.',
+              style: TextStyle(color: _mutedColor(context), fontSize: 13),
+            ),
+          )
+        else
+          ..._customFields.asMap().entries.map(
+            (entry) => Padding(
+              key: ValueKey(_customFieldUiIds[entry.key]),
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildCustomFieldEditor(entry.key, entry.value),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildCustomFieldEditor(int index, LeaveCustomFieldDefinition field) {
+    final isText =
+        field.type == LeaveCustomFieldType.text ||
+        field.type == LeaveCustomFieldType.longText;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _hairline(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Field ${index + 1}',
+                  style: TextStyle(
+                    color: _headingColor(context),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Move field up',
+                onPressed: index == 0 || _saving
+                    ? null
+                    : () => _moveCustomField(index, -1),
+                icon: const Icon(Icons.arrow_upward_rounded, size: 18),
+              ),
+              IconButton(
+                tooltip: 'Move field down',
+                onPressed: index == _customFields.length - 1 || _saving
+                    ? null
+                    : () => _moveCustomField(index, 1),
+                icon: const Icon(Icons.arrow_downward_rounded, size: 18),
+              ),
+              IconButton(
+                tooltip: 'Delete field',
+                onPressed: _saving ? null : () => _removeCustomField(index),
+                icon: const Icon(Icons.delete_outline_rounded, size: 19),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextFormField(
+                  initialValue: field.label,
+                  readOnly: _saving,
+                  style: AppTheme.dashFieldTextStyle(context),
+                  decoration: _inputDecoration('Field label'),
+                  maxLength: 80,
+                  validator: (value) =>
+                      value == null || value.trim().isEmpty ? 'Required' : null,
+                  onChanged: (value) {
+                    final shouldUpdateKey = _autoCustomFieldUiIds.contains(
+                      _customFieldUiIds[index],
+                    );
+                    final nextKey = shouldUpdateKey
+                        ? _uniqueCustomFieldKey(value, excludingIndex: index)
+                        : field.key;
+                    _replaceCustomField(
+                      index,
+                      _updatedCustomField(field, label: value, key: nextKey),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DropdownButtonFormField<LeaveCustomFieldType>(
+                  key: ValueKey('custom-type-${field.key}-${field.type}'),
+                  initialValue: field.type,
+                  isExpanded: true,
+                  dropdownColor: AppTheme.dashPanelOf(context),
+                  style: AppTheme.dashFieldTextStyle(context),
+                  decoration: _inputDecoration('Field type'),
+                  items: LeaveCustomFieldType.values
+                      .map(
+                        (type) => DropdownMenuItem(
+                          value: type,
+                          child: Text(type.displayName),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _saving
+                      ? null
+                      : (type) {
+                          if (type == null) return;
+                          _replaceCustomField(
+                            index,
+                            _updatedCustomField(field, type: type),
+                          );
+                        },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: _inputDecoration(
+              'System key',
+              helperText: 'Generated from the label and stored with requests.',
+            ),
+            child: Text(field.key, style: AppTheme.dashFieldTextStyle(context)),
+          ),
+          const SizedBox(height: 10),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text('Required'),
+            value: field.required,
+            onChanged: _saving
+                ? null
+                : (value) => _replaceCustomField(
+                    index,
+                    _updatedCustomField(field, required: value == true),
+                  ),
+          ),
+          if (isText) ...[
+            const SizedBox(height: 8),
+            TextFormField(
+              key: ValueKey('max-${field.key}-${field.type.value}'),
+              initialValue:
+                  (field.maxLength ??
+                          (field.type == LeaveCustomFieldType.longText
+                              ? 2000
+                              : 255))
+                      .toString(),
+              readOnly: _saving,
+              keyboardType: TextInputType.number,
+              style: AppTheme.dashFieldTextStyle(context),
+              decoration: _inputDecoration('Maximum characters'),
+              validator: (value) {
+                final parsed = int.tryParse(value?.trim() ?? '');
+                return parsed == null || parsed < 1 || parsed > 5000
+                    ? 'Enter 1 to 5000'
+                    : null;
+              },
+              onChanged: (value) => _replaceCustomField(
+                index,
+                _updatedCustomField(
+                  field,
+                  maxLength: int.tryParse(value.trim()),
+                ),
+              ),
+            ),
+          ],
+          if (field.type == LeaveCustomFieldType.select) ...[
+            const SizedBox(height: 8),
+            TextFormField(
+              key: ValueKey('options-${field.key}'),
+              initialValue: field.options.join(', '),
+              readOnly: _saving,
+              style: AppTheme.dashFieldTextStyle(context),
+              decoration: _inputDecoration(
+                'Options',
+                helperText: 'Separate choices with commas.',
+              ),
+              validator: (value) {
+                final options = (value ?? '')
+                    .split(',')
+                    .map((item) => item.trim())
+                    .where((item) => item.isNotEmpty)
+                    .toList();
+                if (options.isEmpty) return 'Add at least one option';
+                if (options.length > 20) return 'Use at most 20 options';
+                if (options.any((option) => option.length > 80)) {
+                  return 'Each option must be 80 characters or less';
+                }
+                return null;
+              },
+              onChanged: (value) => _replaceCustomField(
+                index,
+                _updatedCustomField(
+                  field,
+                  options: value
+                      .split(',')
+                      .map((item) => item.trim())
+                      .where((item) => item.isNotEmpty)
+                      .toList(growable: false),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

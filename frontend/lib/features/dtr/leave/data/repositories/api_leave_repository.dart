@@ -37,6 +37,7 @@ class ApiLeaveRepository implements LeaveRepository {
     'other_purpose',
     'other_purpose_details',
     'commutation',
+    'details',
     'status',
   };
 
@@ -545,7 +546,9 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(int year) async {
+  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(
+    int year,
+  ) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/leave/admin/year-end-forced-leave',
@@ -570,7 +573,8 @@ class ApiLeaveRepository implements LeaveRepository {
           'year': input.year,
           'dry_run': input.dryRun,
           if (input.employeeIds != null) 'employee_ids': input.employeeIds,
-          if (input.remarks != null && input.remarks!.isNotEmpty) 'remarks': input.remarks,
+          if (input.remarks != null && input.remarks!.isNotEmpty)
+            'remarks': input.remarks,
         },
       );
       final data = res.data;

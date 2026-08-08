@@ -1,4 +1,5 @@
 import 'leave_type.dart';
+import 'leave_type_definition.dart';
 
 /// Workflow status for one leave request.
 enum LeaveRequestStatus {
@@ -132,6 +133,8 @@ class LeaveRequest {
     this.otherPurpose,
     this.otherPurposeDetails,
     this.commutation = LeaveCommutationOption.notRequested,
+    this.customDetails = const {},
+    this.employeeDetailSchemaSnapshot = const [],
     this.attachmentPath,
     this.attachmentName,
     this.status = LeaveRequestStatus.pending,
@@ -196,6 +199,8 @@ class LeaveRequest {
   final LeaveOtherPurpose? otherPurpose;
   final String? otherPurposeDetails;
   final LeaveCommutationOption commutation;
+  final Map<String, dynamic> customDetails;
+  final List<LeaveCustomFieldDefinition> employeeDetailSchemaSnapshot;
 
   /// Supporting documents uploaded by the employee.
   final String? attachmentPath;
@@ -319,6 +324,13 @@ class LeaveRequest {
       commutation: leaveCommutationOptionFromString(
         json['commutation']?.toString(),
       ),
+      customDetails: _parseDetailsMap(
+        json['custom_details'] ?? json['customDetails'],
+      ),
+      employeeDetailSchemaSnapshot: leaveCustomFieldDefinitionsFromJson(
+        json['employee_detail_schema_snapshot'] ??
+            json['employeeDetailSchemaSnapshot'],
+      ),
       attachmentPath: json['attachment_path']?.toString(),
       attachmentName: json['attachment_name']?.toString(),
       status: leaveRequestStatusFromString(json['status']?.toString()),
@@ -383,6 +395,7 @@ class LeaveRequest {
       'other_purpose': otherPurpose?.value,
       'other_purpose_details': _trimOrNull(otherPurposeDetails),
       'commutation': commutation.value,
+      'details': customDetails,
       'attachment_path': attachmentPath,
       'attachment_name': attachmentName,
       'status': status.value,
@@ -444,6 +457,8 @@ class LeaveRequest {
     LeaveOtherPurpose? otherPurpose,
     String? otherPurposeDetails,
     LeaveCommutationOption? commutation,
+    Map<String, dynamic>? customDetails,
+    List<LeaveCustomFieldDefinition>? employeeDetailSchemaSnapshot,
     String? attachmentPath,
     String? attachmentName,
     LeaveRequestStatus? status,
@@ -507,6 +522,9 @@ class LeaveRequest {
       otherPurpose: otherPurpose ?? this.otherPurpose,
       otherPurposeDetails: otherPurposeDetails ?? this.otherPurposeDetails,
       commutation: commutation ?? this.commutation,
+      customDetails: customDetails ?? this.customDetails,
+      employeeDetailSchemaSnapshot:
+          employeeDetailSchemaSnapshot ?? this.employeeDetailSchemaSnapshot,
       attachmentPath: attachmentPath ?? this.attachmentPath,
       attachmentName: attachmentName ?? this.attachmentName,
       status: status ?? this.status,
@@ -586,5 +604,10 @@ class LeaveRequest {
     if (value == null) return null;
     if (value is num) return value.toDouble();
     return double.tryParse(value.toString());
+  }
+
+  static Map<String, dynamic> _parseDetailsMap(dynamic value) {
+    if (value is! Map) return const {};
+    return Map<String, dynamic>.unmodifiable(Map<String, dynamic>.from(value));
   }
 }

@@ -89,6 +89,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   bool _workingDaysLoading = false;
   String? _workingDaysHelperText;
   int _workingDaysRequestSerial = 0;
+  Map<String, dynamic> _customDetailValues = {};
 
   late final TextEditingController _customLeaveTypeController;
   late final TextEditingController _reasonController;
@@ -124,6 +125,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _commutation = initial?.commutation ?? LeaveCommutationOption.notRequested;
     _startDate = initial?.startDate;
     _endDate = initial?.endDate;
+    _customDetailValues = Map<String, dynamic>.from(
+      initial?.customDetails ?? const {},
+    );
 
     _customLeaveTypeController = TextEditingController(
       text: initial?.customLeaveTypeText ?? '',
@@ -216,6 +220,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _womenIllnessController.clear();
     _studyPurposeDetailsController.clear();
     _otherPurposeDetailsController.clear();
+    _customDetailValues.clear();
   }
 
   LeaveTypeDefinition? get _selectedLeaveTypeDefinition {
@@ -223,6 +228,59 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       if (item.name == _leaveTypeName) return item;
     }
     return null;
+  }
+
+  List<LeaveCustomFieldDefinition> get _selectedCustomFields =>
+      _selectedLeaveTypeDefinition?.employeeDetailSchema ?? const [];
+
+  Map<String, dynamic> _customDetailsForSubmission() {
+    final output = <String, dynamic>{};
+    for (final field in _selectedCustomFields) {
+      final raw = _customDetailValues[field.key];
+      if (raw == null) continue;
+      if (raw is String) {
+        final value = raw.trim();
+        if (value.isEmpty) continue;
+        output[field.key] = field.type == LeaveCustomFieldType.number
+            ? (num.tryParse(value) ?? value)
+            : value;
+      } else {
+        output[field.key] = raw;
+      }
+    }
+    return output;
+  }
+
+  bool _validateCustomDetails() {
+    for (final field in _selectedCustomFields) {
+      final value = _customDetailValues[field.key];
+      final blank = value == null || (value is String && value.trim().isEmpty);
+      if (field.required && blank) {
+        _showMessage('${field.label} is required.');
+        return false;
+      }
+      if (blank) continue;
+      if ((field.type == LeaveCustomFieldType.text ||
+              field.type == LeaveCustomFieldType.longText) &&
+          value is String &&
+          value.trim().length >
+              (field.maxLength ??
+                  (field.type == LeaveCustomFieldType.longText ? 2000 : 255))) {
+        _showMessage('${field.label} is too long.');
+        return false;
+      }
+      if (field.type == LeaveCustomFieldType.number &&
+          num.tryParse(value.toString()) == null) {
+        _showMessage('${field.label} must be a number.');
+        return false;
+      }
+      if (field.type == LeaveCustomFieldType.select &&
+          !field.options.contains(value.toString())) {
+        _showMessage('Please choose a valid ${field.label}.');
+        return false;
+      }
+    }
+    return true;
   }
 
   String get _selectedLeaveTypeLabel {
@@ -550,6 +608,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Future<void> _saveDraft() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_validateCustomDetails()) return;
     final accountEligibilityMessage = _selectedAccountEligibilityMessage();
     if (accountEligibilityMessage != null) {
       _showMessage(accountEligibilityMessage);
@@ -823,7 +882,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       }
     }
 
-    return true;
+    return _validateCustomDetails();
   }
 
   DateTime _onlyDate(DateTime value) =>
@@ -1186,6 +1245,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         otherPurpose: _leaveType == LeaveType.others ? _otherPurpose : null,
         otherPurposeDetails: _otherPurposeDetailsController.text.trim(),
         commutation: _commutation,
+        customDetails: _customDetailsForSubmission(),
         attachmentName:
             _savedRequest?.attachmentName ?? initial?.attachmentName,
         attachmentPath:
@@ -2069,12 +2129,125 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       ]);
     }
 
+    if (_selectedCustomFields.isNotEmpty) {
+      children.addAll([
+        const Divider(height: 32),
+        Text(
+          'Additional Fields',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 12),
+        for (final field in _selectedCustomFields) ...[
+          _buildCustomDetailField(field),
+          const SizedBox(height: 12),
+        ],
+      ]);
+    }
+
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: children,
       ),
     );
+  }
+
+  Widget _buildCustomDetailField(LeaveCustomFieldDefinition field) {
+    final label = field.required ? '${field.label} *' : field.label;
+    final value = _customDetailValues[field.key];
+    switch (field.type) {
+      case LeaveCustomFieldType.date:
+        return _buildDatePicker(
+          label: label,
+          value: value == null ? null : DateTime.tryParse(value.toString()),
+          onChanged: (date) => setState(() {
+            if (date == null) {
+              _customDetailValues.remove(field.key);
+            } else {
+              _customDetailValues[field.key] = _dateOnly(date);
+            }
+          }),
+        );
+      case LeaveCustomFieldType.boolean:
+        return DropdownButtonFormField<bool>(
+          key: ValueKey('custom-$_leaveTypeName-${field.key}'),
+          initialValue: value is bool ? value : null,
+          decoration: _inputDecoration(label),
+          items: const [
+            DropdownMenuItem(value: true, child: Text('Yes')),
+            DropdownMenuItem(value: false, child: Text('No')),
+          ],
+          onChanged: (next) => setState(() {
+            if (next == null) {
+              _customDetailValues.remove(field.key);
+            } else {
+              _customDetailValues[field.key] = next;
+            }
+          }),
+          validator: (next) => field.required && next == null
+              ? '${field.label} is required'
+              : null,
+        );
+      case LeaveCustomFieldType.select:
+        final selected = field.options.contains(value?.toString())
+            ? value.toString()
+            : null;
+        return DropdownButtonFormField<String>(
+          key: ValueKey('custom-$_leaveTypeName-${field.key}-$selected'),
+          initialValue: selected,
+          isExpanded: true,
+          decoration: _inputDecoration(label),
+          items: field.options
+              .map(
+                (option) =>
+                    DropdownMenuItem(value: option, child: Text(option)),
+              )
+              .toList(),
+          onChanged: (next) => setState(() {
+            if (next == null) {
+              _customDetailValues.remove(field.key);
+            } else {
+              _customDetailValues[field.key] = next;
+            }
+          }),
+          validator: (next) => field.required && (next ?? '').isEmpty
+              ? '${field.label} is required'
+              : null,
+        );
+      case LeaveCustomFieldType.number:
+      case LeaveCustomFieldType.text:
+      case LeaveCustomFieldType.longText:
+        return TextFormField(
+          key: ValueKey('custom-$_leaveTypeName-${field.key}'),
+          initialValue: value?.toString() ?? '',
+          keyboardType: field.type == LeaveCustomFieldType.number
+              ? const TextInputType.numberWithOptions(decimal: true)
+              : TextInputType.text,
+          maxLines: field.type == LeaveCustomFieldType.longText ? 4 : 1,
+          maxLength:
+              field.type == LeaveCustomFieldType.text ||
+                  field.type == LeaveCustomFieldType.longText
+              ? field.maxLength
+              : null,
+          decoration: _inputDecoration(label),
+          onChanged: (next) => _customDetailValues[field.key] = next,
+          validator: (next) {
+            final text = next?.trim() ?? '';
+            if (field.required && text.isEmpty) {
+              return '${field.label} is required';
+            }
+            if (field.type == LeaveCustomFieldType.number &&
+                text.isNotEmpty &&
+                num.tryParse(text) == null) {
+              return 'Enter a valid number';
+            }
+            return null;
+          },
+        );
+    }
   }
 
   Widget _buildAttachmentSection() {

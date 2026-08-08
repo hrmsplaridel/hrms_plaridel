@@ -1,3 +1,100 @@
+enum LeaveCustomFieldType { text, longText, date, number, boolean, select }
+
+extension LeaveCustomFieldTypeValue on LeaveCustomFieldType {
+  String get value => switch (this) {
+    LeaveCustomFieldType.text => 'text',
+    LeaveCustomFieldType.longText => 'long_text',
+    LeaveCustomFieldType.date => 'date',
+    LeaveCustomFieldType.number => 'number',
+    LeaveCustomFieldType.boolean => 'boolean',
+    LeaveCustomFieldType.select => 'select',
+  };
+
+  String get displayName => switch (this) {
+    LeaveCustomFieldType.text => 'Text',
+    LeaveCustomFieldType.longText => 'Long text',
+    LeaveCustomFieldType.date => 'Date',
+    LeaveCustomFieldType.number => 'Number',
+    LeaveCustomFieldType.boolean => 'Yes / No',
+    LeaveCustomFieldType.select => 'Select',
+  };
+}
+
+LeaveCustomFieldType leaveCustomFieldTypeFromString(String? value) {
+  return switch ((value ?? '').trim().toLowerCase()) {
+    'long_text' || 'longtext' => LeaveCustomFieldType.longText,
+    'date' => LeaveCustomFieldType.date,
+    'number' => LeaveCustomFieldType.number,
+    'boolean' || 'bool' => LeaveCustomFieldType.boolean,
+    'select' => LeaveCustomFieldType.select,
+    _ => LeaveCustomFieldType.text,
+  };
+}
+
+class LeaveCustomFieldDefinition {
+  const LeaveCustomFieldDefinition({
+    required this.key,
+    required this.label,
+    this.type = LeaveCustomFieldType.text,
+    this.required = false,
+    this.maxLength,
+    this.options = const [],
+  });
+
+  final String key;
+  final String label;
+  final LeaveCustomFieldType type;
+  final bool required;
+  final int? maxLength;
+  final List<String> options;
+
+  factory LeaveCustomFieldDefinition.fromJson(Map<String, dynamic> json) {
+    final rawOptions = json['options'];
+    return LeaveCustomFieldDefinition(
+      key: json['key']?.toString() ?? '',
+      label: json['label']?.toString() ?? '',
+      type: leaveCustomFieldTypeFromString(json['type']?.toString()),
+      required: json['required'] == true,
+      maxLength: LeaveTypeDefinition._parseInt(
+        json['max_length'] ?? json['maxLength'],
+      ),
+      options: rawOptions is List
+          ? rawOptions
+                .map((option) => option.toString().trim())
+                .where((option) => option.isNotEmpty)
+                .toList(growable: false)
+          : const [],
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'key': key.trim(),
+    'label': label.trim(),
+    'type': type.value,
+    'required': required,
+    if (type == LeaveCustomFieldType.text ||
+        type == LeaveCustomFieldType.longText)
+      'max_length':
+          maxLength ?? (type == LeaveCustomFieldType.longText ? 2000 : 255),
+    if (type == LeaveCustomFieldType.select) 'options': options,
+  };
+}
+
+List<LeaveCustomFieldDefinition> leaveCustomFieldDefinitionsFromJson(
+  dynamic value,
+) {
+  if (value is! List) return const [];
+  return value
+      .whereType<Map>()
+      .map(
+        (item) => LeaveCustomFieldDefinition.fromJson(
+          Map<String, dynamic>.from(item),
+        ),
+      )
+      .where((field) => field.key.isNotEmpty && field.label.isNotEmpty)
+      .toList(growable: false);
+}
+
 class LeaveTypeDefinition {
   const LeaveTypeDefinition({
     this.id,
@@ -16,6 +113,7 @@ class LeaveTypeDefinition {
     this.affectsDtrNormally = true,
     this.balanceLedgerType = 'none',
     this.sexEligibility = 'any',
+    this.employeeDetailSchema = const [],
   });
 
   final String? id;
@@ -34,6 +132,7 @@ class LeaveTypeDefinition {
   final bool affectsDtrNormally;
   final String balanceLedgerType;
   final String sexEligibility;
+  final List<LeaveCustomFieldDefinition> employeeDetailSchema;
 
   factory LeaveTypeDefinition.fromJson(Map<String, dynamic> json) {
     return LeaveTypeDefinition(
@@ -77,6 +176,9 @@ class LeaveTypeDefinition {
         json['sex_eligibility']?.toString() ??
             json['sexEligibility']?.toString(),
       ),
+      employeeDetailSchema: _parseCustomFields(
+        json['employee_detail_schema'] ?? json['employeeDetailSchema'],
+      ),
     );
   }
 
@@ -97,6 +199,9 @@ class LeaveTypeDefinition {
       'affects_dtr_normally': affectsDtrNormally,
       'balance_ledger_type': balanceLedgerType,
       'sex_eligibility': sexEligibility,
+      'employee_detail_schema': employeeDetailSchema
+          .map((field) => field.toJson())
+          .toList(growable: false),
     };
   }
 
@@ -117,6 +222,7 @@ class LeaveTypeDefinition {
     bool? affectsDtrNormally,
     String? balanceLedgerType,
     String? sexEligibility,
+    List<LeaveCustomFieldDefinition>? employeeDetailSchema,
   }) {
     return LeaveTypeDefinition(
       id: id ?? this.id,
@@ -136,6 +242,7 @@ class LeaveTypeDefinition {
       affectsDtrNormally: affectsDtrNormally ?? this.affectsDtrNormally,
       balanceLedgerType: balanceLedgerType ?? this.balanceLedgerType,
       sexEligibility: sexEligibility ?? this.sexEligibility,
+      employeeDetailSchema: employeeDetailSchema ?? this.employeeDetailSchema,
     );
   }
 
@@ -150,6 +257,10 @@ class LeaveTypeDefinition {
     if (value is int) return value;
     if (value is num) return value.toInt();
     return int.tryParse(value.toString());
+  }
+
+  static List<LeaveCustomFieldDefinition> _parseCustomFields(dynamic value) {
+    return leaveCustomFieldDefinitionsFromJson(value);
   }
 }
 
