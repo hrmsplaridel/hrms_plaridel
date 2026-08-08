@@ -14,6 +14,7 @@ const {
 } = require('./holidayRangeUtils');
 const {
   getExpectedWorkMinutes,
+  getShiftExpectedLogs,
   getShiftType,
 } = require('./shiftAttendance');
 const {
@@ -422,22 +423,72 @@ async function loadApprovedLeaveKeys(client, employeeIds, startStr, endStr) {
   return keys;
 }
 
-async function loadFullLocatorKeys(client, employeeIds, startStr, endStr) {
+function expectedLocatorSlotsForAssignment(assignment) {
+  const expected = getShiftExpectedLogs(assignment);
+  if (expected.needsInOut) return ['am_in', 'pm_out'];
+
+  const slots = [];
+  if (expected.needsAm) slots.push('am_in', 'am_out');
+  if (expected.needsPm) slots.push('pm_in', 'pm_out');
+  return slots;
+}
+
+function locatorCoversExpectedShiftSlots(locator, assignment) {
+  if (!locator || !assignment) return false;
+  const expectedSlots = expectedLocatorSlotsForAssignment(assignment);
+  return (
+    expectedSlots.length > 0 &&
+    expectedSlots.every((slot) => locator[slot] === true)
+  );
+}
+
+async function loadFullLocatorKeys(
+  client,
+  employeeIds,
+  startStr,
+  endStr,
+  assignmentsByEmployee
+) {
   const keys = new Set();
   if (employeeIds.length === 0) return keys;
   const result = await client.query(
-    `SELECT employee_id, slip_date::text AS slip_date
+    `SELECT employee_id, slip_date::text AS slip_date,
+            am_in, am_out, pm_in, pm_out
      FROM locator_slips
      WHERE status = 'approved'
        AND employee_id = ANY($1::uuid[])
        AND slip_date >= $2::date
-       AND slip_date <= $3::date
-       AND am_in = true AND am_out = true
-       AND pm_in = true AND pm_out = true`,
+       AND slip_date <= $3::date`,
     [employeeIds, startStr, endStr]
   );
+
+  const coverageByEmployeeDate = new Map();
   for (const row of result.rows) {
-    keys.add(`${row.employee_id}|${dateOnly(row.slip_date)}`);
+    const employeeId = String(row.employee_id);
+    const dateStr = dateOnly(row.slip_date);
+    const key = `${employeeId}|${dateStr}`;
+    const coverage = coverageByEmployeeDate.get(key) || {
+      employeeId,
+      dateStr,
+      am_in: false,
+      am_out: false,
+      pm_in: false,
+      pm_out: false,
+    };
+    coverage.am_in ||= row.am_in === true;
+    coverage.am_out ||= row.am_out === true;
+    coverage.pm_in ||= row.pm_in === true;
+    coverage.pm_out ||= row.pm_out === true;
+    coverageByEmployeeDate.set(key, coverage);
+  }
+
+  for (const [key, coverage] of coverageByEmployeeDate.entries()) {
+    const assignment = assignmentForDate(
+      assignmentsByEmployee,
+      coverage.employeeId,
+      coverage.dateStr
+    );
+    if (locatorCoversExpectedShiftSlots(coverage, assignment)) keys.add(key);
   }
   return keys;
 }
@@ -511,7 +562,13 @@ async function calculateMonthlyAttendanceDeductions(
     await Promise.all([
       loadDtrRows(client, employeeIds, startStr, endStr),
       loadApprovedLeaveKeys(client, employeeIds, startStr, endStr),
-      loadFullLocatorKeys(client, employeeIds, startStr, endStr),
+      loadFullLocatorKeys(
+        client,
+        employeeIds,
+        startStr,
+        endStr,
+        assignmentsByEmployee
+      ),
       loadHolidayCoverage(client, startStr, endStr),
     ]);
 
@@ -944,6 +1001,9 @@ module.exports = {
   desiredPosting,
   /** @internal exported for regression tests */
   assignmentForDate,
+  expectedLocatorSlotsForAssignment,
+  locatorCoversExpectedShiftSlots,
   loadAssignments,
   loadEmployees,
+  loadFullLocatorKeys,
 };
