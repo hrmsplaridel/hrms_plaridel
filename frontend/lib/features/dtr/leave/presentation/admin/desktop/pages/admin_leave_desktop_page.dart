@@ -2053,10 +2053,7 @@ class _ManualBalanceAdjustmentDialog extends StatefulWidget {
 class _ManualBalanceAdjustmentDialogState
     extends State<_ManualBalanceAdjustmentDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _earnedController = TextEditingController();
-  final _usedController = TextEditingController();
-  final _pendingController = TextEditingController();
-  final _adjustedController = TextEditingController();
+  final _adjustmentController = TextEditingController();
   final _remarksController = TextEditingController();
 
   bool _loadingEmployees = true;
@@ -2071,22 +2068,10 @@ class _ManualBalanceAdjustmentDialogState
   LeaveType _selectedLeaveType = LeaveType.vacationLeave;
   List<LeaveBalance> _balances = const [];
 
-  List<TextEditingController> get _balanceControllers => [
-    _earnedController,
-    _usedController,
-    _pendingController,
-    _adjustedController,
-  ];
-
   @override
   void dispose() {
-    for (final controller in _balanceControllers) {
-      controller.removeListener(_refreshPreview);
-    }
-    _earnedController.dispose();
-    _usedController.dispose();
-    _pendingController.dispose();
-    _adjustedController.dispose();
+    _adjustmentController.removeListener(_refreshPreview);
+    _adjustmentController.dispose();
     _remarksController.dispose();
     super.dispose();
   }
@@ -2094,9 +2079,7 @@ class _ManualBalanceAdjustmentDialogState
   @override
   void initState() {
     super.initState();
-    for (final controller in _balanceControllers) {
-      controller.addListener(_refreshPreview);
-    }
+    _adjustmentController.addListener(_refreshPreview);
     _loadEmployees();
   }
 
@@ -2200,12 +2183,8 @@ class _ManualBalanceAdjustmentDialogState
   }
 
   void _applyBalanceToFields() {
-    final row = _selectedBalance;
-    _earnedController.text = _formatDays(row?.earnedDays ?? 0);
-    _usedController.text = _formatDays(row?.usedDays ?? 0);
-    _pendingController.text = _formatDays(row?.pendingDays ?? 0);
-    _adjustedController.text = _formatDays(row?.adjustedDays ?? 0);
-    _asOfDate = row?.asOfDate ?? DateTime.now();
+    _adjustmentController.clear();
+    _asOfDate = DateTime.now();
     _refreshPreview();
   }
 
@@ -2244,19 +2223,16 @@ class _ManualBalanceAdjustmentDialogState
     final uid = _selectedUserId;
     if (uid == null || uid.isEmpty) return;
 
-    final balance = LeaveBalance(
+    final adjustment = parseAdminLeaveDouble(_adjustmentController.text);
+    final remarks = trimAdminLeaveOrNull(_remarksController.text);
+    if (adjustment == null || adjustment == 0 || remarks == null) return;
+
+    final saved = await context.read<LeaveProvider>().applyBalanceAdjustment(
       userId: uid,
       leaveType: _selectedLeaveType,
-      earnedDays: parseAdminLeaveDouble(_earnedController.text) ?? 0,
-      usedDays: parseAdminLeaveDouble(_usedController.text) ?? 0,
-      pendingDays: parseAdminLeaveDouble(_pendingController.text) ?? 0,
-      adjustedDays: parseAdminLeaveDouble(_adjustedController.text) ?? 0,
+      adjustmentDays: adjustment,
+      remarks: remarks,
       asOfDate: _asOfDate,
-    );
-
-    final saved = await context.read<LeaveProvider>().upsertBalance(
-      balance,
-      remarks: trimAdminLeaveOrNull(_remarksController.text),
     );
     if (!mounted) return;
     if (saved != null) {
@@ -2275,13 +2251,16 @@ class _ManualBalanceAdjustmentDialogState
   }
 
   LeaveBalance get _draftBalance {
-    return LeaveBalance(
-      userId: _selectedUserId ?? '',
-      leaveType: _selectedLeaveType,
-      earnedDays: parseAdminLeaveDouble(_earnedController.text) ?? 0,
-      usedDays: parseAdminLeaveDouble(_usedController.text) ?? 0,
-      pendingDays: parseAdminLeaveDouble(_pendingController.text) ?? 0,
-      adjustedDays: parseAdminLeaveDouble(_adjustedController.text) ?? 0,
+    final current =
+        _selectedBalance ??
+        LeaveBalance(
+          userId: _selectedUserId ?? '',
+          leaveType: _selectedLeaveType,
+        );
+    return current.copyWith(
+      adjustedDays:
+          current.adjustedDays +
+          (parseAdminLeaveDouble(_adjustmentController.text) ?? 0),
       asOfDate: _asOfDate,
     );
   }
@@ -2353,7 +2332,7 @@ class _ManualBalanceAdjustmentDialogState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Manual Balance Adjustment',
+                          'Leave Balance Adjustment',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
@@ -2361,7 +2340,7 @@ class _ManualBalanceAdjustmentDialogState
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Update leave credit buckets and record an audit note.',
+                          'Add or remove credits without replacing calculated balances.',
                           style: TextStyle(
                             color: AppTheme.dashTextSecondaryOf(context),
                             fontSize: 13,
@@ -2418,8 +2397,8 @@ class _ManualBalanceAdjustmentDialogState
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.save_outlined),
-                    label: Text(saving ? 'Saving...' : 'Update balance'),
+                        : const Icon(Icons.check_circle_outline_rounded),
+                    label: Text(saving ? 'Applying...' : 'Apply adjustment'),
                   ),
                 ],
               ),
@@ -2582,18 +2561,18 @@ class _ManualBalanceAdjustmentDialogState
           _balancePreviewPanel(current: _selectedBalance, draft: _draftBalance),
           const SizedBox(height: 18),
           _sectionHeader(
-            icon: Icons.tune_outlined,
-            title: 'Balance Buckets',
+            icon: Icons.exposure_outlined,
+            title: 'Adjustment',
             trailing: IconButton(
               onPressed: saving || _loadingBalances
                   ? null
                   : _applyBalanceToFields,
               icon: const Icon(Icons.restore_rounded),
-              tooltip: 'Reset loaded values',
+              tooltip: 'Clear adjustment',
             ),
           ),
           const SizedBox(height: 10),
-          _balanceFieldGrid(
+          _adjustmentField(
             enabled: !saving && !_loadingBalances && hasSelectedEmployee,
           ),
           const SizedBox(height: 16),
@@ -2604,12 +2583,16 @@ class _ManualBalanceAdjustmentDialogState
             enabled: !saving && hasSelectedEmployee,
             minLines: 2,
             maxLines: 4,
+            maxLength: 500,
             decoration: adminLeaveInputDecoration(context, 'Reason / remarks')
                 .copyWith(
                   alignLabelWithHint: true,
                   prefixIcon: const Icon(Icons.notes_outlined),
                   hintText: 'Example: Corrected imported opening balance',
                 ),
+            validator: (value) => (value == null || value.trim().isEmpty)
+                ? 'Enter the reason for this adjustment'
+                : null,
           ),
           const SizedBox(height: 12),
           _statusPanel(
@@ -2617,8 +2600,8 @@ class _ManualBalanceAdjustmentDialogState
                 ? Icons.warning_amber_rounded
                 : Icons.info_outline_rounded,
             message: _draftBalance.availableDays < 0
-                ? 'Resulting available balance is negative. Save only if this reflects the intended HR correction.'
-                : 'Approvals continue to update used and pending days automatically after this adjustment.',
+                ? 'Resulting available balance is negative. Apply only if this reflects the intended HR correction.'
+                : 'Earned, used, and pending stay controlled by accrual and leave workflow transactions.',
             warning: _draftBalance.availableDays < 0,
           ),
         ],
@@ -2650,100 +2633,28 @@ class _ManualBalanceAdjustmentDialogState
     );
   }
 
-  Widget _balanceFieldGrid({required bool enabled}) {
-    final fields = [
-      _numberField(
-        controller: _earnedController,
-        label: 'Earned days',
-        icon: Icons.add_circle_outline,
-        helperText: 'Credits accrued or imported.',
-        enabled: enabled,
-        allowNegative: false,
-      ),
-      _numberField(
-        controller: _usedController,
-        label: 'Used days',
-        icon: Icons.remove_circle_outline,
-        helperText: 'Approved leave already consumed.',
-        enabled: enabled,
-        allowNegative: false,
-      ),
-      _numberField(
-        controller: _pendingController,
-        label: 'Pending days',
-        icon: Icons.hourglass_empty_rounded,
-        helperText: 'Filed requests awaiting final action.',
-        enabled: enabled,
-        allowNegative: false,
-      ),
-      _numberField(
-        controller: _adjustedController,
-        label: 'Adjusted days',
-        icon: Icons.exposure_outlined,
-        helperText: 'Use negative values to reduce credits.',
-        enabled: enabled,
-        allowNegative: true,
-      ),
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 560) {
-          return Column(
-            children: [
-              for (var i = 0; i < fields.length; i++) ...[
-                if (i > 0) const SizedBox(height: 12),
-                fields[i],
-              ],
-            ],
-          );
-        }
-        return Column(
-          children: [
-            Row(
-              children: [
-                Expanded(child: fields[0]),
-                const SizedBox(width: 12),
-                Expanded(child: fields[1]),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(child: fields[2]),
-                const SizedBox(width: 12),
-                Expanded(child: fields[3]),
-              ],
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _numberField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    required String helperText,
-    required bool enabled,
-    required bool allowNegative,
-  }) {
+  Widget _adjustmentField({required bool enabled}) {
     return TextFormField(
-      controller: controller,
+      controller: _adjustmentController,
       enabled: enabled,
-      keyboardType: TextInputType.numberWithOptions(
+      keyboardType: const TextInputType.numberWithOptions(
         decimal: true,
-        signed: allowNegative,
+        signed: true,
       ),
-      decoration: adminLeaveInputDecoration(
-        context,
-        label,
-      ).copyWith(prefixIcon: Icon(icon), helperText: helperText),
+      decoration: adminLeaveInputDecoration(context, 'Adjustment days')
+          .copyWith(
+            prefixIcon: const Icon(Icons.exposure_outlined),
+            hintText: 'Example: +2.000 or -1.250',
+            helperText: 'Positive adds credits; negative removes credits.',
+          ),
       validator: (value) {
-        final parsed = parseAdminLeaveDouble(value ?? '');
-        if (parsed == null) return 'Enter $label';
-        if (!allowNegative && parsed < 0) return 'Must be 0 or more';
+        final text = value?.trim() ?? '';
+        final parsed = parseAdminLeaveDouble(text);
+        if (parsed == null) return 'Enter the number of days to adjust';
+        if (parsed == 0) return 'Adjustment must not be zero';
+        if (!RegExp(r'^[+-]?\d+(?:\.\d{1,3})?$').hasMatch(text)) {
+          return 'Use up to 3 decimal places';
+        }
         return null;
       },
     );
@@ -2754,6 +2665,13 @@ class _ManualBalanceAdjustmentDialogState
     required LeaveBalance draft,
   }) {
     final hasCurrent = current != null;
+    final loaded =
+        current ??
+        LeaveBalance(
+          userId: _selectedUserId ?? '',
+          leaveType: _selectedLeaveType,
+        );
+    final adjustment = parseAdminLeaveDouble(_adjustmentController.text) ?? 0;
     final dark = AppTheme.dashIsDark(context);
     final availableColor = draft.availableDays < 0
         ? (dark ? Colors.red.shade300 : Colors.red.shade700)
@@ -2773,7 +2691,7 @@ class _ManualBalanceAdjustmentDialogState
             children: [
               Expanded(
                 child: Text(
-                  hasCurrent ? 'Editing existing balance' : 'Creating balance',
+                  'Adjustment preview',
                   style: TextStyle(
                     color: AppTheme.dashTextPrimaryOf(context),
                     fontWeight: FontWeight.w700,
@@ -2794,7 +2712,7 @@ class _ManualBalanceAdjustmentDialogState
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  hasCurrent ? 'Loaded' : 'New row',
+                  hasCurrent ? 'Balance loaded' : 'New balance',
                   style: TextStyle(
                     color: hasCurrent
                         ? (dark
@@ -2822,27 +2740,51 @@ class _ManualBalanceAdjustmentDialogState
             runSpacing: 10,
             children: [
               _BalanceMetric(
+                label: 'Earned',
+                value: _formatDays(loaded.earnedDays),
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
+              _BalanceMetric(
+                label: 'Used',
+                value: _formatDays(loaded.usedDays),
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
+              _BalanceMetric(
+                label: 'Pending',
+                value: _formatDays(loaded.pendingDays),
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
+              _BalanceMetric(
+                label: 'Adjusted',
+                value: _formatSignedDays(loaded.adjustedDays),
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _BalanceMetric(
                 label: 'Current available',
-                value: current == null
-                    ? '--'
-                    : _formatDays(current.availableDays),
+                value: _formatDays(loaded.availableDays),
                 color: AppTheme.dashTextSecondaryOf(context),
               ),
               _BalanceMetric(
-                label: 'New remaining',
-                value: _formatDays(draft.remainingDays),
-                color: AppTheme.dashTextPrimaryOf(context),
+                label: 'This adjustment',
+                value: _formatSignedDays(adjustment),
+                color: adjustment < 0
+                    ? (dark ? Colors.red.shade300 : Colors.red.shade700)
+                    : (dark ? Colors.green.shade300 : Colors.green.shade700),
               ),
               _BalanceMetric(
                 label: 'New available',
                 value: _formatDays(draft.availableDays),
                 color: availableColor,
                 emphasize: true,
-              ),
-              _BalanceMetric(
-                label: 'Pending reserve',
-                value: _formatDays(draft.pendingDays),
-                color: AppTheme.dashTextPrimaryOf(context),
               ),
             ],
           ),
@@ -2929,11 +2871,14 @@ class _ManualBalanceAdjustmentDialogState
   }
 
   String _formatDays(double value) {
-    final normalized = value.abs() < 0.005 ? 0.0 : value;
-    final fixed = normalized.toStringAsFixed(2);
-    if (fixed.endsWith('.00')) return fixed.substring(0, fixed.length - 3);
-    if (fixed.endsWith('0')) return fixed.substring(0, fixed.length - 1);
-    return fixed;
+    final normalized = value.abs() < 0.0005 ? 0.0 : value;
+    final fixed = normalized.toStringAsFixed(3);
+    return fixed.replaceFirst(RegExp(r'\.?0+$'), '');
+  }
+
+  String _formatSignedDays(double value) {
+    if (value == 0) return '0';
+    return '${value > 0 ? '+' : ''}${_formatDays(value)}';
   }
 }
 

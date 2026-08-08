@@ -174,17 +174,25 @@ class MockLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<LeaveBalance> upsertBalance(
-    LeaveBalance balance, {
-    String? remarks,
+  Future<LeaveBalance> applyBalanceAdjustment({
+    required String userId,
+    required LeaveType leaveType,
+    required double adjustmentDays,
+    required String remarks,
+    DateTime? asOfDate,
   }) async {
-    _ensureDefaultBalances(balance.userId);
-    final list = _balancesByUser.putIfAbsent(balance.userId, () => []);
-    final index = list.indexWhere((b) => b.leaveType == balance.leaveType);
-    final saved = balance.copyWith(
-      id: balance.id ?? 'balance_${balance.userId}_${balance.leaveType.value}',
+    _ensureDefaultBalances(userId);
+    final list = _balancesByUser.putIfAbsent(userId, () => []);
+    final index = list.indexWhere((b) => b.leaveType == leaveType);
+    final current = index >= 0
+        ? list[index]
+        : LeaveBalance(userId: userId, leaveType: leaveType);
+    final saved = current.copyWith(
+      id: current.id ?? 'balance_${userId}_${leaveType.value}',
+      adjustedDays: current.adjustedDays + adjustmentDays,
+      asOfDate: asOfDate ?? DateTime.now(),
       updatedAt: DateTime.now(),
-      createdAt: balance.createdAt ?? DateTime.now(),
+      createdAt: current.createdAt ?? DateTime.now(),
     );
     if (index >= 0) {
       list[index] = saved;
@@ -613,6 +621,7 @@ class MockLeaveRepository implements LeaveRepository {
       summaryEarned: 0,
       summaryUsed: 0,
       summaryPending: 0,
+      summaryAdjusted: 0,
     );
   }
 

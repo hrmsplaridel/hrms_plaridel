@@ -725,8 +725,15 @@ abstract class LeaveRepository {
     LeaveType leaveType,
   );
 
-  /// Create or update a balance record.
-  Future<LeaveBalance> upsertBalance(LeaveBalance balance, {String? remarks});
+  /// Apply an audited positive or negative correction without replacing
+  /// workflow-derived earned, used, or pending buckets.
+  Future<LeaveBalance> applyBalanceAdjustment({
+    required String userId,
+    required LeaveType leaveType,
+    required double adjustmentDays,
+    required String remarks,
+    DateTime? asOfDate,
+  });
 
   /// Approve a request and apply any balance changes required by policy.
   Future<LeaveRequest> approveRequest(LeaveApprovalInput input);

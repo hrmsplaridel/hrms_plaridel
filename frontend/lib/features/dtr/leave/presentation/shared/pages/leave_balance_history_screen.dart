@@ -591,6 +591,20 @@ class _EmployeeSummaryBand extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: _EmployeeSummaryChip(
+              amountLabel: _fmtDays(stats.totalAdjusted),
+              caption: 'Adjusted',
+              icon: Icons.exposure_rounded,
+              circleColor: dark
+                  ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                  : const Color(0xFFE3F2FD),
+              iconColor: dark
+                  ? AppTheme.primaryNavyLight
+                  : const Color(0xFF1565C0),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _EmployeeSummaryChip(
               amountLabel: _fmtDays(stats.totalUsed),
               caption: 'Used',
               icon: Icons.arrow_downward_rounded,
@@ -1171,17 +1185,20 @@ class _LedgerSummaryStats {
     required this.totalEarned,
     required this.totalUsed,
     required this.totalPending,
+    required this.totalAdjusted,
   });
 
   final double totalEarned;
   final double totalUsed;
   final double totalPending;
+  final double totalAdjusted;
 }
 
 _LedgerSummaryStats _ledgerSummaryStats(List<LeaveBalanceLedgerEntry> rows) {
   double earned = 0;
   double used = 0;
   double pending = 0;
+  double adjusted = 0;
 
   for (final e in rows) {
     final b = e.affectedBucket.toLowerCase();
@@ -1197,12 +1214,16 @@ _LedgerSummaryStats _ledgerSummaryStats(List<LeaveBalanceLedgerEntry> rows) {
     if (b == 'pending') {
       pending += d;
     }
+    if (b == 'adjusted') {
+      adjusted += d;
+    }
   }
 
   return _LedgerSummaryStats(
     totalEarned: earned,
     totalUsed: used < 0 ? 0 : used,
     totalPending: pending < 0 ? 0 : pending,
+    totalAdjusted: adjusted,
   );
 }
 
@@ -1211,6 +1232,7 @@ _LedgerSummaryStats _ledgerSummaryStatsFromResult(LeaveLedgerResult result) {
     totalEarned: result.summaryEarned,
     totalUsed: result.summaryUsed,
     totalPending: result.summaryPending,
+    totalAdjusted: result.summaryAdjusted,
   );
 }
 
@@ -1230,6 +1252,7 @@ class _EmployeeLedgerFilter extends StatelessWidget {
       ('earned', 'Earned'),
       ('used', 'Used'),
       ('pending', 'Pending'),
+      ('adjusted', 'Adjusted'),
     ];
     return Container(
       color: AppTheme.sectionAltOf(context),
@@ -1301,6 +1324,20 @@ class _AdminSummaryChips extends StatelessWidget {
                 : const Color(0xFFFFF8E1),
             iconColor: dark ? Colors.amber.shade300 : const Color(0xFFF9A825),
             valueColor: dark ? Colors.amber.shade200 : const Color(0xFFF57F17),
+          ),
+          _SummaryChip(
+            label: 'Adjusted',
+            value: '${_fmt(stats.totalAdjusted)} days',
+            icon: Icons.exposure_rounded,
+            iconBoxColor: dark
+                ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                : const Color(0xFFE3F2FD),
+            iconColor: dark
+                ? AppTheme.primaryNavyLight
+                : const Color(0xFF1565C0),
+            valueColor: dark
+                ? AppTheme.primaryNavyLight
+                : const Color(0xFF1565C0),
           ),
           if (total != null)
             _SummaryChip(
