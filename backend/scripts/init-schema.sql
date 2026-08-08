@@ -367,9 +367,13 @@ CREATE TABLE IF NOT EXISTS leave_types (
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
   accrual_monthly_rate NUMERIC(6,3),
   accrual_annual_cap NUMERIC(10,3),
+  employee_detail_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
   is_system BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_leave_type_employee_detail_schema_array CHECK (
+    jsonb_typeof(employee_detail_schema) = 'array'
+  )
 );
 
 -- Seed leave types (names must match Flutter LeaveType enum .value for API lookup).
@@ -482,6 +486,8 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   details JSONB,
   -- Server-generated official identity/assignment fields used by forms and exports.
   employee_official_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  -- Field labels/types frozen with the request for reliable historical display.
+  employee_detail_schema_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN (
       'draft',
@@ -524,6 +530,9 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   ),
   CONSTRAINT chk_leave_employee_official_snapshot_object CHECK (
     jsonb_typeof(employee_official_snapshot) = 'object'
+  ),
+  CONSTRAINT chk_leave_employee_detail_schema_snapshot_array CHECK (
+    jsonb_typeof(employee_detail_schema_snapshot) = 'array'
   ),
   CONSTRAINT chk_leave_approved_days_nonnegative CHECK (
     (approved_days_with_pay IS NULL OR approved_days_with_pay >= 0)
