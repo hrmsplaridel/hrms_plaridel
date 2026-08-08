@@ -72,6 +72,77 @@ const EMPLOYEE_EDITABLE_LEAVE_DETAIL_KEYS = new Set([
   'commutation',
 ]);
 
+const CUSTOM_LEAVE_FIELD_TYPES = new Set([
+  'text',
+  'long_text',
+  'date',
+  'number',
+  'boolean',
+  'select',
+]);
+
+const RESERVED_CUSTOM_LEAVE_DETAIL_KEYS = new Set([
+  ...EMPLOYEE_EDITABLE_LEAVE_DETAIL_KEYS,
+  'id',
+  'user_id',
+  'userId',
+  'employee_id',
+  'employeeId',
+  'employee_name',
+  'employeeName',
+  'office_department',
+  'officeDepartment',
+  'position_title',
+  'positionTitle',
+  'salary',
+  'salary_grade',
+  'salaryGrade',
+  'date_filed',
+  'dateFiled',
+  'leave_type',
+  'leaveType',
+  'start_date',
+  'startDate',
+  'end_date',
+  'endDate',
+  'reason',
+  'status',
+  'working_days_applied',
+  'workingDaysApplied',
+  'total_days',
+  'number_of_days',
+  'attachment_name',
+  'attachment_path',
+  'attachment_mime_type',
+  'reviewer_id',
+  'reviewer_name',
+  'reviewer_role',
+  'reviewer_title',
+  'reviewed_at',
+  'hr_remarks',
+  'recommendation_remarks',
+  'disapproval_reason',
+  'approved_days_with_pay',
+  'approved_days_without_pay',
+  'approved_other_details',
+  'approved_by',
+  'approved_at',
+  'review_department_id',
+  'assigned_department_head_id',
+  'department_head_reviewer_id',
+  'department_head_reviewer_name',
+  'department_head_reviewed_at',
+  'department_head_remarks',
+  'department_head_action',
+  'employee_official_snapshot',
+  'employee_detail_schema_snapshot',
+]);
+
+const MAX_CUSTOM_LEAVE_FIELDS = 20;
+const MAX_CUSTOM_FIELD_LABEL_LENGTH = 80;
+const MAX_CUSTOM_FIELD_OPTIONS = 20;
+const MAX_CUSTOM_FIELD_OPTION_LENGTH = 80;
+
 function isPlainObject(value) {
   return value != null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -85,7 +156,243 @@ function isSupportedDetailValue(value) {
   );
 }
 
-function sanitizeEmployeeLeaveDetails(value) {
+function leaveDetailsPolicyError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+}
+
+function parseJsonValue(value) {
+  if (typeof value !== 'string') return value;
+  const text = value.trim();
+  if (!text) return value;
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return value;
+  }
+}
+
+function normalizeEmployeeDetailSchema(value, { strict = false } = {}) {
+  const parsed = parseJsonValue(value);
+  if (parsed == null) return [];
+  if (!Array.isArray(parsed)) {
+    if (strict) {
+      throw leaveDetailsPolicyError('Custom form fields must be a list.');
+    }
+    return [];
+  }
+  if (parsed.length > MAX_CUSTOM_LEAVE_FIELDS) {
+    if (strict) {
+      throw leaveDetailsPolicyError(
+        `A leave type can have at most ${MAX_CUSTOM_LEAVE_FIELDS} custom fields.`
+      );
+    }
+  }
+
+  const normalized = [];
+  const seenKeys = new Set();
+  for (const item of parsed.slice(0, MAX_CUSTOM_LEAVE_FIELDS)) {
+    if (!isPlainObject(item)) {
+      if (strict) throw leaveDetailsPolicyError('Each custom field must be an object.');
+      continue;
+    }
+
+    const key = String(item.key || '').trim();
+    const label = String(item.label || '').trim();
+    const type = String(item.type || 'text').trim().toLowerCase();
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(key)) {
+      if (strict) {
+        throw leaveDetailsPolicyError(
+          `Custom field key "${key || '(blank)'}" must use lowercase letters, numbers, and underscores.`
+        );
+      }
+      continue;
+    }
+    if (RESERVED_CUSTOM_LEAVE_DETAIL_KEYS.has(key)) {
+      if (strict) {
+        throw leaveDetailsPolicyError(`Custom field key "${key}" is reserved.`);
+      }
+      continue;
+    }
+    if (seenKeys.has(key)) {
+      if (strict) {
+        throw leaveDetailsPolicyError(`Custom field key "${key}" is duplicated.`);
+      }
+      continue;
+    }
+    if (!label || label.length > MAX_CUSTOM_FIELD_LABEL_LENGTH) {
+      if (strict) {
+        throw leaveDetailsPolicyError(
+          `Custom field "${key}" must have a label up to ${MAX_CUSTOM_FIELD_LABEL_LENGTH} characters.`
+        );
+      }
+      continue;
+    }
+    if (!CUSTOM_LEAVE_FIELD_TYPES.has(type)) {
+      if (strict) {
+        throw leaveDetailsPolicyError(`Custom field "${label}" has an unsupported type.`);
+      }
+      continue;
+    }
+
+    const defaultMaxLength = type === 'long_text' ? 2000 : 255;
+    const parsedMaxLength = Number.parseInt(
+      item.max_length ?? item.maxLength ?? defaultMaxLength,
+      10
+    );
+    if (
+      strict &&
+      (type === 'text' || type === 'long_text') &&
+      (!Number.isFinite(parsedMaxLength) || parsedMaxLength < 1 || parsedMaxLength > 5000)
+    ) {
+      throw leaveDetailsPolicyError(
+        `Custom field "${label}" must allow between 1 and 5000 characters.`
+      );
+    }
+    const maxLength = Number.isFinite(parsedMaxLength)
+      ? Math.min(Math.max(parsedMaxLength, 1), 5000)
+      : defaultMaxLength;
+    const rawOptions = Array.isArray(item.options) ? item.options : [];
+    if (strict && rawOptions.length > MAX_CUSTOM_FIELD_OPTIONS) {
+      throw leaveDetailsPolicyError(
+        `Select field "${label}" can have at most ${MAX_CUSTOM_FIELD_OPTIONS} options.`
+      );
+    }
+    if (
+      strict &&
+      rawOptions.some(
+        (option) => String(option ?? '').trim().length > MAX_CUSTOM_FIELD_OPTION_LENGTH
+      )
+    ) {
+      throw leaveDetailsPolicyError(
+        `Options for "${label}" must not exceed ${MAX_CUSTOM_FIELD_OPTION_LENGTH} characters.`
+      );
+    }
+    const options = [...new Set(
+      rawOptions
+        .map((option) => String(option ?? '').trim())
+        .filter(Boolean)
+        .map((option) => option.slice(0, MAX_CUSTOM_FIELD_OPTION_LENGTH))
+    )].slice(0, MAX_CUSTOM_FIELD_OPTIONS);
+    if (type === 'select' && options.length === 0) {
+      if (strict) {
+        throw leaveDetailsPolicyError(`Select field "${label}" needs at least one option.`);
+      }
+      continue;
+    }
+
+    seenKeys.add(key);
+    normalized.push({
+      key,
+      label,
+      type,
+      required: item.required === true,
+      ...(type === 'text' || type === 'long_text'
+        ? { max_length: maxLength }
+        : {}),
+      ...(type === 'select' ? { options } : {}),
+    });
+  }
+  return normalized;
+}
+
+function serializeEmployeeDetailSchema(value, options = {}) {
+  return JSON.stringify(normalizeEmployeeDetailSchema(value, options));
+}
+
+function isIsoDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+function customLeaveDetailValues(details, schema, { validate = false } = {}) {
+  const source = isPlainObject(details) ? details : {};
+  const fields = normalizeEmployeeDetailSchema(schema);
+  const output = {};
+
+  for (const field of fields) {
+    const raw = source[field.key];
+    const blank = raw == null || (typeof raw === 'string' && raw.trim() === '');
+    if (blank) {
+      if (validate && field.required) {
+        throw leaveDetailsPolicyError(`${field.label} is required.`);
+      }
+      continue;
+    }
+
+    if (field.type === 'text' || field.type === 'long_text') {
+      if (typeof raw !== 'string') {
+        if (validate) throw leaveDetailsPolicyError(`${field.label} must be text.`);
+        continue;
+      }
+      const value = raw.trim();
+      if (value.length > field.max_length) {
+        if (validate) {
+          throw leaveDetailsPolicyError(
+            `${field.label} must not exceed ${field.max_length} characters.`
+          );
+        }
+        continue;
+      }
+      output[field.key] = value;
+      continue;
+    }
+
+    if (field.type === 'date') {
+      const value = String(raw).trim();
+      if (!isIsoDate(value)) {
+        if (validate) throw leaveDetailsPolicyError(`${field.label} must be a valid date.`);
+        continue;
+      }
+      output[field.key] = value;
+      continue;
+    }
+
+    if (field.type === 'number') {
+      const value = typeof raw === 'number' ? raw : Number(String(raw).trim());
+      if (!Number.isFinite(value)) {
+        if (validate) throw leaveDetailsPolicyError(`${field.label} must be a number.`);
+        continue;
+      }
+      output[field.key] = value;
+      continue;
+    }
+
+    if (field.type === 'boolean') {
+      let value = raw;
+      if (typeof raw === 'string' && ['true', 'false'].includes(raw.toLowerCase())) {
+        value = raw.toLowerCase() === 'true';
+      }
+      if (typeof value !== 'boolean') {
+        if (validate) throw leaveDetailsPolicyError(`${field.label} must be Yes or No.`);
+        continue;
+      }
+      output[field.key] = value;
+      continue;
+    }
+
+    if (field.type === 'select') {
+      const value = String(raw).trim();
+      if (!field.options.includes(value)) {
+        if (validate) throw leaveDetailsPolicyError(`${field.label} has an invalid option.`);
+        continue;
+      }
+      output[field.key] = value;
+    }
+  }
+  return output;
+}
+
+function sanitizeEmployeeLeaveDetails(value, customFieldSchema = []) {
   if (!isPlainObject(value)) return {};
   const sanitized = {};
   for (const [key, detailValue] of Object.entries(value)) {
@@ -96,13 +403,20 @@ function sanitizeEmployeeLeaveDetails(value) {
       sanitized[key] = detailValue;
     }
   }
-  return sanitized;
+  return {
+    ...sanitized,
+    ...customLeaveDetailValues(value, customFieldSchema),
+  };
 }
 
-function employeeLeaveDetailsFromPayload({ details, rest } = {}) {
+function employeeLeaveDetailsFromPayload({ details, rest, customFieldSchema } = {}) {
   const topLevel = isPlainObject(rest) ? rest : {};
   const nested = isPlainObject(details) ? details : {};
-  return sanitizeEmployeeLeaveDetails({ ...topLevel, ...nested });
+  const merged = { ...topLevel, ...nested };
+  return {
+    ...sanitizeEmployeeLeaveDetails(merged),
+    ...customLeaveDetailValues(merged, customFieldSchema, { validate: true }),
+  };
 }
 
 function parseNumericSalaryGrade(value) {
@@ -185,10 +499,15 @@ async function loadEmployeeOfficialSnapshot(db, employeeUserId, effectiveDate = 
 }
 
 module.exports = {
+  CUSTOM_LEAVE_FIELD_TYPES,
   EMPLOYEE_EDITABLE_LEAVE_DETAIL_KEYS,
+  RESERVED_CUSTOM_LEAVE_DETAIL_KEYS,
+  customLeaveDetailValues,
   employeeLeaveDetailsFromPayload,
   loadEmployeeOfficialSnapshot,
+  normalizeEmployeeDetailSchema,
   normalizeEmployeeOfficialSnapshot,
   parseNumericSalaryGrade,
   sanitizeEmployeeLeaveDetails,
+  serializeEmployeeDetailSchema,
 };

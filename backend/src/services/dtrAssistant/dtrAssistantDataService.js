@@ -8,6 +8,7 @@ const {
   buildGuidelinesForTypes,
 } = require('./leaveFilingGuidelines');
 const {
+  normalizeEmployeeDetailSchema,
   sanitizeEmployeeLeaveDetails,
 } = require('../leaveRequestDetailsPolicy');
 
@@ -232,6 +233,7 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
             lr.attachment_name,
             lr.attachment_path,
             lr.details,
+            lr.employee_detail_schema_snapshot,
             lr.reviewer_remarks,
             lr.recommendation_remarks,
             lr.disapproval_reason,
@@ -306,7 +308,13 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
     reason: compactText(row.reason),
     has_attachment: !!row.attachment_path,
     attachment_name: compactText(row.attachment_name, 120),
-    details: sanitizeEmployeeLeaveDetails(row.details),
+    details: sanitizeEmployeeLeaveDetails(
+      row.details,
+      row.employee_detail_schema_snapshot
+    ),
+    employee_detail_schema_snapshot: normalizeEmployeeDetailSchema(
+      row.employee_detail_schema_snapshot
+    ),
     reviewer_remarks: compactText(row.reviewer_remarks),
     recommendation_remarks: compactText(row.recommendation_remarks),
     disapproval_reason: compactText(row.disapproval_reason),
@@ -402,6 +410,7 @@ async function loadLeaveTypes(pool) {
             sex_eligibility,
             affects_dtr_normally,
             balance_ledger_type,
+            employee_detail_schema,
             is_active
      FROM leave_types
      WHERE is_active IS NULL OR is_active = true
@@ -424,6 +433,9 @@ async function loadLeaveTypes(pool) {
     sex_eligibility: row.sex_eligibility,
     affects_dtr_normally: row.affects_dtr_normally !== false,
     balance_ledger_type: row.balance_ledger_type,
+    employee_detail_schema: normalizeEmployeeDetailSchema(
+      row.employee_detail_schema
+    ),
     is_active: row.is_active !== false,
   }));
 }
