@@ -364,6 +364,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   minimum_advance_days INTEGER,
   affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
   balance_ledger_type TEXT NOT NULL DEFAULT 'none',
+  entitlement_basis TEXT NOT NULL DEFAULT 'per_request',
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
   accrual_monthly_rate NUMERIC(6,3),
   accrual_annual_cap NUMERIC(10,3),
@@ -373,6 +374,9 @@ CREATE TABLE IF NOT EXISTS leave_types (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chk_leave_type_employee_detail_schema_array CHECK (
     jsonb_typeof(employee_detail_schema) = 'array'
+  ),
+  CONSTRAINT chk_leave_type_entitlement_basis CHECK (
+    entitlement_basis IN ('accrual', 'annual', 'per_event', 'per_request', 'compliance')
   )
 );
 
@@ -455,6 +459,20 @@ SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
       WHEN name = 'mandatoryForcedLeave' THEN 'vacationLeave'
       WHEN name IN ('vacationLeave', 'sickLeave') THEN name
       ELSE 'none'
+    END,
+    entitlement_basis = CASE
+      WHEN name IN ('vacationLeave', 'sickLeave') THEN 'accrual'
+      WHEN name IN ('specialPrivilegeLeave', 'soloParentLeave', 'tenDayVawcLeave') THEN 'annual'
+      WHEN name = 'mandatoryForcedLeave' THEN 'compliance'
+      WHEN name IN (
+        'maternityLeave',
+        'paternityLeave',
+        'rehabilitationPrivilege',
+        'specialLeaveBenefitsForWomen',
+        'specialEmergencyCalamityLeave',
+        'adoptionLeave'
+      ) THEN 'per_event'
+      ELSE 'per_request'
     END,
     accrues_monthly = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN true ELSE false END,
     accrual_monthly_rate = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN 1.25 ELSE NULL END,
