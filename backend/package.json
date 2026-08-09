@@ -12,7 +12,7 @@
     "leave:accrual": "node scripts/run-leave-monthly-accrual.js",
     "leave:accrual:dry": "node scripts/run-leave-monthly-accrual.js --dry-run",
     "test:leave-month-end": "node --test test/leaveMonthlyAccrual.test.js test/leaveAttendanceDeduction.test.js",
-    "test:leave-management": "node --test test/departmentHeadService.test.js test/leaveApprovalAllocation.test.js test/leaveAttachmentAccess.test.js test/leaveAttachmentPolicy.test.js test/leaveBalanceLedger.test.js test/leaveDtrCoverage.test.js test/leaveRequestDetailsPolicy.test.js test/leaveMonthlyAccrual.test.js test/leaveAttendanceDeduction.test.js",
+    "test:leave-management": "node --test test/departmentHeadService.test.js test/leaveApprovalAllocation.test.js test/leaveAttachmentAccess.test.js test/leaveAttachmentPolicy.test.js test/leaveBalanceLedger.test.js test/leaveDtrCoverage.test.js test/leaveEntitlementPolicy.test.js test/leaveRequestDetailsPolicy.test.js test/leaveMonthlyAccrual.test.js test/leaveAttendanceDeduction.test.js",
     "llm:smoke": "node scripts/test-llm.js",
     "test:dtr-assistant": "node --test test/dtrAssistantRegression.test.js test/dtrAssistantApi.test.js test/dtrAssistantIntegration.test.js test/dtrAssistantDataService.test.js test/dtrAssistantProviders.test.js test/dtrAssistantDateAndExport.test.js test/dtrAssistantIntelligence.test.js test/dtrAssistantActionPrefill.test.js",
     "test:dtr-assistant:regression": "node --test test/dtrAssistantRegression.test.js",
