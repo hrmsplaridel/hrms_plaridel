@@ -410,6 +410,7 @@ async function loadLeaveTypes(pool) {
             sex_eligibility,
             affects_dtr_normally,
             balance_ledger_type,
+            entitlement_basis,
             employee_detail_schema,
             is_active
      FROM leave_types
@@ -433,6 +434,7 @@ async function loadLeaveTypes(pool) {
     sex_eligibility: row.sex_eligibility,
     affects_dtr_normally: row.affects_dtr_normally !== false,
     balance_ledger_type: row.balance_ledger_type,
+    entitlement_basis: row.entitlement_basis,
     employee_detail_schema: normalizeEmployeeDetailSchema(
       row.employee_detail_schema
     ),

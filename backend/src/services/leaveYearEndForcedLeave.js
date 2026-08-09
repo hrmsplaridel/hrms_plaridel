@@ -125,7 +125,8 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
   );
 
   const employees = rows.map((r) => {
-    const forcedUsed = parseFloat(r.forced_leave_days_used || 0);
+    const qualifyingUsed = Math.max(0, parseFloat(r.forced_leave_days_used || 0));
+    const forcedUsed = Math.min(REQUIRED_FORCED_DAYS, qualifyingUsed);
     const vlAccumulated = parseFloat(r.vl_accumulated || 0);
     const vlAvailable = parseFloat(r.vl_available || 0);
     const alreadyDeducted = !!r.deduction_ledger_id;
@@ -158,6 +159,7 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
       full_name: r.full_name,
       current_department_name: r.current_department_name || null,
       forced_leave_days_used: forcedUsed,
+      qualifying_leave_days_used: qualifyingUsed,
       required_days: REQUIRED_FORCED_DAYS,
       suggested_deduction: shortfall,
       actual_deduction: actualDeduction,
