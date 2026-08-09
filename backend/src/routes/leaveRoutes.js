@@ -75,6 +75,11 @@ const {
   applyYearEndForcedLeaveDeductions,
   manilaYearNow: yearEndManilaYearNow,
 } = require('../services/leaveYearEndForcedLeave');
+const {
+  ENTITLEMENT_BASES,
+  defaultEntitlementBasisForLeaveType,
+  normalizeEntitlementBasis,
+} = require('../services/leaveEntitlementPolicy');
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 
@@ -289,20 +294,6 @@ const LEGACY_NO_CREDIT_LEDGER_TYPES = new Set([
   ...SYSTEM_NO_CREDIT_LEAVE_TYPES,
   'others',
 ]);
-const ANNUAL_QUOTA_LEAVE_LIMITS = Object.freeze({
-  specialPrivilegeLeave: {
-    limit: 3,
-    label: 'Special Privilege Leave',
-  },
-  soloParentLeave: {
-    limit: 7,
-    label: 'Solo Parent Leave',
-  },
-  tenDayVawcLeave: {
-    limit: 10,
-    label: '10-Day VAWC Leave',
-  },
-});
 const LEAVE_REVOKE_WINDOW_DAYS = 3;
 const LEAVE_REVOKE_WINDOW_MS = LEAVE_REVOKE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 const ANNUAL_QUOTA_LEAVE_USAGE_STATUSES = [
@@ -330,6 +321,7 @@ pool
         ADD COLUMN IF NOT EXISTS minimum_advance_days INTEGER,
         ADD COLUMN IF NOT EXISTS affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
         ADD COLUMN IF NOT EXISTS balance_ledger_type TEXT NOT NULL DEFAULT 'none',
+        ADD COLUMN IF NOT EXISTS entitlement_basis TEXT NOT NULL DEFAULT 'per_request',
         ADD COLUMN IF NOT EXISTS sex_eligibility TEXT NOT NULL DEFAULT 'any',
         ADD COLUMN IF NOT EXISTS employee_detail_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT false,
@@ -410,6 +402,20 @@ pool
             WHEN name = 'mandatoryForcedLeave' THEN 'vacationLeave'
             WHEN name IN ('vacationLeave', 'sickLeave') THEN name
             ELSE 'none'
+          END,
+          entitlement_basis = CASE
+            WHEN name IN ('vacationLeave', 'sickLeave') THEN 'accrual'
+            WHEN name IN ('specialPrivilegeLeave', 'soloParentLeave', 'tenDayVawcLeave') THEN 'annual'
+            WHEN name = 'mandatoryForcedLeave' THEN 'compliance'
+            WHEN name IN (
+              'maternityLeave',
+              'paternityLeave',
+              'rehabilitationPrivilege',
+              'specialLeaveBenefitsForWomen',
+              'specialEmergencyCalamityLeave',
+              'adoptionLeave'
+            ) THEN 'per_event'
+            ELSE 'per_request'
           END,
           sex_eligibility = CASE
             WHEN name IN ('maternityLeave', 'tenDayVawcLeave', 'specialLeaveBenefitsForWomen') THEN 'female'
@@ -678,9 +684,28 @@ async function assertAnnualQuotaLeaveLimit(
   { userId, leaveTypeName, startStr, endStr, excludeId = null }
 ) {
   const leaveTypeKey = String(leaveTypeName || '').trim();
-  const config = ANNUAL_QUOTA_LEAVE_LIMITS[leaveTypeKey];
-  if (!config) return;
   if (!client || !userId || !startStr || !endStr) return;
+
+  const typeQ = await client.query(
+    `SELECT COALESCE(display_name, description, name) AS display_name,
+            max_days,
+            entitlement_basis
+     FROM leave_types
+     WHERE name = $1
+     LIMIT 1`,
+    [leaveTypeKey]
+  );
+  const typeRow = typeQ.rows[0];
+  if (
+    !typeRow ||
+    normalizeEntitlementBasis(typeRow.entitlement_basis, leaveTypeKey) !==
+      ENTITLEMENT_BASES.ANNUAL
+  ) {
+    return;
+  }
+  const limit = Number(typeRow.max_days);
+  if (!Number.isFinite(limit) || limit <= 0) return;
+  const label = typeRow.display_name || systemLeaveTypeDisplayName(leaveTypeKey);
 
   const years = calendarYearsForDateRange(startStr, endStr);
   if (years.length === 0) return;
@@ -718,10 +743,10 @@ async function assertAnnualQuotaLeaveLimit(
       usedDays += await workingDaysWithinYear(client, userId, existingStart, existingEnd, year);
     }
 
-    const remaining = Math.max(0, config.limit - usedDays);
-    if (usedDays + requestedDays > config.limit + 0.0001) {
+    const remaining = Math.max(0, limit - usedDays);
+    if (usedDays + requestedDays > limit + 0.0001) {
       const err = new Error(
-        `${config.label} is limited to ${config.limit} days per calendar year. ` +
+        `${label} is limited to ${formatDayCount(limit)} days per calendar year. ` +
         `You only have ${formatDayCount(remaining)} day(s) remaining for ${year}; this request needs ${formatDayCount(requestedDays)} day(s).`
       );
       err.statusCode = 400;
@@ -864,6 +889,7 @@ function leaveTypeRowToApi(row = {}) {
         ? row.affects_dtr_normally === true
         : fallback.affects_dtr_normally !== false,
     balance_ledger_type: normalizeLedgerType(row.balance_ledger_type, name),
+    entitlement_basis: normalizeEntitlementBasis(row.entitlement_basis, name),
     sex_eligibility: normalizeSexEligibility(
       row.sex_eligibility ?? fallback.sex_eligibility,
       name
@@ -1262,6 +1288,12 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     ),
     affectsDtrNormally: boolField('affects_dtr_normally', existing?.affects_dtr_normally ?? base.affects_dtr_normally !== false),
     balanceLedgerType: normalizeLedgerType(body.balance_ledger_type ?? body.balanceLedgerType ?? existing?.balance_ledger_type, name),
+    entitlementBasis: normalizeEntitlementBasis(
+      body.entitlement_basis ??
+        body.entitlementBasis ??
+        existing?.entitlement_basis,
+      name
+    ),
     sexEligibility: normalizeSexEligibility(
       body.sex_eligibility ??
         body.sexEligibility ??
@@ -1287,7 +1319,7 @@ function sendLeaveTypeWriteError(res, err, action) {
   }
   if (err?.code === '22P02' || err?.code === '23514') {
     return res.status(400).json({
-      error: 'Leave type settings contain an invalid custom-field configuration.',
+      error: 'Leave type settings contain an invalid value or custom-field configuration.',
     });
   }
   if (err?.code === '42703') {
@@ -1336,7 +1368,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
           employee_can_file, admin_only, allows_past_dates,
           requires_attachment, requires_attachment_when_over_days,
           max_days, minimum_advance_days, affects_dtr_normally, balance_ledger_type,
-          sex_eligibility, employee_detail_schema,
+          entitlement_basis, sex_eligibility, employee_detail_schema,
           created_at, updated_at
         )
         VALUES (
@@ -1344,7 +1376,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
           $5, $6, $7,
           $8, $9,
           $10, $11, $12, $13,
-          $14, $15::jsonb,
+          $14, $15, $16::jsonb,
           now(), now()
         )
         RETURNING *`,
@@ -1362,6 +1394,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
         payload.minimumAdvanceDays,
         payload.affectsDtrNormally,
         payload.balanceLedgerType,
+        payload.entitlementBasis,
         payload.sexEligibility,
         serializeEmployeeDetailSchema(payload.employeeDetailSchema),
       ]
@@ -1388,6 +1421,9 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
     const nextBalanceLedgerType = isSystem
       ? defaultLedgerTypeForLeaveType(nextName)
       : payload.balanceLedgerType;
+    const nextEntitlementBasis = isSystem
+      ? defaultEntitlementBasisForLeaveType(nextName)
+      : payload.entitlementBasis;
     if (!nextName || !payload.displayName) {
       return res.status(400).json({ error: 'Leave type name is required' });
     }
@@ -1412,10 +1448,11 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
            minimum_advance_days = $12,
            affects_dtr_normally = $13,
            balance_ledger_type = $14,
-           sex_eligibility = $15,
-           employee_detail_schema = $16::jsonb,
+           entitlement_basis = $15,
+           sex_eligibility = $16,
+           employee_detail_schema = $17::jsonb,
            updated_at = now()
-       WHERE id = $17::uuid
+       WHERE id = $18::uuid
        RETURNING *`,
       [
         nextName,
@@ -1432,6 +1469,7 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
         payload.minimumAdvanceDays,
         payload.affectsDtrNormally,
         nextBalanceLedgerType,
+        nextEntitlementBasis,
         isSystem ? defaultSexEligibilityForLeaveType(nextName) : payload.sexEligibility,
         serializeEmployeeDetailSchema(
           isSystem
@@ -4502,7 +4540,8 @@ router.get('/balances/:userId', protect, async (req, res) => {
   try {
     const rows = await pool.query(
       `SELECT lb.*, u.full_name AS employee_name,
-              COALESCE(lt.display_name, lt.description, lb.leave_type) AS leave_type_display_name
+              COALESCE(lt.display_name, lt.description, lb.leave_type) AS leave_type_display_name,
+              lt.entitlement_basis
        FROM leave_balances lb
        LEFT JOIN users u ON u.id = lb.user_id
        LEFT JOIN leave_types lt ON lt.name = lb.leave_type
@@ -4519,6 +4558,8 @@ router.get('/balances/:userId', protect, async (req, res) => {
       user_id: r.user_id,
       leave_type: r.leave_type,
       leave_type_display_name: r.leave_type_display_name || r.leave_type,
+      record_kind: 'credit_balance',
+      entitlement_basis: normalizeEntitlementBasis(r.entitlement_basis, r.leave_type),
       employee_name: r.employee_name || null,
       earned_days: r.earned_days != null ? parseFloat(r.earned_days) : 0,
       used_days: r.used_days != null ? parseFloat(r.used_days) : 0,
@@ -4530,28 +4571,33 @@ router.get('/balances/:userId', protect, async (req, res) => {
       updated_at: r.updated_at,
     }));
 
-    // ── Synthetic balances for all annual-quota leave types ─────────────────
-    // These leave types reset every calendar year and do not use the accrual
-    // table. We compute used/pending from leave_requests for the current year.
+    // Annual entitlements are not credit wallets. They are returned as clearly
+    // marked, read-only summary rows so the employee UI can show yearly usage
+    // separately from VL/SL credits.
     const currentYear = new Date().getFullYear();
     const startOfYear = `${currentYear}-01-01`;
     const endOfYear = `${currentYear}-12-31`;
 
-    // Annual leave types to track, with their full-year quota.
-    // sex_eligibility is used later to skip types that don't apply.
-    const ANNUAL_QUOTA_TYPES = [
-      { name: 'specialPrivilegeLeave',         display: 'Special Privilege Leave',               quota: 3   },
-      { name: 'mandatoryForcedLeave',           display: 'Mandatory/Forced Leave',                quota: 5   },
-      { name: 'paternityLeave',                 display: 'Paternity Leave',                       quota: 7,   sex: 'male'   },
-      { name: 'maternityLeave',                 display: 'Maternity Leave',                       quota: 105, sex: 'female' },
-      { name: 'soloParentLeave',                display: 'Solo Parent Leave',                     quota: 7   },
-      { name: 'tenDayVawcLeave',                display: '10-Day VAWC Leave',                     quota: 10,  sex: 'female' },
-      { name: 'specialEmergencyCalamityLeave',  display: 'Special Emergency (Calamity) Leave',    quota: 5   },
-      { name: 'specialLeaveBenefitsForWomen',   display: 'Special Leave Benefits for Women',      quota: 60,  sex: 'female' },
-      { name: 'rehabilitationPrivilege',        display: 'Rehabilitation Privilege',              quota: 180 },
-      { name: 'studyLeave',                     display: 'Study Leave',                           quota: 180 },
-      { name: 'adoptionLeave',                  display: 'Adoption Leave',                        quota: null },
-    ].filter((t) => t.quota !== null); // skip types with no defined limit
+    const annualTypesQ = await pool.query(
+      `SELECT name,
+              COALESCE(display_name, description, name) AS display_name,
+              max_days,
+              sex_eligibility
+       FROM leave_types
+       WHERE is_active = true
+         AND entitlement_basis = $1
+         AND COALESCE(balance_ledger_type, 'none') = 'none'
+         AND max_days IS NOT NULL
+         AND max_days > 0
+       ORDER BY display_name, name`,
+      [ENTITLEMENT_BASES.ANNUAL]
+    );
+    const annualQuotaTypes = annualTypesQ.rows.map((row) => ({
+      name: row.name,
+      display: row.display_name || systemLeaveTypeDisplayName(row.name),
+      quota: parseFloat(row.max_days),
+      sex: normalizeSexEligibility(row.sex_eligibility, row.name),
+    }));
 
     // Skip sex-restricted types the employee cannot use
     let employeeSex = null;
@@ -4560,8 +4606,8 @@ router.get('/balances/:userId', protect, async (req, res) => {
       employeeSex = sexRow.rows[0]?.sex || null;
     } catch (_) {}
 
-    const applicableTypes = ANNUAL_QUOTA_TYPES.filter((t) => {
-      if (!t.sex) return true;
+    const applicableTypes = annualQuotaTypes.filter((t) => {
+      if (!t.sex || t.sex === 'any') return true;
       if (!employeeSex) return true; // unknown sex: show anyway
       return t.sex.toLowerCase() === employeeSex.toLowerCase();
     });
@@ -4572,16 +4618,6 @@ router.get('/balances/:userId', protect, async (req, res) => {
 
     if (synthTypes.length > 0) {
       const synthTypeNames = synthTypes.map((t) => t.name);
-      const usageTypeNames = [...synthTypeNames];
-      // Any approved/pending Vacation Leave also counts toward the employee's
-      // five-day mandatory-leave compliance. Mandatory Leave is not a separate
-      // credit wallet; both request types are charged against VL credits.
-      if (
-        synthTypeNames.includes('mandatoryForcedLeave') &&
-        !usageTypeNames.includes('vacationLeave')
-      ) {
-        usageTypeNames.push('vacationLeave');
-      }
       const usageQuery = await pool.query(
         `SELECT lr.start_date, lr.end_date, lr.status, lt.name AS leave_type
          FROM leave_requests lr
@@ -4591,7 +4627,7 @@ router.get('/balances/:userId', protect, async (req, res) => {
            AND lr.end_date   >= $2::date
            AND lt.name = ANY($4::text[])
            AND lr.status IN ('pending', 'pending_department_head', 'pending_hr', 'approved')`,
-        [targetId, startOfYear, endOfYear, usageTypeNames]
+         [targetId, startOfYear, endOfYear, synthTypeNames]
       );
 
       // Build usage map per type
@@ -4606,11 +4642,7 @@ router.get('/balances/:userId', protect, async (req, res) => {
           const startStr = toIsoDateStr(row.start_date);
           const endStr = toIsoDateStr(row.end_date);
           const days = await workingDaysWithinYear(client, targetId, startStr, endStr, currentYear);
-          const usageKey =
-            row.leave_type === 'vacationLeave' &&
-            usageMap.mandatoryForcedLeave
-              ? 'mandatoryForcedLeave'
-              : row.leave_type;
+          const usageKey = row.leave_type;
           if (days > 0 && usageMap[usageKey]) {
             if (row.status === 'approved') {
               usageMap[usageKey].used += days;
@@ -4625,30 +4657,16 @@ router.get('/balances/:userId', protect, async (req, res) => {
 
       const employeeName = mappedBalances.length > 0 ? mappedBalances[0].employee_name : null;
       const today = new Date().toISOString().slice(0, 10);
-      const vacationBalance = mappedBalances.find(
-        (balance) => balance.leave_type === 'vacationLeave'
-      );
-      const vacationRemaining = vacationBalance
-        ? Number(vacationBalance.earned_days || 0) -
-          Number(vacationBalance.used_days || 0) +
-          Number(vacationBalance.adjusted_days || 0)
-        : 0;
-      // Re-add VL already taken this year so employees who started the year
-      // subject to the rule do not disappear from compliance after using VL.
-      const mandatoryUsage = usageMap.mandatoryForcedLeave?.used || 0;
-      const subjectToMandatoryLeave =
-        vacationRemaining + mandatoryUsage >= 10;
-
       for (const t of synthTypes) {
-        if (t.name === 'mandatoryForcedLeave' && !subjectToMandatoryLeave) {
-          continue;
-        }
         mappedBalances.push({
           id: `synth-${t.name}-${currentYear}`,
           user_id: targetId,
           leave_type: t.name,
           leave_type_display_name: t.display,
           employee_name: employeeName,
+          record_kind: 'annual_entitlement',
+          entitlement_basis: ENTITLEMENT_BASES.ANNUAL,
+          entitlement_year: currentYear,
           earned_days: t.quota,
           used_days: usageMap[t.name].used,
           pending_days: usageMap[t.name].pending,
