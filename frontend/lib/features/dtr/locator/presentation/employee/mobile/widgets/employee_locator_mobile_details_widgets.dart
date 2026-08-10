@@ -501,9 +501,11 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
     super.key,
     required this.canCancel,
     required this.canPrint,
+    required this.canOpenAttachment,
     required this.onHistory,
     required this.onCancel,
     required this.onPrint,
+    required this.onOpenAttachment,
     this.canReject = false,
     this.canApprove = false,
     this.canReturn = false,
@@ -516,6 +518,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
 
   final bool canCancel;
   final bool canPrint;
+  final bool canOpenAttachment;
   final bool canReject;
   final bool canApprove;
   final bool canReturn;
@@ -523,6 +526,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
   final VoidCallback onHistory;
   final VoidCallback onCancel;
   final VoidCallback onPrint;
+  final VoidCallback onOpenAttachment;
   final VoidCallback? onReject;
   final VoidCallback? onApprove;
   final VoidCallback? onReturn;
@@ -560,6 +564,18 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                       style: dangerStyle,
                       icon: const Icon(Icons.close_rounded, size: 18),
                       label: const Text('Cancel Request'),
+                    ),
+                  ),
+                ],
+                if (canOpenAttachment) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onOpenAttachment,
+                      style: secondaryStyle,
+                      icon: const Icon(Icons.visibility_rounded, size: 18),
+                      label: const Text('Open Attachment'),
                     ),
                   ),
                 ],
@@ -652,6 +668,13 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     style: dangerStyle,
                     icon: const Icon(Icons.close_rounded, size: 18),
                     label: const Text('Cancel Request'),
+                  ),
+                if (canOpenAttachment)
+                  OutlinedButton.icon(
+                    onPressed: onOpenAttachment,
+                    style: secondaryStyle,
+                    icon: const Icon(Icons.visibility_rounded, size: 18),
+                    label: const Text('Open Attachment'),
                   ),
                 if (canReject)
                   OutlinedButton.icon(

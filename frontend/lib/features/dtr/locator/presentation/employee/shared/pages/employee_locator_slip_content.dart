@@ -18,6 +18,9 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
+    if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
+    as locator_attachment;
 import 'package:hrms_plaridel/shared/widgets/hrms_date_picker.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
 
@@ -454,6 +457,9 @@ class EmployeeLocatorSlipContentState
         actions: EmployeeLocatorMobileDetailActions(
           canCancel: !reviewMode && _canCancelSlip(item),
           canPrint: item.status == _LocatorSlipStatus.approved,
+          canOpenAttachment:
+              item.id?.trim().isNotEmpty == true &&
+              item.attachmentName?.trim().isNotEmpty == true,
           canReject: canReview,
           canApprove: canReview,
           canReturn: canReview,
@@ -467,6 +473,7 @@ class EmployeeLocatorSlipContentState
             _cancelSlip(item);
           },
           onPrint: printForm,
+          onOpenAttachment: () => _openAttachment(item),
           onReject: () {
             Navigator.of(dialogContext).pop();
             _departmentHeadReject(item);
@@ -1741,6 +1748,45 @@ class EmployeeLocatorSlipContentState
       if (!mounted) return;
       await _showLocatorErrorDialog(
         _apiErrorMessage(e, fallback: 'Failed to resubmit the request.'),
+      );
+    }
+  }
+
+  Future<void> _openAttachment(_LocatorSlipDraft item) async {
+    final id = item.id?.trim();
+    final filename = item.attachmentName?.trim();
+    if (id == null || id.isEmpty || filename == null || filename.isEmpty) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Opening attachment...')),
+      );
+      final response = await ApiClient.instance.dio.get<List<int>>(
+        '/api/locator-slips/$id/attachment',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final bytes = response.data;
+      if (!mounted) return;
+      if (bytes == null || bytes.isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Attachment could not be loaded.')),
+        );
+        return;
+      }
+      messenger.clearSnackBars();
+      await locator_attachment.openLocatorAttachmentBytes(bytes, filename);
+    } catch (e) {
+      if (!mounted) return;
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            _apiErrorMessage(e, fallback: 'Could not open attachment.'),
+          ),
+        ),
       );
     }
   }

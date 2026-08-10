@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -11,6 +12,9 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
+    if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
+    as locator_attachment;
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 
 typedef _LocatorHistoryStep = ({
@@ -965,6 +969,15 @@ class _AdminLocatorManagementScreenState
                                 ),
                               ),
                             ),
+                            if ((item.attachmentName ?? '').trim().isNotEmpty)
+                              TextButton.icon(
+                                onPressed: () => _openAttachment(item),
+                                icon: const Icon(
+                                  Icons.visibility_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text('Open'),
+                              ),
                           ],
                         ),
                       ),
@@ -1430,6 +1443,38 @@ class _AdminLocatorManagementScreenState
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       ),
     );
+  }
+
+  Future<void> _openAttachment(_LocatorAdminRecord item) async {
+    final filename = item.attachmentName?.trim();
+    if (filename == null || filename.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Opening attachment...')),
+      );
+      final response = await ApiClient.instance.dio.get<List<int>>(
+        '/api/locator-slips/${item.id}/attachment',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final bytes = response.data;
+      if (!mounted) return;
+      if (bytes == null || bytes.isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Attachment could not be loaded.')),
+        );
+        return;
+      }
+      messenger.clearSnackBars();
+      await locator_attachment.openLocatorAttachmentBytes(bytes, filename);
+    } catch (_) {
+      if (!mounted) return;
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not open the attachment.')),
+      );
+    }
   }
 
   Widget _statusPill(_LocatorAdminRecord item) {
