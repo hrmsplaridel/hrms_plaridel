@@ -49,6 +49,35 @@ function initLeaveBalanceLedger(dbPool) {
   return _ensurePromise;
 }
 
+function leaveBalanceAdjustmentError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+}
+
+function normalizeLeaveBalanceAdjustment(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw leaveBalanceAdjustmentError('adjustment_days must be a number');
+  }
+  const rounded = Math.round((parsed + Number.EPSILON) * 1000) / 1000;
+  if (rounded === 0) {
+    throw leaveBalanceAdjustmentError('adjustment_days must not be zero');
+  }
+  return rounded;
+}
+
+function normalizeLeaveBalanceAdjustmentReason(value) {
+  const reason = String(value || '').trim();
+  if (!reason) {
+    throw leaveBalanceAdjustmentError('A reason is required for every balance adjustment');
+  }
+  if (reason.length > 500) {
+    throw leaveBalanceAdjustmentError('Adjustment reason must be 500 characters or less');
+  }
+  return reason;
+}
+
 /**
  * @param {import('pg').PoolClient} client
  * @param {object} row
@@ -126,10 +155,94 @@ async function fetchBalanceSnapshot(client, userId, ledgerType) {
   };
 }
 
+function balanceSnapshot(row) {
+  return {
+    earned_days: parseFloat(row?.earned_days || 0),
+    used_days: parseFloat(row?.used_days || 0),
+    pending_days: parseFloat(row?.pending_days || 0),
+    adjusted_days: parseFloat(row?.adjusted_days || 0),
+  };
+}
+
+function availableFromSnapshot(snapshot) {
+  return (
+    snapshot.earned_days -
+    snapshot.used_days +
+    snapshot.adjusted_days -
+    snapshot.pending_days
+  );
+}
+
+async function applyAdminLeaveBalanceAdjustment(client, input) {
+  const daysChanged = normalizeLeaveBalanceAdjustment(input.daysChanged);
+  const remarks = normalizeLeaveBalanceAdjustmentReason(input.remarks);
+
+  await client.query(
+    `INSERT INTO leave_balances (
+       user_id, leave_type, earned_days, used_days, pending_days,
+       adjusted_days, as_of_date, created_at, updated_at
+     ) VALUES ($1::uuid, $2::text, 0, 0, 0, 0, COALESCE($3::date, CURRENT_DATE), now(), now())
+     ON CONFLICT (user_id, leave_type) DO NOTHING`,
+    [input.userId, input.leaveType, input.asOfDate || null]
+  );
+
+  const locked = await client.query(
+    `SELECT earned_days, used_days, pending_days, adjusted_days
+     FROM leave_balances
+     WHERE user_id = $1::uuid AND leave_type = $2::text
+     FOR UPDATE`,
+    [input.userId, input.leaveType]
+  );
+  if (locked.rows.length === 0) {
+    throw new Error('Failed to lock leave balance for adjustment');
+  }
+  const before = balanceSnapshot(locked.rows[0]);
+
+  const updated = await client.query(
+    `UPDATE leave_balances
+     SET adjusted_days = ROUND((COALESCE(adjusted_days, 0) + $3::numeric)::numeric, 3),
+         as_of_date = COALESCE($4::date, CURRENT_DATE),
+         updated_at = now()
+     WHERE user_id = $1::uuid AND leave_type = $2::text
+     RETURNING *`,
+    [input.userId, input.leaveType, daysChanged, input.asOfDate || null]
+  );
+  if (updated.rows.length === 0) {
+    throw new Error('Failed to apply leave balance adjustment');
+  }
+
+  const row = updated.rows[0];
+  const after = balanceSnapshot(row);
+  await insertLeaveBalanceLedger(client, {
+    userId: input.userId,
+    leaveType: input.leaveType,
+    action: 'admin_adjustment',
+    affectedBucket: 'adjusted',
+    daysChanged,
+    oldValue: before.adjusted_days,
+    newValue: after.adjusted_days,
+    actorUserId: input.actorUserId || null,
+    actorKind: input.actorKind || 'admin',
+    remarks,
+    metadataJson: {
+      before,
+      after,
+      available_before: availableFromSnapshot(before),
+      available_after: availableFromSnapshot(after),
+      as_of_date: input.asOfDate || null,
+    },
+  });
+
+  return { row, before, after, daysChanged };
+}
+
 module.exports = {
+  applyAdminLeaveBalanceAdjustment,
   initLeaveBalanceLedger,
   insertLeaveBalanceLedger,
   fetchBalanceSnapshot,
+  normalizeLeaveBalanceAdjustment,
+  normalizeLeaveBalanceAdjustmentReason,
   /** @type {typeof _ensurePromise} */
   _ensurePromise: () => _ensurePromise,
 };

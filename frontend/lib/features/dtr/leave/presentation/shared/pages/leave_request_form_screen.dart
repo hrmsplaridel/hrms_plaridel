@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
@@ -45,18 +46,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   static const int _maxAttachmentBytes = 10 * 1024 * 1024;
   static const int _maternityMinimumNoticeDays = 30;
-  static const _annualQuotaTypes = {
-    'specialPrivilegeLeave',
-    'paternityLeave',
-    'maternityLeave',
-    'soloParentLeave',
-    'tenDayVawcLeave',
-    'specialEmergencyCalamityLeave',
-    'specialLeaveBenefitsForWomen',
-    'rehabilitationPrivilege',
-    'studyLeave',
-  };
-
   late LeaveType _leaveType;
   late String _leaveTypeName;
   List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
@@ -89,6 +78,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   bool _workingDaysLoading = false;
   String? _workingDaysHelperText;
   int _workingDaysRequestSerial = 0;
+  Map<String, dynamic> _customDetailValues = {};
 
   late final TextEditingController _customLeaveTypeController;
   late final TextEditingController _reasonController;
@@ -124,6 +114,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _commutation = initial?.commutation ?? LeaveCommutationOption.notRequested;
     _startDate = initial?.startDate;
     _endDate = initial?.endDate;
+    _customDetailValues = Map<String, dynamic>.from(
+      initial?.customDetails ?? const {},
+    );
 
     _customLeaveTypeController = TextEditingController(
       text: initial?.customLeaveTypeText ?? '',
@@ -216,6 +209,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _womenIllnessController.clear();
     _studyPurposeDetailsController.clear();
     _otherPurposeDetailsController.clear();
+    _customDetailValues.clear();
   }
 
   LeaveTypeDefinition? get _selectedLeaveTypeDefinition {
@@ -223,6 +217,59 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       if (item.name == _leaveTypeName) return item;
     }
     return null;
+  }
+
+  List<LeaveCustomFieldDefinition> get _selectedCustomFields =>
+      _selectedLeaveTypeDefinition?.employeeDetailSchema ?? const [];
+
+  Map<String, dynamic> _customDetailsForSubmission() {
+    final output = <String, dynamic>{};
+    for (final field in _selectedCustomFields) {
+      final raw = _customDetailValues[field.key];
+      if (raw == null) continue;
+      if (raw is String) {
+        final value = raw.trim();
+        if (value.isEmpty) continue;
+        output[field.key] = field.type == LeaveCustomFieldType.number
+            ? (num.tryParse(value) ?? value)
+            : value;
+      } else {
+        output[field.key] = raw;
+      }
+    }
+    return output;
+  }
+
+  bool _validateCustomDetails() {
+    for (final field in _selectedCustomFields) {
+      final value = _customDetailValues[field.key];
+      final blank = value == null || (value is String && value.trim().isEmpty);
+      if (field.required && blank) {
+        _showMessage('${field.label} is required.');
+        return false;
+      }
+      if (blank) continue;
+      if ((field.type == LeaveCustomFieldType.text ||
+              field.type == LeaveCustomFieldType.longText) &&
+          value is String &&
+          value.trim().length >
+              (field.maxLength ??
+                  (field.type == LeaveCustomFieldType.longText ? 2000 : 255))) {
+        _showMessage('${field.label} is too long.');
+        return false;
+      }
+      if (field.type == LeaveCustomFieldType.number &&
+          num.tryParse(value.toString()) == null) {
+        _showMessage('${field.label} must be a number.');
+        return false;
+      }
+      if (field.type == LeaveCustomFieldType.select &&
+          !field.options.contains(value.toString())) {
+        _showMessage('Please choose a valid ${field.label}.');
+        return false;
+      }
+    }
+    return true;
   }
 
   String get _selectedLeaveTypeLabel {
@@ -257,6 +304,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     }
     final def = _selectedLeaveTypeDefinition;
     return def?.maxDays ?? _leaveType.maxDays?.toDouble();
+  }
+
+  String get _selectedEntitlementBasis {
+    return _selectedLeaveTypeDefinition?.entitlementBasis ??
+        LeaveEntitlementBasis.forLeaveType(_leaveTypeName);
   }
 
   int? get _selectedMinimumAdvanceDays {
@@ -550,6 +602,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Future<void> _saveDraft() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_validateCustomDetails()) return;
     final accountEligibilityMessage = _selectedAccountEligibilityMessage();
     if (accountEligibilityMessage != null) {
       _showMessage(accountEligibilityMessage);
@@ -823,7 +876,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       }
     }
 
-    return true;
+    return _validateCustomDetails();
   }
 
   DateTime _onlyDate(DateTime value) =>
@@ -960,14 +1013,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   double? _annualHardLimitForSelectedLeave() {
-    switch (_leaveTypeName) {
-      case 'soloParentLeave':
-        return 7;
-      case 'tenDayVawcLeave':
-        return 10;
-      default:
-        return null;
-    }
+    if (_selectedEntitlementBasis != LeaveEntitlementBasis.annual) return null;
+    return _selectedMaxDays;
   }
 
   bool _validateAnnualQuotaLimit() {
@@ -1186,6 +1233,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         otherPurpose: _leaveType == LeaveType.others ? _otherPurpose : null,
         otherPurposeDetails: _otherPurposeDetailsController.text.trim(),
         commutation: _commutation,
+        customDetails: _customDetailsForSubmission(),
         attachmentName:
             _savedRequest?.attachmentName ?? initial?.attachmentName,
         attachmentPath:
@@ -1570,13 +1618,22 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Widget _buildCreditPolicyPanel() {
     final policy = _selectedCreditPolicy;
-    final isAnnualQuota = _annualQuotaTypes.contains(_leaveTypeName);
+    final entitlementBasis = _selectedEntitlementBasis;
 
     IconData icon = Icons.info_outline_rounded;
     String title = 'Credit handling';
     String message;
 
-    if (isAnnualQuota) {
+    if (entitlementBasis == LeaveEntitlementBasis.compliance) {
+      final requiredDays = _selectedMaxDays;
+      icon = Icons.fact_check_outlined;
+      title = 'Mandatory/Forced Leave Compliance';
+      message = requiredDays == null
+          ? 'This is a compliance requirement, not a separate leave credit balance. Approved days are charged against Vacation Leave credits.'
+          : 'Annual compliance requirement: ${_formatDays(requiredDays)} working day(s). '
+                'This is not a separate leave credit balance. Approved days are charged against Vacation Leave credits.';
+    } else if (entitlementBasis == LeaveEntitlementBasis.annual &&
+        policy == 'none') {
       final year = _startDate?.year ?? DateTime.now().year;
       final balance = _balanceForBucket(_leaveTypeName);
       final entitlement = balance?.earnedDays ?? _selectedMaxDays;
@@ -1600,11 +1657,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                 'Pending usage: ${_formatDays(pending)}. '
                 'Remaining entitlement: ${_formatDays(remaining)} day(s). '
                 'This leave does not deduct VL or SL credits.';
-    } else if (policy == 'none') {
-      icon = Icons.remove_done_outlined;
-      message =
-          'No leave credits required. This request will not deduct Vacation or Sick Leave credits.';
-    } else {
+    } else if (policy != 'none') {
       final bucket = _selectedCreditBucket;
       final balance = _balanceForBucket(bucket);
       final bucketLabel = switch (bucket) {
@@ -1616,6 +1669,28 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       message = balance == null
           ? 'Deducts from $bucketLabel credits. No balance row is available yet.'
           : 'Deducts from $bucketLabel credits. Available: ${balance.availableDays.toStringAsFixed(1)} day(s), pending: ${balance.pendingDays.toStringAsFixed(1)}.';
+    } else if (entitlementBasis == LeaveEntitlementBasis.perEvent) {
+      final maximum = _selectedMaxDays;
+      icon = Icons.event_note_outlined;
+      title = 'Event-based entitlement';
+      message = maximum == null
+          ? 'Available only for a qualifying event, subject to its requirements and approval. This is not a leave credit balance and does not deduct VL or SL credits.'
+          : 'Maximum: up to ${_formatDays(maximum)} working day(s) per qualifying event, subject to its requirements and approval. '
+                'This is not a leave credit balance and does not deduct VL or SL credits.';
+    } else if (entitlementBasis == LeaveEntitlementBasis.perRequest) {
+      final maximum = _selectedMaxDays;
+      icon = Icons.description_outlined;
+      title = 'Request-based entitlement';
+      message = maximum == null
+          ? 'Eligibility and approval are evaluated for each request. This is not a leave credit balance and does not deduct VL or SL credits.'
+          : 'Maximum: up to ${_formatDays(maximum)} working day(s) per approved request. '
+                'This is not a leave credit balance and does not deduct VL or SL credits.';
+    } else if (policy == 'none') {
+      icon = Icons.remove_done_outlined;
+      message =
+          'No leave credits required. This request will not deduct Vacation or Sick Leave credits.';
+    } else {
+      message = 'Leave policy information is not available.';
     }
 
     return Container(
@@ -2069,12 +2144,125 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       ]);
     }
 
+    if (_selectedCustomFields.isNotEmpty) {
+      children.addAll([
+        const Divider(height: 32),
+        Text(
+          'Additional Fields',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 12),
+        for (final field in _selectedCustomFields) ...[
+          _buildCustomDetailField(field),
+          const SizedBox(height: 12),
+        ],
+      ]);
+    }
+
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: children,
       ),
     );
+  }
+
+  Widget _buildCustomDetailField(LeaveCustomFieldDefinition field) {
+    final label = field.required ? '${field.label} *' : field.label;
+    final value = _customDetailValues[field.key];
+    switch (field.type) {
+      case LeaveCustomFieldType.date:
+        return _buildDatePicker(
+          label: label,
+          value: value == null ? null : DateTime.tryParse(value.toString()),
+          onChanged: (date) => setState(() {
+            if (date == null) {
+              _customDetailValues.remove(field.key);
+            } else {
+              _customDetailValues[field.key] = _dateOnly(date);
+            }
+          }),
+        );
+      case LeaveCustomFieldType.boolean:
+        return DropdownButtonFormField<bool>(
+          key: ValueKey('custom-$_leaveTypeName-${field.key}'),
+          initialValue: value is bool ? value : null,
+          decoration: _inputDecoration(label),
+          items: const [
+            DropdownMenuItem(value: true, child: Text('Yes')),
+            DropdownMenuItem(value: false, child: Text('No')),
+          ],
+          onChanged: (next) => setState(() {
+            if (next == null) {
+              _customDetailValues.remove(field.key);
+            } else {
+              _customDetailValues[field.key] = next;
+            }
+          }),
+          validator: (next) => field.required && next == null
+              ? '${field.label} is required'
+              : null,
+        );
+      case LeaveCustomFieldType.select:
+        final selected = field.options.contains(value?.toString())
+            ? value.toString()
+            : null;
+        return DropdownButtonFormField<String>(
+          key: ValueKey('custom-$_leaveTypeName-${field.key}-$selected'),
+          initialValue: selected,
+          isExpanded: true,
+          decoration: _inputDecoration(label),
+          items: field.options
+              .map(
+                (option) =>
+                    DropdownMenuItem(value: option, child: Text(option)),
+              )
+              .toList(),
+          onChanged: (next) => setState(() {
+            if (next == null) {
+              _customDetailValues.remove(field.key);
+            } else {
+              _customDetailValues[field.key] = next;
+            }
+          }),
+          validator: (next) => field.required && (next ?? '').isEmpty
+              ? '${field.label} is required'
+              : null,
+        );
+      case LeaveCustomFieldType.number:
+      case LeaveCustomFieldType.text:
+      case LeaveCustomFieldType.longText:
+        return TextFormField(
+          key: ValueKey('custom-$_leaveTypeName-${field.key}'),
+          initialValue: value?.toString() ?? '',
+          keyboardType: field.type == LeaveCustomFieldType.number
+              ? const TextInputType.numberWithOptions(decimal: true)
+              : TextInputType.text,
+          maxLines: field.type == LeaveCustomFieldType.longText ? 4 : 1,
+          maxLength:
+              field.type == LeaveCustomFieldType.text ||
+                  field.type == LeaveCustomFieldType.longText
+              ? field.maxLength
+              : null,
+          decoration: _inputDecoration(label),
+          onChanged: (next) => _customDetailValues[field.key] = next,
+          validator: (next) {
+            final text = next?.trim() ?? '';
+            if (field.required && text.isEmpty) {
+              return '${field.label} is required';
+            }
+            if (field.type == LeaveCustomFieldType.number &&
+                text.isNotEmpty &&
+                num.tryParse(text) == null) {
+              return 'Enter a valid number';
+            }
+            return null;
+          },
+        );
+    }
   }
 
   Widget _buildAttachmentSection() {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/desktop/widgets/employee_leave_desktop_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/mobile/widgets/employee_leave_mobile_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/history_timeline.dart';
@@ -499,6 +500,20 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                         label: 'Solo Parent ID expiry',
                         value: _formatDate(request.soloParentIdExpiryDate!),
                       ),
+                    for (final field in request.employeeDetailSchemaSnapshot)
+                      if (request.customDetails[field.key] != null &&
+                          request.customDetails[field.key]
+                              .toString()
+                              .trim()
+                              .isNotEmpty)
+                        _LeaveDetailTile(
+                          icon: Icons.dynamic_form_outlined,
+                          label: field.label,
+                          value: _customLeaveDetailDisplayValue(
+                            field,
+                            request.customDetails[field.key],
+                          ),
+                        ),
                     _LeaveDetailTile(
                       icon: Icons.date_range_rounded,
                       label: 'Date range',
@@ -889,6 +904,20 @@ String _formatDate(DateTime value) {
     'Dec',
   ];
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
+}
+
+String _customLeaveDetailDisplayValue(
+  LeaveCustomFieldDefinition field,
+  dynamic value,
+) {
+  if (field.type == LeaveCustomFieldType.boolean) {
+    return value == true ? 'Yes' : 'No';
+  }
+  if (field.type == LeaveCustomFieldType.date) {
+    final date = DateTime.tryParse(value.toString());
+    if (date != null) return _formatDate(date);
+  }
+  return value.toString();
 }
 
 bool _canEmployeeCancel(LeaveRequest request) {

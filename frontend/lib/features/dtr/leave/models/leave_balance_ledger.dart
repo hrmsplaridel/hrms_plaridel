@@ -93,6 +93,7 @@ class LeaveLedgerResult {
     required this.summaryEarned,
     required this.summaryUsed,
     required this.summaryPending,
+    required this.summaryAdjusted,
   });
 
   final int total;
@@ -102,6 +103,7 @@ class LeaveLedgerResult {
   final double summaryEarned;
   final double summaryUsed;
   final double summaryPending;
+  final double summaryAdjusted;
 
   factory LeaveLedgerResult.fromJson(Map<String, dynamic> json) {
     final list = json['rows'];
@@ -130,6 +132,7 @@ class LeaveLedgerResult {
       summaryEarned: summaryValue('earned'),
       summaryUsed: summaryValue('used'),
       summaryPending: summaryValue('pending'),
+      summaryAdjusted: summaryValue('adjusted'),
     );
   }
 }

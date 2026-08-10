@@ -2,9 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  customLeaveDetailValues,
   employeeLeaveDetailsFromPayload,
   loadEmployeeOfficialSnapshot,
+  normalizeEmployeeDetailSchema,
   sanitizeEmployeeLeaveDetails,
+  serializeEmployeeDetailSchema,
 } = require('../src/services/leaveRequestDetailsPolicy');
 
 const USER_ID = '00000000-0000-0000-0000-000000000101';
@@ -54,6 +57,116 @@ test('nested details and flat form fields pass through the same whitelist', () =
     sick_leave_nature: 'outPatient',
     sick_illness_details: 'Updated medical consultation',
   });
+});
+
+test('custom leave schema accepts declared answers and rejects protected keys', () => {
+  const schema = normalizeEmployeeDetailSchema([
+    {
+      key: 'training_title',
+      label: 'Training Title',
+      type: 'text',
+      required: true,
+      max_length: 120,
+    },
+    {
+      key: 'training_date',
+      label: 'Training Date',
+      type: 'date',
+      required: true,
+    },
+    {
+      key: 'training_category',
+      label: 'Training Category',
+      type: 'select',
+      options: ['Technical', 'Administrative'],
+    },
+  ], { strict: true });
+
+  const sanitized = employeeLeaveDetailsFromPayload({
+    details: {
+      training_title: 'Payroll Workshop',
+      training_date: '2026-09-10',
+      training_category: 'Technical',
+      status: 'approved',
+      reviewer_id: USER_ID,
+      undeclared_answer: 'must be removed',
+    },
+    customFieldSchema: schema,
+  });
+
+  assert.deepEqual(customLeaveDetailValues(sanitized, schema), {
+    training_title: 'Payroll Workshop',
+    training_date: '2026-09-10',
+    training_category: 'Technical',
+  });
+  assert.equal(sanitized.status, undefined);
+  assert.equal(sanitized.reviewer_id, undefined);
+  assert.equal(sanitized.undeclared_answer, undefined);
+
+  assert.throws(
+    () => normalizeEmployeeDetailSchema([
+      { key: 'approved_days_with_pay', label: 'Paid Days', type: 'number' },
+    ], { strict: true }),
+    /reserved/i
+  );
+});
+
+test('custom leave schema is serialized as a JSON array for PostgreSQL jsonb parameters', () => {
+  const serialized = serializeEmployeeDetailSchema([
+    {
+      key: 'custom_reason',
+      label: 'Reason',
+      type: 'text',
+      required: true,
+    },
+  ], { strict: true });
+
+  assert.equal(typeof serialized, 'string');
+  assert.deepEqual(JSON.parse(serialized), [
+    {
+      key: 'custom_reason',
+      label: 'Reason',
+      type: 'text',
+      required: true,
+      max_length: 255,
+    },
+  ]);
+});
+
+test('custom leave answers enforce required fields, types, and select options', () => {
+  const schema = normalizeEmployeeDetailSchema([
+    { key: 'provider', label: 'Provider', type: 'text', required: true },
+    { key: 'hours', label: 'Hours', type: 'number', required: true },
+    {
+      key: 'delivery_mode',
+      label: 'Delivery Mode',
+      type: 'select',
+      required: true,
+      options: ['Online', 'Onsite'],
+    },
+  ], { strict: true });
+
+  assert.throws(
+    () => employeeLeaveDetailsFromPayload({
+      details: { hours: 8, delivery_mode: 'Online' },
+      customFieldSchema: schema,
+    }),
+    /Provider is required/
+  );
+  assert.throws(
+    () => employeeLeaveDetailsFromPayload({
+      details: { provider: 'CSC', hours: 'many', delivery_mode: 'Online' },
+      customFieldSchema: schema,
+    }),
+    /Hours must be a number/
+  );
+  assert.throws(
+    () => employeeLeaveDetailsFromPayload({
+      details: { provider: 'CSC', hours: 8, delivery_mode: 'Hybrid' },
+      customFieldSchema: schema,
+    }),
+    /Delivery Mode has an invalid option/
+  );
 });
 
 test('official leave snapshot comes only from server employee and assignment records', async () => {

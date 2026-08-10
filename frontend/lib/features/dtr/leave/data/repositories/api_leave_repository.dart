@@ -37,6 +37,7 @@ class ApiLeaveRepository implements LeaveRepository {
     'other_purpose',
     'other_purpose_details',
     'commutation',
+    'details',
     'status',
   };
 
@@ -227,35 +228,27 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<LeaveBalance> upsertBalance(
-    LeaveBalance balance, {
-    String? remarks,
+  Future<LeaveBalance> applyBalanceAdjustment({
+    required String userId,
+    required LeaveType leaveType,
+    required double adjustmentDays,
+    required String remarks,
+    DateTime? asOfDate,
   }) async {
-    if (balance.userId.isEmpty) {
+    if (userId.isEmpty) {
       throw Exception('Missing user id');
     }
     try {
       final payload = <String, dynamic>{
-        'leave_type': balance.leaveType.value,
-        'earned_days': balance.earnedDays,
-        'used_days': balance.usedDays,
-        'pending_days': balance.pendingDays,
-        'adjusted_days': balance.adjustedDays,
+        'leave_type': leaveType.value,
+        'adjustment_days': adjustmentDays,
+        'remarks': remarks.trim(),
       };
-      final asOf = balance.asOfDate;
-      if (asOf != null) {
-        payload['as_of_date'] = _leaveDateOnly(asOf);
+      if (asOfDate != null) {
+        payload['as_of_date'] = _leaveDateOnly(asOfDate);
       }
-      final lastAcc = balance.lastAccrualDate;
-      if (lastAcc != null) {
-        payload['last_accrual_date'] = _leaveDateOnly(lastAcc);
-      }
-      final cleanRemarks = remarks?.trim();
-      if (cleanRemarks != null && cleanRemarks.isNotEmpty) {
-        payload['remarks'] = cleanRemarks;
-      }
-      final res = await ApiClient.instance.put<Map<String, dynamic>>(
-        '/api/leave/balances/${balance.userId}',
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/leave/balances/$userId/adjustments',
         data: payload,
       );
       final data = res.data;
@@ -545,7 +538,9 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(int year) async {
+  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(
+    int year,
+  ) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/leave/admin/year-end-forced-leave',
@@ -570,7 +565,8 @@ class ApiLeaveRepository implements LeaveRepository {
           'year': input.year,
           'dry_run': input.dryRun,
           if (input.employeeIds != null) 'employee_ids': input.employeeIds,
-          if (input.remarks != null && input.remarks!.isNotEmpty) 'remarks': input.remarks,
+          if (input.remarks != null && input.remarks!.isNotEmpty)
+            'remarks': input.remarks,
         },
       );
       final data = res.data;

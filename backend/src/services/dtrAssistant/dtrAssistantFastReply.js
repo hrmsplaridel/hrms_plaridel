@@ -1219,6 +1219,21 @@ function localizedAvailableForFiling(language) {
   return 'available for filing in HRMS';
 }
 
+function customLeaveFieldRequirement(type, language) {
+  const fields = Array.isArray(type?.employee_detail_schema)
+    ? type.employee_detail_schema
+    : [];
+  const requiredLabels = fields
+    .filter((field) => field?.required === true)
+    .map((field) => String(field.label || '').trim())
+    .filter(Boolean);
+  if (requiredLabels.length === 0) return null;
+  const labels = requiredLabels.join(', ');
+  if (language === 'bisaya') return `kinahanglan nga fields: ${labels}`;
+  if (language === 'tagalog') return `mga kailangang field: ${labels}`;
+  return `required custom fields: ${labels}`;
+}
+
 function localizedLeaveRequirementParts(type, language) {
   if (language === 'english') return leaveRequirementParts(type);
 
@@ -1235,8 +1250,10 @@ function localizedLeaveRequirementParts(type, language) {
       parts.push(`${fmtLocalizedDayCount(type.minimum_advance_days, language)} advance notice`);
     }
     if (type.max_days != null) {
-      parts.push(`max ${fmtLocalizedDayCount(type.max_days, language)}`);
+      parts.push(localizedLeaveLimitText(type, language));
     }
+    const customFields = customLeaveFieldRequirement(type, language);
+    if (customFields) parts.push(customFields);
     return parts;
   }
 
@@ -1252,8 +1269,10 @@ function localizedLeaveRequirementParts(type, language) {
       parts.push(`${fmtLocalizedDayCount(type.minimum_advance_days, language)} advance notice`);
     }
     if (type.max_days != null) {
-      parts.push(`max ${fmtLocalizedDayCount(type.max_days, language)}`);
+      parts.push(localizedLeaveLimitText(type, language));
     }
+    const customFields = customLeaveFieldRequirement(type, language);
+    if (customFields) parts.push(customFields);
     return parts;
   }
 
@@ -1263,7 +1282,9 @@ function localizedLeaveRequirementParts(type, language) {
 function localizedLeaveFormChecklist(type, language) {
   const label = labelLeaveType(type.display_name || type.name);
   if (language === 'english') {
-    return getFormGuidanceForType(type).fields.join(' ');
+    const checklist = getFormGuidanceForType(type).fields.join(' ');
+    const customFields = customLeaveFieldRequirement(type, language);
+    return customFields ? `${checklist} Complete the ${customFields}.` : checklist;
   }
 
   const guidance = getLeaveGuidanceForType(type);
@@ -1277,6 +1298,8 @@ function localizedLeaveFormChecklist(type, language) {
   if (requirements) pieces.push(`Requirements: ${requirements}`);
   if (limits) pieces.push(`Limit: ${limits}`);
   if (advanceFiling) pieces.push(`Filing: ${advanceFiling}`);
+  const customFields = customLeaveFieldRequirement(type, language);
+  if (customFields) pieces.push(customFields);
   return pieces.join(' ');
 }
 
@@ -3717,9 +3740,36 @@ function leaveRequirementParts(type) {
     parts.push(`${fmtDayCount(type.minimum_advance_days)} advance notice`);
   }
   if (type.max_days != null) {
-    parts.push(`max ${fmtDayCount(type.max_days)}`);
+    parts.push(localizedLeaveLimitText(type, 'english'));
   }
+  const customFields = customLeaveFieldRequirement(type, 'english');
+  if (customFields) parts.push(customFields);
   return parts;
+}
+
+function localizedLeaveLimitText(type, language) {
+  const basis = String(type.entitlement_basis || 'per_request').trim();
+  const count =
+    language === 'english'
+      ? fmtDayCount(type.max_days)
+      : fmtLocalizedDayCount(type.max_days, language);
+
+  if (language === 'bisaya') {
+    if (basis === 'annual') return `annual limit: ${count}`;
+    if (basis === 'per_event') return `hangtod ${count} kada qualifying event`;
+    if (basis === 'compliance') return `annual compliance requirement: ${count}`;
+    return `max ${count} kada request`;
+  }
+  if (language === 'tagalog') {
+    if (basis === 'annual') return `annual limit: ${count}`;
+    if (basis === 'per_event') return `hanggang ${count} bawat qualifying event`;
+    if (basis === 'compliance') return `annual compliance requirement: ${count}`;
+    return `max ${count} bawat request`;
+  }
+  if (basis === 'annual') return `annual limit: ${count}`;
+  if (basis === 'per_event') return `up to ${count} per qualifying event`;
+  if (basis === 'compliance') return `annual compliance requirement: ${count}`;
+  return `max ${count} per request`;
 }
 
 function matchingLeaveTypes(context, message) {

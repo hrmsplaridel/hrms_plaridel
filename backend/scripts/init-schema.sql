@@ -364,12 +364,20 @@ CREATE TABLE IF NOT EXISTS leave_types (
   minimum_advance_days INTEGER,
   affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
   balance_ledger_type TEXT NOT NULL DEFAULT 'none',
+  entitlement_basis TEXT NOT NULL DEFAULT 'per_request',
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
   accrual_monthly_rate NUMERIC(6,3),
   accrual_annual_cap NUMERIC(10,3),
+  employee_detail_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
   is_system BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_leave_type_employee_detail_schema_array CHECK (
+    jsonb_typeof(employee_detail_schema) = 'array'
+  ),
+  CONSTRAINT chk_leave_type_entitlement_basis CHECK (
+    entitlement_basis IN ('accrual', 'annual', 'per_event', 'per_request', 'compliance')
+  )
 );
 
 -- Seed leave types (names must match Flutter LeaveType enum .value for API lookup).
@@ -452,6 +460,20 @@ SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
       WHEN name IN ('vacationLeave', 'sickLeave') THEN name
       ELSE 'none'
     END,
+    entitlement_basis = CASE
+      WHEN name IN ('vacationLeave', 'sickLeave') THEN 'accrual'
+      WHEN name IN ('specialPrivilegeLeave', 'soloParentLeave', 'tenDayVawcLeave') THEN 'annual'
+      WHEN name = 'mandatoryForcedLeave' THEN 'compliance'
+      WHEN name IN (
+        'maternityLeave',
+        'paternityLeave',
+        'rehabilitationPrivilege',
+        'specialLeaveBenefitsForWomen',
+        'specialEmergencyCalamityLeave',
+        'adoptionLeave'
+      ) THEN 'per_event'
+      ELSE 'per_request'
+    END,
     accrues_monthly = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN true ELSE false END,
     accrual_monthly_rate = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN 1.25 ELSE NULL END,
     accrual_annual_cap = NULL;
@@ -482,6 +504,8 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   details JSONB,
   -- Server-generated official identity/assignment fields used by forms and exports.
   employee_official_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  -- Field labels/types frozen with the request for reliable historical display.
+  employee_detail_schema_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN (
       'draft',
@@ -524,6 +548,9 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   ),
   CONSTRAINT chk_leave_employee_official_snapshot_object CHECK (
     jsonb_typeof(employee_official_snapshot) = 'object'
+  ),
+  CONSTRAINT chk_leave_employee_detail_schema_snapshot_array CHECK (
+    jsonb_typeof(employee_detail_schema_snapshot) = 'array'
   ),
   CONSTRAINT chk_leave_approved_days_nonnegative CHECK (
     (approved_days_with_pay IS NULL OR approved_days_with_pay >= 0)

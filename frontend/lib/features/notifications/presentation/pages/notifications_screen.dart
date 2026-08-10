@@ -65,6 +65,60 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final isDocuAdmin = _docuTrackerAdmin(context);
     final loadError = np.loadError ?? doc.error;
     final isMobileLayout = _isMobileLayout(context);
+    final newestHrmsAt = np.items.isEmpty
+        ? null
+        : np.items
+              .map((item) => item.createdAt)
+              .reduce((a, b) => a.isAfter(b) ? a : b);
+    final newestDocuAt = doc.notifications
+        .map((item) => item.createdAt)
+        .whereType<DateTime>()
+        .fold<DateTime?>(
+          null,
+          (latest, value) =>
+              latest == null || value.isAfter(latest) ? value : latest,
+        );
+    final showHrmsFirst =
+        !hrmsEmpty &&
+        (docEmpty ||
+            newestDocuAt == null ||
+            (newestHrmsAt?.isAfter(newestDocuAt) ?? false));
+
+    final docuTrackerSection = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _PanelSectionTitle(title: 'DocuTracker'),
+        const SizedBox(height: 8),
+        DocuTrackerNotificationPanel(
+          notifications: doc.notifications,
+          unreadCount: doc.unreadNotificationsCount,
+          initialVisiblePerGroup: 20,
+          onMarkAllRead: doc.unreadNotificationsCount > 0
+              ? () => doc.markAllNotificationsRead()
+              : null,
+          onNotificationTap: (n) => navigateFromDocuTrackerNotification(
+            context,
+            notification: n,
+            isAdmin: isDocuAdmin,
+            afterNavigation: () => refreshDocuTrackerAfterNotificationNav(
+              context,
+              isAdmin: isDocuAdmin,
+            ),
+          ),
+        ),
+      ],
+    );
+    final hrmsSection = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _PanelSectionTitle(title: 'Leave & HR'),
+        const SizedBox(height: 8),
+        _HrmsNotificationList(
+          items: np.items,
+          onTap: (n) => _handleNotificationTap(context, n, np),
+        ),
+      ],
+    );
 
     return Scaffold(
       backgroundColor: AppTheme.sectionAltOf(context),
@@ -199,39 +253,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         totalCount: np.items.length + doc.notifications.length,
                         unreadCount: totalUnread,
                       ),
-                    if (!docEmpty) ...[
-                      const SizedBox(height: 8),
-                      const _PanelSectionTitle(title: 'DocuTracker'),
-                      const SizedBox(height: 8),
-                      DocuTrackerNotificationPanel(
-                        notifications: doc.notifications,
-                        unreadCount: doc.unreadNotificationsCount,
-                        initialVisiblePerGroup: 20,
-                        onMarkAllRead: doc.unreadNotificationsCount > 0
-                            ? () => doc.markAllNotificationsRead()
-                            : null,
-                        onNotificationTap: (n) =>
-                            navigateFromDocuTrackerNotification(
-                              context,
-                              notification: n,
-                              isAdmin: isDocuAdmin,
-                              afterNavigation: () =>
-                                  refreshDocuTrackerAfterNotificationNav(
-                                    context,
-                                    isAdmin: isDocuAdmin,
-                                  ),
-                            ),
-                      ),
-                      if (!hrmsEmpty) const SizedBox(height: 20),
-                    ],
-                    if (!hrmsEmpty) ...[
-                      if (!docEmpty)
-                        const _PanelSectionTitle(title: 'Leave & HR'),
-                      if (!docEmpty) const SizedBox(height: 8),
-                      _HrmsNotificationList(
-                        items: np.items,
-                        onTap: (n) => _handleNotificationTap(context, n, np),
-                      ),
+                    const SizedBox(height: 8),
+                    if (showHrmsFirst) ...[
+                      hrmsSection,
+                      if (!docEmpty) ...[
+                        const SizedBox(height: 20),
+                        docuTrackerSection,
+                      ],
+                    ] else ...[
+                      if (!docEmpty) docuTrackerSection,
+                      if (!docEmpty && !hrmsEmpty) const SizedBox(height: 20),
+                      if (!hrmsEmpty) hrmsSection,
                     ],
                   ],
                 ),
@@ -294,9 +326,11 @@ class _HrmsNotificationList extends StatelessWidget {
       return 'Earlier';
     }
 
+    final sortedItems = [...items]
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     final rows = <_NotificationListRow>[];
     String? lastLabel;
-    for (final n in items) {
+    for (final n in sortedItems) {
       final label = groupLabel(n.createdAt);
       if (lastLabel != label) {
         rows.add(_NotificationListRow.header(label));

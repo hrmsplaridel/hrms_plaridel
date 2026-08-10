@@ -17,8 +17,8 @@
  *                                    hardcoded 1.25 if migration has not yet been run.
  *  7. Missing date_hired warning   — details entry carries missing_hire_date: true so HR can
  *                                    review; credits still proceed at the full rate.
- *  8. last_accrual_date edit guard — enforced in the PUT /balances/:userId route (see
- *                                    leaveRoutes.js); not this file.
+ *  8. Accrual cursor protection    — manual balance correction cannot edit last_accrual_date;
+ *                                    only accrual processing advances or reconciles it.
  *  9. Eligibility gate             — only leave_credit_eligible users with an active assignment
  *                                    overlapping the target month receive monthly credits.
  *

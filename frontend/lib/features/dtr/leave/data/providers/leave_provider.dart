@@ -6,11 +6,16 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dar
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
-/// All balances returned by the backend are now shown.
-/// Annual-quota types (SPL, MFL, Paternity, etc.) are computed server-side.
+/// Credit balances and explicitly marked annual-entitlement summaries are shown.
+/// Event, request, and compliance limits are not balance rows.
 List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
-  // Only exclude `others` and custom admin types with no meaningful quota.
-  return raw.where((b) => b.effectiveLeaveTypeName != 'others').toList();
+  return raw
+      .where(
+        (balance) =>
+            balance.effectiveLeaveTypeName != 'others' &&
+            (balance.isCreditBalance || balance.isAnnualEntitlement),
+      )
+      .toList();
 }
 
 class _LeaveCacheEntry<T> {
@@ -732,16 +737,25 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  /// Admin/HR: create or overwrite one [LeaveBalance] row for an employee.
-  Future<LeaveBalance?> upsertBalance(
-    LeaveBalance balance, {
-    String? remarks,
+  /// Admin/HR: apply an audited correction without overwriting derived buckets.
+  Future<LeaveBalance?> applyBalanceAdjustment({
+    required String userId,
+    required LeaveType leaveType,
+    required double adjustmentDays,
+    required String remarks,
+    DateTime? asOfDate,
   }) async {
     _submitting = true;
     _error = null;
     notifyListeners();
     try {
-      final saved = await _repository.upsertBalance(balance, remarks: remarks);
+      final saved = await _repository.applyBalanceAdjustment(
+        userId: userId,
+        leaveType: leaveType,
+        adjustmentDays: adjustmentDays,
+        remarks: remarks,
+        asOfDate: asOfDate,
+      );
       _notifyMutation();
       return saved;
     } catch (e) {
@@ -972,6 +986,7 @@ class LeaveProvider extends ChangeNotifier {
         summaryEarned: value.summaryEarned,
         summaryUsed: value.summaryUsed,
         summaryPending: value.summaryPending,
+        summaryAdjusted: value.summaryAdjusted,
       );
     }
     final fresh = await _repository.getLeaveLedger(query);
@@ -984,6 +999,7 @@ class LeaveProvider extends ChangeNotifier {
         summaryEarned: fresh.summaryEarned,
         summaryUsed: fresh.summaryUsed,
         summaryPending: fresh.summaryPending,
+        summaryAdjusted: fresh.summaryAdjusted,
       ),
       DateTime.now(),
     );

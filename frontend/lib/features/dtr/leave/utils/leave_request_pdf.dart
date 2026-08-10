@@ -8,6 +8,7 @@ import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 
 /// Loaded once; kept for the app lifetime. [pw.Page.build] runs **lazily** on
 /// `doc.save()` / print — must not rely on fonts that were cleared after
@@ -1372,6 +1373,19 @@ class _LeaveRequestPdfFixedEngine {
     return '${d.year}-$mm-$dd';
   }
 
+  static String _customDetailValue(
+    LeaveCustomFieldDefinition field,
+    dynamic value,
+  ) {
+    if (field.type == LeaveCustomFieldType.boolean) {
+      return value == true ? 'Yes' : 'No';
+    }
+    if (field.type == LeaveCustomFieldType.date) {
+      return _fmtDate(DateTime.tryParse(value.toString()));
+    }
+    return value.toString();
+  }
+
   static ({String last, String first, String middle}) _nameParts(String full) {
     final parts = full
         .trim()
@@ -1662,6 +1676,18 @@ class _LeaveRequestPdfFixedEngine {
     final disapprovalReason = request.status.isRejected
         ? _s(request.disapprovalReason)
         : '';
+    final customDetails = request.employeeDetailSchemaSnapshot
+        .where((field) {
+          final value = request.customDetails[field.key];
+          return value != null && value.toString().trim().isNotEmpty;
+        })
+        .map(
+          (field) => (
+            label: field.label,
+            value: _customDetailValue(field, request.customDetails[field.key]),
+          ),
+        )
+        .toList(growable: false);
 
     final vlDed =
         (request.leaveType == LeaveType.vacationLeave ||
@@ -2798,6 +2824,50 @@ class _LeaveRequestPdfFixedEngine {
         },
       ),
     );
+    if (customDetails.isNotEmpty) {
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat(612, 1008, marginAll: 28),
+          build: (_) => [
+            pw.Text(
+              'ADDITIONAL LEAVE INFORMATION',
+              style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text(
+              '${request.leaveTypeLabel} - $fullName',
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+            pw.SizedBox(height: 16),
+            pw.Table(
+              border: pw.TableBorder.all(color: _borderColor, width: 0.6),
+              columnWidths: const {
+                0: pw.FlexColumnWidth(1.1),
+                1: pw.FlexColumnWidth(2.4),
+              },
+              children: [
+                for (final detail in customDetails)
+                  pw.TableRow(
+                    children: [
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(8),
+                        child: pw.Text(
+                          detail.label,
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                        ),
+                      ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(8),
+                        child: pw.Text(detail.value),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
     return doc;
   }
 

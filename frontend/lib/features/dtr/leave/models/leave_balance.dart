@@ -1,6 +1,7 @@
 import 'leave_type.dart';
+import 'leave_entitlement_basis.dart';
 
-/// Running leave credits for one employee and one leave type.
+/// A credit balance or a read-only annual-entitlement summary.
 ///
 /// This supports:
 /// - employee balance display
@@ -13,6 +14,9 @@ class LeaveBalance {
     required this.leaveType,
     this.leaveTypeName = '',
     this.leaveTypeDisplayName,
+    this.recordKind = 'credit_balance',
+    this.entitlementBasis = LeaveEntitlementBasis.accrual,
+    this.entitlementYear,
     this.employeeName,
     this.earnedDays = 0,
     this.usedDays = 0,
@@ -29,11 +33,14 @@ class LeaveBalance {
   final LeaveType leaveType;
   final String leaveTypeName;
   final String? leaveTypeDisplayName;
+  final String recordKind;
+  final String entitlementBasis;
+  final int? entitlementYear;
 
   /// Optional display snapshot for admin tables/cards.
   final String? employeeName;
 
-  /// Total earned credits for this leave type.
+  /// Earned credits for a credit row, or annual limit for an entitlement row.
   final double earnedDays;
 
   /// Approved/consumed leave days already deducted.
@@ -66,6 +73,12 @@ class LeaveBalance {
 
   bool get hasInsufficientBalance => availableDays < 0;
 
+  bool get isCreditBalance => recordKind == 'credit_balance';
+
+  bool get isAnnualEntitlement =>
+      recordKind == 'annual_entitlement' &&
+      entitlementBasis == LeaveEntitlementBasis.annual;
+
   String get effectiveLeaveTypeName {
     final raw = leaveTypeName.trim();
     return raw.isEmpty ? leaveType.value : raw;
@@ -91,6 +104,16 @@ class LeaveBalance {
       leaveTypeDisplayName:
           json['leave_type_display_name']?.toString() ??
           json['leaveTypeDisplayName']?.toString(),
+      recordKind:
+          json['record_kind']?.toString() ??
+          (json['id']?.toString().startsWith('synth-') == true
+              ? 'annual_entitlement'
+              : 'credit_balance'),
+      entitlementBasis: LeaveEntitlementBasis.normalize(
+        json['entitlement_basis']?.toString(),
+        rawLeaveType,
+      ),
+      entitlementYear: _parseInt(json['entitlement_year']),
       employeeName: json['employee_name']?.toString(),
       earnedDays: _parseDouble(json['earned_days']) ?? 0,
       usedDays: _parseDouble(json['used_days']) ?? 0,
@@ -109,6 +132,9 @@ class LeaveBalance {
       'user_id': userId,
       'leave_type': effectiveLeaveTypeName,
       'leave_type_display_name': _trimOrNull(leaveTypeDisplayName),
+      'record_kind': recordKind,
+      'entitlement_basis': entitlementBasis,
+      if (entitlementYear != null) 'entitlement_year': entitlementYear,
       'employee_name': _trimOrNull(employeeName),
       'earned_days': earnedDays,
       'used_days': usedDays,
@@ -126,6 +152,9 @@ class LeaveBalance {
     LeaveType? leaveType,
     String? leaveTypeName,
     String? leaveTypeDisplayName,
+    String? recordKind,
+    String? entitlementBasis,
+    int? entitlementYear,
     String? employeeName,
     double? earnedDays,
     double? usedDays,
@@ -142,6 +171,9 @@ class LeaveBalance {
       leaveType: leaveType ?? this.leaveType,
       leaveTypeName: leaveTypeName ?? this.leaveTypeName,
       leaveTypeDisplayName: leaveTypeDisplayName ?? this.leaveTypeDisplayName,
+      recordKind: recordKind ?? this.recordKind,
+      entitlementBasis: entitlementBasis ?? this.entitlementBasis,
+      entitlementYear: entitlementYear ?? this.entitlementYear,
       employeeName: employeeName ?? this.employeeName,
       earnedDays: earnedDays ?? this.earnedDays,
       usedDays: usedDays ?? this.usedDays,
@@ -177,5 +209,12 @@ class LeaveBalance {
     if (value == null) return null;
     if (value is num) return value.toDouble();
     return double.tryParse(value.toString());
+  }
+
+  static int? _parseInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
   }
 }

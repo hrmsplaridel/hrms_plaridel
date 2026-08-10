@@ -7,8 +7,11 @@ const {
   expectedMinutesForCoverage,
   desiredPosting,
   assignmentForDate,
+  expectedLocatorSlotsForAssignment,
+  locatorCoversExpectedShiftSlots,
   loadAssignments,
   loadEmployees,
+  loadFullLocatorKeys,
 } = require('../src/services/leaveAttendanceDeduction');
 
 const USER_ID = '00000000-0000-0000-0000-000000000101';
@@ -131,6 +134,125 @@ test('partial holiday coverage removes only the covered shift session', () => {
   assert.equal(expectedMinutesForCoverage(assignment, 'whole_day'), 0);
   assert.equal(expectedMinutesForCoverage(assignment, 'am_only'), 240);
   assert.equal(expectedMinutesForCoverage(assignment, 'pm_only'), 240);
+});
+
+test('approved locator coverage follows the expected slots for each shift type', () => {
+  const fullCoverage = {
+    am_in: true,
+    am_out: true,
+    pm_in: true,
+    pm_out: true,
+  };
+  const pmCoverage = {
+    am_in: false,
+    am_out: false,
+    pm_in: true,
+    pm_out: true,
+  };
+  const amCoverage = {
+    am_in: true,
+    am_out: true,
+    pm_in: false,
+    pm_out: false,
+  };
+  const singleSessionCoverage = {
+    am_in: true,
+    am_out: false,
+    pm_in: false,
+    pm_out: true,
+  };
+
+  assert.deepEqual(
+    expectedLocatorSlotsForAssignment({ punchMode: 'full_day' }),
+    ['am_in', 'am_out', 'pm_in', 'pm_out']
+  );
+  assert.equal(
+    locatorCoversExpectedShiftSlots(fullCoverage, { punchMode: 'full_day' }),
+    true
+  );
+  assert.equal(
+    locatorCoversExpectedShiftSlots(pmCoverage, { punchMode: 'full_day' }),
+    false
+  );
+  assert.equal(
+    locatorCoversExpectedShiftSlots(pmCoverage, { punchMode: 'pm_only' }),
+    true
+  );
+  assert.equal(
+    locatorCoversExpectedShiftSlots(pmCoverage, {
+      punchMode: 'auto',
+      startMinutes: 18 * 60,
+      endMinutes: 19 * 60,
+    }),
+    true,
+    'an auto-mode 6 PM to 7 PM shift must require only PM locator slots'
+  );
+  assert.equal(
+    locatorCoversExpectedShiftSlots(amCoverage, { punchMode: 'am_only' }),
+    true
+  );
+  assert.equal(
+    locatorCoversExpectedShiftSlots(singleSessionCoverage, {
+      punchMode: 'single_session',
+    }),
+    true
+  );
+});
+
+test('full locator keys use the assignment effective on the locator date', async () => {
+  const client = {
+    async query(sql) {
+      assert.doesNotMatch(String(sql), /AND am_in = true/i);
+      return {
+        rows: [
+          {
+            employee_id: USER_ID,
+            slip_date: '2026-06-10',
+            am_in: false,
+            am_out: false,
+            pm_in: true,
+            pm_out: true,
+          },
+          {
+            employee_id: USER_ID,
+            slip_date: '2026-06-20',
+            am_in: false,
+            am_out: false,
+            pm_in: true,
+            pm_out: true,
+          },
+        ],
+      };
+    },
+  };
+  const assignments = new Map([
+    [
+      USER_ID,
+      [
+        {
+          effectiveFrom: '2026-06-16',
+          effectiveTo: null,
+          punchMode: 'full_day',
+        },
+        {
+          effectiveFrom: '2026-06-01',
+          effectiveTo: '2026-06-15',
+          punchMode: 'pm_only',
+        },
+      ],
+    ],
+  ]);
+
+  const keys = await loadFullLocatorKeys(
+    client,
+    [USER_ID],
+    '2026-06-01',
+    '2026-06-30',
+    assignments
+  );
+
+  assert.equal(keys.has(`${USER_ID}|2026-06-10`), true);
+  assert.equal(keys.has(`${USER_ID}|2026-06-20`), false);
 });
 
 test('completed-month DTR processing includes closed historical assignments', async () => {
