@@ -110,12 +110,33 @@ function locatorAttachmentRequiredError(locatorType, hasAttachment) {
   return null;
 }
 
+function canModifyLocatorAttachment(status) {
+  return status === 'returned_for_correction';
+}
+
+function validateLocatorAttachmentForReview({
+  locatorType,
+  attachmentPath,
+  attachmentFileExists,
+}) {
+  if (locatorType?.requires_attachment !== true) return null;
+  if (!(attachmentPath || '').toString().trim()) {
+    return 'This locator type requires an attachment. Return the request to the employee for correction.';
+  }
+  if (attachmentFileExists !== true) {
+    return 'The required attachment file is missing. Return the request to the employee for correction.';
+  }
+  return null;
+}
+
 module.exports = {
+  canModifyLocatorAttachment,
   DEFAULT_LOCATOR_WORKING_DAYS,
   LOCATOR_REQUIRED_FIELDS,
   evaluateLocatorWorkingDay,
   locatorAttachmentRequiredError,
   normalizeLocatorWorkingDays,
   parseLocatorDateOnly,
+  validateLocatorAttachmentForReview,
   validateLocatorRequiredFields,
 };

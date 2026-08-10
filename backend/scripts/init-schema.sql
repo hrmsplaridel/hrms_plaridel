@@ -833,6 +833,7 @@ CREATE TABLE IF NOT EXISTS locator_slips (
       'pending',
       'pending_department_head',
       'pending_hr',
+      'returned_for_correction',
       'approved',
       'rejected_by_department_head',
       'rejected_by_hr',

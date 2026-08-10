@@ -6,6 +6,7 @@ const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdminOrHr } = require('../middleware/rbac');
 const {
+  findDepartmentHeadUserId,
   getDepartmentHeadForEmployee,
   getEmployeeDepartment,
   isDepartmentHead,
@@ -13,9 +14,11 @@ const {
 const locatorNotifications = require('../services/locatorNotifications');
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const {
+  canModifyLocatorAttachment,
   evaluateLocatorWorkingDay,
   locatorAttachmentRequiredError,
   parseLocatorDateOnly,
+  validateLocatorAttachmentForReview,
   validateLocatorRequiredFields,
 } = require('../services/locatorFilingRules');
 
@@ -214,14 +217,31 @@ function uploadLocatorAttachmentMw(req, res, next) {
   });
 }
 
-function canModifyAttachment(status) {
-  return [
-    'pending',
-    'pending_department_head',
-    'pending_hr',
-    'rejected_by_department_head',
-    'rejected_by_hr',
-  ].includes(status);
+function locatorAttachmentFileExists(relativePath) {
+  if (!(relativePath || '').toString().trim()) return false;
+  const root = path.resolve(locatorAttachmentDir);
+  const filePath = path.resolve(UPLOAD_DIR, relativePath);
+  if (!filePath.startsWith(`${root}${path.sep}`)) return false;
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch (_) {
+    return false;
+  }
+}
+
+function removeLocatorAttachmentFile(relativePath) {
+  if (!locatorAttachmentFileExists(relativePath)) return;
+  try {
+    fs.unlinkSync(path.resolve(UPLOAD_DIR, relativePath));
+  } catch (_) {}
+}
+
+function locatorReviewAttachmentError(row) {
+  return validateLocatorAttachmentForReview({
+    locatorType: { requires_attachment: row.request_type_requires_attachment === true },
+    attachmentPath: row.attachment_path,
+    attachmentFileExists: locatorAttachmentFileExists(row.attachment_path),
+  });
 }
 
 function toDateOnlyString(value) {
@@ -303,7 +323,18 @@ pool
         attachment_path TEXT,
         attachment_mime_type TEXT,
         attachment_uploaded_at TIMESTAMPTZ,
-        status TEXT NOT NULL DEFAULT 'pending_department_head',
+        status TEXT NOT NULL DEFAULT 'pending_department_head'
+          CONSTRAINT locator_slips_status_check
+          CHECK (status IN (
+            'pending',
+            'pending_department_head',
+            'pending_hr',
+            'returned_for_correction',
+            'approved',
+            'rejected_by_department_head',
+            'rejected_by_hr',
+            'cancelled'
+          )),
         dept_head_reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
         dept_head_reviewed_at TIMESTAMPTZ,
         dept_head_remarks TEXT,
@@ -416,11 +447,40 @@ function mapLocatorRow(row) {
   };
 }
 
+async function fetchLocatorSlipDetails(db, id) {
+  const result = await db.query(
+    `SELECT ls.*,
+            ls.slip_date::text AS slip_date_text,
+            u.full_name AS employee_name,
+            d.name AS department_name,
+            dh.full_name AS dept_head_reviewer_name,
+            hr.full_name AS hr_reviewer_name,
+            lrt.label AS request_type_label,
+            lrt.short_label AS request_type_short_label,
+            lrt.location_label AS request_type_location_label,
+            lrt.location_hint AS request_type_location_hint,
+            lrt.dtr_slot_label AS request_type_dtr_slot_label,
+            lrt.dtr_print_label AS request_type_dtr_print_label,
+            lrt.requires_attachment AS request_type_requires_attachment,
+            lrt.coverage_mode AS request_type_coverage_mode
+     FROM locator_slips ls
+     LEFT JOIN users u ON u.id = ls.employee_id
+     LEFT JOIN departments d ON d.id = ls.department_id
+     LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
+     LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
+     LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
+     WHERE ls.id = $1::uuid`,
+    [id]
+  );
+  return result.rows[0] ? mapLocatorRow(result.rows[0]) : null;
+}
+
 function isValidStatus(status) {
   return [
     'pending',
     'pending_department_head',
     'pending_hr',
+    'returned_for_correction',
     'approved',
     'rejected_by_department_head',
     'rejected_by_hr',
@@ -893,7 +953,12 @@ router.patch('/:id/cancel', protect, async (req, res) => {
       return res.status(404).json({ error: 'Locator slip not found' });
     }
     const status = current.rows[0].status;
-    if (!['pending', 'pending_department_head', 'pending_hr'].includes(status)) {
+    if (![
+      'pending',
+      'pending_department_head',
+      'pending_hr',
+      'returned_for_correction',
+    ].includes(status)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `Cannot cancel locator slip with status '${status}'` });
     }
@@ -942,29 +1007,114 @@ router.patch('/:id/cancel', protect, async (req, res) => {
   }
 });
 
+// PATCH /api/locator-slips/:id/resubmit
+router.patch('/:id/resubmit', protect, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const { id } = req.params;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
+              u.full_name AS employee_name,
+              lrt.requires_attachment AS request_type_requires_attachment
+       FROM locator_slips ls
+       JOIN users u ON u.id = ls.employee_id
+       LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
+       WHERE ls.id = $1::uuid
+         AND ls.employee_id = $2::uuid
+       FOR UPDATE OF ls`,
+      [id, userId]
+    );
+    const row = current.rows[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Locator slip not found' });
+    }
+    if (row.status !== 'returned_for_correction') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Cannot resubmit locator slip with status '${row.status}'`,
+      });
+    }
+    const attachmentError = locatorReviewAttachmentError(row);
+    if (attachmentError) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: attachmentError });
+    }
+
+    let departmentHeadUserId = null;
+    let submitStatus = 'pending_hr';
+    if (!row.hr_reviewer_id && row.department_id) {
+      departmentHeadUserId = await findDepartmentHeadUserId(client, row.department_id);
+      if (departmentHeadUserId) submitStatus = 'pending_department_head';
+    }
+
+    await client.query(
+      `UPDATE locator_slips
+       SET status = $2::text,
+           updated_at = now()
+       WHERE id = $1::uuid`,
+      [id, submitStatus]
+    );
+    await client.query('COMMIT');
+
+    notifySafe(() =>
+      locatorNotifications.notifyAfterSubmit(pool, {
+        slipId: id,
+        status: submitStatus,
+        employeeUserId: userId,
+        employeeName: row.employee_name,
+        slipDate: row.slip_date_text,
+        amIn: row.am_in,
+        amOut: row.am_out,
+        pmIn: row.pm_in,
+        pmOut: row.pm_out,
+        requestType: row.request_type,
+        departmentHeadUserId,
+      })
+    );
+
+    const mapped = await fetchLocatorSlipDetails(pool, id);
+    broadcastLocatorUpdated('resubmitted', mapped || row, { status: submitStatus });
+    res.json(mapped);
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    console.error('[locator PATCH /:id/resubmit]', err);
+    res.status(500).json({ error: 'Failed to resubmit locator slip' });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/locator-slips/:id/attachment - upload/replace attachment.
 router.post('/:id/attachment', protect, uploadLocatorAttachmentMw, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   if (!req.file) return res.status(400).json({ error: 'Attachment is required.' });
-  const isPrivileged = req.user?.role === 'admin' || req.user?.role === 'hr';
+  const relPath = `${LOCATOR_ATTACHMENT_SUBDIR}/${req.file.filename}`;
+  const cleanupNewFile = () => removeLocatorAttachmentFile(relPath);
   try {
     const current = await pool.query(
       `SELECT id, status, employee_id, attachment_path
        FROM locator_slips
-       WHERE id = $1::uuid AND ($2::boolean = true OR employee_id = $3::uuid)`,
-      [req.params.id, isPrivileged, userId]
+       WHERE id = $1::uuid AND employee_id = $2::uuid`,
+      [req.params.id, userId]
     );
     const row = current.rows[0];
-    if (!row) return res.status(404).json({ error: 'Locator slip not found' });
-    if (!canModifyAttachment(row.status)) {
-      return res.status(400).json({ error: 'Attachment cannot be changed for this request status.' });
+    if (!row) {
+      cleanupNewFile();
+      return res.status(404).json({ error: 'Locator slip not found' });
     }
-    const relPath = `${LOCATOR_ATTACHMENT_SUBDIR}/${req.file.filename}`;
-    if (row.attachment_path) {
-      try {
-        fs.unlinkSync(path.join(UPLOAD_DIR, row.attachment_path));
-      } catch (_) {}
+    if (!canModifyLocatorAttachment(row.status)) {
+      cleanupNewFile();
+      return res.status(409).json({
+        error: 'Attachments are locked after submission. They can only be changed after the request is returned for correction.',
+      });
     }
     await pool.query(
       `UPDATE locator_slips
@@ -973,14 +1123,16 @@ router.post('/:id/attachment', protect, uploadLocatorAttachmentMw, async (req, r
            attachment_mime_type = $3,
            attachment_uploaded_at = now(),
            updated_at = now()
-       WHERE id = $4::uuid`,
+      WHERE id = $4::uuid`,
       [req.file.originalname || 'attachment', relPath, req.file.mimetype || null, req.params.id]
     );
+    if (row.attachment_path && row.attachment_path !== relPath) {
+      removeLocatorAttachmentFile(row.attachment_path);
+    }
+    broadcastLocatorUpdated('attachment_replaced', row, { slipId: req.params.id });
     res.json({ attachment_name: req.file.originalname || 'attachment', attachment_path: relPath });
   } catch (err) {
-    try {
-      fs.unlinkSync(path.join(locatorAttachmentDir, req.file.filename));
-    } catch (_) {}
+    cleanupNewFile();
     console.error('[locator POST /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
   }
@@ -990,23 +1142,19 @@ router.post('/:id/attachment', protect, uploadLocatorAttachmentMw, async (req, r
 router.delete('/:id/attachment', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
-  const isPrivileged = req.user?.role === 'admin' || req.user?.role === 'hr';
   try {
     const current = await pool.query(
       `SELECT id, status, employee_id, attachment_path
        FROM locator_slips
-       WHERE id = $1::uuid AND ($2::boolean = true OR employee_id = $3::uuid)`,
-      [req.params.id, isPrivileged, userId]
+       WHERE id = $1::uuid AND employee_id = $2::uuid`,
+      [req.params.id, userId]
     );
     const row = current.rows[0];
     if (!row) return res.status(404).json({ error: 'Locator slip not found' });
-    if (!canModifyAttachment(row.status)) {
-      return res.status(400).json({ error: 'Attachment cannot be changed for this request status.' });
-    }
-    if (row.attachment_path) {
-      try {
-        fs.unlinkSync(path.join(UPLOAD_DIR, row.attachment_path));
-      } catch (_) {}
+    if (!canModifyLocatorAttachment(row.status)) {
+      return res.status(409).json({
+        error: 'Attachments are locked after submission. They can only be changed after the request is returned for correction.',
+      });
     }
     await pool.query(
       `UPDATE locator_slips
@@ -1015,9 +1163,11 @@ router.delete('/:id/attachment', protect, async (req, res) => {
            attachment_mime_type = NULL,
            attachment_uploaded_at = NULL,
            updated_at = now()
-       WHERE id = $1::uuid`,
+      WHERE id = $1::uuid`,
       [req.params.id]
     );
+    removeLocatorAttachmentFile(row.attachment_path);
+    broadcastLocatorUpdated('attachment_removed', row, { slipId: req.params.id });
     res.json({ ok: true });
   } catch (err) {
     console.error('[locator DELETE /:id/attachment]', err);
@@ -1122,11 +1272,18 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       return res.status(403).json({ error: 'You are not a department head' });
     }
     const current = await client.query(
-      `SELECT id, status, employee_id, slip_date::text AS slip_date, request_type
-       FROM locator_slips
-       WHERE id = $1::uuid
-         AND department_id = $2::uuid
-       FOR UPDATE`,
+      `SELECT ls.id,
+              ls.status,
+              ls.employee_id,
+              ls.slip_date::text AS slip_date,
+              ls.request_type,
+              ls.attachment_path,
+              lrt.requires_attachment AS request_type_requires_attachment
+       FROM locator_slips ls
+       LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
+       WHERE ls.id = $1::uuid
+         AND ls.department_id = $2::uuid
+       FOR UPDATE OF ls`,
       [id, deptInfo.departmentId]
     );
     if (current.rows.length === 0) {
@@ -1138,6 +1295,11 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       return res.status(400).json({
         error: `Cannot approve locator slip with status '${current.rows[0].status}'`,
       });
+    }
+    const attachmentError = locatorReviewAttachmentError(current.rows[0]);
+    if (attachmentError) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: attachmentError });
     }
     await client.query(
       `UPDATE locator_slips
@@ -1299,6 +1461,80 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
   }
 });
 
+// PATCH /api/locator-slips/:id/department-head-return
+router.patch('/:id/department-head-return', protect, async (req, res) => {
+  const reviewerId = req.user?.id;
+  if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
+  const { id } = req.params;
+  const remarks = (req.body?.reviewer_remarks || req.body?.reason || '').toString().trim();
+  if (!remarks) {
+    return res.status(400).json({ error: 'Correction remarks are required.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const deptInfo = await isDepartmentHead(client, reviewerId);
+    if (!deptInfo.isDeptHead || !deptInfo.departmentId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'You are not a department head' });
+    }
+    const current = await client.query(
+      `SELECT id, status, employee_id
+       FROM locator_slips
+       WHERE id = $1::uuid
+         AND department_id = $2::uuid
+       FOR UPDATE`,
+      [id, deptInfo.departmentId]
+    );
+    const row = current.rows[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Locator slip not found or not in your department' });
+    }
+    if (row.status !== 'pending_department_head') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Cannot return locator slip with status '${row.status}'`,
+      });
+    }
+
+    await client.query(
+      `UPDATE locator_slips
+       SET status = 'returned_for_correction',
+           dept_head_reviewer_id = $2::uuid,
+           dept_head_reviewed_at = now(),
+           dept_head_remarks = $3::text,
+           updated_at = now()
+       WHERE id = $1::uuid`,
+      [id, reviewerId, remarks]
+    );
+    await client.query('COMMIT');
+
+    notifySafe(() =>
+      locatorNotifications.notifyEmployee(pool, {
+        employeeUserId: row.employee_id,
+        slipId: id,
+        type: 'locator_returned_department_head',
+        title: 'Locator request returned for correction',
+        body: `Your department head returned this locator request. ${remarks}`,
+        metadata: { reviewer_remarks: remarks, returned_by: 'department_head' },
+      })
+    );
+    const mapped = await fetchLocatorSlipDetails(pool, id);
+    broadcastLocatorUpdated('department_head_returned', mapped || row);
+    res.json(mapped);
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    console.error('[locator PATCH /:id/department-head-return]', err);
+    res.status(500).json({ error: 'Failed to return locator slip for correction' });
+  } finally {
+    client.release();
+  }
+});
+
 // GET /api/locator-slips/admin
 router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
   try {
@@ -1345,6 +1581,79 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
   }
 });
 
+// PATCH /api/locator-slips/:id/return-for-correction
+router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req, res) => {
+  const reviewerId = req.user?.id;
+  if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
+  const { id } = req.params;
+  const remarks = (
+    req.body?.reviewer_remarks ||
+    req.body?.reason ||
+    req.body?.hr_remarks ||
+    ''
+  ).toString().trim();
+  if (!remarks) {
+    return res.status(400).json({ error: 'Correction remarks are required.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT id, status, employee_id
+       FROM locator_slips
+       WHERE id = $1::uuid
+       FOR UPDATE`,
+      [id]
+    );
+    const row = current.rows[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Locator slip not found' });
+    }
+    if (!['pending_hr', 'pending'].includes(row.status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Cannot return locator slip with status '${row.status}'`,
+      });
+    }
+
+    await client.query(
+      `UPDATE locator_slips
+       SET status = 'returned_for_correction',
+           hr_reviewer_id = $2::uuid,
+           hr_reviewed_at = now(),
+           hr_remarks = $3::text,
+           updated_at = now()
+       WHERE id = $1::uuid`,
+      [id, reviewerId, remarks]
+    );
+    await client.query('COMMIT');
+
+    notifySafe(() =>
+      locatorNotifications.notifyEmployee(pool, {
+        employeeUserId: row.employee_id,
+        slipId: id,
+        type: 'locator_returned_hr',
+        title: 'Locator request returned for correction',
+        body: `HR returned this locator request. ${remarks}`,
+        metadata: { reviewer_remarks: remarks, returned_by: 'hr' },
+      })
+    );
+    const mapped = await fetchLocatorSlipDetails(pool, id);
+    broadcastLocatorUpdated('hr_returned', mapped || row);
+    res.json(mapped);
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    console.error('[locator PATCH /:id/return-for-correction]', err);
+    res.status(500).json({ error: 'Failed to return locator slip for correction' });
+  } finally {
+    client.release();
+  }
+});
+
 // PATCH /api/locator-slips/:id/approve
 router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
   const reviewerId = req.user?.id;
@@ -1355,10 +1664,15 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
   try {
     await client.query('BEGIN');
     const current = await client.query(
-      `SELECT id, status, employee_id
-       FROM locator_slips
-       WHERE id = $1::uuid
-       FOR UPDATE`,
+      `SELECT ls.id,
+              ls.status,
+              ls.employee_id,
+              ls.attachment_path,
+              lrt.requires_attachment AS request_type_requires_attachment
+       FROM locator_slips ls
+       LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
+       WHERE ls.id = $1::uuid
+       FOR UPDATE OF ls`,
       [id]
     );
     if (current.rows.length === 0) {
@@ -1370,6 +1684,11 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
       return res.status(400).json({
         error: `Cannot approve locator slip with status '${current.rows[0].status}'`,
       });
+    }
+    const attachmentError = locatorReviewAttachmentError(current.rows[0]);
+    if (attachmentError) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: attachmentError });
     }
     await client.query(
       `UPDATE locator_slips
