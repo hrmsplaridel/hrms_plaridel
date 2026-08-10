@@ -2,9 +2,40 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  attachmentReplacementCleanupPath,
   assertRequiredLeaveAttachment,
   canModifyLeaveAttachment,
 } = require('../src/services/leaveAttachmentPolicy');
+
+test('attachment replacement cleans the new file on failure and old file after commit', () => {
+  const oldPath = 'leave_requests/old.pdf';
+  const newPath = 'leave_requests/new.pdf';
+
+  assert.equal(
+    attachmentReplacementCleanupPath({
+      committed: false,
+      oldAttachmentPath: oldPath,
+      newAttachmentPath: newPath,
+    }),
+    newPath
+  );
+  assert.equal(
+    attachmentReplacementCleanupPath({
+      committed: true,
+      oldAttachmentPath: oldPath,
+      newAttachmentPath: newPath,
+    }),
+    oldPath
+  );
+  assert.equal(
+    attachmentReplacementCleanupPath({
+      committed: true,
+      oldAttachmentPath: newPath,
+      newAttachmentPath: newPath,
+    }),
+    null
+  );
+});
 
 test('attachments can be changed only while a leave request is draft or returned', () => {
   assert.equal(canModifyLeaveAttachment('draft'), true);

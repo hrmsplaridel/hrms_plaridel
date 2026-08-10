@@ -48,6 +48,7 @@ const {
   resolveApprovalAllocation,
 } = require('../services/leaveApprovalAllocation');
 const {
+  attachmentReplacementCleanupPath,
   assertRequiredLeaveAttachment,
   canModifyLeaveAttachment,
 } = require('../services/leaveAttachmentPolicy');
@@ -1249,10 +1250,16 @@ function storedLeaveAttachmentFromMemoryFile(file) {
   const safeExt = ['.pdf', '.jpg', '.jpeg', '.png'].includes(ext) ? ext : '.pdf';
   const filename = `lr_${uuidv4()}${safeExt}`;
   const filePath = path.join(leaveAttachmentDir, filename);
-  fs.writeFileSync(filePath, file.buffer);
+  const relPath = `${LEAVE_ATTACHMENT_SUBDIR}/${filename}`;
+  try {
+    fs.writeFileSync(filePath, file.buffer);
+  } catch (err) {
+    cleanupStoredLeaveAttachment(relPath);
+    throw err;
+  }
   return {
     originalName: file.originalname || filename,
-    relPath: `${LEAVE_ATTACHMENT_SUBDIR}/${filename}`,
+    relPath,
     mimeType: file.mimetype || null,
   };
 }
@@ -3369,7 +3376,7 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
          AND ($4::date IS NULL OR lr.start_date >= $4)
          AND ($5::date IS NULL OR lr.start_date <= $5)
          AND ($6::timestamptz IS NULL OR lr.created_at >= $6)
-         AND ($7::timestamptz IS NULL OR lr.created_at <= $7)
+         AND ($7::date IS NULL OR lr.created_at < ($7::date + interval '1 day'))
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
        ${safeLimit ? 'LIMIT ' + safeLimit : ''}`,
       [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo]
@@ -3510,7 +3517,7 @@ router.get('/department-head', protect, async (req, res) => {
           AND ($5::date IS NULL OR lr.start_date >= $5)
           AND ($6::date IS NULL OR lr.start_date <= $6)
           AND ($7::timestamptz IS NULL OR lr.created_at >= $7)
-          AND ($8::timestamptz IS NULL OR lr.created_at <= $8)
+          AND ($8::date IS NULL OR lr.created_at < ($8::date + interval '1 day'))
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
        LIMIT ${limit}`,
       [
@@ -4849,12 +4856,17 @@ router.put('/balances/:userId', protect, requireAdminOrHr, (_req, res) => {
 router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res) => {
   const userId = req.user?.id;
   const role = req.user?.role;
-  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const newRelPath = req.file?.filename
+    ? `${LEAVE_ATTACHMENT_SUBDIR}/${req.file.filename}`
+    : null;
+  if (!userId) {
+    cleanupStoredLeaveAttachment(newRelPath);
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
   const { id } = req.params;
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded. Allowed: PDF, JPG, JPEG, PNG (max 10MB).' });
   }
-  const newRelPath = `${LEAVE_ATTACHMENT_SUBDIR}/${req.file.filename}`;
   let client = null;
   let committed = false;
   let oldAttachmentPath = null;
@@ -4871,13 +4883,11 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
     );
     if (existing.rows.length === 0) {
       await client.query('ROLLBACK');
-      cleanupStoredLeaveAttachment(newRelPath);
       return res.status(404).json({ error: 'Leave request not found' });
     }
     const row = existing.rows[0];
     if (!canModifyLeaveAttachment(row.status)) {
       await client.query('ROLLBACK');
-      cleanupStoredLeaveAttachment(newRelPath);
       return res.status(409).json({
         error: 'Attachment is locked after submission. It can only be changed while the request is a draft or has been returned.',
       });
@@ -4900,9 +4910,6 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
     );
     await client.query('COMMIT');
     committed = true;
-    if (oldAttachmentPath && oldAttachmentPath !== newRelPath) {
-      cleanupStoredLeaveAttachment(oldAttachmentPath);
-    }
     const mapped = mapLeaveRowToApi(out.rows[0]);
     broadcastLeaveUpdated('attachment_uploaded', mapped);
     res.json(mapped);
@@ -4910,10 +4917,16 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
     if (client) {
       try { await client.query('ROLLBACK'); } catch (_) { }
     }
-    if (!committed) cleanupStoredLeaveAttachment(newRelPath);
     console.error('[leave POST /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
   } finally {
+    cleanupStoredLeaveAttachment(
+      attachmentReplacementCleanupPath({
+        committed,
+        oldAttachmentPath,
+        newAttachmentPath: newRelPath,
+      })
+    );
     if (client) client.release();
   }
 });
