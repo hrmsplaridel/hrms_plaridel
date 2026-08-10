@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
@@ -45,18 +46,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   static const int _maxAttachmentBytes = 10 * 1024 * 1024;
   static const int _maternityMinimumNoticeDays = 30;
-  static const _annualQuotaTypes = {
-    'specialPrivilegeLeave',
-    'paternityLeave',
-    'maternityLeave',
-    'soloParentLeave',
-    'tenDayVawcLeave',
-    'specialEmergencyCalamityLeave',
-    'specialLeaveBenefitsForWomen',
-    'rehabilitationPrivilege',
-    'studyLeave',
-  };
-
   late LeaveType _leaveType;
   late String _leaveTypeName;
   List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
@@ -315,6 +304,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     }
     final def = _selectedLeaveTypeDefinition;
     return def?.maxDays ?? _leaveType.maxDays?.toDouble();
+  }
+
+  String get _selectedEntitlementBasis {
+    return _selectedLeaveTypeDefinition?.entitlementBasis ??
+        LeaveEntitlementBasis.forLeaveType(_leaveTypeName);
   }
 
   int? get _selectedMinimumAdvanceDays {
@@ -1019,14 +1013,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   double? _annualHardLimitForSelectedLeave() {
-    switch (_leaveTypeName) {
-      case 'soloParentLeave':
-        return 7;
-      case 'tenDayVawcLeave':
-        return 10;
-      default:
-        return null;
-    }
+    if (_selectedEntitlementBasis != LeaveEntitlementBasis.annual) return null;
+    return _selectedMaxDays;
   }
 
   bool _validateAnnualQuotaLimit() {
@@ -1630,13 +1618,22 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Widget _buildCreditPolicyPanel() {
     final policy = _selectedCreditPolicy;
-    final isAnnualQuota = _annualQuotaTypes.contains(_leaveTypeName);
+    final entitlementBasis = _selectedEntitlementBasis;
 
     IconData icon = Icons.info_outline_rounded;
     String title = 'Credit handling';
     String message;
 
-    if (isAnnualQuota) {
+    if (entitlementBasis == LeaveEntitlementBasis.compliance) {
+      final requiredDays = _selectedMaxDays;
+      icon = Icons.fact_check_outlined;
+      title = 'Mandatory/Forced Leave Compliance';
+      message = requiredDays == null
+          ? 'This is a compliance requirement, not a separate leave credit balance. Approved days are charged against Vacation Leave credits.'
+          : 'Annual compliance requirement: ${_formatDays(requiredDays)} working day(s). '
+                'This is not a separate leave credit balance. Approved days are charged against Vacation Leave credits.';
+    } else if (entitlementBasis == LeaveEntitlementBasis.annual &&
+        policy == 'none') {
       final year = _startDate?.year ?? DateTime.now().year;
       final balance = _balanceForBucket(_leaveTypeName);
       final entitlement = balance?.earnedDays ?? _selectedMaxDays;
@@ -1660,11 +1657,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                 'Pending usage: ${_formatDays(pending)}. '
                 'Remaining entitlement: ${_formatDays(remaining)} day(s). '
                 'This leave does not deduct VL or SL credits.';
-    } else if (policy == 'none') {
-      icon = Icons.remove_done_outlined;
-      message =
-          'No leave credits required. This request will not deduct Vacation or Sick Leave credits.';
-    } else {
+    } else if (policy != 'none') {
       final bucket = _selectedCreditBucket;
       final balance = _balanceForBucket(bucket);
       final bucketLabel = switch (bucket) {
@@ -1676,6 +1669,28 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       message = balance == null
           ? 'Deducts from $bucketLabel credits. No balance row is available yet.'
           : 'Deducts from $bucketLabel credits. Available: ${balance.availableDays.toStringAsFixed(1)} day(s), pending: ${balance.pendingDays.toStringAsFixed(1)}.';
+    } else if (entitlementBasis == LeaveEntitlementBasis.perEvent) {
+      final maximum = _selectedMaxDays;
+      icon = Icons.event_note_outlined;
+      title = 'Event-based entitlement';
+      message = maximum == null
+          ? 'Available only for a qualifying event, subject to its requirements and approval. This is not a leave credit balance and does not deduct VL or SL credits.'
+          : 'Maximum: up to ${_formatDays(maximum)} working day(s) per qualifying event, subject to its requirements and approval. '
+                'This is not a leave credit balance and does not deduct VL or SL credits.';
+    } else if (entitlementBasis == LeaveEntitlementBasis.perRequest) {
+      final maximum = _selectedMaxDays;
+      icon = Icons.description_outlined;
+      title = 'Request-based entitlement';
+      message = maximum == null
+          ? 'Eligibility and approval are evaluated for each request. This is not a leave credit balance and does not deduct VL or SL credits.'
+          : 'Maximum: up to ${_formatDays(maximum)} working day(s) per approved request. '
+                'This is not a leave credit balance and does not deduct VL or SL credits.';
+    } else if (policy == 'none') {
+      icon = Icons.remove_done_outlined;
+      message =
+          'No leave credits required. This request will not deduct Vacation or Sick Leave credits.';
+    } else {
+      message = 'Leave policy information is not available.';
     }
 
     return Container(

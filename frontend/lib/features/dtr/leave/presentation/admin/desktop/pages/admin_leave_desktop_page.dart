@@ -2052,6 +2052,11 @@ class _ManualBalanceAdjustmentDialog extends StatefulWidget {
 
 class _ManualBalanceAdjustmentDialogState
     extends State<_ManualBalanceAdjustmentDialog> {
+  static const _adjustableCreditTypes = [
+    LeaveType.vacationLeave,
+    LeaveType.sickLeave,
+  ];
+
   final _formKey = GlobalKey<FormState>();
   final _adjustmentController = TextEditingController();
   final _remarksController = TextEditingController();
@@ -2513,7 +2518,7 @@ class _ManualBalanceAdjustmentDialogState
                   context,
                   'Leave type',
                 ).copyWith(prefixIcon: const Icon(Icons.event_note_outlined)),
-                items: LeaveType.values
+                items: _adjustableCreditTypes
                     .map(
                       (t) => DropdownMenuItem<LeaveType>(
                         value: t,

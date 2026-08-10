@@ -502,19 +502,10 @@ class _LeaveDaysPanel extends StatelessWidget {
   final List<LeaveBalance> balances;
   final bool loading;
 
-  static const _annualEntitlementTypes = {
-    'specialPrivilegeLeave',
-    'mandatoryForcedLeave',
-    'soloParentLeave',
-    'specialEmergencyCalamityLeave',
-  };
-
   @override
   Widget build(BuildContext context) {
     final entitlementBalances = balances
-        .where(
-          (b) => _annualEntitlementTypes.contains(b.effectiveLeaveTypeName),
-        )
+        .where((balance) => balance.isAnnualEntitlement)
         .toList();
     if (!loading && entitlementBalances.isEmpty) {
       return const SizedBox.shrink();

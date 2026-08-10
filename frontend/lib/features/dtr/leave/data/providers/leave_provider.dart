@@ -6,11 +6,16 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dar
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
-/// All balances returned by the backend are now shown.
-/// Annual-quota types (SPL, MFL, Paternity, etc.) are computed server-side.
+/// Credit balances and explicitly marked annual-entitlement summaries are shown.
+/// Event, request, and compliance limits are not balance rows.
 List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
-  // Only exclude `others` and custom admin types with no meaningful quota.
-  return raw.where((b) => b.effectiveLeaveTypeName != 'others').toList();
+  return raw
+      .where(
+        (balance) =>
+            balance.effectiveLeaveTypeName != 'others' &&
+            (balance.isCreditBalance || balance.isAnnualEntitlement),
+      )
+      .toList();
 }
 
 class _LeaveCacheEntry<T> {

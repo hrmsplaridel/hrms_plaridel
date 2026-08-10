@@ -1,3 +1,5 @@
+import 'leave_entitlement_basis.dart';
+
 enum LeaveCustomFieldType { text, longText, date, number, boolean, select }
 
 extension LeaveCustomFieldTypeValue on LeaveCustomFieldType {
@@ -112,6 +114,7 @@ class LeaveTypeDefinition {
     this.minimumAdvanceDays,
     this.affectsDtrNormally = true,
     this.balanceLedgerType = 'none',
+    this.entitlementBasis = LeaveEntitlementBasis.perRequest,
     this.sexEligibility = 'any',
     this.employeeDetailSchema = const [],
   });
@@ -131,6 +134,7 @@ class LeaveTypeDefinition {
   final int? minimumAdvanceDays;
   final bool affectsDtrNormally;
   final String balanceLedgerType;
+  final String entitlementBasis;
   final String sexEligibility;
   final List<LeaveCustomFieldDefinition> employeeDetailSchema;
 
@@ -172,6 +176,11 @@ class LeaveTypeDefinition {
           json['balance_ledger_type']?.toString() ??
           json['balanceLedgerType']?.toString() ??
           'none',
+      entitlementBasis: LeaveEntitlementBasis.normalize(
+        json['entitlement_basis']?.toString() ??
+            json['entitlementBasis']?.toString(),
+        json['name']?.toString() ?? '',
+      ),
       sexEligibility: normalizeLeaveTypeSexEligibility(
         json['sex_eligibility']?.toString() ??
             json['sexEligibility']?.toString(),
@@ -198,6 +207,7 @@ class LeaveTypeDefinition {
       'minimum_advance_days': minimumAdvanceDays,
       'affects_dtr_normally': affectsDtrNormally,
       'balance_ledger_type': balanceLedgerType,
+      'entitlement_basis': entitlementBasis,
       'sex_eligibility': sexEligibility,
       'employee_detail_schema': employeeDetailSchema
           .map((field) => field.toJson())
@@ -221,6 +231,7 @@ class LeaveTypeDefinition {
     int? minimumAdvanceDays,
     bool? affectsDtrNormally,
     String? balanceLedgerType,
+    String? entitlementBasis,
     String? sexEligibility,
     List<LeaveCustomFieldDefinition>? employeeDetailSchema,
   }) {
@@ -241,6 +252,7 @@ class LeaveTypeDefinition {
       minimumAdvanceDays: minimumAdvanceDays ?? this.minimumAdvanceDays,
       affectsDtrNormally: affectsDtrNormally ?? this.affectsDtrNormally,
       balanceLedgerType: balanceLedgerType ?? this.balanceLedgerType,
+      entitlementBasis: entitlementBasis ?? this.entitlementBasis,
       sexEligibility: sexEligibility ?? this.sexEligibility,
       employeeDetailSchema: employeeDetailSchema ?? this.employeeDetailSchema,
     );

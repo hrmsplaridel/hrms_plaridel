@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 
 class LeaveTypeManagementScreen extends StatefulWidget {
@@ -38,6 +39,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   bool _requiresAttachment = false;
   bool _affectsDtrNormally = true;
   String _balanceLedgerType = 'none';
+  String _entitlementBasis = LeaveEntitlementBasis.perRequest;
   String _sexEligibility = 'any';
   List<LeaveCustomFieldDefinition> _customFields = const [];
   List<int> _customFieldUiIds = const [];
@@ -65,6 +67,13 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     'any': 'Both sexes',
     'female': 'Female only',
     'male': 'Male only',
+  };
+
+  static const _entitlementBasisTypes = <String, String>{
+    LeaveEntitlementBasis.perRequest: 'Per request',
+    LeaveEntitlementBasis.annual: 'Annual entitlement',
+    LeaveEntitlementBasis.perEvent: 'Per qualifying event',
+    LeaveEntitlementBasis.compliance: 'Compliance requirement',
   };
 
   @override
@@ -149,6 +158,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _balanceLedgerType = _ledgerTypes.containsKey(item.balanceLedgerType)
         ? item.balanceLedgerType
         : 'none';
+    _entitlementBasis = item.entitlementBasis;
     _sexEligibility = _sexEligibilityTypes.containsKey(item.sexEligibility)
         ? item.sexEligibility
         : 'any';
@@ -195,6 +205,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _requiresAttachment = false;
       _affectsDtrNormally = true;
       _balanceLedgerType = 'none';
+      _entitlementBasis = LeaveEntitlementBasis.perRequest;
       _sexEligibility = 'any';
       _customFields = const [];
       _customFieldUiIds = const [];
@@ -336,6 +347,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       'minimum_advance_days': _intOrNull(_minimumAdvanceDaysController.text),
       'affects_dtr_normally': _affectsDtrNormally,
       'balance_ledger_type': _balanceLedgerType,
+      'entitlement_basis': _entitlementBasis,
       'sex_eligibility': _sexEligibility,
       'employee_detail_schema': _customFields
           .map((field) => field.toJson())
@@ -705,6 +717,45 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     validator: (v) =>
                         v == null || v.trim().isEmpty ? 'Required' : null,
                   ),
+                  const SizedBox(height: 12),
+                  if (systemLocked)
+                    _ReadOnlyValue(
+                      label: 'Entitlement basis',
+                      value: LeaveEntitlementBasis.label(
+                        _selected?.entitlementBasis ?? _entitlementBasis,
+                      ),
+                      helperText:
+                          'Defines whether the limit is accrued, annual, event-based, request-based, or compliance-based.',
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      key: ValueKey(_entitlementBasis),
+                      initialValue: _entitlementBasis,
+                      isExpanded: true,
+                      dropdownColor: AppTheme.dashPanelOf(context),
+                      style: AppTheme.dashFieldTextStyle(context),
+                      decoration: _inputDecoration(
+                        'Entitlement basis',
+                        helperText: 'Defines how Max working days is applied.',
+                      ),
+                      items: _entitlementBasisTypes.entries
+                          .map(
+                            (entry) => DropdownMenuItem<String>(
+                              value: entry.key,
+                              child: Text(
+                                entry.value,
+                                style: AppTheme.dashFieldTextStyle(context),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _saving
+                          ? null
+                          : (value) => setState(
+                              () => _entitlementBasis =
+                                  value ?? LeaveEntitlementBasis.perRequest,
+                            ),
+                    ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _nameController,

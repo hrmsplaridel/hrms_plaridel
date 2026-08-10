@@ -17,22 +17,13 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
   final VoidCallback onBalanceHistory;
 
   static const _creditTypes = {'vacationLeave', 'sickLeave'};
-  static const _annualEntitlementTypes = {
-    'specialPrivilegeLeave',
-    'mandatoryForcedLeave',
-    'soloParentLeave',
-    'specialEmergencyCalamityLeave',
-  };
-
   @override
   Widget build(BuildContext context) {
     final creditBalances = balances
         .where((b) => _creditTypes.contains(b.effectiveLeaveTypeName))
         .toList();
     final dayBalances = balances
-        .where(
-          (b) => _annualEntitlementTypes.contains(b.effectiveLeaveTypeName),
-        )
+        .where((balance) => balance.isAnnualEntitlement)
         .toList();
 
     return Column(

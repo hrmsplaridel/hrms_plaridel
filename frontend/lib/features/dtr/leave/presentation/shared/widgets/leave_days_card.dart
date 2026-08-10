@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 
-/// A compact card that shows remaining days for an annual-quota leave type.
+/// A compact card that shows remaining days for a genuine annual entitlement.
 /// Distinct from [LeaveBalanceCard] which is for accrual-based credits.
 class LeaveDaysCard extends StatelessWidget {
   const LeaveDaysCard({super.key, required this.balance});
@@ -18,13 +18,7 @@ class LeaveDaysCard extends StatelessWidget {
     final dark = AppTheme.dashIsDark(context);
     final remaining = balance.availableDays;
     final total = balance.earnedDays;
-    final isMandatory =
-        balance.effectiveLeaveTypeName == 'mandatoryForcedLeave';
-    final isCalamity =
-        balance.effectiveLeaveTypeName == 'specialEmergencyCalamityLeave';
-    final displayedRemaining = isMandatory
-        ? (total - balance.usedDays).clamp(0, total).toDouble()
-        : remaining;
+    final displayedRemaining = remaining.clamp(0, total).toDouble();
 
     // Color the remaining chip: green when plenty left, amber when low, red when zero
     Color accentColor;
@@ -52,9 +46,7 @@ class LeaveDaysCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isMandatory
-                      ? 'Mandatory/Forced Leave Compliance'
-                      : balance.leaveTypeLabel,
+                  balance.leaveTypeLabel,
                   style: TextStyle(
                     color: AppTheme.dashTextPrimaryOf(context),
                     fontWeight: FontWeight.w700,
@@ -65,16 +57,14 @@ class LeaveDaysCard extends StatelessWidget {
                 Row(
                   children: [
                     _Pip(
-                      label: isMandatory
-                          ? 'Required'
-                          : (isCalamity ? 'Maximum' : 'Entitlement'),
+                      label: 'Entitlement',
                       value: _fmt(total),
                       context: context,
                     ),
                     const SizedBox(width: 8),
                     if (balance.usedDays > 0) ...[
                       _Pip(
-                        label: isMandatory ? 'Taken' : 'Used',
+                        label: 'Used',
                         value: _fmt(balance.usedDays),
                         context: context,
                       ),
@@ -82,26 +72,16 @@ class LeaveDaysCard extends StatelessWidget {
                     ],
                     if (balance.pendingDays > 0)
                       _Pip(
-                        label: isMandatory ? 'Scheduled' : 'Pending',
+                        label: 'Pending',
                         value: _fmt(balance.pendingDays),
                         context: context,
                       ),
                   ],
                 ),
-                if (isMandatory) ...[
+                if (balance.entitlementYear != null) ...[
                   const SizedBox(height: 5),
                   Text(
-                    'Charged against Vacation Leave credits.',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 10,
-                    ),
-                  ),
-                ],
-                if (isCalamity) ...[
-                  const SizedBox(height: 5),
-                  Text(
-                    'Subject to a qualifying calamity, supporting documents, and approval.',
+                    'Calendar year ${balance.entitlementYear}',
                     style: TextStyle(
                       color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 10,
@@ -124,9 +104,7 @@ class LeaveDaysCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text(
-                  isCalamity
-                      ? 'Up to ${_fmt(total)}'
-                      : _fmt(displayedRemaining),
+                  _fmt(displayedRemaining),
                   style: TextStyle(
                     color: accentColor,
                     fontSize: 22,
@@ -136,13 +114,7 @@ class LeaveDaysCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  isMandatory
-                      ? (displayedRemaining == 1
-                            ? 'day required'
-                            : 'days required')
-                      : isCalamity
-                      ? (total == 1 ? 'day' : 'days')
-                      : (remaining == 1 ? 'day available' : 'days available'),
+                  displayedRemaining == 1 ? 'day available' : 'days available',
                   style: TextStyle(
                     color: accentColor,
                     fontSize: 10,
