@@ -7,6 +7,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_annual_entitlement_preview.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
@@ -50,9 +51,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   late String _leaveTypeName;
   List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
   List<LeaveBalance> _creditBalances = const [];
-  List<LeaveRequest> _creditRequests = const [];
   bool _loadingLeaveTypes = false;
-  bool _loadingCreditContext = false;
   LeaveLocationOption? _locationOption;
   SickLeaveNature? _sickLeaveNature;
   MaternityDeliveryType? _maternityDeliveryType;
@@ -78,6 +77,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   bool _workingDaysLoading = false;
   String? _workingDaysHelperText;
   int _workingDaysRequestSerial = 0;
+  LeaveAnnualEntitlementPreview? _annualEntitlementPreview;
   Map<String, dynamic> _customDetailValues = {};
 
   late final TextEditingController _customLeaveTypeController;
@@ -150,9 +150,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _loadLeaveTypes();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadCreditContext();
-      if (_startDate != null &&
-          _endDate != null &&
-          initial?.workingDaysApplied == null) {
+      if (_startDate != null && _endDate != null) {
         _syncWorkingDaysFromDates();
       }
     });
@@ -425,6 +423,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           _selectLeaveTypeDefinition(fallback, resetDetails: false);
         }
       });
+      if (_startDate != null && _endDate != null) {
+        _syncWorkingDaysFromDates();
+      }
     } catch (_) {
       if (mounted) setState(() => _loadingLeaveTypes = false);
     }
@@ -433,22 +434,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   Future<void> _loadCreditContext() async {
     final userId = context.read<AuthProvider>().user?.id;
     if (userId == null || userId.isEmpty) return;
-    setState(() => _loadingCreditContext = true);
     try {
       final repository = context.read<LeaveProvider>().repository;
-      final balancesFuture = repository.getBalancesForUser(userId);
-      final requestsFuture = repository.listMyRequests(userId, limit: 500);
-      final balances = await balancesFuture;
-      final requests = await requestsFuture;
+      final balances = await repository.getBalancesForUser(userId);
       if (!mounted) return;
       setState(() {
         _creditBalances = balances;
-        _creditRequests = requests;
-        _loadingCreditContext = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => _loadingCreditContext = false);
-    }
+    } catch (_) {}
   }
 
   void _selectLeaveTypeDefinition(
@@ -535,65 +528,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       if (balance.effectiveLeaveTypeName == bucket) return balance;
     }
     return null;
-  }
-
-  double _annualUsageForYear(
-    String leaveTypeName,
-    int year, {
-    required bool pending,
-  }) {
-    final currentId = (_savedRequest ?? widget.initialRequest)?.id;
-    return _creditRequests
-        .where((request) {
-          if (request.effectiveLeaveTypeName != leaveTypeName) {
-            return false;
-          }
-          if (currentId != null &&
-              currentId.isNotEmpty &&
-              request.id == currentId) {
-            return false;
-          }
-          final matchesStatus = pending
-              ? request.status.isPending
-              : request.status == LeaveRequestStatus.approved;
-          if (!matchesStatus) {
-            return false;
-          }
-          final start = request.startDate;
-          final end = request.endDate;
-          if (start == null || end == null) return false;
-          return start.year <= year && end.year >= year;
-        })
-        .fold<double>(0, (total, request) {
-          final days = _workingDaysInYear(
-            request.startDate,
-            request.endDate,
-            year,
-          );
-          return total + (days > 0 ? days : request.workingDaysApplied ?? 0);
-        });
-  }
-
-  double _workingDaysInYear(DateTime? start, DateTime? end, int year) {
-    if (start == null || end == null) return 0;
-    var d = DateTime(
-      start.year < year ? year : start.year,
-      start.year < year ? 1 : start.month,
-      start.year < year ? 1 : start.day,
-    );
-    final last = DateTime(
-      end.year > year ? year : end.year,
-      end.year > year ? 12 : end.month,
-      end.year > year ? 31 : end.day,
-    );
-    var count = 0;
-    while (!d.isAfter(last)) {
-      if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
-        count += 1;
-      }
-      d = d.add(const Duration(days: 1));
-    }
-    return count.toDouble();
   }
 
   String _formatDays(double days) {
@@ -698,6 +632,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _workingDaysLoading = false;
         _workingDaysHelperText = 'Select dates to auto-compute';
         _workingDaysController.clear();
+        _annualEntitlementPreview = null;
       });
       return;
     }
@@ -707,6 +642,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _workingDaysLoading = true;
       _workingDaysHelperText = 'Computing from assigned shift and holidays...';
       _workingDaysController.text = fallback?.toString() ?? '';
+      _annualEntitlementPreview = null;
     });
 
     try {
@@ -715,17 +651,27 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         queryParameters: {
           'start_date': _dateOnly(start),
           'end_date': _dateOnly(end),
+          'leave_type': _leaveTypeName,
         },
       );
       final data = res.data ?? const <String, dynamic>{};
       final raw = data['working_days_applied'] ?? data['workingDaysApplied'];
       final days = raw is num ? raw.toDouble() : double.tryParse('$raw');
+      final annualRaw = data['annual_entitlement'];
+      final annualPreview = annualRaw is Map
+          ? LeaveAnnualEntitlementPreview.fromJson(
+              Map<String, dynamic>.from(annualRaw),
+            )
+          : null;
       if (!mounted || serial != _workingDaysRequestSerial) return;
       if (days == null) {
         setState(() {
           _workingDaysLoading = false;
           _workingDaysHelperText =
-              'Could not compute from shift; using Mon-Fri fallback';
+              _selectedEntitlementBasis == LeaveEntitlementBasis.annual
+              ? 'Could not verify shift-aware annual entitlement'
+              : 'Could not compute from shift; using Mon-Fri fallback';
+          _annualEntitlementPreview = null;
         });
         return;
       }
@@ -741,13 +687,17 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _workingDaysLoading = false;
         _workingDaysController.text = _formatWorkingDays(days);
         _workingDaysHelperText = '$helper: ${_formatWorkingDays(days)} day(s)';
+        _annualEntitlementPreview = annualPreview;
       });
     } catch (_) {
       if (!mounted || serial != _workingDaysRequestSerial) return;
       setState(() {
         _workingDaysLoading = false;
         _workingDaysHelperText =
-            'Server estimate unavailable; using Mon-Fri fallback';
+            _selectedEntitlementBasis == LeaveEntitlementBasis.annual
+            ? 'Server estimate unavailable; annual entitlement cannot be verified'
+            : 'Server estimate unavailable; using Mon-Fri fallback';
+        _annualEntitlementPreview = null;
       });
     }
   }
@@ -1012,39 +962,26 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return true;
   }
 
-  double? _annualHardLimitForSelectedLeave() {
-    if (_selectedEntitlementBasis != LeaveEntitlementBasis.annual) return null;
-    return _selectedMaxDays;
-  }
-
   bool _validateAnnualQuotaLimit() {
-    final limit = _annualHardLimitForSelectedLeave();
-    final start = _startDate;
-    final end = _endDate;
-    if (limit == null || start == null || end == null) return true;
-
-    for (var year = start.year; year <= end.year; year++) {
-      var requested = _workingDaysInYear(start, end, year);
-      if (requested <= 0 && start.year == year) {
-        requested = _currentWorkingDaysApplied ?? 0;
-      }
-      if (requested <= 0) continue;
-      final approved = _annualUsageForYear(
-        _leaveTypeName,
-        year,
-        pending: false,
-      );
-      final pending = _annualUsageForYear(_leaveTypeName, year, pending: true);
-      final remaining = (limit - approved - pending).clamp(0, limit).toDouble();
-      if (approved + pending + requested > limit + 0.0001) {
-        _showMessage(
-          '$_selectedLeaveTypeLabel is limited to ${_formatDays(limit)} day(s) per calendar year. '
-          'You only have ${_formatDays(remaining)} day(s) remaining for $year.',
-        );
-        return false;
-      }
+    if (_selectedEntitlementBasis != LeaveEntitlementBasis.annual ||
+        _selectedMaxDays == null) {
+      return true;
     }
-    return true;
+
+    final preview = _annualEntitlementPreview;
+    if (preview == null || preview.leaveType != _leaveTypeName) {
+      _showMessage(
+        'Annual entitlement could not be verified from your assigned shift and holidays. Please reselect the dates and try again.',
+      );
+      return false;
+    }
+    final rejectedYear = preview.firstRejectedYear;
+    if (rejectedYear == null) return true;
+    _showMessage(
+      rejectedYear.errorMessage ??
+          '$_selectedLeaveTypeLabel exceeds the remaining annual entitlement for ${rejectedYear.year}.',
+    );
+    return false;
   }
 
   String _maternityExpectedDeliveryHelper() {
@@ -1383,7 +1320,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                         _leaveType,
                                       );
                                     }
+                                    _annualEntitlementPreview = null;
                                   });
+                                  if (_startDate != null && _endDate != null) {
+                                    _syncWorkingDaysFromDates();
+                                  }
                                 }
                               },
                             ),
@@ -1634,29 +1575,17 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                 'This is not a separate leave credit balance. Approved days are charged against Vacation Leave credits.';
     } else if (entitlementBasis == LeaveEntitlementBasis.annual &&
         policy == 'none') {
-      final year = _startDate?.year ?? DateTime.now().year;
-      final balance = _balanceForBucket(_leaveTypeName);
-      final entitlement = balance?.earnedDays ?? _selectedMaxDays;
-      final approved = _annualUsageForYear(
-        _leaveTypeName,
-        year,
-        pending: false,
-      );
-      final pending = _annualUsageForYear(_leaveTypeName, year, pending: true);
-      final remaining = entitlement == null
-          ? null
-          : (entitlement - approved - pending).clamp(0, entitlement).toDouble();
+      final preview = _annualEntitlementPreview;
       icon = Icons.event_available_outlined;
       title = _selectedLeaveTypeLabel;
-      message = _loadingCreditContext
+      message = _workingDaysLoading
           ? 'Checking yearly entitlement...'
-          : entitlement == null || remaining == null
-          ? 'No annual entitlement information is available for $year.'
-          : 'Annual entitlement: ${_formatDays(entitlement)} day(s) for $year. '
-                'Approved usage: ${_formatDays(approved)}. '
-                'Pending usage: ${_formatDays(pending)}. '
-                'Remaining entitlement: ${_formatDays(remaining)} day(s). '
-                'This leave does not deduct VL or SL credits.';
+          : _startDate == null || _endDate == null
+          ? 'Select leave dates to check your shift-aware annual entitlement.'
+          : preview == null || preview.leaveType != _leaveTypeName
+          ? 'Annual entitlement information is temporarily unavailable. Reselect the dates before submitting.'
+          : '${preview.years.map((year) => '${year.year}: ${_formatDays(year.limitDays)} entitled, ${_formatDays(year.approvedDays)} approved, ${_formatDays(year.pendingDays)} pending, ${_formatDays(year.requestedDays)} in this request, ${_formatDays(year.remainingAfterRequest)} remaining after this request.').join(' ')} '
+                'Calculated from your assigned shift and holidays. This leave does not deduct VL or SL credits.';
     } else if (policy != 'none') {
       final bucket = _selectedCreditBucket;
       final balance = _balanceForBucket(bucket);
