@@ -77,6 +77,8 @@ const {
 } = require('../services/leaveYearEndForcedLeave');
 const {
   ENTITLEMENT_BASES,
+  buildAnnualEntitlementYearSummary,
+  countedDatesForCalendarYear,
   defaultEntitlementBasisForLeaveType,
   normalizeEntitlementBasis,
 } = require('../services/leaveEntitlementPolicy');
@@ -679,12 +681,27 @@ async function workingDaysWithinYear(client, userId, startStr, endStr, year) {
   return result.days ?? 0;
 }
 
-async function assertAnnualQuotaLeaveLimit(
+function annualQuotaLimitErrorMessage(label, yearSummary) {
+  return (
+    `${label} is limited to ${formatDayCount(yearSummary.limit_days)} days per calendar year. ` +
+    `You only have ${formatDayCount(yearSummary.remaining_before_request)} day(s) remaining for ${yearSummary.year}; ` +
+    `this request needs ${formatDayCount(yearSummary.requested_days)} day(s).`
+  );
+}
+
+async function computeAnnualQuotaLeavePreview(
   client,
-  { userId, leaveTypeName, startStr, endStr, excludeId = null }
+  {
+    userId,
+    leaveTypeName,
+    startStr,
+    endStr,
+    excludeId = null,
+    requestedCountedDates = null,
+  }
 ) {
   const leaveTypeKey = String(leaveTypeName || '').trim();
-  if (!client || !userId || !startStr || !endStr) return;
+  if (!client || !userId || !leaveTypeKey || !startStr || !endStr) return null;
 
   const typeQ = await client.query(
     `SELECT COALESCE(display_name, description, name) AS display_name,
@@ -701,19 +718,19 @@ async function assertAnnualQuotaLeaveLimit(
     normalizeEntitlementBasis(typeRow.entitlement_basis, leaveTypeKey) !==
       ENTITLEMENT_BASES.ANNUAL
   ) {
-    return;
+    return null;
   }
   const limit = Number(typeRow.max_days);
-  if (!Number.isFinite(limit) || limit <= 0) return;
+  if (!Number.isFinite(limit) || limit <= 0) return null;
   const label = typeRow.display_name || systemLeaveTypeDisplayName(leaveTypeKey);
 
   const years = calendarYearsForDateRange(startStr, endStr);
-  if (years.length === 0) return;
+  if (years.length === 0) return null;
 
   const queryFrom = `${Math.min(...years)}-01-01`;
   const queryTo = `${Math.max(...years)}-12-31`;
   const existing = await client.query(
-    `SELECT lr.id, lr.start_date, lr.end_date
+    `SELECT lr.id, lr.start_date, lr.end_date, lr.status
      FROM leave_requests lr
      INNER JOIN leave_types lt ON lt.id = lr.leave_type_id
      WHERE (lr.user_id = $1::uuid OR lr.employee_id = $1::uuid)
@@ -721,7 +738,7 @@ async function assertAnnualQuotaLeaveLimit(
        AND lr.status = ANY($3::text[])
        AND lr.start_date <= $5::date
        AND lr.end_date >= $4::date
-       AND ($6::uuid IS NULL OR lr.id <> $6::uuid)`,
+       AND ($6::text IS NULL OR lr.id::text <> $6::text)`,
     [
       userId,
       leaveTypeKey,
@@ -732,27 +749,78 @@ async function assertAnnualQuotaLeaveLimit(
     ]
   );
 
+  const normalizedRequestedDates = Array.isArray(requestedCountedDates)
+    ? requestedCountedDates.map(toIsoDateStr).filter(Boolean)
+    : null;
+  const yearSummaries = [];
   for (const year of years) {
-    const requestedDays = await workingDaysWithinYear(client, userId, startStr, endStr, year);
+    const requestedDatesForYear = normalizedRequestedDates == null
+      ? null
+      : countedDatesForCalendarYear(normalizedRequestedDates, year);
+    const requestedDays = requestedDatesForYear == null
+      ? await workingDaysWithinYear(client, userId, startStr, endStr, year)
+      : requestedDatesForYear.length;
     if (requestedDays <= 0) continue;
 
-    let usedDays = 0;
+    let approvedDays = 0;
+    let pendingDays = 0;
     for (const row of existing.rows) {
       const existingStart = toIsoDateStr(row.start_date);
       const existingEnd = toIsoDateStr(row.end_date);
-      usedDays += await workingDaysWithinYear(client, userId, existingStart, existingEnd, year);
+      const days = await workingDaysWithinYear(
+        client,
+        userId,
+        existingStart,
+        existingEnd,
+        year
+      );
+      if (row.status === 'approved') approvedDays += days;
+      else pendingDays += days;
     }
 
-    const remaining = Math.max(0, limit - usedDays);
-    if (usedDays + requestedDays > limit + 0.0001) {
-      const err = new Error(
-        `${label} is limited to ${formatDayCount(limit)} days per calendar year. ` +
-        `You only have ${formatDayCount(remaining)} day(s) remaining for ${year}; this request needs ${formatDayCount(requestedDays)} day(s).`
-      );
-      err.statusCode = 400;
-      throw err;
-    }
+    const summary = buildAnnualEntitlementYearSummary({
+      year,
+      limitDays: limit,
+      approvedDays,
+      pendingDays,
+      requestedDays,
+      requestedCountedDates: requestedDatesForYear || [],
+    });
+    summary.error_message = summary.allowed
+      ? null
+      : annualQuotaLimitErrorMessage(label, summary);
+    yearSummaries.push(summary);
   }
+
+  return {
+    leave_type: leaveTypeKey,
+    display_name: label,
+    entitlement_basis: ENTITLEMENT_BASES.ANNUAL,
+    limit_days: limit,
+    allowed: yearSummaries.every((summary) => summary.allowed),
+    years: yearSummaries,
+  };
+}
+
+async function assertAnnualQuotaLeaveLimit(
+  client,
+  { userId, leaveTypeName, startStr, endStr, excludeId = null }
+) {
+  const preview = await computeAnnualQuotaLeavePreview(client, {
+    userId,
+    leaveTypeName,
+    startStr,
+    endStr,
+    excludeId,
+  });
+  const rejectedYear = preview?.years?.find((summary) => !summary.allowed);
+  if (!rejectedYear) return;
+  const err = new Error(
+    rejectedYear.error_message ||
+      annualQuotaLimitErrorMessage(preview.display_name, rejectedYear)
+  );
+  err.statusCode = 400;
+  throw err;
 }
 
 function systemLeaveTypeDisplayName(name) {
@@ -1798,13 +1866,17 @@ async function releasePendingLeaveBalance(
 // EMPLOYEE ENDPOINTS
 // ============================
 
-// GET /api/leave/working-days?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+// GET /api/leave/working-days?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&leave_type=NAME
 // Counts leave days using the employee's effective shift working days and holidays.
+// Annual types also return the authoritative per-calendar-year entitlement preview.
 router.get('/working-days', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const startStr = toIsoDateStr(req.query.start_date || req.query.startDate);
   const endStr = toIsoDateStr(req.query.end_date || req.query.endDate);
+  const leaveTypeName = String(
+    req.query.leave_type || req.query.leaveType || ''
+  ).trim();
   if (!startStr || !endStr) {
     return res.status(400).json({ error: 'start_date and end_date are required' });
   }
@@ -1813,6 +1885,15 @@ router.get('/working-days', protect, async (req, res) => {
     if (result.days == null) {
       return res.status(400).json({ error: 'Invalid date range' });
     }
+    const annualEntitlement = leaveTypeName
+      ? await computeAnnualQuotaLeavePreview(pool, {
+          userId,
+          leaveTypeName,
+          startStr,
+          endStr,
+          requestedCountedDates: result.countedDates,
+        })
+      : null;
     res.json({
       start_date: startStr,
       end_date: endStr,
@@ -1820,6 +1901,7 @@ router.get('/working-days', protect, async (req, res) => {
       counted_dates: result.countedDates,
       holiday_dates: result.holidayDates || [],
       schedule_source: result.scheduleSource,
+      annual_entitlement: annualEntitlement,
     });
   } catch (err) {
     console.error('[leave GET /working-days]', err);
