@@ -24,6 +24,7 @@ import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
 const _locatorSlipFilterOptions = <RequestFilterOption<String>>[
   RequestFilterOption(label: 'All'),
   RequestFilterOption(value: 'pending', label: 'Pending'),
+  RequestFilterOption(value: 'returned', label: 'Needs Correction'),
   RequestFilterOption(value: 'approved', label: 'Approved'),
   RequestFilterOption(value: 'rejected', label: 'Rejected'),
   RequestFilterOption(value: 'cancelled', label: 'Cancelled'),
@@ -32,6 +33,7 @@ const _locatorSlipFilterOptions = <RequestFilterOption<String>>[
 const _locatorApprovalFilterOptions = <RequestFilterOption<String>>[
   RequestFilterOption(label: 'All'),
   RequestFilterOption(value: 'pending', label: 'Pending'),
+  RequestFilterOption(value: 'returned', label: 'Returned'),
   RequestFilterOption(value: 'forwarded', label: 'Forwarded to HR'),
   RequestFilterOption(value: 'approved', label: 'Approved by HR'),
   RequestFilterOption(value: 'rejected', label: 'Rejected'),
@@ -142,6 +144,10 @@ class EmployeeLocatorSlipContentState
           }
         } else if (_selectedStatusFilter == 'approved') {
           if (item.status != _LocatorSlipStatus.approved) return false;
+        } else if (_selectedStatusFilter == 'returned') {
+          if (item.status != _LocatorSlipStatus.returnedForCorrection) {
+            return false;
+          }
         } else if (_selectedStatusFilter == 'rejected') {
           if (item.status != _LocatorSlipStatus.rejected) return false;
         } else if (_selectedStatusFilter == 'cancelled') {
@@ -167,6 +173,8 @@ class EmployeeLocatorSlipContentState
           return item.status == _LocatorSlipStatus.pendingDepartmentHead;
         case 'forwarded':
           return item.status == _LocatorSlipStatus.pendingHr;
+        case 'returned':
+          return item.status == _LocatorSlipStatus.returnedForCorrection;
         case 'approved':
           return item.status == _LocatorSlipStatus.approved;
         case 'rejected':
@@ -320,7 +328,8 @@ class EmployeeLocatorSlipContentState
     final id = item?.id?.trim();
     if (item == null || id == null || id.isEmpty) return false;
     return item.status == _LocatorSlipStatus.pendingDepartmentHead ||
-        item.status == _LocatorSlipStatus.pendingHr;
+        item.status == _LocatorSlipStatus.pendingHr ||
+        item.status == _LocatorSlipStatus.returnedForCorrection;
   }
 
   void _showSlipDetails(
@@ -336,6 +345,11 @@ class EmployeeLocatorSlipContentState
         : 'Current workflow status';
     final canReview =
         reviewMode && item.status == _LocatorSlipStatus.pendingDepartmentHead;
+    final canCorrect =
+        !reviewMode && item.status == _LocatorSlipStatus.returnedForCorrection;
+    final correctionRemarks = item.hrReviewedAt != null
+        ? item.hrRemarks
+        : item.departmentHeadRemarks;
 
     void printForm() {
       LocatorSlipPrint.printForm(
@@ -419,6 +433,22 @@ class EmployeeLocatorSlipContentState
                   ? 'No reason provided.'
                   : item.remarks.trim(),
             ),
+            if (canCorrect) ...[
+              const SizedBox(height: 12),
+              EmployeeLocatorMobileDetailSection(
+                title: 'Correction Requested',
+                icon: Icons.assignment_return_rounded,
+                children: [
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.rate_review_outlined,
+                    label: 'Reviewer remarks',
+                    value: (correctionRemarks ?? '').trim().isEmpty
+                        ? 'Please replace or restore the required attachment.'
+                        : correctionRemarks!.trim(),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
         actions: EmployeeLocatorMobileDetailActions(
@@ -426,6 +456,8 @@ class EmployeeLocatorSlipContentState
           canPrint: item.status == _LocatorSlipStatus.approved,
           canReject: canReview,
           canApprove: canReview,
+          canReturn: canReview,
+          canCorrect: canCorrect,
           onHistory: () {
             Navigator.of(dialogContext).pop();
             _showSlipHistory(context, item);
@@ -442,6 +474,14 @@ class EmployeeLocatorSlipContentState
           onApprove: () {
             Navigator.of(dialogContext).pop();
             _departmentHeadApprove(item);
+          },
+          onReturn: () {
+            Navigator.of(dialogContext).pop();
+            _departmentHeadReturn(item);
+          },
+          onCorrect: () {
+            Navigator.of(dialogContext).pop();
+            _correctAndResubmit(item);
           },
         ),
       ),
@@ -481,10 +521,14 @@ class EmployeeLocatorSlipContentState
               rawStatus == 'pending_hr' ||
               rawStatus == 'approved' ||
               rawStatus == 'rejected_by_hr' ||
+              rawStatus == 'returned_for_correction' ||
               rawStatus == 'rejected_by_department_head')
             (
               title: rawStatus == 'rejected_by_department_head'
                   ? 'Rejected by Department Head'
+                  : rawStatus == 'returned_for_correction' &&
+                        item.hrReviewedAt == null
+                  ? 'Returned by Department Head'
                   : 'Reviewed by Department Head',
               actor: item.departmentHeadName,
               date: item.departmentHeadReviewedAt,
@@ -510,6 +554,15 @@ class EmployeeLocatorSlipContentState
           if (rawStatus == 'rejected_by_hr')
             (
               title: 'Rejected by HR',
+              actor: item.hrReviewerName,
+              date: item.hrReviewedAt,
+              remarks: item.hrRemarks,
+              completed: true,
+            ),
+          if (rawStatus == 'returned_for_correction' &&
+              item.hrReviewedAt != null)
+            (
+              title: 'Returned by HR',
               actor: item.hrReviewerName,
               date: item.hrReviewedAt,
               remarks: item.hrRemarks,
@@ -1557,6 +1610,141 @@ class EmployeeLocatorSlipContentState
     }
   }
 
+  Future<String?> _promptCorrectionRemarks() async {
+    final controller = TextEditingController();
+    final remarks = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Return for correction'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 3,
+          maxLines: 5,
+          maxLength: 500,
+          decoration: const InputDecoration(
+            labelText: 'Correction remarks',
+            hintText: 'State what the employee needs to correct.',
+            alignLabelWithHint: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isEmpty) return;
+              Navigator.of(dialogContext).pop(value);
+            },
+            icon: const Icon(Icons.assignment_return_rounded, size: 18),
+            label: const Text('Return'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return remarks;
+  }
+
+  Future<void> _departmentHeadReturn(_LocatorSlipDraft item) async {
+    final id = item.id?.trim();
+    if (id == null || id.isEmpty) return;
+    final remarks = await _promptCorrectionRemarks();
+    if (remarks == null || !mounted) return;
+    try {
+      await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/locator-slips/$id/department-head-return',
+        data: {'reviewer_remarks': remarks},
+      );
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _loadDepartmentHeadRequests(forceRefresh: true);
+      await _loadMyRequests(forceRefresh: true);
+      if (!mounted) return;
+      _showLocatorSnack('Request returned to the employee for correction.');
+    } catch (e) {
+      if (!mounted) return;
+      await _showLocatorErrorDialog(
+        _apiErrorMessage(e, fallback: 'Failed to return the request.'),
+      );
+    }
+  }
+
+  Future<void> _correctAndResubmit(_LocatorSlipDraft item) async {
+    final id = item.id?.trim();
+    if (id == null || id.isEmpty) return;
+    final hasCurrentAttachment = (item.attachmentName ?? '').trim().isNotEmpty;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Correct locator request'),
+        content: Text(
+          hasCurrentAttachment
+              ? 'Replace the supporting document if needed, then resubmit the request for review.'
+              : 'Add the required supporting document before resubmitting the request.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          if (hasCurrentAttachment || !item.requestType.requiresAttachment)
+            OutlinedButton(
+              onPressed: () => Navigator.of(dialogContext).pop('resubmit'),
+              child: const Text('Resubmit Current'),
+            ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop('replace'),
+            icon: const Icon(Icons.upload_file_rounded, size: 18),
+            label: const Text('Replace & Resubmit'),
+          ),
+        ],
+      ),
+    );
+    if (action == null || !mounted) return;
+
+    try {
+      if (action == 'replace') {
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
+          withData: true,
+        );
+        if (result == null || result.files.isEmpty || !mounted) return;
+        final file = result.files.single;
+        final bytes = file.bytes;
+        if (bytes == null) {
+          await _showLocatorErrorDialog('The selected file could not be read.');
+          return;
+        }
+        await ApiClient.instance.dio.post<Map<String, dynamic>>(
+          '/api/locator-slips/$id/attachment',
+          data: FormData.fromMap({
+            'file': MultipartFile.fromBytes(bytes, filename: file.name),
+          }),
+        );
+      }
+
+      await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/locator-slips/$id/resubmit',
+        data: const {},
+      );
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _loadMyRequests(forceRefresh: true);
+      if (!mounted) return;
+      _showLocatorSnack(
+        'Corrections submitted. The attachment is locked again.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      await _showLocatorErrorDialog(
+        _apiErrorMessage(e, fallback: 'Failed to resubmit the request.'),
+      );
+    }
+  }
+
   Future<void> _pickFilterDate({required bool isFrom}) async {
     final initial = isFrom
         ? (_fromDate ?? DateTime.now())
@@ -2453,6 +2641,7 @@ enum _LocatorSlipStatus {
   draft('Draft'),
   pendingDepartmentHead('Pending Dept Head'),
   pendingHr('Pending HR Admin'),
+  returnedForCorrection('Returned for Correction'),
   approved('Approved'),
   rejected('Rejected'),
   cancelled('Cancelled');
@@ -2469,6 +2658,8 @@ enum _LocatorSlipStatus {
       case 'pending_hr':
       case 'pending':
         return _LocatorSlipStatus.pendingHr;
+      case 'returned_for_correction':
+        return _LocatorSlipStatus.returnedForCorrection;
       case 'approved':
         return _LocatorSlipStatus.approved;
       case 'cancelled':
@@ -2799,6 +2990,8 @@ String _departmentHeadStatusLabel(_LocatorSlipDraft item) {
     case 'pending_hr':
     case 'pending':
       return 'Forwarded to HR';
+    case 'returned_for_correction':
+      return 'Returned for Correction';
     case 'approved':
       return 'Approved by HR';
     case 'rejected_by_hr':
@@ -2820,6 +3013,11 @@ String _departmentHeadStatusLabel(_LocatorSlipDraft item) {
     ),
     _LocatorSlipStatus.pendingDepartmentHead || _LocatorSlipStatus.pendingHr =>
       (Colors.blue.shade50, Colors.blue.shade300, Colors.blue.shade900),
+    _LocatorSlipStatus.returnedForCorrection => (
+      Colors.orange.shade50,
+      Colors.orange.shade300,
+      Colors.orange.shade900,
+    ),
     _LocatorSlipStatus.approved => (
       Colors.green.shade50,
       Colors.green.shade300,
@@ -2844,6 +3042,7 @@ IconData _locatorStatusIcon(_LocatorSlipStatus status) {
     _LocatorSlipStatus.pendingDepartmentHead =>
       Icons.supervisor_account_rounded,
     _LocatorSlipStatus.pendingHr => Icons.hourglass_top_rounded,
+    _LocatorSlipStatus.returnedForCorrection => Icons.assignment_return_rounded,
     _LocatorSlipStatus.approved => Icons.check_circle_rounded,
     _LocatorSlipStatus.rejected => Icons.cancel_rounded,
     _LocatorSlipStatus.cancelled => Icons.flag_rounded,

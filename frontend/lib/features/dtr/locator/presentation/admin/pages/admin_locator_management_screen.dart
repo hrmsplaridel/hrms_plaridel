@@ -25,6 +25,7 @@ enum _LocatorAdminQueue {
   all('All'),
   pendingDeptHead('Pending Dept Head'),
   pendingHrAdmin('Pending HR Admin'),
+  returned('Returned for Correction'),
   approved('Approved'),
   rejected('Rejected'),
   cancelled('Cancelled');
@@ -999,6 +1000,19 @@ class _AdminLocatorManagementScreenState
                           OutlinedButton.icon(
                             onPressed: () {
                               Navigator.of(dialogContext).pop();
+                              _returnForCorrection(item);
+                            },
+                            style: _dialogSecondaryButtonStyle(dialogContext),
+                            icon: const Icon(
+                              Icons.assignment_return_rounded,
+                              size: 18,
+                            ),
+                            label: const Text('Return'),
+                          ),
+                        if (canReview)
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(dialogContext).pop();
                               _reject(item);
                             },
                             style: _dialogDangerButtonStyle(dialogContext),
@@ -1349,10 +1363,14 @@ class _AdminLocatorManagementScreenState
           item.status == 'pending' ||
           item.status == 'approved' ||
           item.status == 'rejected_by_hr' ||
+          item.status == 'returned_for_correction' ||
           item.status == 'rejected_by_department_head')
         (
           title: item.status == 'rejected_by_department_head'
               ? 'Rejected by Department Head'
+              : item.status == 'returned_for_correction' &&
+                    item.hrReviewedAt == null
+              ? 'Returned by Department Head'
               : 'Reviewed by Department Head',
           actor: item.deptHeadReviewerName,
           date: item.deptHeadReviewedAt,
@@ -1378,6 +1396,14 @@ class _AdminLocatorManagementScreenState
       if (item.status == 'rejected_by_hr')
         (
           title: 'Rejected by HR',
+          actor: item.hrReviewerName,
+          date: item.hrReviewedAt,
+          remarks: item.hrRemarks,
+          completed: true,
+        ),
+      if (item.status == 'returned_for_correction' && item.hrReviewedAt != null)
+        (
+          title: 'Returned by HR',
           actor: item.hrReviewerName,
           date: item.hrReviewedAt,
           remarks: item.hrRemarks,
@@ -1411,12 +1437,15 @@ class _AdminLocatorManagementScreenState
     final isApproved = lower == 'approved';
     final isRejected = lower.contains('rejected');
     final isPending = lower.contains('pending');
+    final isReturned = lower == 'returned_for_correction';
     final bg = isApproved
         ? Colors.green.shade50
         : isRejected
         ? Colors.red.shade50
         : isPending
         ? Colors.blue.shade50
+        : isReturned
+        ? Colors.orange.shade50
         : Colors.grey.shade100;
     final bd = isApproved
         ? Colors.green.shade300
@@ -1424,6 +1453,8 @@ class _AdminLocatorManagementScreenState
         ? Colors.red.shade300
         : isPending
         ? Colors.blue.shade300
+        : isReturned
+        ? Colors.orange.shade300
         : Colors.grey.shade300;
     final fg = isApproved
         ? Colors.green.shade900
@@ -1431,6 +1462,8 @@ class _AdminLocatorManagementScreenState
         ? Colors.red.shade900
         : isPending
         ? Colors.blue.shade900
+        : isReturned
+        ? Colors.orange.shade900
         : Colors.grey.shade900;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1490,6 +1523,7 @@ class _AdminLocatorManagementScreenState
         _LocatorAdminQueue.all => null,
         _LocatorAdminQueue.pendingDeptHead => 'pending_department_head',
         _LocatorAdminQueue.pendingHrAdmin => null,
+        _LocatorAdminQueue.returned => 'returned_for_correction',
         _LocatorAdminQueue.approved => 'approved',
         _LocatorAdminQueue.rejected => null,
         _LocatorAdminQueue.cancelled => 'cancelled',
@@ -1543,6 +1577,63 @@ class _AdminLocatorManagementScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Approve failed: $e');
+    }
+  }
+
+  Future<String?> _promptCorrectionRemarks() async {
+    final controller = TextEditingController();
+    final remarks = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Return for correction'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 3,
+          maxLines: 5,
+          maxLength: 500,
+          decoration: const InputDecoration(
+            labelText: 'Correction remarks',
+            hintText: 'State what the employee needs to correct.',
+            alignLabelWithHint: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isEmpty) return;
+              Navigator.of(dialogContext).pop(value);
+            },
+            icon: const Icon(Icons.assignment_return_rounded, size: 18),
+            label: const Text('Return'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return remarks;
+  }
+
+  Future<void> _returnForCorrection(_LocatorAdminRecord item) async {
+    final remarks = await _promptCorrectionRemarks();
+    if (remarks == null || !mounted) return;
+    try {
+      await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/locator-slips/${item.id}/return-for-correction',
+        data: {'reviewer_remarks': remarks},
+      );
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
+      if (!mounted) return;
+      _showLocatorSnack('Request returned to the employee for correction.');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Return failed: $e');
     }
   }
 
@@ -1622,6 +1713,8 @@ class _LocatorAdminRecord {
       case 'pending_hr':
       case 'pending':
         return 'Pending HR Admin';
+      case 'returned_for_correction':
+        return 'Returned for Correction';
       case 'approved':
         return 'Approved';
       case 'rejected_by_department_head':
