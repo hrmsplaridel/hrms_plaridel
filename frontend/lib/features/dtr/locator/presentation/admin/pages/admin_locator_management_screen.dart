@@ -11,6 +11,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
+import 'package:hrms_plaridel/providers/auth_provider.dart';
 
 typedef _LocatorHistoryStep = ({
   String title,
@@ -1479,6 +1480,12 @@ class _AdminLocatorManagementScreenState
       _error = null;
     });
     try {
+      final user = context.read<AuthProvider>().user;
+      final userId = (user?.id ?? '').trim();
+      final role = (user?.role ?? '').trim().toLowerCase();
+      if (userId.isEmpty || role.isEmpty) {
+        throw StateError('No authenticated admin or HR user is available.');
+      }
       final statusParam = switch (_queue) {
         _LocatorAdminQueue.all => null,
         _LocatorAdminQueue.pendingDeptHead => 'pending_department_head',
@@ -1493,6 +1500,8 @@ class _AdminLocatorManagementScreenState
         query['request_type'] = _requestTypeFilter!.code;
       }
       final all = (await LocatorSlipDataCache.instance.listAdminRequests(
+        userId: userId,
+        role: role,
         query: query,
         forceRefresh: forceRefresh,
       )).map((e) => _LocatorAdminRecord.fromJson(e)).toList();

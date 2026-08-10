@@ -13,7 +13,7 @@ class LocatorSlipDataCache {
   final Map<String, _LocatorCacheEntry<List<Map<String, dynamic>>>>
   _requestCache = {};
   final Map<bool, _LocatorCacheEntry<List<LocatorRequestType>>> _typeCache = {};
-  _LocatorCacheEntry<bool>? _departmentHeadCache;
+  final Map<String, _LocatorCacheEntry<bool>> _departmentHeadCache = {};
 
   Future<List<LocatorRequestType>> listTypes({
     bool includeInactive = false,
@@ -39,8 +39,17 @@ class LocatorSlipDataCache {
     return items;
   }
 
-  Future<bool> checkIsDepartmentHead({bool forceRefresh = false}) async {
-    final cached = _departmentHeadCache;
+  Future<bool> checkIsDepartmentHead({
+    required String userId,
+    String? role,
+    bool forceRefresh = false,
+  }) async {
+    final cacheKey = requestCacheKeyForUser(
+      scope: 'department-head-check',
+      userId: userId,
+      role: role,
+    );
+    final cached = _departmentHeadCache[cacheKey];
     if (!forceRefresh && cached != null && cached.isFresh(_referenceCacheTtl)) {
       return cached.value;
     }
@@ -49,31 +58,44 @@ class LocatorSlipDataCache {
       '/api/locator-slips/department-head/check',
     );
     final value = res.data?['isDeptHead'] == true;
-    _departmentHeadCache = _LocatorCacheEntry<bool>(value, DateTime.now());
+    _departmentHeadCache[cacheKey] = _LocatorCacheEntry<bool>(
+      value,
+      DateTime.now(),
+    );
     return value;
   }
 
   Future<List<Map<String, dynamic>>> listMyRequests({
+    required String userId,
+    String? role,
     bool forceRefresh = false,
   }) {
     return _listRequestRows(
-      key: 'my',
+      key: requestCacheKeyForUser(scope: 'my', userId: userId, role: role),
       path: '/api/locator-slips/my',
       forceRefresh: forceRefresh,
     );
   }
 
   Future<List<Map<String, dynamic>>> listDepartmentHeadRequests({
+    required String userId,
+    String? role,
     bool forceRefresh = false,
   }) {
     return _listRequestRows(
-      key: 'department-head',
+      key: requestCacheKeyForUser(
+        scope: 'department-head',
+        userId: userId,
+        role: role,
+      ),
       path: '/api/locator-slips/department-head',
       forceRefresh: forceRefresh,
     );
   }
 
   Future<List<Map<String, dynamic>>> listAdminRequests({
+    required String userId,
+    required String role,
     Map<String, String> query = const {},
     bool forceRefresh = false,
   }) {
@@ -82,7 +104,12 @@ class LocatorSlipDataCache {
       queryParameters: query.isEmpty ? null : query,
     ).toString();
     return _listRequestRows(
-      key: _requestCacheKey('admin', query),
+      key: requestCacheKeyForUser(
+        scope: 'admin',
+        userId: userId,
+        role: role,
+        query: query,
+      ),
       path: path,
       forceRefresh: forceRefresh,
     );
@@ -92,7 +119,7 @@ class LocatorSlipDataCache {
 
   void invalidateTypes() => _typeCache.clear();
 
-  void invalidateReferenceData() => _departmentHeadCache = null;
+  void invalidateReferenceData() => _departmentHeadCache.clear();
 
   void invalidateAll() {
     invalidateRequests();
@@ -126,8 +153,20 @@ class LocatorSlipDataCache {
     return rows.map((row) => Map<String, dynamic>.from(row)).toList();
   }
 
-  static String _requestCacheKey(String scope, Map<String, String> query) {
-    if (query.isEmpty) return scope;
+  static String requestCacheKeyForUser({
+    required String scope,
+    required String userId,
+    String? role,
+    Map<String, String> query = const {},
+  }) {
+    final normalizedUserId = userId.trim();
+    if (normalizedUserId.isEmpty) {
+      throw ArgumentError.value(userId, 'userId', 'A user ID is required');
+    }
+    final normalizedRole = (role ?? '').trim().toLowerCase();
+    final baseKey =
+        '${scope.trim()}|user=$normalizedUserId|role=${normalizedRole.isEmpty ? 'unknown' : normalizedRole}';
+    if (query.isEmpty) return baseKey;
     final entries = query.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
     final queryText = entries
@@ -136,7 +175,7 @@ class LocatorSlipDataCache {
               '${Uri.encodeQueryComponent(entry.key)}=${Uri.encodeQueryComponent(entry.value)}',
         )
         .join('&');
-    return '$scope?$queryText';
+    return '$baseKey?$queryText';
   }
 }
 

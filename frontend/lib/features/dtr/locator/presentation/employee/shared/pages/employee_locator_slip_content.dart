@@ -1430,8 +1430,11 @@ class EmployeeLocatorSlipContentState
 
   Future<bool> _checkIsDepartmentHead() async {
     try {
+      final user = context.read<AuthProvider>().user;
+      final userId = (user?.id ?? '').trim();
+      if (userId.isEmpty) return false;
       final isDeptHead = await LocatorSlipDataCache.instance
-          .checkIsDepartmentHead();
+          .checkIsDepartmentHead(userId: userId, role: user?.role);
       if (isDeptHead) {
         _loadDepartmentHeadRequests();
       }
@@ -1459,7 +1462,14 @@ class EmployeeLocatorSlipContentState
       _error = null;
     });
     try {
+      final user = context.read<AuthProvider>().user;
+      final userId = (user?.id ?? '').trim();
+      if (userId.isEmpty) {
+        throw StateError('No authenticated user is available.');
+      }
       final items = (await LocatorSlipDataCache.instance.listMyRequests(
+        userId: userId,
+        role: user?.role,
         forceRefresh: forceRefresh,
       )).map((e) => _LocatorSlipDraft.fromApi(e)).toList();
       if (!mounted) return;
@@ -1484,8 +1494,15 @@ class EmployeeLocatorSlipContentState
   Future<void> _loadDepartmentHeadRequests({bool forceRefresh = false}) async {
     setState(() => _loadingApprovals = true);
     try {
+      final user = context.read<AuthProvider>().user;
+      final userId = (user?.id ?? '').trim();
+      if (userId.isEmpty) {
+        throw StateError('No authenticated user is available.');
+      }
       final items =
           (await LocatorSlipDataCache.instance.listDepartmentHeadRequests(
+            userId: userId,
+            role: user?.role,
             forceRefresh: forceRefresh,
           )).map((e) => _LocatorSlipDraft.fromApi(e)).toList();
       if (!mounted) return;
