@@ -78,6 +78,56 @@ function normalizeLeaveBalanceAdjustmentReason(value) {
   return reason;
 }
 
+function buildLeaveBalanceHistoryFilters({
+  scopeAllUsers = false,
+  scopedUserId = null,
+  leaveType = '',
+  action = '',
+  from = '',
+  to = '',
+  affectedBucket = '',
+}) {
+  const summaryWhere = [];
+  const summaryParams = [];
+
+  function addSummaryFilter(sql, value) {
+    const parameter = summaryParams.length + 1;
+    summaryWhere.push(sql.replace('$?', `$${parameter}`));
+    summaryParams.push(value);
+  }
+
+  if (!scopeAllUsers) {
+    addSummaryFilter('l.user_id = $?::uuid', scopedUserId);
+  }
+  if (leaveType) addSummaryFilter('l.leave_type = $?', leaveType);
+  if (action) addSummaryFilter('l.action = $?', action);
+  if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
+    addSummaryFilter('l.created_at >= $?::date', from);
+  }
+  if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    addSummaryFilter("l.created_at < ($?::date + interval '1 day')", to);
+  }
+
+  const summaryWhereSql = summaryWhere.length > 0
+    ? summaryWhere.join(' AND ')
+    : 'true';
+  const where = [...summaryWhere];
+  const params = [...summaryParams];
+  if (affectedBucket) {
+    const parameter = params.length + 1;
+    where.push(`LOWER(l.affected_bucket) = $${parameter}`);
+    params.push(affectedBucket);
+  }
+
+  return {
+    summaryWhereSql,
+    summaryParams,
+    whereSql: where.length > 0 ? where.join(' AND ') : 'true',
+    params,
+    nextParameter: params.length + 1,
+  };
+}
+
 /**
  * @param {import('pg').PoolClient} client
  * @param {object} row
@@ -238,6 +288,7 @@ async function applyAdminLeaveBalanceAdjustment(client, input) {
 
 module.exports = {
   applyAdminLeaveBalanceAdjustment,
+  buildLeaveBalanceHistoryFilters,
   initLeaveBalanceLedger,
   insertLeaveBalanceLedger,
   fetchBalanceSnapshot,

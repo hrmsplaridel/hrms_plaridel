@@ -29,6 +29,7 @@ const {
 } = require('../services/leaveRequestHistory');
 const {
   applyAdminLeaveBalanceAdjustment,
+  buildLeaveBalanceHistoryFilters,
   initLeaveBalanceLedger,
   insertLeaveBalanceLedger,
   fetchBalanceSnapshot,
@@ -4483,49 +4484,29 @@ router.get('/ledger', protect, async (req, res) => {
   const scopeAllUsers = isPrivileged && includeAllUsers && !filterUserId;
   const scopedUserId = filterUserId || requesterId;
 
-  const params = [];
-  let p = 1;
-  const where = [];
-  if (!scopeAllUsers) {
-    where.push(`l.user_id = $${p}::uuid`);
-    params.push(scopedUserId);
-    p += 1;
-  }
-  if (leaveType) {
-    where.push(`l.leave_type = $${p}`);
-    params.push(leaveType);
-    p += 1;
-  }
-  if (action) {
-    where.push(`l.action = $${p}`);
-    params.push(action);
-    p += 1;
-  }
-  if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
-    where.push(`l.created_at >= $${p}::date`);
-    params.push(from);
-    p += 1;
-  }
-
-  // Summary remains stable while the user switches activity buckets.
-  const summaryWhereSql = where.length > 0 ? where.join(' AND ') : 'true';
-  const summaryParams = [...params];
-
   if (affectedBucket) {
     if (!['earned', 'used', 'pending', 'adjusted'].includes(affectedBucket)) {
       return res.status(400).json({ error: 'Invalid affected_bucket filter' });
     }
-    where.push(`LOWER(l.affected_bucket) = $${p}`);
-    params.push(affectedBucket);
-    p += 1;
-  }
-  if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
-    where.push(`l.created_at < ($${p}::date + interval '1 day')`);
-    params.push(to);
-    p += 1;
   }
 
-  const whereSql = where.length > 0 ? where.join(' AND ') : 'true';
+  // Summary includes the complete date range and remains stable while the
+  // user switches activity buckets. The row list adds that bucket filter.
+  const {
+    summaryWhereSql,
+    summaryParams,
+    whereSql,
+    params,
+    nextParameter: p,
+  } = buildLeaveBalanceHistoryFilters({
+    scopeAllUsers,
+    scopedUserId,
+    leaveType,
+    action,
+    from,
+    to,
+    affectedBucket,
+  });
 
   try {
     const [countQ, summaryQ] = await Promise.all([

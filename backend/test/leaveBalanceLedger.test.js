@@ -3,12 +3,39 @@ const assert = require('node:assert/strict');
 
 const {
   applyAdminLeaveBalanceAdjustment,
+  buildLeaveBalanceHistoryFilters,
   normalizeLeaveBalanceAdjustment,
   normalizeLeaveBalanceAdjustmentReason,
 } = require('../src/services/leaveBalanceLedger');
 
 const USER_ID = '00000000-0000-0000-0000-000000000101';
 const ACTOR_ID = '00000000-0000-0000-0000-000000000102';
+
+test('balance-history summary includes both dates but excludes activity bucket', () => {
+  const filters = buildLeaveBalanceHistoryFilters({
+    scopedUserId: USER_ID,
+    leaveType: 'vacationLeave',
+    action: 'monthly_accrual',
+    from: '2026-01-01',
+    to: '2026-01-31',
+    affectedBucket: 'earned',
+  });
+
+  assert.match(filters.summaryWhereSql, /created_at >= \$4::date/);
+  assert.match(filters.summaryWhereSql, /created_at < \(\$5::date/);
+  assert.doesNotMatch(filters.summaryWhereSql, /affected_bucket/);
+  assert.deepEqual(filters.summaryParams, [
+    USER_ID,
+    'vacationLeave',
+    'monthly_accrual',
+    '2026-01-01',
+    '2026-01-31',
+  ]);
+
+  assert.match(filters.whereSql, /affected_bucket\) = \$6/);
+  assert.deepEqual(filters.params, [...filters.summaryParams, 'earned']);
+  assert.equal(filters.nextParameter, 7);
+});
 
 test('admin adjustment changes only adjusted days and writes the exact ledger movement', async () => {
   const queries = [];
