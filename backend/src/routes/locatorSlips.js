@@ -12,6 +12,10 @@ const {
   isDepartmentHead,
 } = require('../services/departmentHeadService');
 const locatorNotifications = require('../services/locatorNotifications');
+const {
+  recordLocatorAttachmentAccess,
+  resolveLocatorAttachmentAccess,
+} = require('../services/locatorAttachmentAccess');
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const {
   canModifyLocatorAttachment,
@@ -1178,23 +1182,83 @@ router.delete('/:id/attachment', protect, async (req, res) => {
 // GET /api/locator-slips/:id/attachment
 router.get('/:id/attachment', protect, async (req, res) => {
   const userId = req.user?.id;
+  const role = req.user?.role;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
-  const isPrivileged = req.user?.role === 'admin' || req.user?.role === 'hr';
   try {
     const current = await pool.query(
-      `SELECT employee_id, attachment_name, attachment_path, attachment_mime_type
+      `SELECT id,
+              employee_id,
+              department_id,
+              status,
+              dept_head_reviewer_id,
+              attachment_name,
+              attachment_path,
+              attachment_mime_type
        FROM locator_slips
-       WHERE id = $1::uuid AND ($2::boolean = true OR employee_id = $3::uuid)`,
-      [req.params.id, isPrivileged, userId]
+       WHERE id = $1::uuid`,
+      [req.params.id]
     );
     const row = current.rows[0];
     if (!row) return res.status(404).json({ error: 'Locator slip not found' });
-    if (!row.attachment_path) return res.status(404).json({ error: 'No attachment for this request' });
-    const filePath = path.join(UPLOAD_DIR, row.attachment_path);
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Attachment file not found' });
+
+    const normalizedRole = String(role || '').trim().toLowerCase();
+    const isOwner = String(row.employee_id) === String(userId);
+    const isHrOrAdmin = normalizedRole === 'hr' || normalizedRole === 'admin';
+    let assignedDepartmentHeadId = null;
+    if (
+      !isOwner &&
+      !isHrOrAdmin &&
+      row.status === 'pending_department_head' &&
+      row.department_id
+    ) {
+      assignedDepartmentHeadId = await findDepartmentHeadUserId(pool, row.department_id);
+    }
+    const access = resolveLocatorAttachmentAccess({
+      role,
+      userId,
+      ownerUserId: row.employee_id,
+      requestStatus: row.status,
+      assignedDepartmentHeadId,
+      reviewingDepartmentHeadId: row.dept_head_reviewer_id,
+    });
+    const auditBase = {
+      locatorSlipId: row.id,
+      attachmentName: row.attachment_name || null,
+      accessedBy: userId,
+      actorRole: role || null,
+      accessReason: access.reason,
+      ipAddress: req.ip || req.socket?.remoteAddress || null,
+      userAgent: req.get('user-agent') || null,
+    };
+    if (!access.allowed) {
+      await recordLocatorAttachmentAccess(pool, {
+        ...auditBase,
+        accessOutcome: 'denied',
+      });
+      return res.status(404).json({ error: 'Locator slip not found' });
+    }
+    if (!row.attachment_path) {
+      await recordLocatorAttachmentAccess(pool, {
+        ...auditBase,
+        accessOutcome: 'missing_attachment',
+      });
+      return res.status(404).json({ error: 'No attachment for this request' });
+    }
+    if (!locatorAttachmentFileExists(row.attachment_path)) {
+      await recordLocatorAttachmentAccess(pool, {
+        ...auditBase,
+        accessOutcome: 'missing_file',
+      });
+      return res.status(404).json({ error: 'Attachment file not found' });
+    }
+    await recordLocatorAttachmentAccess(pool, {
+      ...auditBase,
+      accessOutcome: 'allowed',
+    });
+    const filePath = path.resolve(UPLOAD_DIR, row.attachment_path);
     const filename = (row.attachment_name || 'attachment').replace(/[^\w.\- ()]/g, '_').slice(0, 180);
     if (row.attachment_mime_type) res.setHeader('Content-Type', row.attachment_mime_type);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
     res.sendFile(filePath);
   } catch (err) {
     console.error('[locator GET /:id/attachment]', err);
