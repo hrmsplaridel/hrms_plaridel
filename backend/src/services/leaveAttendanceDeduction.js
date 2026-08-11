@@ -364,6 +364,7 @@ async function loadDtrRows(client, employeeIds, startStr, endStr) {
   if (employeeIds.length === 0) return map;
   const result = await client.query(
     `SELECT employee_id, attendance_date::text AS attendance_date,
+            time_in, break_out, break_in, time_out,
             late_minutes, undertime_minutes, status, holiday_id, leave_request_id
      FROM dtr_daily_summary
      WHERE employee_id = ANY($1::uuid[])
@@ -376,6 +377,10 @@ async function loadDtrRows(client, employeeIds, startStr, endStr) {
     map.set(key, row);
   }
   return map;
+}
+
+function hasPhysicalDtrPunches(row) {
+  return !!(row?.time_in || row?.break_out || row?.break_in || row?.time_out);
 }
 
 async function loadApprovedLeaveKeys(client, employeeIds, startStr, endStr) {
@@ -592,9 +597,10 @@ async function calculateMonthlyAttendanceDeductions(
 
       const key = `${employee.userId}|${dateStr}`;
       const holiday = holidayCoverage.get(dateStr) || null;
+      const dtr = dtrRows.get(key);
       if (
         approvedLeaveKeys.has(key) ||
-        fullLocatorKeys.has(key) ||
+        (fullLocatorKeys.has(key) && !hasPhysicalDtrPunches(dtr)) ||
         holiday === 'whole_day'
       ) {
         continue;
@@ -609,7 +615,6 @@ async function calculateMonthlyAttendanceDeductions(
       });
       if (!policy.useEquivalentDayConversion) continue;
 
-      const dtr = dtrRows.get(key);
       let dayLate = 0;
       let dayUndertime = 0;
       let dayAbsence = 0;
@@ -998,6 +1003,7 @@ module.exports = {
   desiredPosting,
   /** @internal exported for regression tests */
   assignmentForDate,
+  hasPhysicalDtrPunches,
   expectedLocatorSlotsForAssignment: expectedLocatorSlotsForShift,
   locatorCoversExpectedShiftSlots,
   loadAssignments,

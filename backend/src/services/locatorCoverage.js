@@ -7,6 +7,12 @@ const SLOT_LABELS = Object.freeze({
   pm_in: 'PM in',
   pm_out: 'PM out',
 });
+const DTR_SLOT_FIELDS = Object.freeze({
+  am_in: 'time_in',
+  am_out: 'break_out',
+  pm_in: 'break_in',
+  pm_out: 'time_out',
+});
 
 function timeToMinutes(value) {
   if (value == null || value === '') return null;
@@ -124,6 +130,13 @@ function locatorCoverageSegments(locator) {
   return LOCATOR_SLOTS.filter((slot) => coverage[slot]).map(locatorSlotLabel);
 }
 
+function locatorSegmentsForMissingPunches(locator, record = {}) {
+  const coverage = normalizeLocatorCoverage(locator);
+  return LOCATOR_SLOTS
+    .filter((slot) => coverage[slot] && record[DTR_SLOT_FIELDS[slot]] == null)
+    .map(locatorSlotLabel);
+}
+
 function evaluateLocatorCoverage({
   locator = null,
   locators = null,
@@ -157,6 +170,7 @@ module.exports = {
   isShiftWorkingDate,
   locatorCoverageSegments,
   locatorCoversExpectedShiftSlots,
+  locatorSegmentsForMissingPunches,
   locatorSlotKey,
   locatorSlotLabel,
   mergeLocatorCoverages,
