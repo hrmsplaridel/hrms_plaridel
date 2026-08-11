@@ -17,6 +17,11 @@ const {
   getExpectedLogsForDay: resolveExpectedLogsForDay,
   computeTotalHoursFromRecord,
 } = require('../services/shiftAttendance');
+const {
+  evaluateLocatorCoverage,
+  locatorCoverageSegments,
+  mergeLocatorCoverages,
+} = require('../services/locatorCoverage');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -169,7 +174,6 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
        SELECT a.department_id, a.shift_id
        FROM assignments a
        WHERE a.employee_id = $1::uuid
-         AND (a.is_active IS NULL OR a.is_active = true)
          AND a.effective_from <= $2::date
          AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
@@ -343,7 +347,6 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
      FROM assignments a
      LEFT JOIN shifts s ON a.shift_id = s.id
      WHERE a.employee_id = $1
-       AND (a.is_active IS NULL OR a.is_active = true)
        AND a.effective_from <= $2::date
        AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
      ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
@@ -785,18 +788,20 @@ async function getApprovedLocatorByDateInRange(employeeIds, startStr, endStr) {
   for (const r of res.rows) {
     const dateStr = String(r.slip_date_str).slice(0, 10);
     const key = `${r.employee_id}|${dateStr}`;
-    if (out.has(key)) continue;
-    const segments = [];
-    if (r.am_in) segments.push('AM IN');
-    if (r.am_out) segments.push('AM OUT');
-    if (r.pm_in) segments.push('PM IN');
-    if (r.pm_out) segments.push('PM OUT');
+    const existing = out.get(key);
+    const coverage = mergeLocatorCoverages([existing?.coverage, r]);
+    if (existing) {
+      existing.coverage = coverage;
+      existing.segments = locatorCoverageSegments(coverage).map((slot) => slot.toUpperCase());
+      continue;
+    }
     out.set(key, {
       id: r.id,
       request_type: normalizeLocatorRequestType(r.request_type),
       office: r.office || null,
       reason: r.reason || null,
-      segments,
+      coverage,
+      segments: locatorCoverageSegments(coverage).map((slot) => slot.toUpperCase()),
     });
   }
   return out;
@@ -824,7 +829,6 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
      FROM assignments a
      LEFT JOIN shifts s ON s.id = a.shift_id
      WHERE a.employee_id = ANY($1::uuid[])
-       AND (a.is_active IS NULL OR a.is_active = true)
        AND a.effective_from <= $3::date
        AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
      ORDER BY a.employee_id, a.effective_from DESC`,
@@ -947,7 +951,6 @@ router.get('/', protect, async (req, res) => {
       conditions.push(`d.employee_id IN (
         SELECT DISTINCT a.employee_id FROM assignments a
         WHERE a.department_id = $${depIdx}
-          AND (a.is_active IS NULL OR a.is_active = true)
           AND a.effective_from <= $${endIdx}::date
           AND (a.effective_to IS NULL OR a.effective_to >= $${startIdx}::date)
       )`);
@@ -1133,7 +1136,6 @@ router.get('/', protect, async (req, res) => {
            FROM assignments a
            JOIN users u ON u.id = a.employee_id AND u.is_active = true
            WHERE a.department_id = $1
-             AND (a.is_active IS NULL OR a.is_active = true)
              AND a.effective_from <= $2::date
              AND (a.effective_to IS NULL OR a.effective_to >= $3::date)
            ORDER BY u.full_name`,
@@ -1149,8 +1151,7 @@ router.get('/', protect, async (req, res) => {
           `SELECT DISTINCT u.id, u.full_name
            FROM assignments a
            JOIN users u ON u.id = a.employee_id AND u.is_active = true
-           WHERE (a.is_active IS NULL OR a.is_active = true)
-             AND a.effective_from <= $1::date
+           WHERE a.effective_from <= $1::date
              AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
            ORDER BY u.full_name`,
           [endStr, startStr]
@@ -1273,13 +1274,6 @@ router.get('/', protect, async (req, res) => {
         startStr,
         endStr
       );
-      const hasFullDayLocatorCoverage = (locator) => {
-        const locatorSegments = Array.isArray(locator?.segments)
-          ? locator.segments.map((s) => String(s).toUpperCase().trim())
-          : [];
-        return ['AM IN', 'AM OUT', 'PM IN', 'PM OUT']
-          .every((seg) => locatorSegments.includes(seg));
-      };
 
       // Iterate by calendar date (YYYY-MM-DD) to avoid timezone shifting: e.g. "Day 14" must not show as March 13 in UTC+8.
       const startD = new Date(`${startStr}T12:00:00`); // noon avoids UTC date shift
@@ -1297,11 +1291,17 @@ router.get('/', protect, async (req, res) => {
           const key = `${empId}|${dateStr}`;
           if (existingKeys.has(key)) continue;
           if (leaveKeys.has(key)) continue;
-          const locator = locatorByKey.get(key);
-          if (locator && hasFullDayLocatorCoverage(locator)) continue;
-
           const shiftInfo = getShiftInfoForDateFromAssignments(assignmentsByEmployee, empId, dateStr);
           if (!shiftInfo) continue; // no assignment/shift => can't determine working day
+
+          const locator = locatorByKey.get(key);
+          const locatorCoverage = evaluateLocatorCoverage({
+            locator,
+            shiftInfo,
+            holidayInfo: holiday,
+            date: dateStr,
+          });
+          if (locatorCoverage.isFullCoverage) continue;
 
           const workingDays = shiftInfo.workingDays;
           if (!Array.isArray(workingDays) || workingDays.length === 0) continue;
@@ -1353,9 +1353,21 @@ router.get('/', protect, async (req, res) => {
 
       // 4) Inject synthetic rows for approved locator slips with no existing DTR row.
       for (const [key, locator] of locatorByKey.entries()) {
-        if (!hasFullDayLocatorCoverage(locator)) continue;
         if (existingKeys.has(key)) continue;
         const [empId, dateStr] = key.split('|');
+        const shiftInfo = getShiftInfoForDateFromAssignments(
+          assignmentsByEmployee,
+          empId,
+          dateStr
+        );
+        const holidayInfo = holidayByDate.get(dateStr) || null;
+        const locatorCoverage = evaluateLocatorCoverage({
+          locator,
+          shiftInfo,
+          holidayInfo,
+          date: dateStr,
+        });
+        if (!locatorCoverage.isFullCoverage) continue;
         existingKeys.add(key);
         rows.push({
           id: null,
@@ -1386,7 +1398,7 @@ router.get('/', protect, async (req, res) => {
           created_at: null,
           updated_at: null,
           employee_name: userIdToName[empId] || null,
-          shift_punch_mode: getShiftInfoForDateFromAssignments(assignmentsByEmployee, empId, dateStr)?.punchMode || 'auto',
+          shift_punch_mode: shiftInfo?.punchMode || 'auto',
         });
       }
 
@@ -1401,13 +1413,23 @@ router.get('/', protect, async (req, res) => {
         row.locator_slip_reason = locator.reason || null;
         row.locator_slip_segments = locator.segments || [];
 
-        const hasFullDayCoverage = hasFullDayLocatorCoverage(locator);
+        const rowDateStr = String(row.record_date).slice(0, 10);
+        const holidayInfo = holidayByDate.get(rowDateStr) || null;
+        const shiftInfo =
+          getShiftInfoForDateFromAssignments(assignmentsByEmployee, row.user_id, rowDateStr) ||
+          await getAssignmentShiftForDate(row.user_id, rowDateStr);
+        const hasFullShiftCoverage = evaluateLocatorCoverage({
+          locator,
+          shiftInfo,
+          holidayInfo,
+          date: rowDateStr,
+        }).isFullCoverage;
 
-        // Only clear deductions when locator slip covers the full day.
+        // Only clear deductions when locator slips cover every expected shift slot.
         // Partial locator segments (e.g., AM IN only) should keep computed
         // late/undertime from other uncovered segments.
         if (
-          hasFullDayCoverage &&
+          hasFullShiftCoverage &&
           row.status !== 'holiday' &&
           row.status !== 'on_leave'
         ) {
@@ -1418,7 +1440,7 @@ router.get('/', protect, async (req, res) => {
         const hasAnyLog = !!(row.time_in || row.break_out || row.break_in || row.time_out);
         if (
           !hasAnyLog &&
-          hasFullDayCoverage &&
+          hasFullShiftCoverage &&
           row.status !== 'holiday' &&
           row.status !== 'on_leave'
         ) {
@@ -1431,8 +1453,6 @@ router.get('/', protect, async (req, res) => {
         // Re-evaluate remark/undertime with locator segment substitution so
         // partial approved locator segments (e.g., AM IN) can satisfy
         // completeness checks with existing punches.
-        const rowDateStr = String(row.record_date).slice(0, 10);
-        const holidayInfo = holidayByDate.get(rowDateStr) || null;
         const coverage = holidayInfo?.coverage || row.coverage || null;
         row.undertime_minutes = await computeUndertimeMinutes(
           row.user_id,
@@ -1446,9 +1466,6 @@ router.get('/', protect, async (req, res) => {
           row.break_in,
           row.locator_slip_segments || []
         );
-        const shiftInfo =
-          getShiftInfoForDateFromAssignments(assignmentsByEmployee, row.user_id, rowDateStr) ||
-          await getAssignmentShiftForDate(row.user_id, rowDateStr);
         row.attendance_remark = await computeAttendanceRemark(
           row,
           shiftInfo,
