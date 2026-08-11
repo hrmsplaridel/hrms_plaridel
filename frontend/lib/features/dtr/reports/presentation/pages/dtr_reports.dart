@@ -192,7 +192,7 @@ class _DtrReportsState extends State<DtrReports> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/assignments',
-        queryParameters: {'employee_id': employeeId, 'status': 'Active'},
+        queryParameters: {'employee_id': employeeId, 'status': 'All'},
       );
       final list = res.data ?? [];
       for (final a in list) {
