@@ -31,7 +31,13 @@ test('approval coverage rejects a date with real attendance before writing cover
   const queries = [];
   const client = {
     async query(sql) {
-      queries.push(String(sql));
+      const text = String(sql);
+      queries.push(text);
+      if (text.includes('pg_advisory_xact_lock')) return { rows: [], rowCount: 1 };
+      if (text.includes('FROM locator_slips')) return { rows: [], rowCount: 0 };
+      if (!text.includes('FROM dtr_daily_summary')) {
+        throw new Error('Unexpected query: ' + text);
+      }
       return {
         rows: [{ attendance_date: '2026-08-04', status: 'present', has_time_in: true }],
         rowCount: 1,
@@ -48,8 +54,46 @@ test('approval coverage rejects a date with real attendance before writing cover
     }),
     /attendance already exists on 2026-08-04/
   );
-  assert.equal(queries.length, 1);
-  assert.match(queries[0], /FROM dtr_daily_summary/);
+  assert.equal(queries.some((sql) => /FROM dtr_daily_summary/.test(sql)), true);
+  assert.equal(queries.some((sql) => /INSERT INTO dtr_leave_coverage/.test(sql)), false);
+});
+
+test('approval coverage rejects a date already covered by an approved locator', async () => {
+  const queries = [];
+  const client = {
+    async query(sql) {
+      const text = String(sql);
+      queries.push(text);
+      if (text.includes('pg_advisory_xact_lock')) return { rows: [], rowCount: 1 };
+      if (text.includes('FROM locator_slips')) {
+        return {
+          rows: [{
+            id: '00000000-0000-0000-0000-000000000401',
+            slip_date: '2026-08-04',
+            request_type: 'locator',
+            am_in: true,
+            am_out: true,
+            pm_in: false,
+            pm_out: false,
+          }],
+          rowCount: 1,
+        };
+      }
+      throw new Error('Unexpected query: ' + text);
+    },
+  };
+
+  await assert.rejects(
+    () => replaceApprovedLeaveCoverage(client, {
+      employeeId: EMPLOYEE_ID,
+      leaveRequestId: REQUEST_ID,
+      dates: ['2026-08-04'],
+      actorUserId: ACTOR_ID,
+    }),
+    /approved locator coverage already exists on 2026-08-04/
+  );
+  assert.equal(queries.some((sql) => /FROM dtr_daily_summary/.test(sql)), false);
+  assert.equal(queries.some((sql) => /INSERT INTO dtr_leave_coverage/.test(sql)), false);
 });
 
 test('approval stores coverage without inserting or updating the underlying DTR row', async () => {
@@ -58,6 +102,8 @@ test('approval stores coverage without inserting or updating the underlying DTR 
     async query(sql) {
       const text = String(sql);
       queries.push(text);
+      if (text.includes('pg_advisory_xact_lock')) return { rows: [], rowCount: 1 };
+      if (text.includes('FROM locator_slips')) return { rows: [], rowCount: 0 };
       if (text.includes('FROM dtr_daily_summary')) return { rows: [], rowCount: 0 };
       if (text.includes('FROM dtr_leave_coverage') && text.includes('leave_request_id <>')) {
         return { rows: [], rowCount: 0 };

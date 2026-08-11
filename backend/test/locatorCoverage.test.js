@@ -6,6 +6,7 @@ const {
   expectedLocatorSlotsForShift,
   locatorCoverageSegments,
   locatorCoversExpectedShiftSlots,
+  locatorSegmentsForMissingPunches,
 } = require('../src/services/locatorCoverage');
 
 const REGULAR_SHIFT = {
@@ -91,6 +92,27 @@ test('approved locator slips on the same date can jointly cover a shift', () => 
   assert.equal(result.isFullCoverage, true);
   assert.deepEqual(result.missingSlots, []);
   assert.deepEqual(locatorCoverageSegments(result.coverage), ['PM in', 'PM out']);
+});
+
+test('locator coverage fills only slots without physical DTR punches', () => {
+  const locator = {
+    am_in: true,
+    am_out: true,
+    pm_in: true,
+    pm_out: true,
+  };
+
+  assert.deepEqual(
+    locatorSegmentsForMissingPunches(locator, {
+      time_in: '2026-08-04T00:15:00.000Z',
+      time_out: '2026-08-04T09:00:00.000Z',
+    }),
+    ['AM out', 'PM in']
+  );
+  assert.deepEqual(
+    locatorSegmentsForMissingPunches(locator, {}),
+    ['AM in', 'AM out', 'PM in', 'PM out']
+  );
 });
 
 test('holiday and working-day context changes the expected locator slots', () => {

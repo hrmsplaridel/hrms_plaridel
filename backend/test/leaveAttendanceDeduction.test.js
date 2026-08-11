@@ -7,6 +7,7 @@ const {
   expectedMinutesForCoverage,
   desiredPosting,
   assignmentForDate,
+  hasPhysicalDtrPunches,
   expectedLocatorSlotsForAssignment,
   locatorCoversExpectedShiftSlots,
   loadAssignments,
@@ -31,6 +32,15 @@ function summary(computedDays) {
     synthetic_absence_count: 0,
   };
 }
+
+test('month-end distinguishes locator-only dates from dates with physical punches', () => {
+  assert.equal(hasPhysicalDtrPunches({}), false);
+  assert.equal(hasPhysicalDtrPunches({ time_in: null, time_out: null }), false);
+  assert.equal(
+    hasPhysicalDtrPunches({ break_in: '2026-08-04T05:00:00.000Z' }),
+    true
+  );
+});
 
 function createPostingPool() {
   const state = {
