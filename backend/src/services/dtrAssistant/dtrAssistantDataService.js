@@ -148,7 +148,6 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
        SELECT a.*
        FROM assignments a
        WHERE a.employee_id = $1::uuid
-         AND (a.is_active IS NULL OR a.is_active = true)
          AND a.effective_from <= day.day::date
          AND (a.effective_to IS NULL OR a.effective_to >= day.day::date)
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC

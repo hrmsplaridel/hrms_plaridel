@@ -14,9 +14,12 @@ const {
 } = require('./holidayRangeUtils');
 const {
   getExpectedWorkMinutes,
-  getShiftExpectedLogs,
   getShiftType,
 } = require('./shiftAttendance');
+const {
+  expectedLocatorSlotsForShift,
+  locatorCoversExpectedShiftSlots,
+} = require('./locatorCoverage');
 const {
   initLeaveBalanceLedger,
   insertLeaveBalanceLedger,
@@ -423,31 +426,13 @@ async function loadApprovedLeaveKeys(client, employeeIds, startStr, endStr) {
   return keys;
 }
 
-function expectedLocatorSlotsForAssignment(assignment) {
-  const expected = getShiftExpectedLogs(assignment);
-  if (expected.needsInOut) return ['am_in', 'pm_out'];
-
-  const slots = [];
-  if (expected.needsAm) slots.push('am_in', 'am_out');
-  if (expected.needsPm) slots.push('pm_in', 'pm_out');
-  return slots;
-}
-
-function locatorCoversExpectedShiftSlots(locator, assignment) {
-  if (!locator || !assignment) return false;
-  const expectedSlots = expectedLocatorSlotsForAssignment(assignment);
-  return (
-    expectedSlots.length > 0 &&
-    expectedSlots.every((slot) => locator[slot] === true)
-  );
-}
-
 async function loadFullLocatorKeys(
   client,
   employeeIds,
   startStr,
   endStr,
-  assignmentsByEmployee
+  assignmentsByEmployee,
+  holidayCoverageByDate = new Map()
 ) {
   const keys = new Set();
   if (employeeIds.length === 0) return keys;
@@ -488,7 +473,18 @@ async function loadFullLocatorKeys(
       coverage.employeeId,
       coverage.dateStr
     );
-    if (locatorCoversExpectedShiftSlots(coverage, assignment)) keys.add(key);
+    const holidayCoverage = holidayCoverageByDate.get(coverage.dateStr) || null;
+    const holidayInfo = holidayCoverage ? { coverage: holidayCoverage } : null;
+    if (
+      locatorCoversExpectedShiftSlots(
+        coverage,
+        assignment,
+        holidayInfo,
+        coverage.dateStr
+      )
+    ) {
+      keys.add(key);
+    }
   }
   return keys;
 }
@@ -558,7 +554,8 @@ async function calculateMonthlyAttendanceDeductions(
     startStr,
     endStr
   );
-  const [dtrRows, approvedLeaveKeys, fullLocatorKeys, holidayCoverage] =
+  const holidayCoverage = await loadHolidayCoverage(client, startStr, endStr);
+  const [dtrRows, approvedLeaveKeys, fullLocatorKeys] =
     await Promise.all([
       loadDtrRows(client, employeeIds, startStr, endStr),
       loadApprovedLeaveKeys(client, employeeIds, startStr, endStr),
@@ -567,9 +564,9 @@ async function calculateMonthlyAttendanceDeductions(
         employeeIds,
         startStr,
         endStr,
-        assignmentsByEmployee
+        assignmentsByEmployee,
+        holidayCoverage
       ),
-      loadHolidayCoverage(client, startStr, endStr),
     ]);
 
   const monthDates = datesInRange(startStr, endStr);
@@ -1001,7 +998,7 @@ module.exports = {
   desiredPosting,
   /** @internal exported for regression tests */
   assignmentForDate,
-  expectedLocatorSlotsForAssignment,
+  expectedLocatorSlotsForAssignment: expectedLocatorSlotsForShift,
   locatorCoversExpectedShiftSlots,
   loadAssignments,
   loadEmployees,

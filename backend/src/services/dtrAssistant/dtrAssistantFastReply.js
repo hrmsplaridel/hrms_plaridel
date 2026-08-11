@@ -37,6 +37,14 @@ const {
   locatorAttachmentRequiredError,
   parseLocatorDateOnly,
 } = require('../locatorFilingRules');
+const {
+  evaluateLocatorCoverage,
+  expectedLocatorSlotsForShift,
+  locatorCoverageSegments,
+  locatorSlotKey,
+  locatorSlotLabel,
+  normalizeLocatorCoverage,
+} = require('../locatorCoverage');
 
 function lower(value) {
   return String(value || '').toLowerCase();
@@ -1707,19 +1715,6 @@ function dtrRecordForDate(context, date) {
   return dtrRecords(context).find((record) => fmtDate(record.attendance_date) === key) || null;
 }
 
-function shiftTypeFromCalendar(day) {
-  if (!day?.start_time) return null;
-  const explicit = lower(day.punch_mode || 'auto');
-  if (explicit && explicit !== 'auto') return explicit;
-  const start = timeTextToMinutes(day.start_time);
-  const end = timeTextToMinutes(day.end_time);
-  const breakEnd = timeTextToMinutes(day.break_end);
-  if (start == null) return null;
-  if (start >= 12 * 60) return 'pm_only';
-  if (breakEnd == null && end != null && end <= 13 * 60) return 'am_only';
-  return 'full_day';
-}
-
 function isCalendarWorkingDay(day) {
   if (!day?.shift_id || !day.start_time) return false;
   const workingDays = Array.isArray(day.working_days) ? day.working_days : [];
@@ -1731,20 +1726,11 @@ function isCalendarWorkingDay(day) {
 
 function expectedSlotsForCalendarDay(day) {
   if (!isCalendarWorkingDay(day)) return [];
-  const type = shiftTypeFromCalendar(day);
-  let slots;
-  if (type === 'single_session') slots = ['AM in', 'PM out'];
-  else if (type === 'am_only') slots = ['AM in', 'AM out'];
-  else if (type === 'pm_only') slots = ['PM in', 'PM out'];
-  else slots = ['AM in', 'AM out', 'PM in', 'PM out'];
-
-  if (day.holiday_coverage === 'am_only') {
-    slots = slots.filter((slot) => slot === 'PM in' || slot === 'PM out');
-  }
-  if (day.holiday_coverage === 'pm_only') {
-    slots = slots.filter((slot) => slot === 'AM in' || slot === 'AM out');
-  }
-  return slots;
+  const holidayInfo = day.holiday_coverage && day.holiday_coverage !== 'none'
+    ? { coverage: day.holiday_coverage }
+    : null;
+  return expectedLocatorSlotsForShift(day, holidayInfo, day.attendance_date)
+    .map(locatorSlotLabel);
 }
 
 function slotValue(record, slot) {
@@ -1802,7 +1788,7 @@ function dtrDailyRecordReply(context, message) {
   const label = context.date_range?.label || 'selected date';
   if (!record) {
     const day = calendarDayForDate(context, context.date_range?.startDate);
-    if (day?.holiday_name) {
+    if (day?.holiday_name && day.holiday_coverage === 'whole_day') {
       return structuredReply(language, {
         title: 'DTR check',
         summary:
@@ -1846,25 +1832,47 @@ function dtrDailyRecordReply(context, message) {
     }
     if (day && isCalendarWorkingDay(day)) {
       const expected = expectedSlotsForCalendarDay(day);
+      const locatorEvaluation = approvedLocatorCoverageForDate(
+        context,
+        day.attendance_date
+      );
+      const locatorText = locatorCoverageForMissingSlots(
+        context,
+        day.attendance_date,
+        ['no DTR record']
+      );
       return structuredReply(language, {
         title: 'DTR check',
         summary:
-          language === 'bisaya'
-            ? `Status: Absent/no DTR record. Scheduled workday ni pero wala koy nakitang DTR punches.`
-            : language === 'tagalog'
-              ? `Status: Absent/no DTR record. Scheduled workday ito pero wala akong nakitang DTR punches.`
-              : `No DTR record was found for ${fmtFriendlyDate(day.attendance_date)}, but it is a scheduled workday.`,
+          locatorEvaluation.isFullCoverage
+            ? language === 'bisaya'
+              ? 'Status: On field. Walay DTR punches, pero ang approved locator kompleto para sa imong assigned shift.'
+              : language === 'tagalog'
+                ? 'Status: On field. Walang DTR punches, pero kumpleto ang approved locator para sa assigned shift mo.'
+                : 'Status: On field. No DTR punches were found, but approved locator coverage satisfies the assigned shift.'
+            : language === 'bisaya'
+              ? 'Status: Absent/no DTR record. Scheduled workday ni pero wala koy nakitang kompletong DTR o locator coverage.'
+              : language === 'tagalog'
+                ? 'Status: Absent/no DTR record. Scheduled workday ito pero walang kumpletong DTR o locator coverage.'
+                : `No complete DTR or locator coverage was found for ${fmtFriendlyDate(day.attendance_date)}, which is a scheduled workday.`,
         details: [
           `Shift: ${day.shift_name || 'shift'} ${fmtScheduleRange(day)}`.trim(),
           `Grace period: ${fmtMinutes(day.grace_period_minutes || 0)}`,
           `Expected logs: ${expected.join(', ')}`,
+          locatorText ? `Locator coverage: ${locatorText}` : null,
         ],
         nextStep:
-          language === 'bisaya'
-            ? 'Kung ni-duty ka ani nga adlaw, i-check kung kinahanglan ba ug DTR correction, locator slip, or leave coverage.'
-            : language === 'tagalog'
-              ? 'Kung pumasok ka sa araw na ito, i-check kung kailangan ng DTR correction, locator slip, o leave coverage.'
-              : 'If you worked that day, check whether you need a DTR correction, locator slip, or leave coverage.',
+          locatorEvaluation.isFullCoverage
+            ? language === 'bisaya'
+              ? 'Dili kinahanglan ang DTR correction kung sakto kining approved locator.'
+              : language === 'tagalog'
+                ? 'Hindi kailangan ng DTR correction kung tama ang approved locator na ito.'
+                : 'No DTR correction is needed if this approved locator coverage is correct.'
+            : language === 'bisaya'
+              ? 'Kung ni-duty ka ani nga adlaw, i-check kung kinahanglan ba ug DTR correction, locator slip, or leave coverage.'
+              : language === 'tagalog'
+                ? 'Kung pumasok ka sa araw na ito, i-check kung kailangan ng DTR correction, locator slip, o leave coverage.'
+                : 'If you worked that day, check whether you need a DTR correction, locator slip, or leave coverage.',
       });
     }
     return structuredReply(language, {
@@ -2298,45 +2306,63 @@ function firstMatchingLocator(context, date) {
 }
 
 function locatorCoversSlot(slip, slot) {
-  if (slot === 'AM in') return slip?.coverage?.am_in === true;
-  if (slot === 'AM out') return slip?.coverage?.am_out === true;
-  if (slot === 'PM in') return slip?.coverage?.pm_in === true;
-  if (slot === 'PM out') return slip?.coverage?.pm_out === true;
-  if (slot === 'no DTR record') {
-    return (
-      slip?.coverage?.am_in === true ||
-      slip?.coverage?.am_out === true ||
-      slip?.coverage?.pm_in === true ||
-      slip?.coverage?.pm_out === true
-    );
-  }
-  return false;
+  const slotKey = locatorSlotKey(slot);
+  return slotKey ? normalizeLocatorCoverage(slip)[slotKey] : false;
+}
+
+function approvedLocatorCoverageForDate(context, date) {
+  const dateKey = fmtDate(date);
+  const slips = (context.recent_locator_slips || []).filter((slip) => {
+    return slip.slip_date === dateKey && approvedStatus(slip.status);
+  });
+  const day = calendarDayForDate(context, dateKey);
+  const holidayInfo = day?.holiday_coverage && day.holiday_coverage !== 'none'
+    ? { coverage: day.holiday_coverage }
+    : null;
+  return {
+    slips,
+    day,
+    ...evaluateLocatorCoverage({
+      locators: slips,
+      shiftInfo: day,
+      holidayInfo,
+      date: dateKey,
+    }),
+  };
 }
 
 function locatorCoverageForMissingSlots(context, date, missingSlots = []) {
-  const slips = (context.recent_locator_slips || []).filter((slip) => {
-    return slip.slip_date === date && approvedStatus(slip.status);
-  });
+  const evaluation = approvedLocatorCoverageForDate(context, date);
+  const { slips } = evaluation;
   if (slips.length === 0) return null;
   const missing = missingSlots.length > 0 ? missingSlots : ['no DTR record'];
-  for (const slip of slips) {
-    const covered = missing.filter((slot) => locatorCoversSlot(slip, slot));
-    if (covered.length > 0) {
-      const uncovered = missing.filter((slot) => !covered.includes(slot));
-      return `${locatorCoverageText(slip)}. Covered: ${covered.join(', ')}${
-        uncovered.length > 0 ? `. Not covered: ${uncovered.join(', ')}` : ''
-      }`;
+  const sourceText = slips.length === 1
+    ? locatorCoverageText(slips[0])
+    : `${slips.length} approved locator slips`;
+
+  if (missing.includes('no DTR record')) {
+    const covered = evaluation.coveredSlots.map(locatorSlotLabel);
+    const uncovered = evaluation.missingSlots.map(locatorSlotLabel);
+    if (evaluation.isFullCoverage) {
+      return `${sourceText}. Full assigned shift covered: ${covered.join(', ')}`;
     }
+    return `${sourceText}. Covered: ${covered.join(', ') || 'none'}. Missing shift coverage: ${
+      uncovered.join(', ') || 'schedule unavailable'
+    }`;
   }
-  return `${locatorCoverageText(slips[0])}. It does not match the missing logs: ${missing.join(', ')}`;
+
+  const covered = missing.filter((slot) => {
+    const key = locatorSlotKey(slot);
+    return key && evaluation.coverage[key];
+  });
+  const uncovered = missing.filter((slot) => !covered.includes(slot));
+  return `${sourceText}. Covered: ${covered.join(', ') || 'none'}${
+    uncovered.length > 0 ? `. Not covered: ${uncovered.join(', ')}` : ''
+  }`;
 }
 
 function locatorCoverageText(slip) {
-  const slots = [];
-  if (slip?.coverage?.am_in) slots.push('AM in');
-  if (slip?.coverage?.am_out) slots.push('AM out');
-  if (slip?.coverage?.pm_in) slots.push('PM in');
-  if (slip?.coverage?.pm_out) slots.push('PM out');
+  const slots = locatorCoverageSegments(slip);
   return `${slip.request_type_label || slip.request_type || 'Locator'} ${statusLabel(slip.status)}${
     slots.length > 0 ? ` covering ${slots.join(', ')}` : ''
   }`;
@@ -2363,7 +2389,7 @@ function dtrStatusExplanationReply(context, message) {
     const dateText = range.startDate
       ? fmtLocalizedDateRange(range.startDate, range.endDate, language)
       : range.label || 'the selected date';
-    if (day?.holiday_name) {
+    if (day?.holiday_name && day.holiday_coverage === 'whole_day') {
       return structuredReply(language, {
         title: 'DTR check',
         summary:
@@ -2409,15 +2435,25 @@ function dtrStatusExplanationReply(context, message) {
     }
     if (day && isCalendarWorkingDay(day)) {
       const expected = expectedSlotsForCalendarDay(day);
+      const locatorEvaluation = approvedLocatorCoverageForDate(
+        context,
+        day.attendance_date
+      );
       const coverage = locatorCoverageForMissingSlots(context, day.attendance_date, ['no DTR record']);
       return structuredReply(language, {
         title: `DTR check for ${fmtFriendlyDate(day.attendance_date)}`,
         summary:
-          language === 'bisaya'
-            ? `Status: Absent/no DTR record. Scheduled workday ni pero wala koy nakitang DTR punches.`
-            : language === 'tagalog'
-              ? `Status: Absent/no DTR record. Scheduled workday ito pero wala akong nakitang DTR punches.`
-              : 'Status: Absent/no DTR record. This is a scheduled workday, but no DTR punches were found.',
+          locatorEvaluation.isFullCoverage
+            ? language === 'bisaya'
+              ? 'Status: On field. Ang approved locator kompleto para sa imong assigned shift.'
+              : language === 'tagalog'
+                ? 'Status: On field. Kumpleto ang approved locator para sa assigned shift mo.'
+                : 'Status: On field. Approved locator coverage satisfies the assigned shift.'
+            : language === 'bisaya'
+              ? 'Status: Absent/no DTR record. Scheduled workday ni pero walay kompletong DTR o locator coverage.'
+              : language === 'tagalog'
+                ? 'Status: Absent/no DTR record. Scheduled workday ito pero walang kumpletong DTR o locator coverage.'
+                : 'Status: Absent/no DTR record. This scheduled workday has no complete DTR or locator coverage.',
         details: [
           `Shift: ${day.shift_name || 'shift'} ${fmtScheduleRange(day)}`.trim(),
           `Grace period: ${fmtMinutes(day.grace_period_minutes || 0)}`,
@@ -2428,11 +2464,17 @@ function dtrStatusExplanationReply(context, message) {
           }),
         ],
         nextStep:
-          language === 'bisaya'
-            ? 'Kung ni-duty ka ani nga adlaw, i-check kung kinahanglan ba ug DTR correction, locator slip, or leave coverage.'
-            : language === 'tagalog'
-              ? 'Kung pumasok ka sa araw na ito, i-check kung kailangan ng DTR correction, locator slip, o leave coverage.'
-              : 'If you worked that day, check whether you need a DTR correction, locator slip, or leave coverage.',
+          locatorEvaluation.isFullCoverage
+            ? language === 'bisaya'
+              ? 'Dili kinahanglan ang DTR correction kung sakto kining approved locator.'
+              : language === 'tagalog'
+                ? 'Hindi kailangan ng DTR correction kung tama ang approved locator na ito.'
+                : 'No DTR correction is needed if this approved locator coverage is correct.'
+            : language === 'bisaya'
+              ? 'Kung ni-duty ka ani nga adlaw, i-check kung kinahanglan ba ug DTR correction, locator slip, or leave coverage.'
+              : language === 'tagalog'
+                ? 'Kung pumasok ka sa araw na ito, i-check kung kailangan ng DTR correction, locator slip, o leave coverage.'
+                : 'If you worked that day, check whether you need a DTR correction, locator slip, or leave coverage.',
       });
     }
     if (language === 'bisaya') {
@@ -2635,14 +2677,31 @@ function dtrLocatorCoverageReply(context, message) {
   const approvedMatching = requestedSlot
     ? slips.filter((slip) => approvedStatus(slip.status) && locatorCoversSlot(slip, requestedSlot))
     : slips.filter((slip) => approvedStatus(slip.status));
+  const approvedDates = [...new Set(
+    slips.filter((slip) => approvedStatus(slip.status)).map((slip) => slip.slip_date)
+  )];
+  const fullyCoveredDates = approvedDates.filter((date) => {
+    return approvedLocatorCoverageForDate(context, date).isFullCoverage;
+  });
   const lines = slips.map((slip) => {
+    const shiftCoverage = approvedStatus(slip.status)
+      ? approvedLocatorCoverageForDate(context, slip.slip_date)
+      : null;
     const slotCheck = requestedSlot
       ? locatorCoversSlot(slip, requestedSlot)
         ? `covers ${requestedSlot}`
         : `does not cover ${requestedSlot}`
-      : locatorSlots(slip).length > 0
-        ? `covers ${locatorSlots(slip).join(', ')}`
-        : 'no covered slot saved';
+      : shiftCoverage?.isFullCoverage
+        ? `full assigned shift coverage: ${shiftCoverage.expectedSlots
+            .map(locatorSlotLabel)
+            .join(', ')}`
+        : approvedStatus(slip.status) && shiftCoverage?.expectedSlots.length > 0
+          ? `partial shift coverage; missing ${shiftCoverage.missingSlots
+              .map(locatorSlotLabel)
+              .join(', ')}`
+          : locatorSlots(slip).length > 0
+            ? `covers ${locatorSlots(slip).join(', ')}`
+            : 'no covered slot saved';
     const finalCoverage = approvedStatus(slip.status) ? '' : ', not final coverage until approved';
     return `${fmtFriendlyDate(slip.slip_date)}: ${locatorCoverageText(slip)} (${slotCheck}${finalCoverage})${
       slip.hr_remarks ? `, HR remarks ${slip.hr_remarks}` : ''
@@ -2660,23 +2719,34 @@ function dtrLocatorCoverageReply(context, message) {
         : language === 'tagalog'
           ? `May locator slip, pero wala akong approved locator na malinaw na nag-cover sa ${requestedSlot}.`
           : `I found locator slips, but no approved locator clearly covers ${requestedSlot}.`
-    : language === 'bisaya'
-      ? `Nakita nako ang ${slips.length} ka locator slip para sa ${localizedPeriodLabel(label, language)}.`
-      : language === 'tagalog'
-        ? `May nakita akong ${slips.length} locator slip para sa ${localizedPeriodLabel(label, language)}.`
-        : `I found ${slips.length} locator ${plural(slips.length, 'slip')} in this period.`;
+    : fullyCoveredDates.length > 0
+      ? language === 'bisaya'
+        ? `Ang approved locator coverage kompleto para sa assigned shift sa ${fullyCoveredDates.length} ka petsa.`
+        : language === 'tagalog'
+          ? `Kumpleto ang approved locator coverage para sa assigned shift sa ${fullyCoveredDates.length} petsa.`
+          : `Approved locator coverage fully satisfies the assigned shift on ${fullyCoveredDates.length} ${plural(fullyCoveredDates.length, 'date')}.`
+      : language === 'bisaya'
+        ? 'Naa koy locator slip, pero walay kompletong approved coverage para sa assigned shift.'
+        : language === 'tagalog'
+          ? 'May locator slip, pero walang approved coverage na kumpleto para sa assigned shift.'
+          : 'I found locator slips, but no approved coverage fully satisfies the assigned shift.';
   return structuredReply(language, {
     title: `Locator coverage for ${label}`,
     summary,
     details: lines,
     nextStep:
-      requestedSlot && approvedMatching.length === 0
+      (requestedSlot && approvedMatching.length === 0) ||
+      (!requestedSlot && fullyCoveredDates.length === 0)
         ? language === 'bisaya'
           ? 'Kung mao ni ang missing slot, i-check kung naa bay lain approved locator, leave, holiday, or DTR correction.'
           : language === 'tagalog'
             ? 'Kung ito ang missing slot, i-check kung may ibang approved locator, leave, holiday, o DTR correction.'
             : 'If this is the missing slot, check for another approved locator, leave, holiday, or DTR correction.'
-        : 'If a specific log is missing, ask me to check locator coverage for that missing slot.',
+        : language === 'bisaya'
+          ? 'Kung naay specific nga missing log, pangutan-a ko kung covered ba kana nga slot sa locator.'
+          : language === 'tagalog'
+            ? 'Kung may partikular na missing log, itanong mo kung covered ng locator ang slot na iyon.'
+            : 'If a specific log is missing, ask me to check locator coverage for that missing slot.',
     limit: 5,
   });
 }
@@ -5385,12 +5455,7 @@ function leaveApprovalHistoryReply(context, message) {
 }
 
 function locatorSlots(slip) {
-  const slots = [];
-  if (slip?.coverage?.am_in) slots.push('AM in');
-  if (slip?.coverage?.am_out) slots.push('AM out');
-  if (slip?.coverage?.pm_in) slots.push('PM in');
-  if (slip?.coverage?.pm_out) slots.push('PM out');
-  return slots;
+  return locatorCoverageSegments(slip);
 }
 
 function locatorStatusText(status) {
