@@ -19,8 +19,7 @@ function assertDependency(name, value) {
 
 function createLocatorSubmissionService({
   dbPool,
-  getDepartmentHeadForEmployee,
-  getEmployeeDepartment,
+  getReviewSnapshot,
   validateWorkingDay,
   getLocatorTypeByCode,
   findConflicts,
@@ -33,8 +32,7 @@ function createLocatorSubmissionService({
   if (!dbPool?.connect || !dbPool?.query) {
     throw new TypeError('Locator submission service requires a database pool');
   }
-  assertDependency('getDepartmentHeadForEmployee', getDepartmentHeadForEmployee);
-  assertDependency('getEmployeeDepartment', getEmployeeDepartment);
+  assertDependency('getReviewSnapshot', getReviewSnapshot);
   assertDependency('validateWorkingDay', validateWorkingDay);
   assertDependency('getLocatorTypeByCode', getLocatorTypeByCode);
   assertDependency('findConflicts', findConflicts);
@@ -76,11 +74,17 @@ function createLocatorSubmissionService({
     try {
       await client.query('BEGIN');
 
-      const deptInfo = await getDepartmentHeadForEmployee(client, employeeUserId);
-      const ownDept = await getEmployeeDepartment(client, employeeUserId);
-      submitStatus = deptInfo ? 'pending_department_head' : 'pending_hr';
-      departmentHeadUserId = deptInfo?.departmentHeadUserId || null;
-      const departmentId = deptInfo?.departmentId || ownDept?.departmentId || null;
+      const reviewSnapshot = await getReviewSnapshot(
+        client,
+        employeeUserId,
+        slipDate
+      );
+      departmentHeadUserId =
+        reviewSnapshot?.departmentHeadUserId || null;
+      submitStatus = departmentHeadUserId
+        ? 'pending_department_head'
+        : 'pending_hr';
+      const departmentId = reviewSnapshot?.departmentId || null;
 
       const workingDayCheck = await validateWorkingDay(
         client,
@@ -125,6 +129,7 @@ function createLocatorSubmissionService({
         `INSERT INTO locator_slips (
            employee_id,
            department_id,
+           assigned_department_head_id,
            slip_date,
            am_in,
            am_out,
@@ -143,6 +148,7 @@ function createLocatorSubmissionService({
          ) VALUES (
            $1::uuid,
            $2::uuid,
+           $15::uuid,
            $3::date,
            $4::boolean,
            $5::boolean,
@@ -177,6 +183,7 @@ function createLocatorSubmissionService({
           attachmentPath,
           attachmentPath ? attachment?.mimeType || null : null,
           submitStatus,
+          departmentHeadUserId,
         ]
       );
       insertedRow = inserted.rows[0];

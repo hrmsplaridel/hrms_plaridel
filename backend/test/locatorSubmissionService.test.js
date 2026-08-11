@@ -15,6 +15,7 @@ function createHarness() {
     inserts: [],
     notifications: [],
     broadcasts: [],
+    reviewSnapshotDates: [],
     released: 0,
     nextId: 1,
   };
@@ -39,6 +40,7 @@ function createHarness() {
           attachment_path: params[11],
           attachment_mime_type: params[12],
           status: params[13],
+          assigned_department_head_id: params[14],
         };
         state.inserts.push({ params, row });
         return { rows: [row], rowCount: 1 };
@@ -59,11 +61,13 @@ function createHarness() {
   };
   const service = createLocatorSubmissionService({
     dbPool,
-    getDepartmentHeadForEmployee: async () => ({
-      departmentId: DEPARTMENT_ID,
-      departmentHeadUserId: HEAD_ID,
-    }),
-    getEmployeeDepartment: async () => ({ departmentId: DEPARTMENT_ID }),
+    getReviewSnapshot: async (_client, _employeeId, effectiveDate) => {
+      state.reviewSnapshotDates.push(effectiveDate);
+      return {
+        departmentId: DEPARTMENT_ID,
+        departmentHeadUserId: HEAD_ID,
+      };
+    },
     validateWorkingDay: async () => ({ ok: true }),
     getLocatorTypeByCode: async (_client, code) => ({
       code,
@@ -134,6 +138,14 @@ test('plain and multipart locator submissions share reviewer notifications', asy
     [HEAD_ID, HEAD_ID]
   );
   assert.equal(state.inserts[0].row.attachment_path, null);
+  assert.equal(
+    state.inserts[0].row.assigned_department_head_id,
+    HEAD_ID
+  );
+  assert.deepEqual(state.reviewSnapshotDates, [
+    '2026-08-12',
+    '2026-08-12',
+  ]);
   assert.equal(
     state.inserts[1].row.attachment_path,
     'locator-attachments/support.pdf'

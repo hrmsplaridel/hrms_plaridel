@@ -328,7 +328,7 @@ function getExpectedLogsForDay(shiftInfo, holidayInfo) {
 }
 
 /**
- * Get employee's assignment for a date (effective_from <= date <= effective_to, is_active).
+ * Get the employee assignment effective on a date, including closed history.
  * Returns { startMinutes, endMinutes, graceMinutes, breakEndMinutes } or null if no assignment/shift.
  * breakEndMinutes: PM shift start (when late is checked for break_in). Null = no PM late check.
  * endMinutes: shift end time in minutes from midnight (for validating clock-in outside shift).

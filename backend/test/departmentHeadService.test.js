@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   getDepartmentReviewSnapshot,
+  getDepartmentReviewSnapshotForDate,
 } = require('../src/services/departmentHeadService');
 
 const EMPLOYEE_ID = '00000000-0000-0000-0000-000000000101';
@@ -62,4 +63,41 @@ test('review snapshot retains the department when no head is configured', async 
     departmentId: DEPARTMENT_ID,
     departmentName: 'Accounting',
   });
+});
+
+test('historical review snapshot uses the assignment effective on the request date', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params) {
+      const text = String(sql);
+      calls.push({ text, params });
+      if (text.includes('a.effective_from <= $2::date')) {
+        return {
+          rows: [{
+            department_id: DEPARTMENT_ID,
+            department_name: 'Historical Department',
+          }],
+        };
+      }
+      if (text.includes('LOWER(p.name) = ANY')) {
+        return { rows: [{ employee_id: HEAD_ID }] };
+      }
+      throw new Error('Unexpected query: ' + text.slice(0, 80));
+    },
+  };
+
+  const snapshot = await getDepartmentReviewSnapshotForDate(
+    client,
+    EMPLOYEE_ID,
+    '2026-06-20'
+  );
+
+  assert.deepEqual(snapshot, {
+    departmentHeadUserId: HEAD_ID,
+    departmentId: DEPARTMENT_ID,
+    departmentName: 'Historical Department',
+  });
+  assert.deepEqual(calls[0].params, [EMPLOYEE_ID, '2026-06-20']);
+  assert.doesNotMatch(calls[0].text, /a\.is_active/i);
+  assert.match(calls[1].text, /CURRENT_DATE/);
 });

@@ -7,8 +7,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { requireAdminOrHr } = require('../middleware/rbac');
 const {
   findDepartmentHeadUserId,
-  getDepartmentHeadForEmployee,
-  getEmployeeDepartment,
+  getDepartmentReviewSnapshotForDate,
   isDepartmentHead,
 } = require('../services/departmentHeadService');
 const locatorNotifications = require('../services/locatorNotifications');
@@ -19,8 +18,9 @@ const {
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const {
   canModifyLocatorAttachment,
-  evaluateLocatorWorkingDay,
+  parseLocatorDateOnly,
   validateLocatorAttachmentForReview,
+  validateLocatorWorkingDayForEmployee,
 } = require('../services/locatorFilingRules');
 const {
   findLocatorRequestConflicts,
@@ -276,28 +276,6 @@ function toDateOnlyString(value) {
   return null;
 }
 
-async function validateLocatorSlipWorkingDay(client, employeeId, dateInfo) {
-  const result = await client.query(
-    `SELECT a.id,
-            a.shift_id,
-            s.name AS shift_name,
-            s.working_days
-     FROM assignments a
-     LEFT JOIN shifts s ON s.id = a.shift_id
-     WHERE a.employee_id = $1::uuid
-       AND (a.is_active IS NULL OR a.is_active = true)
-       AND a.effective_from <= $2::date
-       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
-     ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
-     LIMIT 1`,
-    [employeeId, dateInfo.dateStr]
-  );
-  return evaluateLocatorWorkingDay({
-    dateInfo,
-    assignment: result.rows[0],
-  });
-}
-
 pool
   .query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`)
   .then(() =>
@@ -326,6 +304,7 @@ pool
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+        assigned_department_head_id UUID REFERENCES users(id) ON DELETE SET NULL,
         slip_date DATE NOT NULL,
         am_in BOOLEAN NOT NULL DEFAULT false,
         am_out BOOLEAN NOT NULL DEFAULT false,
@@ -381,10 +360,15 @@ pool
         ADD COLUMN IF NOT EXISTS attachment_mime_type TEXT;
       ALTER TABLE locator_slips
         ADD COLUMN IF NOT EXISTS attachment_uploaded_at TIMESTAMPTZ;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS assigned_department_head_id UUID
+          REFERENCES users(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS idx_locator_request_types_active
         ON locator_request_types(is_active, sort_order, label);
       CREATE INDEX IF NOT EXISTS idx_locator_slips_request_type
         ON locator_slips(request_type);
+      CREATE INDEX IF NOT EXISTS idx_locator_slips_assigned_department_head
+        ON locator_slips(assigned_department_head_id, status, updated_at DESC);
     `)
   )
   .then(async () => {
@@ -428,6 +412,9 @@ function mapLocatorRow(row) {
     employee_name: row.employee_name || null,
     department_id: row.department_id || null,
     department_name: row.department_name || null,
+    assigned_department_head_id: row.assigned_department_head_id || null,
+    assigned_department_head_name:
+      row.assigned_department_head_name || null,
     slip_date: toDateOnlyString(row.slip_date_text || row.slip_date),
     am_in: row.am_in === true,
     am_out: row.am_out === true,
@@ -468,6 +455,7 @@ async function fetchLocatorSlipDetails(db, id) {
             ls.slip_date::text AS slip_date_text,
             u.full_name AS employee_name,
             d.name AS department_name,
+            assigned_dh.full_name AS assigned_department_head_name,
             dh.full_name AS dept_head_reviewer_name,
             hr.full_name AS hr_reviewer_name,
             lrt.label AS request_type_label,
@@ -481,6 +469,7 @@ async function fetchLocatorSlipDetails(db, id) {
      FROM locator_slips ls
      LEFT JOIN users u ON u.id = ls.employee_id
      LEFT JOIN departments d ON d.id = ls.department_id
+     LEFT JOIN users assigned_dh ON assigned_dh.id = ls.assigned_department_head_id
      LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
      LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
      LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
@@ -492,9 +481,8 @@ async function fetchLocatorSlipDetails(db, id) {
 
 const locatorSubmissionService = createLocatorSubmissionService({
   dbPool: pool,
-  getDepartmentHeadForEmployee,
-  getEmployeeDepartment,
-  validateWorkingDay: validateLocatorSlipWorkingDay,
+  getReviewSnapshot: getDepartmentReviewSnapshotForDate,
+  validateWorkingDay: validateLocatorWorkingDayForEmployee,
   getLocatorTypeByCode,
   findConflicts: findLocatorRequestConflicts,
   fetchSlipDetails: fetchLocatorSlipDetails,
@@ -522,8 +510,24 @@ router.get('/department-head/check', protect, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const client = await pool.connect();
   try {
-    const result = await isDepartmentHead(client, userId);
-    res.json(result);
+    const current = await isDepartmentHead(client, userId);
+    const assigned = await client.query(
+      `SELECT ls.department_id, d.name AS department_name
+       FROM locator_slips ls
+       LEFT JOIN departments d ON d.id = ls.department_id
+       WHERE ls.assigned_department_head_id = $1::uuid
+         AND ls.status = 'pending_department_head'
+       ORDER BY ls.updated_at DESC
+       LIMIT 1`,
+      [userId]
+    );
+    const assignedDepartmentId = assigned.rows[0]?.department_id || null;
+    const assignedDepartmentName = assigned.rows[0]?.department_name || null;
+    res.json({
+      isDeptHead: current.isDeptHead || Boolean(assignedDepartmentId),
+      departmentId: current.departmentId || assignedDepartmentId,
+      departmentName: current.departmentName || assignedDepartmentName,
+    });
   } catch (err) {
     console.error('[locator GET /department-head/check]', err);
     res.status(500).json({ error: 'Failed to check department head status' });
@@ -903,6 +907,15 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: attachmentError });
     }
+    const workingDayCheck = await validateLocatorWorkingDayForEmployee(
+      client,
+      userId,
+      parseLocatorDateOnly(row.slip_date_text)
+    );
+    if (!workingDayCheck.ok) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: workingDayCheck.error });
+    }
     const conflictCheck = await findLocatorRequestConflicts(client, {
       employeeId: userId,
       slipDate: row.slip_date_text,
@@ -915,19 +928,30 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
 
-    let departmentHeadUserId = null;
-    let submitStatus = 'pending_hr';
-    if (!row.hr_reviewer_id && row.department_id) {
-      departmentHeadUserId = await findDepartmentHeadUserId(client, row.department_id);
-      if (departmentHeadUserId) submitStatus = 'pending_department_head';
-    }
+    const reviewSnapshot = await getDepartmentReviewSnapshotForDate(
+      client,
+      userId,
+      row.slip_date_text
+    );
+    const departmentHeadUserId =
+      reviewSnapshot?.departmentHeadUserId || null;
+    const submitStatus = departmentHeadUserId
+      ? 'pending_department_head'
+      : 'pending_hr';
 
     await client.query(
       `UPDATE locator_slips
        SET status = $2::text,
+           department_id = $3::uuid,
+           assigned_department_head_id = $4::uuid,
            updated_at = now()
        WHERE id = $1::uuid`,
-      [id, submitStatus]
+      [
+        id,
+        submitStatus,
+        reviewSnapshot?.departmentId || null,
+        departmentHeadUserId,
+      ]
     );
     await client.query('COMMIT');
 
@@ -1055,6 +1079,7 @@ router.get('/:id/attachment', protect, async (req, res) => {
       `SELECT id,
               employee_id,
               department_id,
+              assigned_department_head_id,
               status,
               dept_head_reviewer_id,
               attachment_name,
@@ -1070,8 +1095,10 @@ router.get('/:id/attachment', protect, async (req, res) => {
     const normalizedRole = String(role || '').trim().toLowerCase();
     const isOwner = String(row.employee_id) === String(userId);
     const isHrOrAdmin = normalizedRole === 'hr' || normalizedRole === 'admin';
-    let assignedDepartmentHeadId = null;
+    let assignedDepartmentHeadId =
+      row.assigned_department_head_id || null;
     if (
+      !assignedDepartmentHeadId &&
       !isOwner &&
       !isHrOrAdmin &&
       row.status === 'pending_department_head' &&
@@ -1139,9 +1166,6 @@ router.get('/department-head', protect, async (req, res) => {
   const client = await pool.connect();
   try {
     const deptInfo = await isDepartmentHead(client, userId);
-    if (!deptInfo.isDeptHead || !deptInfo.departmentId) {
-      return res.status(403).json({ error: 'You are not a department head' });
-    }
     const status = (req.query?.status || '').toString().trim() || null;
     if (status && !isValidStatus(status)) {
       return res.status(400).json({ error: 'Invalid status filter' });
@@ -1151,6 +1175,7 @@ router.get('/department-head', protect, async (req, res) => {
               ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
               d.name AS department_name,
+              assigned_dh.full_name AS assigned_department_head_name,
               dh.full_name AS dept_head_reviewer_name,
               hr.full_name AS hr_reviewer_name,
               lrt.label AS request_type_label,
@@ -1164,18 +1189,27 @@ router.get('/department-head', protect, async (req, res) => {
        FROM locator_slips ls
        LEFT JOIN users u ON u.id = ls.employee_id
        LEFT JOIN departments d ON d.id = ls.department_id
+       LEFT JOIN users assigned_dh ON assigned_dh.id = ls.assigned_department_head_id
        LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
        LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
        LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
-       WHERE ls.department_id = $1::uuid
-         AND (
-           ls.status = 'pending_department_head'
-           OR ls.dept_head_reviewer_id = $2::uuid
+       WHERE (
+           (
+             ls.status = 'pending_department_head'
+             AND (
+               ls.assigned_department_head_id = $1::uuid
+               OR (
+                 ls.assigned_department_head_id IS NULL
+                 AND ls.department_id = $2::uuid
+               )
+             )
+           )
+           OR ls.dept_head_reviewer_id = $1::uuid
          )
          AND ($3::text IS NULL OR ls.status = $3::text)
        ORDER BY ls.updated_at DESC, ls.created_at DESC
        LIMIT 500`,
-      [deptInfo.departmentId, userId, status]
+      [userId, deptInfo.departmentId, status]
     );
     res.json(rows.rows.map(mapLocatorRow));
   } catch (err) {
@@ -1197,10 +1231,6 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
   try {
     await client.query('BEGIN');
     const deptInfo = await isDepartmentHead(client, reviewerId);
-    if (!deptInfo.isDeptHead || !deptInfo.departmentId) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'You are not a department head' });
-    }
     const current = await client.query(
       `SELECT ls.id,
               ls.status,
@@ -1216,13 +1246,19 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
        FROM locator_slips ls
        LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
        WHERE ls.id = $1::uuid
-         AND ls.department_id = $2::uuid
+         AND (
+           ls.assigned_department_head_id = $2::uuid
+           OR (
+             ls.assigned_department_head_id IS NULL
+             AND ls.department_id = $3::uuid
+           )
+         )
        FOR UPDATE OF ls`,
-      [id, deptInfo.departmentId]
+      [id, reviewerId, deptInfo.departmentId]
     );
     if (current.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Locator slip not found or not in your department' });
+      return res.status(404).json({ error: 'Locator slip not found or not assigned to you' });
     }
     if (current.rows[0].status !== 'pending_department_head') {
       await client.query('ROLLBACK');
@@ -1325,21 +1361,23 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
   try {
     await client.query('BEGIN');
     const deptInfo = await isDepartmentHead(client, reviewerId);
-    if (!deptInfo.isDeptHead || !deptInfo.departmentId) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'You are not a department head' });
-    }
     const current = await client.query(
       `SELECT id, status, employee_id
        FROM locator_slips
        WHERE id = $1::uuid
-         AND department_id = $2::uuid
+         AND (
+           assigned_department_head_id = $2::uuid
+           OR (
+             assigned_department_head_id IS NULL
+             AND department_id = $3::uuid
+           )
+         )
        FOR UPDATE`,
-      [id, deptInfo.departmentId]
+      [id, reviewerId, deptInfo.departmentId]
     );
     if (current.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Locator slip not found or not in your department' });
+      return res.status(404).json({ error: 'Locator slip not found or not assigned to you' });
     }
     if (current.rows[0].status !== 'pending_department_head') {
       await client.query('ROLLBACK');
@@ -1422,22 +1460,24 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
   try {
     await client.query('BEGIN');
     const deptInfo = await isDepartmentHead(client, reviewerId);
-    if (!deptInfo.isDeptHead || !deptInfo.departmentId) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'You are not a department head' });
-    }
     const current = await client.query(
       `SELECT id, status, employee_id
        FROM locator_slips
        WHERE id = $1::uuid
-         AND department_id = $2::uuid
+         AND (
+           assigned_department_head_id = $2::uuid
+           OR (
+             assigned_department_head_id IS NULL
+             AND department_id = $3::uuid
+           )
+         )
        FOR UPDATE`,
-      [id, deptInfo.departmentId]
+      [id, reviewerId, deptInfo.departmentId]
     );
     const row = current.rows[0];
     if (!row) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Locator slip not found or not in your department' });
+      return res.status(404).json({ error: 'Locator slip not found or not assigned to you' });
     }
     if (row.status !== 'pending_department_head') {
       await client.query('ROLLBACK');

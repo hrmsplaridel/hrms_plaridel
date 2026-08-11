@@ -816,6 +816,7 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  assigned_department_head_id UUID REFERENCES users(id) ON DELETE SET NULL,
   slip_date DATE NOT NULL,
   am_in BOOLEAN NOT NULL DEFAULT false,
   am_out BOOLEAN NOT NULL DEFAULT false,
@@ -855,6 +856,8 @@ CREATE INDEX IF NOT EXISTS idx_locator_slips_status
   ON locator_slips(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_department
   ON locator_slips(department_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_locator_slips_assigned_department_head
+  ON locator_slips(assigned_department_head_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_date
   ON locator_slips(slip_date DESC);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_request_type
