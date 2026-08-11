@@ -25,6 +25,9 @@ const {
   validateLocatorAttachmentForReview,
   validateLocatorRequiredFields,
 } = require('../services/locatorFilingRules');
+const {
+  findLocatorRequestConflicts,
+} = require('../services/locatorConflictPolicy');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -231,6 +234,14 @@ function locatorAttachmentFileExists(relativePath) {
   } catch (_) {
     return false;
   }
+}
+
+function locatorConflictPayload(result) {
+  return {
+    error: result.message || 'Locator request conflicts with an existing record.',
+    code: result.code || 'locator_conflict',
+    conflicts: result.conflicts || {},
+  };
 }
 
 function removeLocatorAttachmentFile(relativePath) {
@@ -731,6 +742,16 @@ router.post('/submit', protect, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: attachmentError });
     }
+    const conflictCheck = await findLocatorRequestConflicts(client, {
+      employeeId: userId,
+      slipDate,
+      slots: { amIn, amOut, pmIn, pmOut },
+      phase: 'submission',
+    });
+    if (!conflictCheck.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json(locatorConflictPayload(conflictCheck));
+    }
 
     const inserted = await client.query(
       `INSERT INTO locator_slips (
@@ -866,6 +887,17 @@ router.post('/submit-with-attachment', protect, uploadLocatorAttachmentMw, async
       await client.query('ROLLBACK');
       cleanup();
       return res.status(400).json({ error: 'Invalid request_type' });
+    }
+    const conflictCheck = await findLocatorRequestConflicts(client, {
+      employeeId: userId,
+      slipDate,
+      slots: { amIn, amOut, pmIn, pmOut },
+      phase: 'submission',
+    });
+    if (!conflictCheck.ok) {
+      await client.query('ROLLBACK');
+      cleanup();
+      return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
 
     const inserted = await client.query(
@@ -1047,6 +1079,17 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
     if (attachmentError) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: attachmentError });
+    }
+    const conflictCheck = await findLocatorRequestConflicts(client, {
+      employeeId: userId,
+      slipDate: row.slip_date_text,
+      slots: row,
+      excludeSlipId: id,
+      phase: 'submission',
+    });
+    if (!conflictCheck.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
 
     let departmentHeadUserId = null;
@@ -1341,6 +1384,10 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
               ls.employee_id,
               ls.slip_date::text AS slip_date,
               ls.request_type,
+              ls.am_in,
+              ls.am_out,
+              ls.pm_in,
+              ls.pm_out,
               ls.attachment_path,
               lrt.requires_attachment AS request_type_requires_attachment
        FROM locator_slips ls
@@ -1364,6 +1411,19 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     if (attachmentError) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: attachmentError });
+    }
+    const conflictCheck = await findLocatorRequestConflicts(client, {
+      employeeId: current.rows[0].employee_id,
+      slipDate: current.rows[0].slip_date,
+      slots: current.rows[0],
+      excludeSlipId: id,
+      phase: 'approval',
+      checkLeave: false,
+      checkAttendance: false,
+    });
+    if (!conflictCheck.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
     await client.query(
       `UPDATE locator_slips
@@ -1731,6 +1791,11 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
       `SELECT ls.id,
               ls.status,
               ls.employee_id,
+              ls.slip_date::text AS slip_date,
+              ls.am_in,
+              ls.am_out,
+              ls.pm_in,
+              ls.pm_out,
               ls.attachment_path,
               lrt.requires_attachment AS request_type_requires_attachment
        FROM locator_slips ls
@@ -1753,6 +1818,17 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
     if (attachmentError) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: attachmentError });
+    }
+    const conflictCheck = await findLocatorRequestConflicts(client, {
+      employeeId: current.rows[0].employee_id,
+      slipDate: current.rows[0].slip_date,
+      slots: current.rows[0],
+      excludeSlipId: id,
+      phase: 'approval',
+    });
+    if (!conflictCheck.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
     await client.query(
       `UPDATE locator_slips

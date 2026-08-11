@@ -20,6 +20,7 @@ const {
 const {
   evaluateLocatorCoverage,
   locatorCoverageSegments,
+  locatorSegmentsForMissingPunches,
   mergeLocatorCoverages,
 } = require('../services/locatorCoverage');
 
@@ -603,7 +604,9 @@ async function computeAttendanceRemark(
   const hasPm =
     (record.break_in != null || locatorSegSet.has('PM IN')) &&
     (record.time_out != null || locatorSegSet.has('PM OUT'));
-  const hasInOut = record.time_in != null && record.time_out != null;
+  const hasInOut =
+    (record.time_in != null || locatorSegSet.has('AM IN')) &&
+    (record.time_out != null || locatorSegSet.has('PM OUT'));
   const missingRequired =
     (expected.needsAm && !hasAm) ||
     (expected.needsPm && !hasPm) ||
@@ -1424,11 +1427,13 @@ router.get('/', protect, async (req, res) => {
           holidayInfo,
           date: rowDateStr,
         }).isFullCoverage;
+        const hasAnyLog = !!(row.time_in || row.break_out || row.break_in || row.time_out);
+        const effectiveLocatorSegments = locatorSegmentsForMissingPunches(locator, row);
 
-        // Only clear deductions when locator slips cover every expected shift slot.
-        // Partial locator segments (e.g., AM IN only) should keep computed
-        // late/undertime from other uncovered segments.
+        // Physical punches are authoritative. Locator coverage can fill missing
+        // slots, but it must not erase penalties calculated from real punches.
         if (
+          !hasAnyLog &&
           hasFullShiftCoverage &&
           row.status !== 'holiday' &&
           row.status !== 'on_leave'
@@ -1437,7 +1442,6 @@ router.get('/', protect, async (req, res) => {
           row.undertime_minutes = 0;
         }
 
-        const hasAnyLog = !!(row.time_in || row.break_out || row.break_in || row.time_out);
         if (
           !hasAnyLog &&
           hasFullShiftCoverage &&
@@ -1464,7 +1468,7 @@ router.get('/', protect, async (req, res) => {
           coverage,
           row.time_in,
           row.break_in,
-          row.locator_slip_segments || []
+          effectiveLocatorSegments
         );
         row.attendance_remark = await computeAttendanceRemark(
           row,
@@ -1472,7 +1476,7 @@ router.get('/', protect, async (req, res) => {
           row.holiday_id,
           row.leave_request_id,
           holidayInfo,
-          row.locator_slip_segments || []
+          effectiveLocatorSegments
         );
       }
 
