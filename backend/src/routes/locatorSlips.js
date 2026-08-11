@@ -20,14 +20,14 @@ const { broadcastAppEvent } = require('../websockets/appEvents');
 const {
   canModifyLocatorAttachment,
   evaluateLocatorWorkingDay,
-  locatorAttachmentRequiredError,
-  parseLocatorDateOnly,
   validateLocatorAttachmentForReview,
-  validateLocatorRequiredFields,
 } = require('../services/locatorFilingRules');
 const {
   findLocatorRequestConflicts,
 } = require('../services/locatorConflictPolicy');
+const {
+  createLocatorSubmissionService,
+} = require('../services/locatorSubmissionService');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -490,6 +490,19 @@ async function fetchLocatorSlipDetails(db, id) {
   return result.rows[0] ? mapLocatorRow(result.rows[0]) : null;
 }
 
+const locatorSubmissionService = createLocatorSubmissionService({
+  dbPool: pool,
+  getDepartmentHeadForEmployee,
+  getEmployeeDepartment,
+  validateWorkingDay: validateLocatorSlipWorkingDay,
+  getLocatorTypeByCode,
+  findConflicts: findLocatorRequestConflicts,
+  fetchSlipDetails: fetchLocatorSlipDetails,
+  mapInsertedRow: mapLocatorRow,
+  notifyAfterSubmit: locatorNotifications.notifyAfterSubmit,
+  broadcastSubmitted: (row) => broadcastLocatorUpdated('submitted', row),
+});
+
 function isValidStatus(status) {
   return [
     'pending',
@@ -707,131 +720,25 @@ router.post('/submit', protect, async (req, res) => {
   const pmIn = req.body?.pm_in === true;
   const pmOut = req.body?.pm_out === true;
 
-  const fieldValidation = validateLocatorRequiredFields({
-    slipDate,
-    requestType,
-    office,
-    reason,
-    slots: { amIn, amOut, pmIn, pmOut },
-  });
-  if (!fieldValidation.valid) {
-    return res.status(400).json({ error: fieldValidation.error });
-  }
-  const slipDateInfo = parseLocatorDateOnly(slipDate);
-
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-
-    const deptInfo = await getDepartmentHeadForEmployee(client, userId);
-    const ownDept = await getEmployeeDepartment(client, userId);
-    const submitStatus = deptInfo ? 'pending_department_head' : 'pending_hr';
-    const departmentId = deptInfo?.departmentId || ownDept?.departmentId || null;
-    const workingDayCheck = await validateLocatorSlipWorkingDay(client, userId, slipDateInfo);
-    if (!workingDayCheck.ok) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: workingDayCheck.error });
-    }
-    const locatorType = await getLocatorTypeByCode(client, requestType, { activeOnly: true });
-    if (!locatorType) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Invalid request_type' });
-    }
-    const attachmentError = locatorAttachmentRequiredError(locatorType, false);
-    if (attachmentError) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: attachmentError });
-    }
-    const conflictCheck = await findLocatorRequestConflicts(client, {
-      employeeId: userId,
+    const mapped = await locatorSubmissionService.submit({
+      employeeUserId: userId,
       slipDate,
-      slots: { amIn, amOut, pmIn, pmOut },
-      phase: 'submission',
+      office,
+      reason,
+      requestType,
+      amIn,
+      amOut,
+      pmIn,
+      pmOut,
     });
-    if (!conflictCheck.ok) {
-      await client.query('ROLLBACK');
-      return res.status(409).json(locatorConflictPayload(conflictCheck));
-    }
-
-    const inserted = await client.query(
-      `INSERT INTO locator_slips (
-        employee_id, department_id, slip_date, am_in, am_out, pm_in, pm_out,
-        request_type, office, reason, status, created_at, updated_at
-      ) VALUES (
-        $1::uuid, $2::uuid, $3::date, $4::boolean, $5::boolean, $6::boolean, $7::boolean,
-        $8::text, $9::text, $10::text, $11::text, now(), now()
-      )
-      RETURNING *`,
-      [
-        userId,
-        departmentId,
-        slipDate,
-        amIn,
-        amOut,
-        pmIn,
-        pmOut,
-        requestType,
-        office,
-        reason,
-        submitStatus,
-      ]
-    );
-    await client.query('COMMIT');
-
-    const out = await pool.query(
-      `SELECT ls.*,
-              ls.slip_date::text AS slip_date_text,
-              u.full_name AS employee_name,
-              d.name AS department_name,
-              dh.full_name AS dept_head_reviewer_name,
-              hr.full_name AS hr_reviewer_name,
-              lrt.label AS request_type_label,
-              lrt.short_label AS request_type_short_label,
-              lrt.location_label AS request_type_location_label,
-              lrt.location_hint AS request_type_location_hint,
-              lrt.dtr_slot_label AS request_type_dtr_slot_label,
-              lrt.dtr_print_label AS request_type_dtr_print_label,
-              lrt.requires_attachment AS request_type_requires_attachment,
-              lrt.coverage_mode AS request_type_coverage_mode
-       FROM locator_slips ls
-       LEFT JOIN users u ON u.id = ls.employee_id
-       LEFT JOIN departments d ON d.id = ls.department_id
-       LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
-       LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
-       LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
-       WHERE ls.id = $1::uuid`,
-      [inserted.rows[0].id]
-    );
-
-    const nameQ = await pool.query('SELECT full_name FROM users WHERE id = $1::uuid', [userId]);
-    const employeeName = nameQ.rows[0]?.full_name || 'Employee';
-    notifySafe(() =>
-      locatorNotifications.notifyAfterSubmit(pool, {
-        slipId: inserted.rows[0].id,
-        status: submitStatus,
-        employeeUserId: userId,
-        employeeName,
-        slipDate,
-        amIn,
-        amOut,
-        pmIn,
-        pmOut,
-        requestType,
-        departmentHeadUserId: deptInfo?.departmentHeadUserId || null,
-      })
-    );
-
-    const mapped = mapLocatorRow(out.rows[0]);
-    broadcastLocatorUpdated('submitted', mapped);
     res.status(201).json(mapped);
   } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {}
+    if (err?.statusCode && err?.payload) {
+      return res.status(err.statusCode).json(err.payload);
+    }
     console.error('[locator POST /submit]', err);
     res.status(500).json({ error: 'Failed to submit locator slip' });
-  } finally {
-    client.release();
   }
 });
 
@@ -857,115 +764,31 @@ router.post('/submit-with-attachment', protect, uploadLocatorAttachmentMw, async
     } catch (_) {}
   };
 
-  const fieldValidation = validateLocatorRequiredFields({
-    slipDate,
-    requestType,
-    office,
-    reason,
-    slots: { amIn, amOut, pmIn, pmOut },
-  });
-  if (!fieldValidation.valid) {
-    cleanup();
-    return res.status(400).json({ error: fieldValidation.error });
-  }
-  const slipDateInfo = parseLocatorDateOnly(slipDate);
-
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    const deptInfo = await getDepartmentHeadForEmployee(client, userId);
-    const ownDept = await getEmployeeDepartment(client, userId);
-    const departmentId = deptInfo?.departmentId || ownDept?.departmentId || null;
-    const workingDayCheck = await validateLocatorSlipWorkingDay(client, userId, slipDateInfo);
-    if (!workingDayCheck.ok) {
-      await client.query('ROLLBACK');
-      cleanup();
-      return res.status(400).json({ error: workingDayCheck.error });
-    }
-    const locatorType = await getLocatorTypeByCode(client, requestType, { activeOnly: true });
-    if (!locatorType) {
-      await client.query('ROLLBACK');
-      cleanup();
-      return res.status(400).json({ error: 'Invalid request_type' });
-    }
-    const conflictCheck = await findLocatorRequestConflicts(client, {
-      employeeId: userId,
+    const mapped = await locatorSubmissionService.submit({
+      employeeUserId: userId,
       slipDate,
-      slots: { amIn, amOut, pmIn, pmOut },
-      phase: 'submission',
+      office,
+      reason,
+      requestType,
+      amIn,
+      amOut,
+      pmIn,
+      pmOut,
+      attachment: {
+        name: req.file.originalname || 'attachment',
+        path: relPath,
+        mimeType: req.file.mimetype || null,
+      },
     });
-    if (!conflictCheck.ok) {
-      await client.query('ROLLBACK');
-      cleanup();
-      return res.status(409).json(locatorConflictPayload(conflictCheck));
-    }
-
-    const inserted = await client.query(
-      `INSERT INTO locator_slips (
-        employee_id, department_id, slip_date, am_in, am_out, pm_in, pm_out,
-        request_type, office, reason, attachment_name, attachment_path,
-        attachment_mime_type, attachment_uploaded_at, status, created_at, updated_at
-      ) VALUES (
-        $1::uuid, $2::uuid, $3::date, $4::boolean, $5::boolean, $6::boolean, $7::boolean,
-        $8::text, $9::text, $10::text, $11::text, $12::text, $13::text, now(), $14::text, now(), now()
-      )
-      RETURNING *`,
-      [
-        userId,
-        departmentId,
-        slipDate,
-        amIn,
-        amOut,
-        pmIn,
-        pmOut,
-        requestType,
-        office,
-        reason,
-        req.file.originalname || 'attachment',
-        relPath,
-        req.file.mimetype || null,
-        deptInfo ? 'pending_department_head' : 'pending_hr',
-      ]
-    );
-
-    await client.query('COMMIT');
-    const out = await pool.query(
-      `SELECT ls.*,
-              ls.slip_date::text AS slip_date_text,
-              u.full_name AS employee_name,
-              d.name AS department_name,
-              dh.full_name AS dept_head_reviewer_name,
-              hr.full_name AS hr_reviewer_name,
-              lrt.label AS request_type_label,
-              lrt.short_label AS request_type_short_label,
-              lrt.location_label AS request_type_location_label,
-              lrt.location_hint AS request_type_location_hint,
-              lrt.dtr_slot_label AS request_type_dtr_slot_label,
-              lrt.dtr_print_label AS request_type_dtr_print_label,
-              lrt.requires_attachment AS request_type_requires_attachment,
-              lrt.coverage_mode AS request_type_coverage_mode
-       FROM locator_slips ls
-       LEFT JOIN users u ON u.id = ls.employee_id
-       LEFT JOIN departments d ON d.id = ls.department_id
-       LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
-       LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
-       LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
-       WHERE ls.id = $1::uuid`,
-      [inserted.rows[0].id]
-    );
-
-    const mapped = mapLocatorRow(out.rows[0]);
-    broadcastLocatorUpdated('submitted', mapped);
     res.status(201).json(mapped);
   } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {}
     cleanup();
+    if (err?.statusCode && err?.payload) {
+      return res.status(err.statusCode).json(err.payload);
+    }
     console.error('[locator POST /submit-with-attachment]', err);
     res.status(500).json({ error: 'Failed to submit locator slip with attachment' });
-  } finally {
-    client.release();
   }
 });
 
