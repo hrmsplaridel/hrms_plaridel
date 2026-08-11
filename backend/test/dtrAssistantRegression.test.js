@@ -1721,6 +1721,59 @@ test('DTR assistant regression: locator exact slot coverage requires approved ma
   assert.match(reply, /not final coverage until approved/i);
 });
 
+test('DTR assistant regression: PM-only approved locator covers the assigned shift', () => {
+  const context = {
+    date_range: {
+      label: 'tomorrow',
+      startDate: '2026-06-16',
+      endDate: '2026-06-16',
+    },
+    dtr_calendar_days: [
+      {
+        attendance_date: '2026-06-16',
+        shift_id: 'pm-shift',
+        shift_name: 'Evening Shift',
+        start_time: '18:00:00',
+        end_time: '19:00:00',
+        punch_mode: 'auto',
+        working_days: [1, 2, 3, 4, 5],
+        holiday_coverage: null,
+      },
+    ],
+    recent_locator_slips: [
+      {
+        slip_date: '2026-06-16',
+        request_type: 'locator',
+        request_type_label: 'Locator Slip',
+        status: 'approved',
+        coverage: {
+          am_in: false,
+          am_out: false,
+          pm_in: true,
+          pm_out: true,
+        },
+      },
+    ],
+  };
+
+  const locatorReply = buildFastEmployeeAssistantReply(
+    'does my locator cover my shift tomorrow?',
+    context,
+    'dtr_locator_coverage_check'
+  );
+  assert.match(locatorReply, /fully satisfies the assigned shift/i);
+  assert.doesNotMatch(locatorReply, /no approved coverage fully satisfies/i);
+
+  const statusReply = buildFastEmployeeAssistantReply(
+    'why is there no DTR tomorrow?',
+    context,
+    'dtr_status_explanation'
+  );
+  assert.match(statusReply, /Status: On field/i);
+  assert.match(statusReply, /PM in, PM out/i);
+  assert.doesNotMatch(statusReply, /Status: Absent/i);
+});
+
 test('DTR assistant regression: DTR export rows include no-record scheduled days', () => {
   const rows = dtrExportRows({
     date_range: {

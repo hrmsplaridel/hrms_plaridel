@@ -255,6 +255,49 @@ test('full locator keys use the assignment effective on the locator date', async
   assert.equal(keys.has(`${USER_ID}|2026-06-20`), false);
 });
 
+test('full locator keys honor partial-holiday shift coverage', async () => {
+  const client = {
+    async query() {
+      return {
+        rows: [
+          {
+            employee_id: USER_ID,
+            slip_date: '2026-06-10',
+            am_in: false,
+            am_out: false,
+            pm_in: true,
+            pm_out: true,
+          },
+        ],
+      };
+    },
+  };
+  const assignments = new Map([
+    [
+      USER_ID,
+      [
+        {
+          effectiveFrom: '2026-06-01',
+          effectiveTo: null,
+          punchMode: 'full_day',
+          workingDays: [1, 2, 3, 4, 5],
+        },
+      ],
+    ],
+  ]);
+
+  const keys = await loadFullLocatorKeys(
+    client,
+    [USER_ID],
+    '2026-06-01',
+    '2026-06-30',
+    assignments,
+    new Map([['2026-06-10', 'am_only']])
+  );
+
+  assert.equal(keys.has(`${USER_ID}|2026-06-10`), true);
+});
+
 test('completed-month DTR processing includes closed historical assignments', async () => {
   const sqlCalls = [];
   const client = {
