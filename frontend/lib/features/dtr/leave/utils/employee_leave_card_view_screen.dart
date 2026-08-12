@@ -122,11 +122,12 @@ class _EmployeeLeaveCardViewScreenState
               .map((e) => (e.officeDepartment ?? '').trim())
               .firstWhere((e) => e.isNotEmpty, orElse: () => 'N/A');
     return Scaffold(
-      backgroundColor: AppTheme.offWhite,
+      backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
         title: const Text("Employee's Leave Card"),
-        backgroundColor: AppTheme.white,
-        foregroundColor: AppTheme.textPrimary,
+        backgroundColor: AppTheme.dashPanelOf(context),
+        foregroundColor: AppTheme.dashTextPrimaryOf(context),
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
         actions: [
           IconButton(
@@ -197,7 +198,7 @@ class _EmployeeLeaveCardViewScreenState
             Text(
               'Failed to load leave card data.',
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
               ),
@@ -206,7 +207,7 @@ class _EmployeeLeaveCardViewScreenState
             Text(
               _error ?? 'Unknown error.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.textSecondary),
+              style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
             ),
             const SizedBox(height: 14),
             FilledButton.icon(
