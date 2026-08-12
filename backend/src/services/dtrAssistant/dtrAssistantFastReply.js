@@ -38,6 +38,9 @@ const {
   parseLocatorDateOnly,
 } = require('../locatorFilingRules');
 const {
+  evaluateEmployeeLocatorDateWindow,
+} = require('../locatorDatePolicy');
+const {
   evaluateLocatorCoverage,
   expectedLocatorSlotsForShift,
   locatorCoverageSegments,
@@ -1133,6 +1136,9 @@ function localizedRuleIssue(message, language) {
     [/must be used within 30 days from the calamity occurrence/i, isBisaya
       ? 'Kinahanglan gamiton sulod sa 30 days from calamity occurrence.'
       : 'Kailangang gamitin sa loob ng 30 days from calamity occurrence.'],
+    [/cannot file locator requests for a past date/i, isBisaya
+      ? 'Dili pwede mag-file ang employee ug locator para sa nilabay nga date. Kontaka ang HR para sa documented correction.'
+      : 'Hindi puwedeng mag-file ang employee ng locator para sa nakaraang date. Kontakin ang HR para sa documented correction.'],
   ];
   for (const [pattern, replacement] of pairs) {
     if (pattern.test(text)) return replacement;
@@ -5463,6 +5469,7 @@ function locatorStatusText(status) {
   if (value === 'pending_department_head') return 'waiting for department head review';
   if (value === 'pending_hr' || value === 'pending') return 'waiting for HR review';
   if (value === 'approved') return 'approved by HR';
+  if (value === 'revoked') return 'approval revoked by HR';
   if (value === 'rejected_by_department_head') return 'rejected by department head';
   if (value === 'rejected_by_hr' || value === 'rejected') return 'rejected by HR';
   if (value === 'cancelled' || value === 'canceled') return 'cancelled';
@@ -5510,6 +5517,7 @@ function requestedLocatorStatus(message) {
   const text = lower(message);
   if (/\b(pending|waiting|awaiting|hold|holding|asa|where|kinsa|sino)\b/.test(text)) return 'pending';
   if (/\b(approved|approve|na-approve|accepted|accept)\b/.test(text)) return 'approved';
+  if (/\b(revoked|revoke|gi-revoke|girevoke|binawi|bawiin|withdrawn approval)\b/.test(text)) return 'revoked';
   if (/\b(rejected|reject|declined|denied|gi reject|gireject|not approved|wala.*approve|dili.*approved|hindi.*approved)\b/.test(text)) return 'rejected';
   if (/\b(cancelled|canceled|cancel)\b/.test(text)) return 'cancelled';
   return null;
@@ -5531,6 +5539,11 @@ function localizedLocatorStatusName(status, language) {
     if (language === 'tagalog') return 'rejected';
     return 'rejected';
   }
+  if (status === 'revoked') {
+    if (language === 'bisaya') return 'gi-revoke';
+    if (language === 'tagalog') return 'binawi';
+    return 'revoked';
+  }
   if (status === 'cancelled') {
     if (language === 'bisaya') return 'cancelled';
     if (language === 'tagalog') return 'cancelled';
@@ -5544,6 +5557,7 @@ function locatorStatusMatches(status, requested) {
   const value = lower(status);
   if (requested === 'pending') return value === 'pending' || value === 'pending_department_head' || value === 'pending_hr';
   if (requested === 'approved') return value === 'approved';
+  if (requested === 'revoked') return value === 'revoked';
   if (requested === 'rejected') return value === 'rejected' || value === 'rejected_by_department_head' || value === 'rejected_by_hr';
   if (requested === 'cancelled') return value === 'cancelled' || value === 'canceled';
   return true;
@@ -5645,14 +5659,16 @@ function locatorRequirementPolicyLines(language) {
     return [
       'Locator filing: Kinahanglan ug slip date, locator type, covered DTR slot/s, destination/location, ug reason.',
       'DTR coverage: Makatabang lang sa DTR ang locator kung approved na ug sakto ang covered slot/s.',
-      'Approval workflow: Muagi gihapon ni sa normal approval workflow; dili pa ni final kung pending pa.',
+      'Approval workflow: Muagi sa Department Head ug HR review. Dili pa kini DTR coverage kung pending pa.',
+      'Past date: HR/Admin ra ang makarekord isip documented correction o emergency exception.',
     ];
   }
   if (language === 'tagalog') {
     return [
       'Locator filing: Kailangan ng slip date, locator type, covered DTR slot/s, destination/location, at reason.',
       'DTR coverage: Makakatulong lang sa DTR ang locator kapag approved na at tama ang covered slot/s.',
-      'Approval workflow: Dadaan pa rin ito sa normal approval workflow; hindi pa final kung pending pa.',
+      'Approval workflow: Dadaan sa Department Head at HR review. Hindi pa ito DTR coverage habang pending.',
+      'Past date: HR/Admin lang ang maaaring mag-record bilang documented correction o emergency exception.',
     ];
   }
   return policyPointLines(getLocatorPolicySectionsForMessage('', {
@@ -5731,10 +5747,10 @@ function locatorTypesReply(context, message) {
           ? 'Kailangan pa rin ang slip date, covered slots, location/destination, at reason.'
           : 'You still need a slip date, covered slots, location/destination, and reason.',
       language === 'bisaya'
-        ? 'Kinahanglan pa ang approval bago mahimong final DTR coverage.'
+        ? 'Kinahanglan pa ang final HR approval bago mahimong DTR coverage.'
         : language === 'tagalog'
-          ? 'Kailangan pa ng approval bago maging final DTR coverage.'
-          : 'Approval is still required before it becomes final DTR coverage.',
+          ? 'Kailangan pa ng final HR approval bago maging DTR coverage.'
+          : 'Final HR approval is required before it becomes DTR coverage.',
     ],
     nextStep:
       language === 'bisaya'
@@ -5752,6 +5768,7 @@ function localizedLocatorStatusText(status, language) {
     if (value === 'pending_department_head') return 'naghulat sa department head review';
     if (value === 'pending_hr' || value === 'pending') return 'naghulat sa HR review';
     if (value === 'approved') return 'approved sa HR';
+    if (value === 'revoked') return 'gi-revoke sa HR';
     if (value === 'rejected_by_department_head') return 'rejected sa department head';
     if (value === 'rejected_by_hr' || value === 'rejected') return 'rejected sa HR';
     if (value === 'cancelled' || value === 'canceled') return 'cancelled';
@@ -5761,6 +5778,7 @@ function localizedLocatorStatusText(status, language) {
     if (value === 'pending_department_head') return 'naghihintay ng department head review';
     if (value === 'pending_hr' || value === 'pending') return 'naghihintay ng HR review';
     if (value === 'approved') return 'approved ng HR';
+    if (value === 'revoked') return 'binawi ng HR ang approval';
     if (value === 'rejected_by_department_head') return 'rejected ng department head';
     if (value === 'rejected_by_hr' || value === 'rejected') return 'rejected ng HR';
     if (value === 'cancelled' || value === 'canceled') return 'cancelled';
@@ -5802,8 +5820,9 @@ function locatorReply(context, localized, message = '') {
   }
 
   const remarks = locatorRemarks(slip);
+  const localizedStatus = localizedLocatorStatusText(slip.status, language);
   const details = [
-    `Status: ${locatorStatusText(slip.status)}`,
+    `Status: ${localizedStatus}`,
     `Date: ${fmtFriendlyDate(slip.slip_date)}`,
     `Type: ${slip.request_type_label || slip.request_type || 'Locator'}`,
     locatorSlots(slip).length > 0 ? `Coverage: ${locatorSlots(slip).join(', ')}` : null,
@@ -5811,15 +5830,21 @@ function locatorReply(context, localized, message = '') {
     slip.reason ? `Reason: ${slip.reason}` : null,
     slip.dept_head_reviewer_name ? `Department head reviewer: ${slip.dept_head_reviewer_name}` : null,
     slip.hr_reviewer_name ? `HR reviewer: ${slip.hr_reviewer_name}` : null,
+    slip.revoked_by_name ? `Revoked by: ${slip.revoked_by_name}` : null,
+    slip.revoked_at ? `Revoked at: ${fmtFriendlyDate(slip.revoked_at)}` : null,
+    slip.revocation_reason ? `Revocation reason: ${slip.revocation_reason}` : null,
+    slip.month_end_reconciliation_required
+      ? 'DTR reconciliation: HR must rerun month-end processing for this locator month.'
+      : null,
     remarks ? `Remarks: ${remarks}` : null,
   ];
   const title = language === 'bisaya' ? 'Locator status' : language === 'tagalog' ? 'Status ng locator' : 'Locator status';
   const summary =
     language === 'bisaya'
-      ? `Ang locator request nimo kay ${locatorStatusText(slip.status)}.`
+      ? `Ang locator request nimo kay ${localizedStatus}.`
       : language === 'tagalog'
-        ? `Ang locator request mo ay ${locatorStatusText(slip.status)}.`
-        : `Your locator request is ${locatorStatusText(slip.status)}.`;
+        ? `Ang locator request mo ay ${localizedStatus}.`
+        : `Your locator request is ${localizedStatus}.`;
   return structuredReply(language, {
     title,
     summary,
@@ -5857,10 +5882,11 @@ function locatorSummaryReply(context, message) {
       else if (status === 'pending' || status === 'pending_department_head' || status === 'pending_hr') acc.pending += 1;
       else if (status === 'rejected' || status === 'rejected_by_department_head' || status === 'rejected_by_hr') acc.rejected += 1;
       else if (status === 'cancelled' || status === 'canceled') acc.cancelled += 1;
+      else if (status === 'revoked') acc.revoked += 1;
       else acc.other += 1;
       return acc;
     },
-    { pending: 0, approved: 0, rejected: 0, cancelled: 0, other: 0 }
+    { pending: 0, approved: 0, revoked: 0, rejected: 0, cancelled: 0, other: 0 }
   );
   const lines = limitedRequests(slips, 6).map(fmtLocatorSlip);
   const summary =
@@ -5875,6 +5901,7 @@ function locatorSummaryReply(context, message) {
     details: [
       `Pending: ${counts.pending}`,
       `Approved: ${counts.approved}`,
+      `Revoked: ${counts.revoked}`,
       `Rejected: ${counts.rejected}`,
       `Cancelled: ${counts.cancelled}`,
       ...lines,
@@ -5886,12 +5913,12 @@ function locatorSummaryReply(context, message) {
 function locatorCreditRequirementReply(message) {
   const language = languageOf(message);
   if (language === 'bisaya') {
-    return 'Dili. Ang locator request dili mogamit ug dili mobawas sa imong Vacation Leave o Sick Leave credits. Lahi kini sa leave filing. Kinahanglan lang nga sakto ang locator type, workday, covered AM/PM slots, destination ug reason, required attachment depende sa type, ug approval. Kung approved, makatabang kini sa DTR coverage pero dili mokunhod ang imong leave balance.';
+    return 'Dili. Ang locator request dili mogamit ug dili mobawas sa imong Vacation Leave o Sick Leave credits. Lahi kini sa leave filing. Kinahanglan ang sakto nga locator type, karon o advance nga scheduled workday, covered AM/PM slots, destination ug reason, required attachment depende sa type, ug approval. Kung approved, makatabang kini sa DTR coverage pero dili mokunhod ang imong leave balance.';
   }
   if (language === 'tagalog') {
-    return 'Hindi. Ang locator request ay hindi gumagamit o nagbabawas sa iyong Vacation Leave o Sick Leave credits. Hiwalay ito sa leave filing. Kailangan lamang ang tamang locator type, workday, covered AM/PM slots, destination at reason, required attachment depende sa type, at approval. Kapag approved, makakatulong ito sa DTR coverage pero hindi mababawasan ang leave balance mo.';
+    return 'Hindi. Ang locator request ay hindi gumagamit o nagbabawas sa iyong Vacation Leave o Sick Leave credits. Hiwalay ito sa leave filing. Kailangan ang tamang locator type, ngayon o advance na scheduled workday, covered AM/PM slots, destination at reason, required attachment depende sa type, at approval. Kapag approved, makakatulong ito sa DTR coverage pero hindi mababawasan ang leave balance mo.';
   }
-  return 'No. A locator request does not use or deduct from your Vacation Leave or Sick Leave credits. It is separate from leave filing. You only need the correct locator type, workday, covered AM/PM slots, destination and reason, any attachment required by the type, and approval. Once approved, it can support DTR coverage without reducing your leave balance.';
+  return 'No. A locator request does not use or deduct from your Vacation Leave or Sick Leave credits. It is separate from leave filing. You need the correct locator type, a scheduled workday today or in advance, covered AM/PM slots, destination and reason, any required attachment, and approval. Once approved, it can support DTR coverage without reducing your leave balance.';
 }
 
 function locatorRequirementsReply(context, message) {
@@ -5984,10 +6011,10 @@ function locatorRequirementsReply(context, message) {
       ...lines,
       ...locatorRequirementPolicyLines(language),
       language === 'bisaya'
-        ? 'Kinahanglan valid working-day schedule ang slip date.'
+        ? 'Ang slip date kinahanglan karon o advance ug valid scheduled workday.'
         : language === 'tagalog'
-          ? 'Kailangan valid working-day schedule ang slip date.'
-          : 'You need a valid working-day schedule for the slip date.',
+          ? 'Ang slip date ay dapat ngayon o advance at valid scheduled workday.'
+          : 'The slip date must be today or in advance and on a valid scheduled workday.',
       language === 'bisaya'
         ? 'Pili ug bisan usa ka covered slot: AM in, AM out, PM in, o PM out.'
         : language === 'tagalog'
@@ -6034,9 +6061,15 @@ function locatorAvailabilityReply(context, message) {
   const friendlyDate = date ? fmtFriendlyDate(date) : '';
   const scheduleRange = fmtScheduleRange(day);
   const expectedSlots = day ? expectedSlotsForCalendarDay(day) : [];
+  const filingDateWindow = date
+    ? evaluateEmployeeLocatorDateWindow({ slipDate: date })
+    : null;
 
   const issues = [];
   if (!date) issues.push('No target date was detected.');
+  if (filingDateWindow && !filingDateWindow.ok) {
+    issues.push(localizedRuleIssue(filingDateWindow.error, language));
+  }
   if (isWholeDayHoliday) {
     issues.push(`Date is marked as whole-day holiday: ${day.holiday_name}`);
   }
@@ -6149,9 +6182,9 @@ function locatorAvailabilityReply(context, message) {
           ? 'May issue sa initial locator check. Tingnan ang detalye sa baba.'
           : 'The initial locator filing check found an issue.'
       : language === 'bisaya'
-        ? 'Initial check: murag pwede ka mag-file, basta kompleto ang type, slots, destination, reason, ug required attachment.'
+        ? 'Initial check: murag pwede ka mag-file kung karon o advance ang scheduled workday ug kompleto ang form.'
         : language === 'tagalog'
-          ? 'Initial check: mukhang puwede kang mag-file kung kumpleto ang type, slots, destination, reason, at required attachment.'
+          ? 'Initial check: mukhang puwede kang mag-file kung ngayon o advance ang scheduled workday at kumpleto ang form.'
           : `Initial check: you can file when these are complete: ${LOCATOR_REQUIRED_FIELDS.join(
               ', '
             )}, and any required attachment.`;
@@ -6228,6 +6261,11 @@ function locatorApprovalOwner(slip, language = 'english') {
   }
   if (status === 'approved') {
     return slip.hr_reviewer_name ? `completed by HR (${slip.hr_reviewer_name})` : 'completed by HR';
+  }
+  if (status === 'revoked') {
+    return slip.revoked_by_name
+      ? `revoked by HR (${slip.revoked_by_name})`
+      : 'revoked by HR';
   }
   if (/department_head/.test(status)) {
     return slip.dept_head_reviewer_name

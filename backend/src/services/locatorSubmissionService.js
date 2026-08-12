@@ -3,6 +3,9 @@ const {
   parseLocatorDateOnly,
   validateLocatorRequiredFields,
 } = require('./locatorFilingRules');
+const {
+  evaluateEmployeeLocatorDateWindow,
+} = require('./locatorDatePolicy');
 
 function locatorSubmissionError(statusCode, payload) {
   const error = new Error(payload?.error || 'Failed to submit locator request');
@@ -27,6 +30,7 @@ function createLocatorSubmissionService({
   mapInsertedRow,
   notifyAfterSubmit,
   broadcastSubmitted,
+  nowProvider = () => new Date(),
   logger = console,
 }) {
   if (!dbPool?.connect || !dbPool?.query) {
@@ -40,6 +44,7 @@ function createLocatorSubmissionService({
   assertDependency('mapInsertedRow', mapInsertedRow);
   assertDependency('notifyAfterSubmit', notifyAfterSubmit);
   assertDependency('broadcastSubmitted', broadcastSubmitted);
+  assertDependency('nowProvider', nowProvider);
 
   async function submit({
     employeeUserId,
@@ -62,6 +67,17 @@ function createLocatorSubmissionService({
     });
     if (!fieldValidation.valid) {
       throw locatorSubmissionError(400, { error: fieldValidation.error });
+    }
+
+    const filingWindow = evaluateEmployeeLocatorDateWindow({
+      slipDate,
+      now: nowProvider(),
+    });
+    if (!filingWindow.ok) {
+      throw locatorSubmissionError(409, {
+        error: filingWindow.error,
+        code: filingWindow.code,
+      });
     }
 
     const slipDateInfo = parseLocatorDateOnly(slipDate);

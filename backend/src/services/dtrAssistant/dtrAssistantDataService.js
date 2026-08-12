@@ -457,12 +457,17 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
             ls.hr_remarks,
             ls.dept_head_reviewed_at,
             ls.hr_reviewed_at,
+            ls.revoked_at,
+            ls.revocation_reason,
+            ls.month_end_reconciliation_required,
+            ls.month_end_reconciled_at,
             ls.attachment_name,
             ls.attachment_path,
             ls.created_at,
             ls.updated_at,
             dept_head.full_name AS dept_head_reviewer_name,
             hr.full_name AS hr_reviewer_name,
+            revoker.full_name AS revoked_by_name,
             lrt.label AS request_type_label,
             lrt.short_label AS request_type_short_label,
             lrt.location_label AS request_type_location_label,
@@ -474,6 +479,7 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
      FROM locator_slips ls
      LEFT JOIN users dept_head ON dept_head.id = ls.dept_head_reviewer_id
      LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
+     LEFT JOIN users revoker ON revoker.id = ls.revoked_by
      LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
      WHERE ls.employee_id = $1::uuid
      ORDER BY
@@ -514,8 +520,14 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
     hr_remarks: compactText(row.hr_remarks),
     dept_head_reviewer_name: row.dept_head_reviewer_name,
     hr_reviewer_name: row.hr_reviewer_name,
+    revoked_by_name: row.revoked_by_name,
     dept_head_reviewed_at: toIso(row.dept_head_reviewed_at),
     hr_reviewed_at: toIso(row.hr_reviewed_at),
+    revoked_at: toIso(row.revoked_at),
+    revocation_reason: compactText(row.revocation_reason),
+    month_end_reconciliation_required:
+      row.month_end_reconciliation_required === true,
+    month_end_reconciled_at: toIso(row.month_end_reconciled_at),
     created_at: toIso(row.created_at),
     updated_at: toIso(row.updated_at),
   }));

@@ -794,6 +794,7 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
   let totalComputedDays = 0;
   let totalDeductedDays = 0;
   let totalWithoutPayDays = 0;
+  let locatorReconciliationsCleared = 0;
   const details = [];
 
   try {
@@ -968,7 +969,20 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
       });
     }
 
-    if (!dryRun) await client.query('COMMIT');
+    if (!dryRun) {
+      const reconciledLocators = await client.query(
+        `UPDATE locator_slips
+         SET month_end_reconciliation_required = false,
+             month_end_reconciled_at = now(),
+             updated_at = now()
+         WHERE status = 'revoked'
+           AND month_end_reconciliation_required = true
+           AND date_trunc('month', slip_date)::date = $1::date`,
+        [serviceMonth]
+      );
+      locatorReconciliationsCleared = reconciledLocators.rowCount || 0;
+      await client.query('COMMIT');
+    }
 
     return {
       targetYearMonth,
@@ -978,6 +992,7 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
       totalComputedDays,
       totalDeductedDays,
       totalWithoutPayDays,
+      locatorReconciliationsCleared,
       details,
     };
   } catch (error) {
