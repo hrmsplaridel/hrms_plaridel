@@ -29,6 +29,7 @@ const _locatorSlipFilterOptions = <RequestFilterOption<String>>[
   RequestFilterOption(value: 'pending', label: 'Pending'),
   RequestFilterOption(value: 'returned', label: 'Needs Correction'),
   RequestFilterOption(value: 'approved', label: 'Approved'),
+  RequestFilterOption(value: 'revoked', label: 'Revoked'),
   RequestFilterOption(value: 'rejected', label: 'Rejected'),
   RequestFilterOption(value: 'cancelled', label: 'Cancelled'),
 ];
@@ -39,6 +40,7 @@ const _locatorApprovalFilterOptions = <RequestFilterOption<String>>[
   RequestFilterOption(value: 'returned', label: 'Returned'),
   RequestFilterOption(value: 'forwarded', label: 'Forwarded to HR'),
   RequestFilterOption(value: 'approved', label: 'Approved by HR'),
+  RequestFilterOption(value: 'revoked', label: 'Revoked'),
   RequestFilterOption(value: 'rejected', label: 'Rejected'),
   RequestFilterOption(value: 'cancelled', label: 'Cancelled'),
 ];
@@ -147,6 +149,8 @@ class EmployeeLocatorSlipContentState
           }
         } else if (_selectedStatusFilter == 'approved') {
           if (item.status != _LocatorSlipStatus.approved) return false;
+        } else if (_selectedStatusFilter == 'revoked') {
+          if (item.status != _LocatorSlipStatus.revoked) return false;
         } else if (_selectedStatusFilter == 'returned') {
           if (item.status != _LocatorSlipStatus.returnedForCorrection) {
             return false;
@@ -180,6 +184,8 @@ class EmployeeLocatorSlipContentState
           return item.status == _LocatorSlipStatus.returnedForCorrection;
         case 'approved':
           return item.status == _LocatorSlipStatus.approved;
+        case 'revoked':
+          return item.status == _LocatorSlipStatus.revoked;
         case 'rejected':
           return item.status == _LocatorSlipStatus.rejected;
         case 'cancelled':
@@ -452,6 +458,43 @@ class EmployeeLocatorSlipContentState
                 ],
               ),
             ],
+            if (item.status == _LocatorSlipStatus.revoked) ...[
+              const SizedBox(height: 12),
+              EmployeeLocatorMobileDetailSection(
+                title: 'Approval Revoked',
+                icon: Icons.undo_rounded,
+                children: [
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.person_outline_rounded,
+                    label: 'Revoked by',
+                    value: (item.revokedByName ?? '').trim().isEmpty
+                        ? 'HR/Admin'
+                        : item.revokedByName!.trim(),
+                  ),
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.schedule_rounded,
+                    label: 'Revoked at',
+                    value: item.revokedAt == null
+                        ? 'Not recorded'
+                        : _formatDateTime(item.revokedAt!),
+                  ),
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.rate_review_outlined,
+                    label: 'Reason',
+                    value: (item.revocationReason ?? '').trim().isEmpty
+                        ? 'No reason recorded.'
+                        : item.revocationReason!.trim(),
+                  ),
+                  if (item.monthEndReconciliationRequired)
+                    const EmployeeLocatorMobileDetailTile(
+                      icon: Icons.sync_problem_rounded,
+                      label: 'DTR reconciliation',
+                      value:
+                          'HR must rerun month-end processing for this month.',
+                    ),
+                ],
+              ),
+            ],
           ],
         ),
         actions: EmployeeLocatorMobileDetailActions(
@@ -527,6 +570,7 @@ class EmployeeLocatorSlipContentState
           if (item.departmentHeadReviewedAt != null ||
               rawStatus == 'pending_hr' ||
               rawStatus == 'approved' ||
+              rawStatus == 'revoked' ||
               rawStatus == 'rejected_by_hr' ||
               rawStatus == 'returned_for_correction' ||
               rawStatus == 'rejected_by_department_head')
@@ -550,12 +594,20 @@ class EmployeeLocatorSlipContentState
               remarks: null,
               completed: false,
             ),
-          if (rawStatus == 'approved')
+          if (rawStatus == 'approved' || rawStatus == 'revoked')
             (
               title: 'Approved by HR',
               actor: item.hrReviewerName,
               date: item.hrReviewedAt,
               remarks: item.hrRemarks,
+              completed: true,
+            ),
+          if (rawStatus == 'revoked')
+            (
+              title: 'Approval Revoked',
+              actor: item.revokedByName,
+              date: item.revokedAt,
+              remarks: item.revocationReason,
               completed: true,
             ),
           if (rawStatus == 'rejected_by_hr')
@@ -2041,7 +2093,10 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     }
     if (initial?.slipDate != null) {
       final date = initial!.slipDate!;
-      _date = DateTime(date.year, date.month, date.day);
+      final requested = DateTime(date.year, date.month, date.day);
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      _date = requested.isBefore(today) ? today : requested;
     }
     if (initial?.office != null && initial!.office!.trim().isNotEmpty) {
       _officeController.text = initial.office!.trim();
@@ -2243,6 +2298,8 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   }
 
   Widget _datePicker() {
+    final today = DateTime.now();
+    final firstAllowedDate = DateTime(today.year, today.month, today.day);
     return EmployeeLocatorMobileDateField(
       labelColor: AppTheme.dashTextSecondaryOf(context),
       dateLabel: _formatDate(_date),
@@ -2251,7 +2308,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         final picked = await showHrmsDatePicker(
           context: context,
           initialDate: _date,
-          firstDate: DateTime(2000),
+          firstDate: firstAllowedDate,
           lastDate: DateTime(2100),
           helpText: 'Select request date',
         );
@@ -2484,6 +2541,19 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       return;
     }
     if (!_formKey.currentState!.validate()) return;
+    final now = DateTime.now();
+    final requestDate = DateTime(_date.year, _date.month, _date.day);
+    final today = DateTime(now.year, now.month, now.day);
+    if (requestDate.isBefore(today)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Employees cannot file a locator for a past date. Contact HR for a correction.',
+          ),
+        ),
+      );
+      return;
+    }
     if (_requiresAttachment && _pendingAttachmentBytes == null) {
       setState(() => _showAttachmentError = true);
       return;
@@ -2523,6 +2593,11 @@ class _LocatorSlipDraft {
     this.hrReviewerName,
     this.hrReviewedAt,
     this.hrRemarks,
+    this.revokedByName,
+    this.revokedAt,
+    this.revocationReason,
+    this.monthEndReconciliationRequired = false,
+    this.monthEndReconciledAt,
     this.createdAt,
     this.updatedAt,
     required this.amIn,
@@ -2548,6 +2623,11 @@ class _LocatorSlipDraft {
   final String? hrReviewerName;
   final DateTime? hrReviewedAt;
   final String? hrRemarks;
+  final String? revokedByName;
+  final DateTime? revokedAt;
+  final String? revocationReason;
+  final bool monthEndReconciliationRequired;
+  final DateTime? monthEndReconciledAt;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final bool amIn;
@@ -2573,6 +2653,11 @@ class _LocatorSlipDraft {
     String? hrReviewerName,
     DateTime? hrReviewedAt,
     String? hrRemarks,
+    String? revokedByName,
+    DateTime? revokedAt,
+    String? revocationReason,
+    bool? monthEndReconciliationRequired,
+    DateTime? monthEndReconciledAt,
     DateTime? createdAt,
     DateTime? updatedAt,
     bool? amIn,
@@ -2600,6 +2685,12 @@ class _LocatorSlipDraft {
       hrReviewerName: hrReviewerName ?? this.hrReviewerName,
       hrReviewedAt: hrReviewedAt ?? this.hrReviewedAt,
       hrRemarks: hrRemarks ?? this.hrRemarks,
+      revokedByName: revokedByName ?? this.revokedByName,
+      revokedAt: revokedAt ?? this.revokedAt,
+      revocationReason: revocationReason ?? this.revocationReason,
+      monthEndReconciliationRequired:
+          monthEndReconciliationRequired ?? this.monthEndReconciliationRequired,
+      monthEndReconciledAt: monthEndReconciledAt ?? this.monthEndReconciledAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       amIn: amIn ?? this.amIn,
@@ -2667,11 +2758,18 @@ class _LocatorSlipDraft {
             'approved_by_hr_name',
           ]) ??
           ((status == _LocatorSlipStatus.approved ||
+                  status == _LocatorSlipStatus.revoked ||
                   status == _LocatorSlipStatus.rejected)
               ? genericReviewer
               : null),
       hrReviewedAt: _parseDateTime(json['hr_reviewed_at']),
       hrRemarks: readName(['hr_remarks']),
+      revokedByName: readName(['revoked_by_name']),
+      revokedAt: _parseDateTime(json['revoked_at']),
+      revocationReason: readName(['revocation_reason']),
+      monthEndReconciliationRequired:
+          json['month_end_reconciliation_required'] == true,
+      monthEndReconciledAt: _parseDateTime(json['month_end_reconciled_at']),
       createdAt: _parseDateTime(json['created_at']),
       updatedAt: _parseDateTime(json['updated_at']),
       amIn: json['am_in'] == true,
@@ -2689,6 +2787,7 @@ enum _LocatorSlipStatus {
   pendingHr('Pending HR Admin'),
   returnedForCorrection('Returned for Correction'),
   approved('Approved'),
+  revoked('Revoked'),
   rejected('Rejected'),
   cancelled('Cancelled');
 
@@ -2708,6 +2807,8 @@ enum _LocatorSlipStatus {
         return _LocatorSlipStatus.returnedForCorrection;
       case 'approved':
         return _LocatorSlipStatus.approved;
+      case 'revoked':
+        return _LocatorSlipStatus.revoked;
       case 'cancelled':
         return _LocatorSlipStatus.cancelled;
       case 'rejected_by_department_head':
@@ -3040,6 +3141,8 @@ String _departmentHeadStatusLabel(_LocatorSlipDraft item) {
       return 'Returned for Correction';
     case 'approved':
       return 'Approved by HR';
+    case 'revoked':
+      return 'Approval Revoked';
     case 'rejected_by_hr':
       return 'Rejected by HR';
     case 'rejected_by_department_head':
@@ -3069,6 +3172,11 @@ String _departmentHeadStatusLabel(_LocatorSlipDraft item) {
       Colors.green.shade300,
       Colors.green.shade900,
     ),
+    _LocatorSlipStatus.revoked => (
+      Colors.deepOrange.shade50,
+      Colors.deepOrange.shade300,
+      Colors.deepOrange.shade900,
+    ),
     _LocatorSlipStatus.rejected => (
       Colors.red.shade50,
       Colors.red.shade300,
@@ -3090,6 +3198,7 @@ IconData _locatorStatusIcon(_LocatorSlipStatus status) {
     _LocatorSlipStatus.pendingHr => Icons.hourglass_top_rounded,
     _LocatorSlipStatus.returnedForCorrection => Icons.assignment_return_rounded,
     _LocatorSlipStatus.approved => Icons.check_circle_rounded,
+    _LocatorSlipStatus.revoked => Icons.undo_rounded,
     _LocatorSlipStatus.rejected => Icons.cancel_rounded,
     _LocatorSlipStatus.cancelled => Icons.flag_rounded,
   };

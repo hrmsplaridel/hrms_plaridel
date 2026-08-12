@@ -11,6 +11,7 @@ import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.d
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_correction_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
@@ -31,6 +32,7 @@ enum _LocatorAdminQueue {
   pendingHrAdmin('Pending HR Admin'),
   returned('Returned for Correction'),
   approved('Approved'),
+  revoked('Revoked'),
   rejected('Rejected'),
   cancelled('Cancelled');
 
@@ -135,10 +137,21 @@ class _AdminLocatorManagementScreenState
         const SizedBox(height: 16),
         Align(
           alignment: Alignment.centerRight,
-          child: FilledButton.icon(
-            onPressed: _openTypeManagement,
-            icon: const Icon(Icons.tune_rounded, size: 18),
-            label: const Text('Manage Types'),
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _recordLocatorCorrection,
+                icon: const Icon(Icons.edit_calendar_outlined, size: 18),
+                label: const Text('Record Correction'),
+              ),
+              FilledButton.icon(
+                onPressed: _openTypeManagement,
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                label: const Text('Manage Types'),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 12),
@@ -777,7 +790,9 @@ class _AdminLocatorManagementScreenState
         normalizedStatus.startsWith('pending_');
     final canShowHistory = !isPending;
     final canPrint = normalizedStatus == 'approved';
-    final showFooter = canShowHistory || canReview || canPrint;
+    final isApproved = normalizedStatus == 'approved';
+    final revokeDisabledReason = isApproved ? item.revokeDisabledReason : null;
+    final showFooter = canShowHistory || canReview || canPrint || isApproved;
     unawaited(
       openResponsiveRightSidePanel<void>(
         context: context,
@@ -941,6 +956,51 @@ class _AdminLocatorManagementScreenState
                                   item.hrRemarks!,
                                 ),
                               ),
+                            if (item.revokedAt != null) ...[
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: _locatorDetailsGrid(dialogContext, [
+                                  MapEntry(
+                                    'Revoked By',
+                                    item.revokedByName ?? 'HR/Admin',
+                                  ),
+                                  MapEntry(
+                                    'Revoked At',
+                                    _formatDateTime(item.revokedAt!),
+                                  ),
+                                ]),
+                              ),
+                              if ((item.revocationReason ?? '')
+                                  .trim()
+                                  .isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 12),
+                                  child: _locatorDetailField(
+                                    dialogContext,
+                                    'Revocation Reason',
+                                    item.revocationReason!,
+                                  ),
+                                ),
+                              if (item.monthEndReconciliationRequired)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 12),
+                                  child: _locatorDetailField(
+                                    dialogContext,
+                                    'Month-End Reconciliation',
+                                    'Required for ${item.serviceMonthLabel}',
+                                  ),
+                                ),
+                            ],
+                            if (item.isRetroactiveCorrection)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: _locatorDetailField(
+                                  dialogContext,
+                                  'HR Correction Reason',
+                                  item.retroactiveCorrectionReason ??
+                                      'Documented correction',
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -1041,6 +1101,23 @@ class _AdminLocatorManagementScreenState
                             style: _dialogPrimaryButtonStyle(),
                             icon: const Icon(Icons.check_rounded, size: 18),
                             label: const Text('Approve'),
+                          ),
+                        if (isApproved)
+                          Tooltip(
+                            message:
+                                revokeDisabledReason ??
+                                'Revoke this locator approval',
+                            child: OutlinedButton.icon(
+                              onPressed: revokeDisabledReason == null
+                                  ? () {
+                                      Navigator.of(dialogContext).pop();
+                                      _revokeApproval(item);
+                                    }
+                                  : null,
+                              style: _dialogDangerButtonStyle(dialogContext),
+                              icon: const Icon(Icons.undo_rounded, size: 18),
+                              label: const Text('Revoke Approval'),
+                            ),
                           ),
                         if (canPrint)
                           FilledButton.icon(
@@ -1375,6 +1452,7 @@ class _AdminLocatorManagementScreenState
           item.status == 'pending_hr' ||
           item.status == 'pending' ||
           item.status == 'approved' ||
+          item.status == 'revoked' ||
           item.status == 'rejected_by_hr' ||
           item.status == 'returned_for_correction' ||
           item.status == 'rejected_by_department_head')
@@ -1398,12 +1476,20 @@ class _AdminLocatorManagementScreenState
           remarks: null,
           completed: false,
         ),
-      if (item.status == 'approved')
+      if (item.status == 'approved' || item.status == 'revoked')
         (
           title: 'Approved by HR',
           actor: item.hrReviewerName,
           date: item.hrReviewedAt,
           remarks: item.hrRemarks,
+          completed: true,
+        ),
+      if (item.status == 'revoked')
+        (
+          title: 'Approval Revoked',
+          actor: item.revokedByName,
+          date: item.revokedAt,
+          remarks: item.revocationReason,
           completed: true,
         ),
       if (item.status == 'rejected_by_hr')
@@ -1480,11 +1566,14 @@ class _AdminLocatorManagementScreenState
   Widget _statusPill(_LocatorAdminRecord item) {
     final lower = item.status.toLowerCase();
     final isApproved = lower == 'approved';
+    final isRevoked = lower == 'revoked';
     final isRejected = lower.contains('rejected');
     final isPending = lower.contains('pending');
     final isReturned = lower == 'returned_for_correction';
     final bg = isApproved
         ? Colors.green.shade50
+        : isRevoked
+        ? Colors.deepOrange.shade50
         : isRejected
         ? Colors.red.shade50
         : isPending
@@ -1494,6 +1583,8 @@ class _AdminLocatorManagementScreenState
         : Colors.grey.shade100;
     final bd = isApproved
         ? Colors.green.shade300
+        : isRevoked
+        ? Colors.deepOrange.shade300
         : isRejected
         ? Colors.red.shade300
         : isPending
@@ -1503,6 +1594,8 @@ class _AdminLocatorManagementScreenState
         : Colors.grey.shade300;
     final fg = isApproved
         ? Colors.green.shade900
+        : isRevoked
+        ? Colors.deepOrange.shade900
         : isRejected
         ? Colors.red.shade900
         : isPending
@@ -1570,6 +1663,7 @@ class _AdminLocatorManagementScreenState
         _LocatorAdminQueue.pendingHrAdmin => null,
         _LocatorAdminQueue.returned => 'returned_for_correction',
         _LocatorAdminQueue.approved => 'approved',
+        _LocatorAdminQueue.revoked => 'revoked',
         _LocatorAdminQueue.rejected => null,
         _LocatorAdminQueue.cancelled => 'cancelled',
       };
@@ -1622,6 +1716,140 @@ class _AdminLocatorManagementScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Approve failed: $e');
+    }
+  }
+
+  Future<void> _revokeApproval(_LocatorAdminRecord item) async {
+    final disabledReason = item.revokeDisabledReason;
+    if (disabledReason != null) {
+      _showLocatorSnack(disabledReason);
+      return;
+    }
+    final reason = await _promptLocatorRevocationReason(item);
+    if (reason == null || !mounted) return;
+    try {
+      final response = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/locator-slips/${item.id}/revoke',
+        data: {'revocation_reason': reason},
+      );
+      final reconciliationRequired =
+          response.data?['month_end_reconciliation_required'] == true;
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
+      if (!mounted) return;
+      _showLocatorSnack(
+        reconciliationRequired
+            ? 'Approval revoked and DTR coverage removed. Re-run month-end processing for ${item.serviceMonthLabel}.'
+            : 'Approval revoked and DTR coverage removed.',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = 'Revoke failed: $error');
+    }
+  }
+
+  Future<String?> _promptLocatorRevocationReason(
+    _LocatorAdminRecord item,
+  ) async {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Revoke Locator Approval'),
+        content: SizedBox(
+          width: 480,
+          child: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'This removes locator coverage from ${item.employeeName}\'s DTR for ${item.slipDateLabel}. Physical punches will remain unchanged.',
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: controller,
+                  autofocus: true,
+                  minLines: 3,
+                  maxLines: 6,
+                  maxLength: 1000,
+                  decoration: const InputDecoration(
+                    labelText: 'Revocation reason',
+                    hintText: 'Explain why the approval is being revoked.',
+                    alignLabelWithHint: true,
+                  ),
+                  validator: (value) {
+                    final length = (value ?? '').trim().length;
+                    if (length < 10) return 'Enter at least 10 characters.';
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              if (!formKey.currentState!.validate()) return;
+              Navigator.of(dialogContext).pop(controller.text.trim());
+            },
+            icon: const Icon(Icons.undo_rounded, size: 18),
+            label: const Text('Revoke Approval'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> _recordLocatorCorrection() async {
+    final draft = await showDialog<AdminLocatorCorrectionDraft>(
+      context: context,
+      builder: (dialogContext) =>
+          AdminLocatorCorrectionDialog(requestTypes: _locatorTypes),
+    );
+    if (draft == null || !mounted) return;
+    String date(DateTime value) =>
+        '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+    final data = <String, dynamic>{
+      'employee_id': draft.employeeId,
+      'slip_date': date(draft.date),
+      'request_type': draft.requestType.code,
+      'office': draft.office,
+      'reason': draft.reason,
+      'retroactive_correction_reason': draft.correctionReason,
+      'am_in': draft.amIn.toString(),
+      'am_out': draft.amOut.toString(),
+      'pm_in': draft.pmIn.toString(),
+      'pm_out': draft.pmOut.toString(),
+    };
+    if (draft.attachmentBytes != null &&
+        (draft.attachmentName ?? '').isNotEmpty) {
+      data['file'] = MultipartFile.fromBytes(
+        draft.attachmentBytes!,
+        filename: draft.attachmentName,
+      );
+    }
+    try {
+      await ApiClient.instance.dio.post<Map<String, dynamic>>(
+        '/api/locator-slips/admin/corrections',
+        data: FormData.fromMap(data),
+      );
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
+      if (!mounted) return;
+      _showLocatorSnack('Locator correction recorded and approved.');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = 'Correction failed: $error');
     }
   }
 
@@ -1716,6 +1944,13 @@ class _LocatorAdminRecord {
     this.hrReviewerName,
     this.hrReviewedAt,
     this.hrRemarks,
+    this.isRetroactiveCorrection = false,
+    this.retroactiveCorrectionReason,
+    this.revokedByName,
+    this.revokedAt,
+    this.revocationReason,
+    this.monthEndReconciliationRequired = false,
+    this.monthEndReconciledAt,
     this.createdAt,
     this.updatedAt,
     required this.amIn,
@@ -1739,6 +1974,13 @@ class _LocatorAdminRecord {
   final String? hrReviewerName;
   final DateTime? hrReviewedAt;
   final String? hrRemarks;
+  final bool isRetroactiveCorrection;
+  final String? retroactiveCorrectionReason;
+  final String? revokedByName;
+  final DateTime? revokedAt;
+  final String? revocationReason;
+  final bool monthEndReconciliationRequired;
+  final DateTime? monthEndReconciledAt;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final bool amIn;
@@ -1749,6 +1991,21 @@ class _LocatorAdminRecord {
   bool get canHrReview {
     final normalized = status.toLowerCase();
     return normalized == 'pending_hr' || normalized == 'pending';
+  }
+
+  String? get revokeDisabledReason {
+    if (status.toLowerCase() != 'approved') {
+      return 'Only approved locator requests can be revoked.';
+    }
+    final approvedAt = hrReviewedAt;
+    if (approvedAt == null) {
+      return 'The HR approval time is unavailable.';
+    }
+    final deadline = approvedAt.add(const Duration(days: 3));
+    if (DateTime.now().isAfter(deadline)) {
+      return 'The three-day revoke period expired on ${_formatDateTime(deadline)}.';
+    }
+    return null;
   }
 
   String get statusLabel {
@@ -1762,6 +2019,8 @@ class _LocatorAdminRecord {
         return 'Returned for Correction';
       case 'approved':
         return 'Approved';
+      case 'revoked':
+        return 'Revoked';
       case 'rejected_by_department_head':
         return 'Rejected by Dept Head';
       case 'rejected_by_hr':
@@ -1786,6 +2045,12 @@ class _LocatorAdminRecord {
   String get slipDateLabel {
     final parsed = slipDateValue;
     return parsed == null ? slipDate : _formatDate(parsed);
+  }
+
+  String get serviceMonthLabel {
+    final parsed = slipDateValue;
+    if (parsed == null) return slipDate;
+    return '${parsed.year.toString().padLeft(4, '0')}-${parsed.month.toString().padLeft(2, '0')}';
   }
 
   factory _LocatorAdminRecord.fromJson(Map<String, dynamic> json) {
@@ -1815,6 +2080,16 @@ class _LocatorAdminRecord {
       hrReviewerName: _trimOrNull(json['hr_reviewer_name']),
       hrReviewedAt: _parseDateTime(json['hr_reviewed_at']),
       hrRemarks: _trimOrNull(json['hr_remarks']),
+      isRetroactiveCorrection: json['is_retroactive_correction'] == true,
+      retroactiveCorrectionReason: _trimOrNull(
+        json['retroactive_correction_reason'],
+      ),
+      revokedByName: _trimOrNull(json['revoked_by_name']),
+      revokedAt: _parseDateTime(json['revoked_at']),
+      revocationReason: _trimOrNull(json['revocation_reason']),
+      monthEndReconciliationRequired:
+          json['month_end_reconciliation_required'] == true,
+      monthEndReconciledAt: _parseDateTime(json['month_end_reconciled_at']),
       createdAt: _parseDateTime(json['created_at']),
       updatedAt: _parseDateTime(json['updated_at']),
       amIn: json['am_in'] == true,
