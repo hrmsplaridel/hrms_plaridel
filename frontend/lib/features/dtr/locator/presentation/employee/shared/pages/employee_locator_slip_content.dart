@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_slip_form_initial_values.dart';
+import 'package:hrms_plaridel/features/dtr/locator/models/locator_workflow_event.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_details_widgets.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_form_widgets.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_request_card.dart';
@@ -44,6 +45,14 @@ const _locatorApprovalFilterOptions = <RequestFilterOption<String>>[
   RequestFilterOption(value: 'rejected', label: 'Rejected'),
   RequestFilterOption(value: 'cancelled', label: 'Cancelled'),
 ];
+
+typedef _LocatorWorkflowStep = ({
+  String title,
+  String? actor,
+  DateTime? date,
+  String? remarks,
+  bool completed,
+});
 
 class EmployeeLocatorSlipContent extends StatefulWidget {
   const EmployeeLocatorSlipContent({
@@ -538,104 +547,147 @@ class EmployeeLocatorSlipContentState
     );
   }
 
-  void _showSlipHistory(BuildContext context, _LocatorSlipDraft item) {
+  Future<void> _showSlipHistory(
+    BuildContext context,
+    _LocatorSlipDraft item,
+  ) async {
     final rawStatus = item.rawStatus;
-    final history =
-        <
-          ({
-            String title,
-            String? actor,
-            DateTime? date,
-            String? remarks,
-            bool completed,
-          })
-        >[
-          (
-            title: item.status == _LocatorSlipStatus.draft
-                ? 'Draft'
-                : 'Submitted',
-            actor: item.employeeName,
-            date: item.createdAt ?? item.date,
-            remarks: null,
-            completed: true,
-          ),
-          if (item.status == _LocatorSlipStatus.pendingDepartmentHead)
-            (
+    final history = <_LocatorWorkflowStep>[
+      (
+        title: item.status == _LocatorSlipStatus.draft ? 'Draft' : 'Submitted',
+        actor: item.employeeName,
+        date: item.createdAt ?? item.date,
+        remarks: null,
+        completed: true,
+      ),
+      if (item.status == _LocatorSlipStatus.pendingDepartmentHead)
+        (
+          title: 'Pending Department Head',
+          actor: item.departmentHeadName,
+          date: null,
+          remarks: null,
+          completed: false,
+        ),
+      if (item.departmentHeadReviewedAt != null ||
+          rawStatus == 'pending_hr' ||
+          rawStatus == 'approved' ||
+          rawStatus == 'revoked' ||
+          rawStatus == 'rejected_by_hr' ||
+          rawStatus == 'returned_for_correction' ||
+          rawStatus == 'rejected_by_department_head')
+        (
+          title: rawStatus == 'rejected_by_department_head'
+              ? 'Rejected by Department Head'
+              : rawStatus == 'returned_for_correction' &&
+                    item.hrReviewedAt == null
+              ? 'Returned by Department Head'
+              : 'Reviewed by Department Head',
+          actor: item.departmentHeadName,
+          date: item.departmentHeadReviewedAt,
+          remarks: item.departmentHeadRemarks,
+          completed: true,
+        ),
+      if (item.status == _LocatorSlipStatus.pendingHr)
+        (
+          title: 'Pending HR Admin',
+          actor: item.hrReviewerName,
+          date: null,
+          remarks: null,
+          completed: false,
+        ),
+      if (rawStatus == 'approved' || rawStatus == 'revoked')
+        (
+          title: 'Approved by HR',
+          actor: item.hrReviewerName,
+          date: item.hrReviewedAt,
+          remarks: item.hrRemarks,
+          completed: true,
+        ),
+      if (rawStatus == 'revoked')
+        (
+          title: 'Approval Revoked',
+          actor: item.revokedByName,
+          date: item.revokedAt,
+          remarks: item.revocationReason,
+          completed: true,
+        ),
+      if (rawStatus == 'rejected_by_hr')
+        (
+          title: 'Rejected by HR',
+          actor: item.hrReviewerName,
+          date: item.hrReviewedAt,
+          remarks: item.hrRemarks,
+          completed: true,
+        ),
+      if (rawStatus == 'returned_for_correction' && item.hrReviewedAt != null)
+        (
+          title: 'Returned by HR',
+          actor: item.hrReviewerName,
+          date: item.hrReviewedAt,
+          remarks: item.hrRemarks,
+          completed: true,
+        ),
+      if (rawStatus == 'cancelled')
+        (
+          title: 'Cancelled',
+          actor: null,
+          date: item.updatedAt,
+          remarks: null,
+          completed: true,
+        ),
+    ];
+
+    final slipId = item.id?.trim();
+    if (slipId != null && slipId.isNotEmpty) {
+      try {
+        final response = await ApiClient.instance.get<List<dynamic>>(
+          '/api/locator-slips/$slipId/history',
+        );
+        final events = (response.data ?? const <dynamic>[])
+            .whereType<Map>()
+            .map(
+              (json) => LocatorWorkflowEvent.fromJson(
+                Map<String, dynamic>.from(json),
+              ),
+            )
+            .toList();
+        if (events.isNotEmpty) {
+          history
+            ..clear()
+            ..addAll(
+              events.map(
+                (event) => (
+                  title: event.title,
+                  actor: event.actorName,
+                  date: event.createdAt,
+                  remarks: event.remarks,
+                  completed: true,
+                ),
+              ),
+            );
+          if (item.status == _LocatorSlipStatus.pendingDepartmentHead) {
+            history.add((
               title: 'Pending Department Head',
               actor: item.departmentHeadName,
               date: null,
               remarks: null,
               completed: false,
-            ),
-          if (item.departmentHeadReviewedAt != null ||
-              rawStatus == 'pending_hr' ||
-              rawStatus == 'approved' ||
-              rawStatus == 'revoked' ||
-              rawStatus == 'rejected_by_hr' ||
-              rawStatus == 'returned_for_correction' ||
-              rawStatus == 'rejected_by_department_head')
-            (
-              title: rawStatus == 'rejected_by_department_head'
-                  ? 'Rejected by Department Head'
-                  : rawStatus == 'returned_for_correction' &&
-                        item.hrReviewedAt == null
-                  ? 'Returned by Department Head'
-                  : 'Reviewed by Department Head',
-              actor: item.departmentHeadName,
-              date: item.departmentHeadReviewedAt,
-              remarks: item.departmentHeadRemarks,
-              completed: true,
-            ),
-          if (item.status == _LocatorSlipStatus.pendingHr)
-            (
+            ));
+          } else if (item.status == _LocatorSlipStatus.pendingHr) {
+            history.add((
               title: 'Pending HR Admin',
               actor: item.hrReviewerName,
               date: null,
               remarks: null,
               completed: false,
-            ),
-          if (rawStatus == 'approved' || rawStatus == 'revoked')
-            (
-              title: 'Approved by HR',
-              actor: item.hrReviewerName,
-              date: item.hrReviewedAt,
-              remarks: item.hrRemarks,
-              completed: true,
-            ),
-          if (rawStatus == 'revoked')
-            (
-              title: 'Approval Revoked',
-              actor: item.revokedByName,
-              date: item.revokedAt,
-              remarks: item.revocationReason,
-              completed: true,
-            ),
-          if (rawStatus == 'rejected_by_hr')
-            (
-              title: 'Rejected by HR',
-              actor: item.hrReviewerName,
-              date: item.hrReviewedAt,
-              remarks: item.hrRemarks,
-              completed: true,
-            ),
-          if (rawStatus == 'returned_for_correction' &&
-              item.hrReviewedAt != null)
-            (
-              title: 'Returned by HR',
-              actor: item.hrReviewerName,
-              date: item.hrReviewedAt,
-              remarks: item.hrRemarks,
-              completed: true,
-            ),
-          if (rawStatus == 'cancelled')
-            (
-              title: 'Cancelled',
-              actor: null,
-              date: item.updatedAt,
-              remarks: null,
-              completed: true,
-            ),
-        ];
+            ));
+          }
+        }
+      } catch (_) {
+        // Legacy reconstruction remains available if history cannot be loaded.
+      }
+    }
+    if (!context.mounted) return;
     final accent = AppTheme.primaryNavy;
 
     showDialog<void>(
@@ -1653,10 +1705,12 @@ class EmployeeLocatorSlipContentState
 
   Future<void> _departmentHeadReject(_LocatorSlipDraft item) async {
     if (item.id == null || item.id!.isEmpty) return;
+    final reason = await _promptRejectionReason('Department Head');
+    if (reason == null || !mounted) return;
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/department-head-reject',
-        data: const {},
+        data: {'reviewer_remarks': reason},
       );
       LocatorSlipDataCache.instance.invalidateRequests();
       await _loadDepartmentHeadRequests(forceRefresh: true);
@@ -1667,6 +1721,55 @@ class EmployeeLocatorSlipContentState
       if (!mounted) return;
       setState(() => _error = _apiErrorMessage(e, fallback: 'Reject failed.'));
     }
+  }
+
+  Future<String?> _promptRejectionReason(String reviewerLabel) async {
+    final controller = TextEditingController();
+    String? validationMessage;
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Reject locator request'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 3,
+            maxLines: 5,
+            maxLength: 1000,
+            decoration: InputDecoration(
+              labelText: 'Rejection reason',
+              hintText: 'Explain why this request cannot be approved.',
+              helperText: 'The employee will see this reason.',
+              errorText: validationMessage,
+              alignLabelWithHint: true,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.isEmpty) {
+                  setDialogState(
+                    () => validationMessage = 'Rejection reason is required.',
+                  );
+                  return;
+                }
+                Navigator.of(dialogContext).pop(value);
+              },
+              icon: const Icon(Icons.block_rounded, size: 18),
+              label: Text('Reject as $reviewerLabel'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    return reason;
   }
 
   Future<String?> _promptCorrectionRemarks() async {

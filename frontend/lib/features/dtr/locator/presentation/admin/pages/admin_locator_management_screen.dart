@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
+import 'package:hrms_plaridel/features/dtr/locator/models/locator_workflow_event.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
@@ -1130,8 +1131,53 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  void _showHistoryDialog(_LocatorAdminRecord item) {
-    final history = _historySteps(item);
+  Future<void> _showHistoryDialog(_LocatorAdminRecord item) async {
+    var history = _historySteps(item);
+    try {
+      final response = await ApiClient.instance.get<List<dynamic>>(
+        '/api/locator-slips/${item.id}/history',
+      );
+      final events = (response.data ?? const <dynamic>[])
+          .whereType<Map>()
+          .map(
+            (json) =>
+                LocatorWorkflowEvent.fromJson(Map<String, dynamic>.from(json)),
+          )
+          .toList();
+      if (events.isNotEmpty) {
+        history = events
+            .map<_LocatorHistoryStep>(
+              (event) => (
+                title: event.title,
+                actor: event.actorName,
+                date: event.createdAt,
+                remarks: event.remarks,
+                completed: true,
+              ),
+            )
+            .toList();
+        if (item.status == 'pending_department_head') {
+          history.add((
+            title: 'Pending Department Head',
+            actor: item.deptHeadReviewerName,
+            date: null,
+            remarks: null,
+            completed: false,
+          ));
+        } else if (item.status == 'pending_hr' || item.status == 'pending') {
+          history.add((
+            title: 'Pending HR Admin',
+            actor: item.hrReviewerName,
+            date: null,
+            remarks: null,
+            completed: false,
+          ));
+        }
+      }
+    } catch (_) {
+      // Keep the legacy timeline available while older databases are migrated.
+    }
+    if (!mounted) return;
     final accent = AppTheme.primaryNavy;
     showDialog<void>(
       context: context,
@@ -1904,10 +1950,12 @@ class _AdminLocatorManagementScreenState
   }
 
   Future<void> _reject(_LocatorAdminRecord item) async {
+    final reason = await _promptRejectionReason();
+    if (reason == null || !mounted) return;
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/reject',
-        data: const {},
+        data: {'reviewer_remarks': reason},
       );
       LocatorSlipDataCache.instance.invalidateRequests();
       await _load(forceRefresh: true);
@@ -1917,6 +1965,55 @@ class _AdminLocatorManagementScreenState
       if (!mounted) return;
       setState(() => _error = 'Reject failed: $e');
     }
+  }
+
+  Future<String?> _promptRejectionReason() async {
+    final controller = TextEditingController();
+    String? validationMessage;
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Reject locator request'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 3,
+            maxLines: 5,
+            maxLength: 1000,
+            decoration: InputDecoration(
+              labelText: 'Rejection reason',
+              hintText: 'Explain why this request cannot be approved.',
+              helperText: 'The employee will see this reason.',
+              errorText: validationMessage,
+              alignLabelWithHint: true,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.isEmpty) {
+                  setDialogState(
+                    () => validationMessage = 'Rejection reason is required.',
+                  );
+                  return;
+                }
+                Navigator.of(dialogContext).pop(value);
+              },
+              icon: const Icon(Icons.block_rounded, size: 18),
+              label: const Text('Reject Request'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    return reason;
   }
 }
 
