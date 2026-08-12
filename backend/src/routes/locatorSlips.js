@@ -48,6 +48,11 @@ const {
   captureLocatorTypeSnapshot,
   resolveLocatorTypeMetadata,
 } = require('../services/locatorTypeSnapshot');
+const {
+  listLocatorWorkflowEvents,
+  normalizeLocatorRejectionReason,
+  recordLocatorWorkflowEvent,
+} = require('../services/locatorWorkflowHistory');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -501,6 +506,32 @@ pool
         ON locator_slips(request_type);
       CREATE INDEX IF NOT EXISTS idx_locator_slips_assigned_department_head
         ON locator_slips(assigned_department_head_id, status, updated_at DESC);
+      CREATE TABLE IF NOT EXISTS locator_slip_history (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        locator_slip_id UUID NOT NULL REFERENCES locator_slips(id) ON DELETE RESTRICT,
+        action TEXT NOT NULL CHECK (char_length(btrim(action)) > 0),
+        from_status TEXT,
+        to_status TEXT,
+        actor_id UUID,
+        actor_name_snapshot TEXT,
+        actor_role TEXT,
+        remarks TEXT,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_locator_slip_history_request_time
+        ON locator_slip_history(locator_slip_id, created_at, id);
+      CREATE OR REPLACE FUNCTION prevent_locator_slip_history_mutation()
+      RETURNS trigger AS $history$
+      BEGIN
+        RAISE EXCEPTION 'locator_slip_history is append-only';
+      END;
+      $history$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS trg_prevent_locator_slip_history_mutation
+        ON locator_slip_history;
+      CREATE TRIGGER trg_prevent_locator_slip_history_mutation
+      BEFORE UPDATE OR DELETE ON locator_slip_history
+      FOR EACH ROW EXECUTE FUNCTION prevent_locator_slip_history_mutation();
     `)
   )
   .then(async () => {
@@ -665,6 +696,7 @@ const locatorSubmissionService = createLocatorSubmissionService({
   mapInsertedRow: mapLocatorRow,
   notifyAfterSubmit: locatorNotifications.notifyAfterSubmit,
   broadcastSubmitted: (row) => broadcastLocatorUpdated('submitted', row),
+  recordHistory: recordLocatorWorkflowEvent,
 });
 
 function isValidStatus(status) {
@@ -1160,6 +1192,16 @@ router.post(
           typeSnapshot.coverageMode,
         ]
       );
+      await recordLocatorWorkflowEvent(client, {
+        locatorSlipId: inserted.rows[0].id,
+        action: 'retroactive_correction_recorded',
+        fromStatus: null,
+        toStatus: 'approved',
+        actorId: reviewerId,
+        actorRole: req.user?.role || 'hr',
+        remarks: correctionReason,
+        metadata: { retroactive_correction: true },
+      });
       await client.query('COMMIT');
       committed = true;
 
@@ -1241,6 +1283,14 @@ router.patch('/:id/cancel', protect, async (req, res) => {
        WHERE id = $1::uuid`,
       [id]
     );
+    await recordLocatorWorkflowEvent(client, {
+      locatorSlipId: id,
+      action: 'cancelled',
+      fromStatus: status,
+      toStatus: 'cancelled',
+      actorId: userId,
+      actorRole: 'employee',
+    });
     await client.query('COMMIT');
     const out = await pool.query(
       `SELECT ls.*,
@@ -1377,6 +1427,14 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         departmentHeadUserId,
       ]
     );
+    await recordLocatorWorkflowEvent(client, {
+      locatorSlipId: id,
+      action: 'resubmitted',
+      fromStatus: 'returned_for_correction',
+      toStatus: submitStatus,
+      actorId: userId,
+      actorRole: 'employee',
+    });
     await client.query('COMMIT');
 
     notifySafe(() =>
@@ -1431,6 +1489,7 @@ router.post('/:id/attachment', protect, uploadLocatorAttachmentMw, async (req, r
         mimeType: req.file.mimetype || null,
       },
       canModifyStatus: canModifyLocatorAttachment,
+      recordHistory: recordLocatorWorkflowEvent,
       removeFile: removeLocatorAttachmentFile,
     });
     broadcastLocatorUpdated('attachment_replaced', {
@@ -1457,6 +1516,7 @@ router.delete('/:id/attachment', protect, async (req, res) => {
       slipId: req.params.id,
       employeeId: userId,
       canModifyStatus: canModifyLocatorAttachment,
+      recordHistory: recordLocatorWorkflowEvent,
       removeFile: removeLocatorAttachmentFile,
     });
     broadcastLocatorUpdated('attachment_removed', {
@@ -1470,6 +1530,58 @@ router.delete('/:id/attachment', protect, async (req, res) => {
     }
     console.error('[locator DELETE /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to remove attachment' });
+  }
+});
+
+// GET /api/locator-slips/:id/history
+router.get('/:id/history', protect, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+  const client = await pool.connect();
+  try {
+    const current = await client.query(
+      `SELECT id, employee_id, department_id, assigned_department_head_id,
+              dept_head_reviewer_id, status
+       FROM locator_slips
+       WHERE id = $1::uuid`,
+      [req.params.id]
+    );
+    const row = current.rows[0];
+    if (!row) return res.status(404).json({ error: 'Locator slip not found' });
+
+    const normalizedRole = String(req.user?.role || '').trim().toLowerCase();
+    const isOwner = String(row.employee_id) === String(userId);
+    const isHrOrAdmin = normalizedRole === 'hr' || normalizedRole === 'admin';
+    let canReadAsDepartmentHead =
+      String(row.assigned_department_head_id || '') === String(userId) ||
+      String(row.dept_head_reviewer_id || '') === String(userId);
+
+    if (
+      !isOwner &&
+      !isHrOrAdmin &&
+      !canReadAsDepartmentHead &&
+      !row.assigned_department_head_id &&
+      row.status === 'pending_department_head'
+    ) {
+      const departmentHead = await isDepartmentHead(client, userId);
+      canReadAsDepartmentHead =
+        departmentHead.isDeptHead === true &&
+        String(departmentHead.departmentId || '') ===
+          String(row.department_id || '');
+    }
+
+    if (!isOwner && !isHrOrAdmin && !canReadAsDepartmentHead) {
+      return res.status(404).json({ error: 'Locator slip not found' });
+    }
+
+    const events = await listLocatorWorkflowEvents(client, row.id);
+    return res.json(events);
+  } catch (err) {
+    console.error('[locator GET /:id/history]', err);
+    return res.status(500).json({ error: 'Failed to fetch locator history' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1699,6 +1811,15 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
        WHERE id = $1::uuid`,
       [id, reviewerId, remarks]
     );
+    await recordLocatorWorkflowEvent(client, {
+      locatorSlipId: id,
+      action: 'department_head_approved',
+      fromStatus: 'pending_department_head',
+      toStatus: 'pending_hr',
+      actorId: reviewerId,
+      actorRole: 'department_head',
+      remarks,
+    });
     await client.query('COMMIT');
 
     notifySafe(() =>
@@ -1737,7 +1858,13 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
-  const remarks = (req.body?.reviewer_remarks || req.body?.reason || '').toString().trim() || null;
+  const reasonValidation = normalizeLocatorRejectionReason(
+    req.body?.reviewer_remarks || req.body?.reason
+  );
+  if (!reasonValidation.valid) {
+    return res.status(400).json({ error: reasonValidation.error });
+  }
+  const remarks = reasonValidation.value;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1776,6 +1903,15 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
        WHERE id = $1::uuid`,
       [id, reviewerId, remarks]
     );
+    await recordLocatorWorkflowEvent(client, {
+      locatorSlipId: id,
+      action: 'department_head_rejected',
+      fromStatus: 'pending_department_head',
+      toStatus: 'rejected_by_department_head',
+      actorId: reviewerId,
+      actorRole: 'department_head',
+      remarks,
+    });
     await client.query('COMMIT');
     notifySafe(() =>
       locatorNotifications.notifyEmployee(pool, {
@@ -1877,6 +2013,15 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
        WHERE id = $1::uuid`,
       [id, reviewerId, remarks]
     );
+    await recordLocatorWorkflowEvent(client, {
+      locatorSlipId: id,
+      action: 'department_head_returned',
+      fromStatus: 'pending_department_head',
+      toStatus: 'returned_for_correction',
+      actorId: reviewerId,
+      actorRole: 'department_head',
+      remarks,
+    });
     await client.query('COMMIT');
 
     notifySafe(() =>
@@ -2086,6 +2231,15 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
        WHERE id = $1::uuid`,
       [id, reviewerId, remarks]
     );
+    await recordLocatorWorkflowEvent(client, {
+      locatorSlipId: id,
+      action: 'hr_returned',
+      fromStatus: row.status,
+      toStatus: 'returned_for_correction',
+      actorId: reviewerId,
+      actorRole: req.user?.role || 'hr',
+      remarks,
+    });
     await client.query('COMMIT');
 
     notifySafe(() =>
@@ -2175,6 +2329,15 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
        WHERE id = $1::uuid`,
       [id, reviewerId, remarks]
     );
+    await recordLocatorWorkflowEvent(client, {
+      locatorSlipId: id,
+      action: 'hr_approved',
+      fromStatus: current.rows[0].status,
+      toStatus: 'approved',
+      actorId: reviewerId,
+      actorRole: req.user?.role || 'hr',
+      remarks,
+    });
     await client.query('COMMIT');
 
     notifySafe(() =>
@@ -2302,6 +2465,16 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
        WHERE id = $1::uuid`,
       [id, reviewerId, policy.revocationReason, reconciliationRequired]
     );
+    await recordLocatorWorkflowEvent(client, {
+      locatorSlipId: id,
+      action: 'approval_revoked',
+      fromStatus: 'approved',
+      toStatus: 'revoked',
+      actorId: reviewerId,
+      actorRole: req.user?.role || 'hr',
+      remarks: policy.revocationReason,
+      metadata: { reconciliation_required: reconciliationRequired },
+    });
     await client.query('COMMIT');
 
     const mapped = await fetchLocatorSlipDetails(pool, id);
@@ -2341,7 +2514,13 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
-  const remarks = (req.body?.reviewer_remarks || req.body?.reason || req.body?.hr_remarks || '').toString().trim() || null;
+  const reasonValidation = normalizeLocatorRejectionReason(
+    req.body?.reviewer_remarks || req.body?.reason || req.body?.hr_remarks
+  );
+  if (!reasonValidation.valid) {
+    return res.status(400).json({ error: reasonValidation.error });
+  }
+  const remarks = reasonValidation.value;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -2372,6 +2551,15 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
        WHERE id = $1::uuid`,
       [id, reviewerId, remarks]
     );
+    await recordLocatorWorkflowEvent(client, {
+      locatorSlipId: id,
+      action: 'hr_rejected',
+      fromStatus: current.rows[0].status,
+      toStatus: 'rejected_by_hr',
+      actorId: reviewerId,
+      actorRole: req.user?.role || 'hr',
+      remarks,
+    });
     await client.query('COMMIT');
 
     notifySafe(() =>
