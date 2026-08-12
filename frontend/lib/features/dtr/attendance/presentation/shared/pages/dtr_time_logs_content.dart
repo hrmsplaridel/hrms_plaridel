@@ -2786,6 +2786,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         source: r.source,
         locatorSlipId: r.locatorSlipId,
         locatorSlipRequestType: r.locatorSlipRequestType,
+        locatorSlipRequestTypeLabel: r.locatorSlipRequestTypeLabel,
+        locatorSlipDtrSlotLabel: r.locatorSlipDtrSlotLabel,
+        locatorSlipDtrPrintLabel: r.locatorSlipDtrPrintLabel,
+        locatorSlipCoverageMode: r.locatorSlipCoverageMode,
         locatorSlipSegments: r.locatorSlipSegments,
       );
       _showTimeLogSnack('Time entry updated.', isSuccess: true);

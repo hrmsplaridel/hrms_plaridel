@@ -32,6 +32,10 @@ class TimeRecord {
     this.source,
     this.locatorSlipId,
     this.locatorSlipRequestType,
+    this.locatorSlipRequestTypeLabel,
+    this.locatorSlipDtrSlotLabel,
+    this.locatorSlipDtrPrintLabel,
+    this.locatorSlipCoverageMode,
     this.locatorSlipSegments,
     this.shiftPunchMode = 'auto',
   });
@@ -87,6 +91,10 @@ class TimeRecord {
   /// Approved locator-slip metadata (when present in DTR payload).
   final String? locatorSlipId;
   final String? locatorSlipRequestType;
+  final String? locatorSlipRequestTypeLabel;
+  final String? locatorSlipDtrSlotLabel;
+  final String? locatorSlipDtrPrintLabel;
+  final String? locatorSlipCoverageMode;
   final List<String>? locatorSlipSegments;
 
   /// Employee's shift punch mode for this record's date.
@@ -96,14 +104,22 @@ class TimeRecord {
   LocatorRequestType get locatorRequestType =>
       LocatorRequestType.fromCode(locatorSlipRequestType);
 
-  String get locatorSlipSlotLabel => locatorRequestType.dtrSlotLabel;
+  String get locatorSlipSlotLabel =>
+      _nonEmpty(locatorSlipDtrSlotLabel) ?? locatorRequestType.dtrSlotLabel;
 
-  String get locatorSlipPrintLabel => locatorRequestType.dtrPrintLabel;
+  String get locatorSlipPrintLabel =>
+      _nonEmpty(locatorSlipDtrPrintLabel) ?? locatorRequestType.dtrPrintLabel;
 
   String get locatorSlipDisplayLabel =>
-      locatorRequestType == LocatorRequestType.workFromHome
-      ? locatorRequestType.shortLabel
-      : locatorRequestType.label;
+      _nonEmpty(locatorSlipRequestTypeLabel) ??
+      (locatorRequestType == LocatorRequestType.workFromHome
+          ? locatorRequestType.shortLabel
+          : locatorRequestType.label);
+
+  static String? _nonEmpty(String? value) {
+    final normalized = value?.trim();
+    return normalized == null || normalized.isEmpty ? null : normalized;
+  }
 
   static const String tableName = 'time_records';
 
@@ -160,6 +176,12 @@ class TimeRecord {
       source: json['source']?.toString(),
       locatorSlipId: json['locator_slip_id']?.toString(),
       locatorSlipRequestType: json['locator_slip_request_type']?.toString(),
+      locatorSlipRequestTypeLabel: json['locator_slip_request_type_label']
+          ?.toString(),
+      locatorSlipDtrSlotLabel: json['locator_slip_dtr_slot_label']?.toString(),
+      locatorSlipDtrPrintLabel: json['locator_slip_dtr_print_label']
+          ?.toString(),
+      locatorSlipCoverageMode: json['locator_slip_coverage_mode']?.toString(),
       locatorSlipSegments: (json['locator_slip_segments'] is List)
           ? (json['locator_slip_segments'] as List)
                 .map((e) => e.toString())
@@ -241,6 +263,10 @@ class TimeRecord {
     String? source,
     String? locatorSlipId,
     String? locatorSlipRequestType,
+    String? locatorSlipRequestTypeLabel,
+    String? locatorSlipDtrSlotLabel,
+    String? locatorSlipDtrPrintLabel,
+    String? locatorSlipCoverageMode,
     List<String>? locatorSlipSegments,
   }) {
     return TimeRecord(
@@ -269,6 +295,14 @@ class TimeRecord {
       locatorSlipId: locatorSlipId ?? this.locatorSlipId,
       locatorSlipRequestType:
           locatorSlipRequestType ?? this.locatorSlipRequestType,
+      locatorSlipRequestTypeLabel:
+          locatorSlipRequestTypeLabel ?? this.locatorSlipRequestTypeLabel,
+      locatorSlipDtrSlotLabel:
+          locatorSlipDtrSlotLabel ?? this.locatorSlipDtrSlotLabel,
+      locatorSlipDtrPrintLabel:
+          locatorSlipDtrPrintLabel ?? this.locatorSlipDtrPrintLabel,
+      locatorSlipCoverageMode:
+          locatorSlipCoverageMode ?? this.locatorSlipCoverageMode,
       locatorSlipSegments: locatorSlipSegments ?? this.locatorSlipSegments,
     );
   }
