@@ -1068,6 +1068,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         builder: (_) => EmployeeLeaveCardViewScreen(
           userId: selected.userId,
           employeeName: selected.name,
+          employeeOptions: selected.employees,
         ),
       ),
     );
@@ -1448,10 +1449,15 @@ class _ForcedLeaveDeductionInput {
 }
 
 class _EmployeeLeaveCardSelection {
-  const _EmployeeLeaveCardSelection({required this.userId, required this.name});
+  const _EmployeeLeaveCardSelection({
+    required this.userId,
+    required this.name,
+    required this.employees,
+  });
 
   final String userId;
   final String name;
+  final List<EmployeeLeaveCardOption> employees;
 }
 
 class _EmployeeLeaveCardPickerDialog extends StatefulWidget {
@@ -1602,6 +1608,14 @@ class _EmployeeLeaveCardPickerDialogState
       _EmployeeLeaveCardSelection(
         userId: selectedUserId,
         name: selectedEmployee['name'] ?? 'Selected employee',
+        employees: _allEmployees
+            .map(
+              (employee) => EmployeeLeaveCardOption(
+                userId: employee['id']!,
+                name: employee['name']!,
+              ),
+            )
+            .toList(growable: false),
       ),
     );
   }

@@ -12,15 +12,24 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'leave_card_print_view.dart';
 
+class EmployeeLeaveCardOption {
+  const EmployeeLeaveCardOption({required this.userId, required this.name});
+
+  final String userId;
+  final String name;
+}
+
 class EmployeeLeaveCardViewScreen extends StatefulWidget {
   const EmployeeLeaveCardViewScreen({
     super.key,
     required this.userId,
     required this.employeeName,
+    this.employeeOptions = const [],
   });
 
   final String userId;
   final String employeeName;
+  final List<EmployeeLeaveCardOption> employeeOptions;
 
   @override
   State<EmployeeLeaveCardViewScreen> createState() =>
@@ -45,10 +54,24 @@ class _EmployeeLeaveCardViewScreenState
   String? _officeDepartment;
   DateTime? _firstDayOfService;
   Map<String, String> _balanceLedgerTypes = const {};
+  late String _selectedUserId;
+  late String _selectedEmployeeName;
+  late final List<EmployeeLeaveCardOption> _employeeOptions;
 
   @override
   void initState() {
     super.initState();
+    _selectedUserId = widget.userId;
+    _selectedEmployeeName = widget.employeeName;
+    _employeeOptions = [...widget.employeeOptions];
+    if (!_employeeOptions.any((option) => option.userId == _selectedUserId)) {
+      _employeeOptions.add(
+        EmployeeLeaveCardOption(
+          userId: _selectedUserId,
+          name: _selectedEmployeeName,
+        ),
+      );
+    }
     _loadLeaveCardData();
   }
 
@@ -67,7 +90,7 @@ class _EmployeeLeaveCardViewScreenState
       };
       final rows = await repository.listRequests(
         query: LeaveRequestQuery(
-          userId: widget.userId,
+          userId: _selectedUserId,
           status: LeaveRequestStatus.approved,
           limit: 500,
         ),
@@ -83,10 +106,10 @@ class _EmployeeLeaveCardViewScreenState
               final bDate = b.startDate ?? b.dateFiled ?? DateTime(1900);
               return aDate.compareTo(bDate);
             });
-      final balances = await repository.getBalancesForUser(widget.userId);
+      final balances = await repository.getBalancesForUser(_selectedUserId);
       final ledger = await repository.getLeaveLedger(
         LeaveLedgerQuery(
-          userId: widget.userId,
+          userId: _selectedUserId,
           leaveType: LeaveType.vacationLeave.value,
           limit: 500,
         ),
@@ -122,7 +145,56 @@ class _EmployeeLeaveCardViewScreenState
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
-        title: const Text("Employee's Leave Card"),
+        title: Row(
+          children: [
+            const Text("Employee's Leave Card"),
+            if (_employeeOptions.length > 1) ...[
+              const SizedBox(width: 24),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    child: Container(
+                      height: 42,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.dashMutedSurfaceOf(context),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: AppTheme.dashHairlineOf(context),
+                        ),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedUserId,
+                          isExpanded: true,
+                          menuMaxHeight: 420,
+                          dropdownColor: AppTheme.dashPanelOf(context),
+                          icon: const Icon(Icons.arrow_drop_down_rounded),
+                          style: AppTheme.dashFieldTextStyle(context),
+                          items: _employeeOptions
+                              .map(
+                                (option) => DropdownMenuItem<String>(
+                                  value: option.userId,
+                                  child: Text(
+                                    option.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: _loading ? null : _selectEmployee,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
         backgroundColor: AppTheme.dashPanelOf(context),
         foregroundColor: AppTheme.dashTextPrimaryOf(context),
         surfaceTintColor: Colors.transparent,
@@ -151,13 +223,25 @@ class _EmployeeLeaveCardViewScreenState
     );
   }
 
+  void _selectEmployee(String? userId) {
+    if (userId == null || userId == _selectedUserId) return;
+    final selected = _employeeOptions.firstWhere(
+      (option) => option.userId == userId,
+    );
+    setState(() {
+      _selectedUserId = selected.userId;
+      _selectedEmployeeName = selected.name;
+    });
+    _loadLeaveCardData();
+  }
+
   Future<void> _printLeaveCard(String office) async {
     if (_printing) return;
 
     setState(() => _printing = true);
     try {
       await LeaveCardPrintView.print(
-        employeeName: widget.employeeName,
+        employeeName: _selectedEmployeeName,
         officeDepartment: office,
         firstDayOfService: _firstDayOfService,
         requests: _requests,
@@ -178,7 +262,7 @@ class _EmployeeLeaveCardViewScreenState
 
   Future<_LeaveCardEmployeeProfile> _loadEmployeeProfile() async {
     final res = await ApiClient.instance.get<Map<String, dynamic>>(
-      '/api/employees/${widget.userId}',
+      '/api/employees/$_selectedUserId',
     );
     return _LeaveCardEmployeeProfile.fromJson(
       res.data ?? const <String, dynamic>{},
@@ -294,7 +378,7 @@ class _EmployeeLeaveCardViewScreenState
                             flex: 4,
                             child: _LabeledLineField(
                               label: 'NAME',
-                              value: widget.employeeName,
+                              value: _selectedEmployeeName,
                             ),
                           ),
                           const SizedBox(width: 12),
