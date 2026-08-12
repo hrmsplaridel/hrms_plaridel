@@ -42,7 +42,6 @@ class _EmployeeLeaveCardViewScreenState
   /// Current VL / SL remaining totals from [leave_balances].
   double _vacationRemainingDays = 0;
   double _sickRemainingDays = 0;
-  String _service = '';
   String? _officeDepartment;
   DateTime? _firstDayOfService;
   Map<String, String> _balanceLedgerTypes = const {};
@@ -99,7 +98,6 @@ class _EmployeeLeaveCardViewScreenState
         _forcedLeaveDeductions = ledger.rows;
         _vacationRemainingDays = totals.vacationRemaining;
         _sickRemainingDays = totals.sickRemaining;
-        _service = profile.service;
         _officeDepartment = profile.officeDepartment;
         _firstDayOfService = profile.firstDayOfService;
         _balanceLedgerTypes = balanceLedgerTypes;
@@ -160,7 +158,6 @@ class _EmployeeLeaveCardViewScreenState
     try {
       await LeaveCardPrintView.print(
         employeeName: widget.employeeName,
-        service: _service,
         officeDepartment: office,
         firstDayOfService: _firstDayOfService,
         requests: _requests,
@@ -295,18 +292,9 @@ class _EmployeeLeaveCardViewScreenState
                         children: [
                           Expanded(
                             flex: 4,
-                            child: Column(
-                              children: [
-                                _LabeledLineField(
-                                  label: 'NAME',
-                                  value: widget.employeeName,
-                                ),
-                                const SizedBox(height: 2),
-                                _LabeledLineField(
-                                  label: 'SERVICE',
-                                  value: _service,
-                                ),
-                              ],
+                            child: _LabeledLineField(
+                              label: 'NAME',
+                              value: widget.employeeName,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -319,9 +307,9 @@ class _EmployeeLeaveCardViewScreenState
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            flex: 2,
+                            flex: 3,
                             child: _LabeledLineField(
-                              label: 'FIRST DAY OF',
+                              label: 'FIRST DAY OF SERVICE',
                               value: _firstDayOfService != null
                                   ? _fmtDate(_firstDayOfService!)
                                   : '',
@@ -1179,47 +1167,18 @@ class _LeaveCardTotals {
 
 class _LeaveCardEmployeeProfile {
   const _LeaveCardEmployeeProfile({
-    required this.service,
     this.officeDepartment,
     this.firstDayOfService,
   });
 
-  final String service;
   final String? officeDepartment;
   final DateTime? firstDayOfService;
 
   factory _LeaveCardEmployeeProfile.fromJson(Map<String, dynamic> json) {
     return _LeaveCardEmployeeProfile(
-      service: _formatService(json['employment_type']),
       officeDepartment: _cleanProfileText(json['current_department_name']),
       firstDayOfService: _parseProfileDate(json['date_hired']),
     );
-  }
-}
-
-String _formatService(dynamic value) {
-  final raw = value?.toString().trim() ?? '';
-  if (raw.isEmpty) return '';
-  switch (raw.toLowerCase()) {
-    case 'regular':
-      return 'Permanent';
-    case 'contractual':
-      return 'Contractual';
-    case 'job_order':
-    case 'job order':
-      return 'Job Order';
-    case 'casual':
-      return 'Casual';
-    default:
-      return raw
-          .replaceAll('_', ' ')
-          .split(' ')
-          .where((part) => part.trim().isNotEmpty)
-          .map((part) {
-            final clean = part.trim().toLowerCase();
-            return '${clean[0].toUpperCase()}${clean.substring(1)}';
-          })
-          .join(' ');
   }
 }
 
