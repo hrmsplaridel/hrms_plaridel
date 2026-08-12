@@ -34,6 +34,14 @@ function createHarness() {
           pm_in: params[5],
           pm_out: params[6],
           request_type: params[7],
+          request_type_label_snapshot: params[15],
+          request_type_short_label_snapshot: params[16],
+          request_type_location_label_snapshot: params[17],
+          request_type_location_hint_snapshot: params[18],
+          request_type_dtr_slot_label_snapshot: params[19],
+          request_type_dtr_print_label_snapshot: params[20],
+          request_type_requires_attachment_snapshot: params[21],
+          request_type_coverage_mode_snapshot: params[22],
           office: params[8],
           reason: params[9],
           attachment_name: params[10],
@@ -71,7 +79,21 @@ function createHarness() {
     validateWorkingDay: async () => ({ ok: true }),
     getLocatorTypeByCode: async (_client, code) => ({
       code,
+      label:
+        code === 'work_from_home'
+          ? 'Work From Home'
+          : 'Locator / Official Business',
+      short_label: code === 'work_from_home' ? 'WFH' : 'Locator',
+      location_label:
+        code === 'work_from_home' ? 'Work Location' : 'Office / Destination',
+      location_hint:
+        code === 'work_from_home'
+          ? 'Enter work location'
+          : 'Enter office or destination',
+      dtr_slot_label: code === 'work_from_home' ? 'WFH' : 'On Field',
+      dtr_print_label: code === 'work_from_home' ? 'WFH' : 'ON FIELD',
       requires_attachment: code === 'work_from_home',
+      coverage_mode: code === 'work_from_home' ? 'wfh' : 'manual',
     }),
     findConflicts: async () => ({
       ok: true,
@@ -150,6 +172,26 @@ test('plain and multipart locator submissions share reviewer notifications', asy
   assert.equal(
     state.inserts[1].row.attachment_path,
     'locator-attachments/support.pdf'
+  );
+  assert.equal(
+    state.inserts[0].row.request_type_label_snapshot,
+    'Locator / Official Business'
+  );
+  assert.equal(
+    state.inserts[0].row.request_type_dtr_print_label_snapshot,
+    'ON FIELD'
+  );
+  assert.equal(
+    state.inserts[0].row.request_type_requires_attachment_snapshot,
+    false
+  );
+  assert.equal(
+    state.inserts[1].row.request_type_label_snapshot,
+    'Work From Home'
+  );
+  assert.equal(
+    state.inserts[1].row.request_type_coverage_mode_snapshot,
+    'wfh'
   );
   assert.equal(
     state.queries.filter((sql) => sql === 'COMMIT').length,
