@@ -33,6 +33,7 @@ function createLocatorSubmissionService({
   mapInsertedRow,
   notifyAfterSubmit,
   broadcastSubmitted,
+  recordHistory,
   nowProvider = () => new Date(),
   logger = console,
 }) {
@@ -47,6 +48,7 @@ function createLocatorSubmissionService({
   assertDependency('mapInsertedRow', mapInsertedRow);
   assertDependency('notifyAfterSubmit', notifyAfterSubmit);
   assertDependency('broadcastSubmitted', broadcastSubmitted);
+  assertDependency('recordHistory', recordHistory);
   assertDependency('nowProvider', nowProvider);
 
   async function submit({
@@ -236,6 +238,14 @@ function createLocatorSubmissionService({
       if (!insertedRow?.id) {
         throw new Error('Locator request insert did not return a saved record.');
       }
+      await recordHistory(client, {
+        locatorSlipId: insertedRow.id,
+        action: 'submitted',
+        fromStatus: null,
+        toStatus: submitStatus,
+        actorId: employeeUserId,
+        actorRole: 'employee',
+      });
       await client.query('COMMIT');
     } catch (error) {
       try {

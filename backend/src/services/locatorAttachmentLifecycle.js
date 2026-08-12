@@ -25,6 +25,7 @@ async function replaceLocatorAttachment({
   employeeId,
   attachment,
   canModifyStatus,
+  recordHistory,
   removeFile,
   logger = console,
 }) {
@@ -39,7 +40,7 @@ async function replaceLocatorAttachment({
     transactionStarted = true;
 
     const current = await client.query(
-      `SELECT id, status, employee_id, attachment_path
+      `SELECT id, status, employee_id, attachment_name, attachment_path
        FROM locator_slips
        WHERE id = $1::uuid AND employee_id = $2::uuid
        FOR UPDATE`,
@@ -67,6 +68,20 @@ async function replaceLocatorAttachment({
        WHERE id = $4::uuid`,
       [attachment.name, attachment.path, attachment.mimeType, slipId]
     );
+    if (recordHistory) {
+      await recordHistory(client, {
+        locatorSlipId: slipId,
+        action: 'attachment_replaced',
+        fromStatus: row.status,
+        toStatus: row.status,
+        actorId: employeeId,
+        actorRole: 'employee',
+        metadata: {
+          previous_attachment_name: row.attachment_name || null,
+          attachment_name: attachment.name,
+        },
+      });
+    }
     await client.query('COMMIT');
     committed = true;
   } catch (error) {
@@ -96,6 +111,7 @@ async function deleteLocatorAttachment({
   slipId,
   employeeId,
   canModifyStatus,
+  recordHistory,
   removeFile,
   logger = console,
 }) {
@@ -110,7 +126,7 @@ async function deleteLocatorAttachment({
     transactionStarted = true;
 
     const current = await client.query(
-      `SELECT id, status, employee_id, attachment_path
+      `SELECT id, status, employee_id, attachment_name, attachment_path
        FROM locator_slips
        WHERE id = $1::uuid AND employee_id = $2::uuid
        FOR UPDATE`,
@@ -138,6 +154,17 @@ async function deleteLocatorAttachment({
        WHERE id = $1::uuid`,
       [slipId]
     );
+    if (recordHistory) {
+      await recordHistory(client, {
+        locatorSlipId: slipId,
+        action: 'attachment_removed',
+        fromStatus: row.status,
+        toStatus: row.status,
+        actorId: employeeId,
+        actorRole: 'employee',
+        metadata: { attachment_name: row.attachment_name || null },
+      });
+    }
     await client.query('COMMIT');
     committed = true;
   } catch (error) {
