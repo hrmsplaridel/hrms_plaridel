@@ -15,6 +15,10 @@ const {
   recordLocatorAttachmentAccess,
   resolveLocatorAttachmentAccess,
 } = require('../services/locatorAttachmentAccess');
+const {
+  deleteLocatorAttachment,
+  replaceLocatorAttachment,
+} = require('../services/locatorAttachmentLifecycle');
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const {
   canModifyLocatorAttachment,
@@ -926,7 +930,13 @@ router.post('/submit', protect, async (req, res) => {
 // POST /api/locator-slips/submit-with-attachment
 router.post('/submit-with-attachment', protect, uploadLocatorAttachmentMw, async (req, res) => {
   const userId = req.user?.id;
-  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const relPath = req.file
+    ? `${LOCATOR_ATTACHMENT_SUBDIR}/${req.file.filename}`
+    : null;
+  if (!userId) {
+    removeLocatorAttachmentFile(relPath);
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
   if (!req.file) return res.status(400).json({ error: 'Attachment is required.' });
 
   const slipDate = (req.body?.slip_date || '').toString().trim();
@@ -937,12 +947,8 @@ router.post('/submit-with-attachment', protect, uploadLocatorAttachmentMw, async
   const amOut = boolField(req.body?.am_out);
   const pmIn = boolField(req.body?.pm_in);
   const pmOut = boolField(req.body?.pm_out);
-  const relPath = `${LOCATOR_ATTACHMENT_SUBDIR}/${req.file.filename}`;
-
   const cleanup = () => {
-    try {
-      fs.unlinkSync(path.join(UPLOAD_DIR, relPath));
-    } catch (_) {}
+    removeLocatorAttachmentFile(relPath);
   };
 
   try {
@@ -1044,8 +1050,10 @@ router.post(
       });
     }
 
-    const client = await pool.connect();
+    let client = null;
+    let committed = false;
     try {
+      client = await pool.connect();
       await client.query('BEGIN');
       const employee = await client.query(
         `SELECT id, full_name FROM users WHERE id = $1::uuid LIMIT 1`,
@@ -1124,7 +1132,7 @@ router.post(
            CASE WHEN $13::text IS NULL THEN NULL ELSE now() END,
            'approved', $15::uuid, now(), $16::text, true,
            $16::text, $15::uuid, now(), now(), now()
-         ) RETURNING id`,
+         ) RETURNING *`,
         [
           employeeId,
           snapshot?.departmentId || null,
@@ -1153,12 +1161,28 @@ router.post(
         ]
       );
       await client.query('COMMIT');
+      committed = true;
 
-      const mapped = await fetchLocatorSlipDetails(pool, inserted.rows[0].id);
+      const insertedRow = inserted.rows[0];
+      let mapped = mapLocatorRow({
+        ...insertedRow,
+        slip_date_text: slipDate,
+        employee_name: employee.rows[0].full_name,
+        department_name: snapshot?.departmentName || null,
+      });
+      try {
+        mapped =
+          (await fetchLocatorSlipDetails(pool, insertedRow.id)) || mapped;
+      } catch (detailsError) {
+        console.error(
+          '[locator POST /admin/corrections details]',
+          detailsError
+        );
+      }
       notifySafe(() =>
         locatorNotifications.notifyEmployee(pool, {
           employeeUserId: employeeId,
-          slipId: inserted.rows[0].id,
+          slipId: insertedRow.id,
           type: 'locator_retroactive_correction_recorded',
           title: 'Locator correction recorded',
           body: `HR recorded a locator correction for ${slipDate}.`,
@@ -1168,14 +1192,16 @@ router.post(
       broadcastLocatorUpdated('retroactive_correction_recorded', mapped);
       return res.status(201).json(mapped);
     } catch (err) {
-      try {
-        await client.query('ROLLBACK');
-      } catch (_) {}
-      cleanup();
+      if (client && !committed) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (_) {}
+      }
+      if (!committed) cleanup();
       console.error('[locator POST /admin/corrections]', err);
       return res.status(500).json({ error: 'Failed to record locator correction' });
     } finally {
-      client.release();
+      client?.release();
     }
   }
 );
@@ -1386,45 +1412,36 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
 // POST /api/locator-slips/:id/attachment - upload/replace attachment.
 router.post('/:id/attachment', protect, uploadLocatorAttachmentMw, async (req, res) => {
   const userId = req.user?.id;
-  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const relPath = req.file
+    ? `${LOCATOR_ATTACHMENT_SUBDIR}/${req.file.filename}`
+    : null;
+  if (!userId) {
+    removeLocatorAttachmentFile(relPath);
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
   if (!req.file) return res.status(400).json({ error: 'Attachment is required.' });
-  const relPath = `${LOCATOR_ATTACHMENT_SUBDIR}/${req.file.filename}`;
-  const cleanupNewFile = () => removeLocatorAttachmentFile(relPath);
   try {
-    const current = await pool.query(
-      `SELECT id, status, employee_id, attachment_path
-       FROM locator_slips
-       WHERE id = $1::uuid AND employee_id = $2::uuid`,
-      [req.params.id, userId]
-    );
-    const row = current.rows[0];
-    if (!row) {
-      cleanupNewFile();
-      return res.status(404).json({ error: 'Locator slip not found' });
-    }
-    if (!canModifyLocatorAttachment(row.status)) {
-      cleanupNewFile();
-      return res.status(409).json({
-        error: 'Attachments are locked after submission. They can only be changed after the request is returned for correction.',
-      });
-    }
-    await pool.query(
-      `UPDATE locator_slips
-       SET attachment_name = $1,
-           attachment_path = $2,
-           attachment_mime_type = $3,
-           attachment_uploaded_at = now(),
-           updated_at = now()
-      WHERE id = $4::uuid`,
-      [req.file.originalname || 'attachment', relPath, req.file.mimetype || null, req.params.id]
-    );
-    if (row.attachment_path && row.attachment_path !== relPath) {
-      removeLocatorAttachmentFile(row.attachment_path);
-    }
-    broadcastLocatorUpdated('attachment_replaced', row, { slipId: req.params.id });
-    res.json({ attachment_name: req.file.originalname || 'attachment', attachment_path: relPath });
+    const attachment = await replaceLocatorAttachment({
+      dbPool: pool,
+      slipId: req.params.id,
+      employeeId: userId,
+      attachment: {
+        name: req.file.originalname || 'attachment',
+        path: relPath,
+        mimeType: req.file.mimetype || null,
+      },
+      canModifyStatus: canModifyLocatorAttachment,
+      removeFile: removeLocatorAttachmentFile,
+    });
+    broadcastLocatorUpdated('attachment_replaced', {
+      id: req.params.id,
+      employee_id: userId,
+    });
+    res.json(attachment);
   } catch (err) {
-    cleanupNewFile();
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[locator POST /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
   }
@@ -1435,33 +1452,22 @@ router.delete('/:id/attachment', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   try {
-    const current = await pool.query(
-      `SELECT id, status, employee_id, attachment_path
-       FROM locator_slips
-       WHERE id = $1::uuid AND employee_id = $2::uuid`,
-      [req.params.id, userId]
-    );
-    const row = current.rows[0];
-    if (!row) return res.status(404).json({ error: 'Locator slip not found' });
-    if (!canModifyLocatorAttachment(row.status)) {
-      return res.status(409).json({
-        error: 'Attachments are locked after submission. They can only be changed after the request is returned for correction.',
-      });
-    }
-    await pool.query(
-      `UPDATE locator_slips
-       SET attachment_name = NULL,
-           attachment_path = NULL,
-           attachment_mime_type = NULL,
-           attachment_uploaded_at = NULL,
-           updated_at = now()
-      WHERE id = $1::uuid`,
-      [req.params.id]
-    );
-    removeLocatorAttachmentFile(row.attachment_path);
-    broadcastLocatorUpdated('attachment_removed', row, { slipId: req.params.id });
+    await deleteLocatorAttachment({
+      dbPool: pool,
+      slipId: req.params.id,
+      employeeId: userId,
+      canModifyStatus: canModifyLocatorAttachment,
+      removeFile: removeLocatorAttachmentFile,
+    });
+    broadcastLocatorUpdated('attachment_removed', {
+      id: req.params.id,
+      employee_id: userId,
+    });
     res.json({ ok: true });
   } catch (err) {
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[locator DELETE /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to remove attachment' });
   }
