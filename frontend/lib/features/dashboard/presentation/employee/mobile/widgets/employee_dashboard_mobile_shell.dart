@@ -147,20 +147,30 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
             Positioned(right: 16, bottom: 16, child: actionButton),
           if (_showAssistantFab)
             ValueListenableBuilder<bool>(
-              valueListenable:
-                  EmployeeHrmsAssistantController.instance.floatingVisible,
-              builder: (context, assistantOpen, _) => assistantOpen
+              valueListenable: EmployeeHrmsAssistantController
+                  .instance
+                  .baseLauncherSuppressed,
+              builder: (context, launcherSuppressed, _) => launcherSuppressed
                   ? const SizedBox.shrink()
                   : ValueListenableBuilder<bool>(
-                      valueListenable: EmployeeTutorialController.coachActive,
-                      builder: (context, coachActive, _) => coachActive
+                      valueListenable: EmployeeHrmsAssistantController
+                          .instance
+                          .floatingVisible,
+                      builder: (context, assistantOpen, _) => assistantOpen
                           ? const SizedBox.shrink()
-                          : DraggableDtrAssistantLauncher(
-                              onPressed: onHrmsAssistant,
-                              initialBottom:
-                                  _useMobileLeaveFab || _useMobileLocatorFab
-                                  ? 108
-                                  : 16,
+                          : ValueListenableBuilder<bool>(
+                              valueListenable:
+                                  EmployeeTutorialController.coachActive,
+                              builder: (context, coachActive, _) => coachActive
+                                  ? const SizedBox.shrink()
+                                  : DraggableDtrAssistantLauncher(
+                                      onPressed: onHrmsAssistant,
+                                      initialBottom:
+                                          _useMobileLeaveFab ||
+                                              _useMobileLocatorFab
+                                          ? 108
+                                          : 16,
+                                    ),
                             ),
                     ),
             ),

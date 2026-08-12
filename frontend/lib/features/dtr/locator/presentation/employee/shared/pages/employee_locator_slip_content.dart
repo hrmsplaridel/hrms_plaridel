@@ -7,6 +7,7 @@ import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employ
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_slip_form_initial_values.dart';
@@ -1430,25 +1431,19 @@ class EmployeeLocatorSlipContentState
     String employeeName, {
     LocatorSlipFormInitialValues? initialValues,
   }) async {
-    final isMobile = MediaQuery.sizeOf(context).width < 600;
     final form = _LocatorSlipFormDialog(
       employeeName: employeeName,
       requestTypes: _locatorTypes,
       initialValues: initialValues,
     );
-    final _LocatorSlipDraft? created;
-    if (isMobile) {
-      created = await Navigator.of(context, rootNavigator: true)
-          .push<_LocatorSlipDraft>(
-            MaterialPageRoute<_LocatorSlipDraft>(builder: (_) => form),
-          );
-    } else {
-      created = await showDialog<_LocatorSlipDraft>(
-        context: context,
-        builder: (_) =>
-            EmployeeHrmsAssistantOverlay(initialBottom: 92, child: form),
-      );
-    }
+    final created = await openResponsiveRightSidePanel<_LocatorSlipDraft>(
+      context: context,
+      barrierLabel: 'Close locator request form',
+      minWidth: 520,
+      initialWidthFraction: 0.38,
+      builder: (_) =>
+          EmployeeHrmsAssistantOverlay(initialBottom: 92, child: form),
+    );
     if (!mounted || created == null) return;
     setState(() {
       _error = null;
@@ -2248,42 +2243,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.sizeOf(context).width < 600;
-    return isMobile ? _buildFullScreen(context) : _buildDialog(context);
-  }
-
-  Widget _buildDialog(BuildContext context) {
-    const accent = Color(0xFFF57C00);
-    return AlertDialog(
-      backgroundColor: AppTheme.dashPanelOf(context),
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-      contentPadding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
-      actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-      title: Text(
-        'File Request',
-        style: TextStyle(
-          color: AppTheme.dashTextPrimaryOf(context),
-          fontSize: 17,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-      content: SizedBox(
-        width: 360,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(child: _formFields(context)),
-        ),
-      ),
-      actions: [
-        EmployeeLocatorMobileFormActions(
-          accent: accent,
-          onCancel: () => Navigator.of(context).pop(),
-          onSubmit: _save,
-        ),
-      ],
-    );
+    return _buildFullScreen(context);
   }
 
   Widget _buildFullScreen(BuildContext context) {

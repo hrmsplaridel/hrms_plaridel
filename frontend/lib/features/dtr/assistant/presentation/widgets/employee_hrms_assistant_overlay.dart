@@ -7,7 +7,7 @@ import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employ
 ///
 /// The root floating panel does not replace the active form route, so unfinished
 /// employee input remains visible and intact while they chat.
-class EmployeeHrmsAssistantOverlay extends StatelessWidget {
+class EmployeeHrmsAssistantOverlay extends StatefulWidget {
   const EmployeeHrmsAssistantOverlay({
     super.key,
     required this.child,
@@ -19,6 +19,35 @@ class EmployeeHrmsAssistantOverlay extends StatelessWidget {
   final double initialRight;
   final double initialBottom;
 
+  @override
+  State<EmployeeHrmsAssistantOverlay> createState() =>
+      _EmployeeHrmsAssistantOverlayState();
+}
+
+class _EmployeeHrmsAssistantOverlayState
+    extends State<EmployeeHrmsAssistantOverlay> {
+  bool _ownsEmbeddedLauncher = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _ownsEmbeddedLauncher) return;
+      _ownsEmbeddedLauncher = true;
+      EmployeeHrmsAssistantController.instance.acquireEmbeddedLauncher();
+    });
+  }
+
+  @override
+  void dispose() {
+    if (_ownsEmbeddedLauncher) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        EmployeeHrmsAssistantController.instance.releaseEmbeddedLauncher();
+      });
+    }
+    super.dispose();
+  }
+
   void _openAssistant(BuildContext context) {
     EmployeeHrmsAssistantController.instance.openFullPage(context);
   }
@@ -28,7 +57,7 @@ class EmployeeHrmsAssistantOverlay extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Positioned.fill(child: child),
+        Positioned.fill(child: widget.child),
         ValueListenableBuilder<bool>(
           valueListenable:
               EmployeeHrmsAssistantController.instance.floatingVisible,
@@ -36,8 +65,8 @@ class EmployeeHrmsAssistantOverlay extends StatelessWidget {
               ? const SizedBox.shrink()
               : DraggableDtrAssistantLauncher(
                   onPressed: () => _openAssistant(context),
-                  initialRight: initialRight,
-                  initialBottom: initialBottom,
+                  initialRight: widget.initialRight,
+                  initialBottom: widget.initialBottom,
                 ),
         ),
       ],

@@ -6,6 +6,8 @@ import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_api.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/pages/employee_dtr_assistant_page.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_controller.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_overlay.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/hrms_assistant_floating_frame.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 
@@ -162,5 +164,36 @@ void main() {
     expect(expanded, isTrue);
     expect(closed, isTrue);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('embedded assistant suppresses the dashboard launcher', (
+    tester,
+  ) async {
+    final controller = EmployeeHrmsAssistantController.instance;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Stack(
+          children: [
+            ValueListenableBuilder<bool>(
+              valueListenable: controller.baseLauncherSuppressed,
+              builder: (_, suppressed, _) => Text('$suppressed'),
+            ),
+            const EmployeeHrmsAssistantOverlay(
+              child: ColoredBox(color: Colors.white),
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(controller.baseLauncherSuppressed.value, isTrue);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    await tester.pump();
+
+    expect(controller.baseLauncherSuppressed.value, isFalse);
   });
 }

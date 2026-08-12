@@ -710,18 +710,27 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
           ),
           if (_showHrmsAssistantFab)
             ValueListenableBuilder<bool>(
-              valueListenable:
-                  EmployeeHrmsAssistantController.instance.floatingVisible,
-              builder: (context, assistantOpen, _) => assistantOpen
+              valueListenable: EmployeeHrmsAssistantController
+                  .instance
+                  .baseLauncherSuppressed,
+              builder: (context, launcherSuppressed, _) => launcherSuppressed
                   ? const SizedBox.shrink()
                   : ValueListenableBuilder<bool>(
-                      valueListenable: EmployeeTutorialController.coachActive,
-                      builder: (context, coachActive, _) => coachActive
+                      valueListenable: EmployeeHrmsAssistantController
+                          .instance
+                          .floatingVisible,
+                      builder: (context, assistantOpen, _) => assistantOpen
                           ? const SizedBox.shrink()
-                          : DraggableDtrAssistantLauncher(
-                              onPressed: _openHrmsAssistant,
-                              initialRight: 24,
-                              initialBottom: 24,
+                          : ValueListenableBuilder<bool>(
+                              valueListenable:
+                                  EmployeeTutorialController.coachActive,
+                              builder: (context, coachActive, _) => coachActive
+                                  ? const SizedBox.shrink()
+                                  : DraggableDtrAssistantLauncher(
+                                      onPressed: _openHrmsAssistant,
+                                      initialRight: 24,
+                                      initialBottom: 24,
+                                    ),
                             ),
                     ),
             ),
