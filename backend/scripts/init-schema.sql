@@ -823,6 +823,20 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   pm_in BOOLEAN NOT NULL DEFAULT false,
   pm_out BOOLEAN NOT NULL DEFAULT false,
   request_type TEXT NOT NULL DEFAULT 'locator',
+  request_type_label_snapshot TEXT,
+  request_type_short_label_snapshot TEXT,
+  request_type_location_label_snapshot TEXT,
+  request_type_location_hint_snapshot TEXT,
+  request_type_dtr_slot_label_snapshot TEXT,
+  request_type_dtr_print_label_snapshot TEXT,
+  request_type_requires_attachment_snapshot BOOLEAN,
+  request_type_coverage_mode_snapshot TEXT
+    CONSTRAINT chk_locator_type_coverage_snapshot
+    CHECK (
+      request_type_coverage_mode_snapshot IS NULL
+      OR request_type_coverage_mode_snapshot IN ('manual', 'wfh')
+    ),
+  request_type_snapshot_at TIMESTAMPTZ,
   office TEXT NOT NULL,
   reason TEXT NOT NULL,
   attachment_name TEXT,
