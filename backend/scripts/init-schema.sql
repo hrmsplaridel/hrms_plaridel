@@ -908,6 +908,38 @@ CREATE INDEX IF NOT EXISTS idx_locator_request_types_active
   ON locator_request_types(is_active, sort_order, label);
 
 -- =========================================
+-- LOCATOR WORKFLOW HISTORY (APPEND-ONLY)
+-- =========================================
+CREATE TABLE IF NOT EXISTS locator_slip_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  locator_slip_id UUID NOT NULL REFERENCES locator_slips(id) ON DELETE RESTRICT,
+  action TEXT NOT NULL CHECK (char_length(btrim(action)) > 0),
+  from_status TEXT,
+  to_status TEXT,
+  actor_id UUID,
+  actor_name_snapshot TEXT,
+  actor_role TEXT,
+  remarks TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_locator_slip_history_request_time
+  ON locator_slip_history(locator_slip_id, created_at, id);
+
+CREATE OR REPLACE FUNCTION prevent_locator_slip_history_mutation()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'locator_slip_history is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_prevent_locator_slip_history_mutation
+  ON locator_slip_history;
+CREATE TRIGGER trg_prevent_locator_slip_history_mutation
+BEFORE UPDATE OR DELETE ON locator_slip_history
+FOR EACH ROW EXECUTE FUNCTION prevent_locator_slip_history_mutation();
+
+-- =========================================
 -- LOCATOR ATTACHMENT ACCESS LOG
 -- =========================================
 CREATE TABLE IF NOT EXISTS locator_attachment_access_logs (
