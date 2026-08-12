@@ -836,6 +836,7 @@ CREATE TABLE IF NOT EXISTS locator_slips (
       'pending_hr',
       'returned_for_correction',
       'approved',
+      'revoked',
       'rejected_by_department_head',
       'rejected_by_hr',
       'cancelled'
@@ -846,8 +847,35 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   hr_reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
   hr_reviewed_at TIMESTAMPTZ,
   hr_remarks TEXT,
+  is_retroactive_correction BOOLEAN NOT NULL DEFAULT false,
+  retroactive_correction_reason TEXT,
+  retroactive_corrected_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  retroactive_corrected_at TIMESTAMPTZ,
+  revoked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  revoked_at TIMESTAMPTZ,
+  revocation_reason TEXT,
+  month_end_reconciliation_required BOOLEAN NOT NULL DEFAULT false,
+  month_end_reconciled_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_locator_correction_audit CHECK (
+    is_retroactive_correction = false
+    OR (
+      retroactive_correction_reason IS NOT NULL
+      AND char_length(btrim(retroactive_correction_reason)) BETWEEN 10 AND 1000
+      AND retroactive_corrected_by IS NOT NULL
+      AND retroactive_corrected_at IS NOT NULL
+    )
+  ),
+  CONSTRAINT chk_locator_revocation_audit CHECK (
+    status <> 'revoked'
+    OR (
+      revoked_by IS NOT NULL
+      AND revoked_at IS NOT NULL
+      AND revocation_reason IS NOT NULL
+      AND char_length(btrim(revocation_reason)) BETWEEN 10 AND 1000
+    )
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_locator_slips_employee
