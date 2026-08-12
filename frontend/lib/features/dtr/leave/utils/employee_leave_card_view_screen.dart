@@ -155,39 +155,53 @@ class _EmployeeLeaveCardViewScreenState
                   alignment: Alignment.centerLeft,
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 320),
-                    child: Container(
-                      height: 42,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.dashMutedSurfaceOf(context),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: AppTheme.dashHairlineOf(context),
+                    child: DropdownMenu<String>(
+                      key: ValueKey(_selectedUserId),
+                      initialSelection: _selectedUserId,
+                      width: 320,
+                      menuHeight: 420,
+                      enabled: !_loading,
+                      enableFilter: true,
+                      enableSearch: true,
+                      requestFocusOnTap: true,
+                      leadingIcon: const Icon(Icons.search_rounded, size: 20),
+                      hintText: 'Search employee',
+                      textStyle: AppTheme.dashFieldTextStyle(context),
+                      inputDecorationTheme: InputDecorationTheme(
+                        isDense: true,
+                        filled: true,
+                        fillColor: AppTheme.dashMutedSurfaceOf(context),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: AppTheme.dashHairlineOf(context),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: AppTheme.dashHairlineOf(context),
+                          ),
                         ),
                       ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: _selectedUserId,
-                          isExpanded: true,
-                          menuMaxHeight: 420,
-                          dropdownColor: AppTheme.dashPanelOf(context),
-                          icon: const Icon(Icons.arrow_drop_down_rounded),
-                          style: AppTheme.dashFieldTextStyle(context),
-                          items: _employeeOptions
-                              .map(
-                                (option) => DropdownMenuItem<String>(
-                                  value: option.userId,
-                                  child: Text(
-                                    option.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: _loading ? null : _selectEmployee,
+                      menuStyle: MenuStyle(
+                        backgroundColor: WidgetStatePropertyAll(
+                          AppTheme.dashPanelOf(context),
                         ),
                       ),
+                      dropdownMenuEntries: _employeeOptions
+                          .map(
+                            (option) => DropdownMenuEntry<String>(
+                              value: option.userId,
+                              label: option.name,
+                            ),
+                          )
+                          .toList(),
+                      onSelected: _selectEmployee,
                     ),
                   ),
                 ),
