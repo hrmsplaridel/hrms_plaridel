@@ -92,6 +92,7 @@ function createHarness() {
     broadcastSubmitted: (row) => {
       state.broadcasts.push(row);
     },
+    nowProvider: () => new Date('2026-08-11T00:00:00.000Z'),
     logger: { error() {} },
   });
   return { service, state };
@@ -170,4 +171,18 @@ test('attachment-required locator types still fail before insertion without a fi
   assert.equal(state.notifications.length, 0);
   assert.equal(state.broadcasts.length, 0);
   assert.equal(state.queries.includes('ROLLBACK'), true);
+});
+
+test('employee submission blocks past dates before opening a transaction', async () => {
+  const { service, state } = createHarness();
+
+  await assert.rejects(
+    () => service.submit(validInput({ slipDate: '2026-08-10' })),
+    (error) =>
+      error.statusCode === 409 &&
+      error.payload?.code === 'locator_past_date_not_allowed'
+  );
+
+  assert.equal(state.inserts.length, 0);
+  assert.equal(state.queries.length, 0);
 });
