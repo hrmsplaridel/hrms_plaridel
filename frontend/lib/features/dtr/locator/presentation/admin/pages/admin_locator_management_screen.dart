@@ -41,6 +41,8 @@ enum _LocatorAdminQueue {
   final String label;
 }
 
+enum _LocatorHeaderAction { recordCorrection, manageTypes }
+
 class AdminLocatorManagementScreen extends StatefulWidget {
   const AdminLocatorManagementScreen({super.key});
 
@@ -141,19 +143,44 @@ class _AdminLocatorManagementScreenState
         const SizedBox(height: 16),
         Align(
           alignment: Alignment.centerRight,
-          child: Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              OutlinedButton.icon(
-                onPressed: _recordLocatorCorrection,
-                icon: const Icon(Icons.edit_calendar_outlined, size: 18),
-                label: const Text('Record Correction'),
+          child: PopupMenuButton<_LocatorHeaderAction>(
+            tooltip: 'More actions',
+            icon: Icon(
+              Icons.more_vert_rounded,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+            color: AppTheme.dashPanelOf(context),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            onSelected: (action) {
+              switch (action) {
+                case _LocatorHeaderAction.recordCorrection:
+                  unawaited(_recordLocatorCorrection());
+                case _LocatorHeaderAction.manageTypes:
+                  unawaited(_openTypeManagement());
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem<_LocatorHeaderAction>(
+                value: _LocatorHeaderAction.recordCorrection,
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_calendar_outlined, size: 18),
+                    SizedBox(width: 10),
+                    Text('Record Correction'),
+                  ],
+                ),
               ),
-              FilledButton.icon(
-                onPressed: _openTypeManagement,
-                icon: const Icon(Icons.tune_rounded, size: 18),
-                label: const Text('Manage Types'),
+              PopupMenuItem<_LocatorHeaderAction>(
+                value: _LocatorHeaderAction.manageTypes,
+                child: Row(
+                  children: [
+                    Icon(Icons.tune_rounded, size: 18),
+                    SizedBox(width: 10),
+                    Text('Manage Types'),
+                  ],
+                ),
               ),
             ],
           ),
@@ -1850,11 +1877,16 @@ class _AdminLocatorManagementScreenState
   }
 
   Future<void> _recordLocatorCorrection() async {
-    final draft = await showDialog<AdminLocatorCorrectionDraft>(
-      context: context,
-      builder: (dialogContext) =>
-          AdminLocatorCorrectionDialog(requestTypes: _locatorTypes),
-    );
+    final draft =
+        await openResponsiveRightSidePanel<AdminLocatorCorrectionDraft>(
+          context: context,
+          barrierLabel: 'Close locator correction form',
+          breakpoint: 0,
+          minWidth: 620,
+          initialWidthFraction: 0.45,
+          builder: (_) =>
+              AdminLocatorCorrectionDialog(requestTypes: _locatorTypes),
+        );
     if (draft == null || !mounted) return;
     String date(DateTime value) =>
         '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';

@@ -127,21 +127,35 @@ class _AdminLocatorCorrectionDialogState
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return Scaffold(
       backgroundColor: AppTheme.dashPanelOf(context),
-      surfaceTintColor: Colors.transparent,
-      title: const Row(
-        children: [
-          Icon(Icons.edit_calendar_outlined),
-          SizedBox(width: 10),
-          Text('Record Locator Correction'),
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: AppTheme.dashPanelOf(context),
+        foregroundColor: AppTheme.dashTextPrimaryOf(context),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        title: const Row(
+          children: [
+            Icon(Icons.edit_calendar_outlined),
+            SizedBox(width: 10),
+            Expanded(child: Text('Record Locator Correction')),
+          ],
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Close',
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close_rounded),
+          ),
+          const SizedBox(width: 8),
         ],
       ),
-      content: SizedBox(
-        width: 680,
+      body: SafeArea(
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -256,17 +270,32 @@ class _AdminLocatorCorrectionDialogState
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+          decoration: BoxDecoration(
+            color: AppTheme.dashPanelOf(context),
+            border: Border(
+              top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                onPressed: _submit,
+                icon: const Icon(Icons.fact_check_outlined),
+                label: const Text('Record Correction'),
+              ),
+            ],
+          ),
         ),
-        FilledButton.icon(
-          onPressed: _submit,
-          icon: const Icon(Icons.fact_check_outlined),
-          label: const Text('Record Correction'),
-        ),
-      ],
+      ),
     );
   }
 

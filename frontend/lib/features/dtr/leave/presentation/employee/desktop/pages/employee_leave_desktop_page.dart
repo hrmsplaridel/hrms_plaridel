@@ -379,7 +379,7 @@ class _LeavePageHeader extends StatelessWidget {
           if (onFileLeavePressed != null)
             FilledButton.icon(
               onPressed: onFileLeavePressed,
-              icon: const Icon(Icons.add_task_rounded),
+              icon: const Icon(Icons.add_rounded),
               label: const Text('File Leave Request'),
             ),
         ],
