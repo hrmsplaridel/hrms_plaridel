@@ -16,6 +16,7 @@ function createHarness({
     id: SLIP_ID,
     employee_id: EMPLOYEE_ID,
     status: 'returned_for_correction',
+    attachment_name: 'old.pdf',
     attachment_path: OLD_PATH,
   },
   failUpdate = false,
@@ -167,4 +168,34 @@ test('attachment deletion commits before removing the physical file', async () =
       harness.events.indexOf(`REMOVE ${OLD_PATH}`)
   );
   assert.deepEqual(harness.removed, [OLD_PATH]);
+});
+
+test('attachment changes record history before the transaction commits', async () => {
+  const harness = createHarness();
+  const history = [];
+  const recordHistory = async (_client, event) => {
+    history.push(event);
+    harness.events.push(`HISTORY ${event.action}`);
+  };
+
+  await replaceLocatorAttachment({
+    dbPool: harness.dbPool,
+    slipId: SLIP_ID,
+    employeeId: EMPLOYEE_ID,
+    attachment,
+    canModifyStatus,
+    recordHistory,
+    removeFile: harness.removeFile,
+  });
+
+  assert.equal(history[0].action, 'attachment_replaced');
+  assert.equal(history[0].fromStatus, 'returned_for_correction');
+  assert.deepEqual(history[0].metadata, {
+    previous_attachment_name: 'old.pdf',
+    attachment_name: 'new.pdf',
+  });
+  assert.ok(
+    harness.events.indexOf('HISTORY attachment_replaced') <
+      harness.events.indexOf('COMMIT')
+  );
 });

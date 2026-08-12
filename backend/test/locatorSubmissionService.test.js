@@ -15,6 +15,7 @@ function createHarness() {
     inserts: [],
     notifications: [],
     broadcasts: [],
+    history: [],
     reviewSnapshotDates: [],
     released: 0,
     nextId: 1,
@@ -114,6 +115,9 @@ function createHarness() {
     broadcastSubmitted: (row) => {
       state.broadcasts.push(row);
     },
+    recordHistory: async (_client, event) => {
+      state.history.push(event);
+    },
     nowProvider: () => new Date('2026-08-11T00:00:00.000Z'),
     logger: { error() {} },
   });
@@ -151,6 +155,7 @@ test('plain and multipart locator submissions share reviewer notifications', asy
   assert.equal(state.inserts.length, 2);
   assert.equal(state.notifications.length, 2);
   assert.equal(state.broadcasts.length, 2);
+  assert.equal(state.history.length, 2);
   assert.equal(state.released, 2);
   assert.deepEqual(
     state.notifications.map((item) => item.status),
@@ -159,6 +164,28 @@ test('plain and multipart locator submissions share reviewer notifications', asy
   assert.deepEqual(
     state.notifications.map((item) => item.departmentHeadUserId),
     [HEAD_ID, HEAD_ID]
+  );
+  assert.deepEqual(
+    state.history.map((item) => ({
+      action: item.action,
+      toStatus: item.toStatus,
+      actorId: item.actorId,
+      actorRole: item.actorRole,
+    })),
+    [
+      {
+        action: 'submitted',
+        toStatus: 'pending_department_head',
+        actorId: EMPLOYEE_ID,
+        actorRole: 'employee',
+      },
+      {
+        action: 'submitted',
+        toStatus: 'pending_department_head',
+        actorId: EMPLOYEE_ID,
+        actorRole: 'employee',
+      },
+    ]
   );
   assert.equal(state.inserts[0].row.attachment_path, null);
   assert.equal(
