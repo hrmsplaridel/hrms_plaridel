@@ -468,14 +468,14 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
             dept_head.full_name AS dept_head_reviewer_name,
             hr.full_name AS hr_reviewer_name,
             revoker.full_name AS revoked_by_name,
-            lrt.label AS request_type_label,
-            lrt.short_label AS request_type_short_label,
-            lrt.location_label AS request_type_location_label,
-            lrt.location_hint AS request_type_location_hint,
-            lrt.dtr_slot_label AS dtr_slot_label,
-            lrt.dtr_print_label AS dtr_print_label,
-            lrt.requires_attachment AS request_type_requires_attachment,
-            lrt.coverage_mode AS request_type_coverage_mode
+            COALESCE(ls.request_type_label_snapshot, lrt.label) AS request_type_label,
+            COALESCE(ls.request_type_short_label_snapshot, lrt.short_label) AS request_type_short_label,
+            COALESCE(ls.request_type_location_label_snapshot, lrt.location_label) AS request_type_location_label,
+            COALESCE(ls.request_type_location_hint_snapshot, lrt.location_hint) AS request_type_location_hint,
+            COALESCE(ls.request_type_dtr_slot_label_snapshot, lrt.dtr_slot_label) AS dtr_slot_label,
+            COALESCE(ls.request_type_dtr_print_label_snapshot, lrt.dtr_print_label) AS dtr_print_label,
+            COALESCE(ls.request_type_requires_attachment_snapshot, lrt.requires_attachment, false) AS request_type_requires_attachment,
+            COALESCE(ls.request_type_coverage_mode_snapshot, lrt.coverage_mode) AS request_type_coverage_mode
      FROM locator_slips ls
      LEFT JOIN users dept_head ON dept_head.id = ls.dept_head_reviewer_id
      LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id

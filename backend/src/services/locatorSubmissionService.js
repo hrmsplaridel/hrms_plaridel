@@ -6,6 +6,9 @@ const {
 const {
   evaluateEmployeeLocatorDateWindow,
 } = require('./locatorDatePolicy');
+const {
+  captureLocatorTypeSnapshot,
+} = require('./locatorTypeSnapshot');
 
 function locatorSubmissionError(statusCode, payload) {
   const error = new Error(payload?.error || 'Failed to submit locator request');
@@ -117,6 +120,7 @@ function createLocatorSubmissionService({
       if (!locatorType) {
         throw locatorSubmissionError(400, { error: 'Invalid request_type' });
       }
+      const typeSnapshot = captureLocatorTypeSnapshot(locatorType);
       const attachmentError = locatorAttachmentRequiredError(
         locatorType,
         Boolean(attachmentPath)
@@ -152,6 +156,15 @@ function createLocatorSubmissionService({
            pm_in,
            pm_out,
            request_type,
+           request_type_label_snapshot,
+           request_type_short_label_snapshot,
+           request_type_location_label_snapshot,
+           request_type_location_hint_snapshot,
+           request_type_dtr_slot_label_snapshot,
+           request_type_dtr_print_label_snapshot,
+           request_type_requires_attachment_snapshot,
+           request_type_coverage_mode_snapshot,
+           request_type_snapshot_at,
            office,
            reason,
            attachment_name,
@@ -171,6 +184,15 @@ function createLocatorSubmissionService({
            $6::boolean,
            $7::boolean,
            $8::text,
+           $16::text,
+           $17::text,
+           $18::text,
+           $19::text,
+           $20::text,
+           $21::text,
+           $22::boolean,
+           $23::text,
+           now(),
            $9::text,
            $10::text,
            $11::text,
@@ -200,6 +222,14 @@ function createLocatorSubmissionService({
           attachmentPath ? attachment?.mimeType || null : null,
           submitStatus,
           departmentHeadUserId,
+          typeSnapshot.label,
+          typeSnapshot.shortLabel,
+          typeSnapshot.locationLabel,
+          typeSnapshot.locationHint,
+          typeSnapshot.dtrSlotLabel,
+          typeSnapshot.dtrPrintLabel,
+          typeSnapshot.requiresAttachment,
+          typeSnapshot.coverageMode,
         ]
       );
       insertedRow = inserted.rows[0];
