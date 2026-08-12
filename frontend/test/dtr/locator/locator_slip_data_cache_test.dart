@@ -51,4 +51,48 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test('admin locator pages parse records, totals, and filter options', () {
+    final page = LocatorAdminRequestPage.fromData({
+      'items': [
+        {'id': 'locator-1', 'status': 'approved'},
+      ],
+      'pagination': {
+        'page': 3,
+        'page_size': 10,
+        'total': 27,
+        'page_count': 3,
+      },
+      'filter_options': {
+        'departments': [
+          {'id': 'department-1', 'name': 'Human Resources'},
+        ],
+        'employees': [
+          {
+            'id': 'employee-1',
+            'name': 'Employee One',
+            'department_ids': ['department-1'],
+          },
+        ],
+      },
+    });
+
+    expect(page.items.single['id'], 'locator-1');
+    expect(page.page, 3);
+    expect(page.total, 27);
+    expect(page.pageCount, 3);
+    expect(page.departments.single.name, 'Human Resources');
+    expect(page.employees.single.departmentIds, ['department-1']);
+  });
+
+  test('admin locator page parser supports the legacy list response', () {
+    final page = LocatorAdminRequestPage.fromData([
+      {'id': 'locator-1'},
+      {'id': 'locator-2'},
+    ]);
+
+    expect(page.items, hasLength(2));
+    expect(page.total, 2);
+    expect(page.pageCount, 1);
+  });
 }

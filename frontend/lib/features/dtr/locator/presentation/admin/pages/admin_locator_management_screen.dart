@@ -64,9 +64,14 @@ class _AdminLocatorManagementScreenState
   bool _loading = false;
   String? _error;
   List<LocatorRequestType> _locatorTypes = LocatorRequestType.values;
+  List<LocatorAdminFilterOption> _departmentOptions = [];
+  List<LocatorAdminFilterOption> _employeeOptions = [];
   List<_LocatorAdminRecord> _items = [];
   String? _selectedItemId;
   int _page = 0;
+  int _totalItems = 0;
+  int _serverPageCount = 1;
+  int _loadVersion = 0;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
@@ -105,8 +110,6 @@ class _AdminLocatorManagementScreenState
 
   @override
   Widget build(BuildContext context) {
-    final visibleItems = _visibleItems;
-    _clampPage();
     final screenHeight = MediaQuery.sizeOf(context).height;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final maxListHeight = screenWidth < 600
@@ -115,8 +118,8 @@ class _AdminLocatorManagementScreenState
         ? (screenHeight * 0.5).clamp(320.0, 560.0)
         : (screenHeight * 0.58).clamp(380.0, 700.0);
     final pageStart = _page * _rowsPerPage;
-    final pageEnd = (pageStart + _rowsPerPage).clamp(0, visibleItems.length);
-    final pageItems = visibleItems.sublist(pageStart, pageEnd);
+    final pageItems = _items;
+    final pageEnd = pageStart + pageItems.length;
     final useScrollableList = pageItems.length > 3;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -197,7 +200,7 @@ class _AdminLocatorManagementScreenState
                     style: TextStyle(color: Colors.red.shade900, fontSize: 12),
                   ),
                 ),
-              if (_loading && visibleItems.isEmpty)
+              if (_loading && _items.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
                   child: SizedBox(
@@ -211,7 +214,7 @@ class _AdminLocatorManagementScreenState
                     ),
                   ),
                 )
-              else if (visibleItems.isEmpty)
+              else if (_items.isEmpty)
                 Text(
                   'No locator request records in this queue.',
                   style: TextStyle(
@@ -249,14 +252,14 @@ class _AdminLocatorManagementScreenState
                             ),
                         ],
                       ),
-                      if (visibleItems.length > _rowsPerPage) ...[
+                      if (_totalItems > _rowsPerPage) ...[
                         const SizedBox(height: 12),
                         _LocatorPaginationBar(
                           page: _page,
                           pageCount: _pageCount,
                           pageStart: pageStart,
                           pageEnd: pageEnd,
-                          total: visibleItems.length,
+                          total: _totalItems,
                           onPrevious: _page > 0
                               ? () => _goToPage(_page - 1)
                               : null,
@@ -275,52 +278,14 @@ class _AdminLocatorManagementScreenState
     );
   }
 
-  List<_LocatorAdminRecord> get _visibleItems {
-    return _items.where((item) {
-      if (_departmentFilter != null &&
-          item.departmentName != _departmentFilter) {
-        return false;
-      }
-      if (_employeeFilter != null && item.employeeName != _employeeFilter) {
-        return false;
-      }
-      final date = item.slipDateValue;
-      if ((_fromDate != null || _toDate != null) && date == null) {
-        return false;
-      }
-      if (_fromDate != null && date!.isBefore(_dateOnly(_fromDate!))) {
-        return false;
-      }
-      if (_toDate != null && date!.isAfter(_dateOnly(_toDate!))) {
-        return false;
-      }
-      return true;
-    }).toList();
-  }
-
-  DateTime _dateOnly(DateTime value) =>
-      DateTime(value.year, value.month, value.day);
-
   Widget _buildFilterPanel(BuildContext context) {
-    final departments =
-        _items
-            .map((item) => item.departmentName.trim())
-            .where((name) => name.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort();
-    final employees =
-        _items
-            .where(
-              (item) =>
-                  _departmentFilter == null ||
-                  item.departmentName == _departmentFilter,
-            )
-            .map((item) => item.employeeName.trim())
-            .where((name) => name.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort();
+    final employees = _employeeOptions
+        .where(
+          (option) =>
+              _departmentFilter == null ||
+              option.departmentIds.contains(_departmentFilter),
+        )
+        .toList();
 
     InputDecoration decoration(String label) => AppTheme.dashInputDecoration(
       context,
@@ -410,26 +375,31 @@ class _AdminLocatorManagementScreenState
                   value: null,
                   child: Text('All departments'),
                 ),
-                ...departments.map(
-                  (name) => DropdownMenuItem<String?>(
-                    value: name,
-                    child: Text(name, overflow: TextOverflow.ellipsis),
+                ..._departmentOptions.map(
+                  (option) => DropdownMenuItem<String?>(
+                    value: option.id,
+                    child: Text(option.name, overflow: TextOverflow.ellipsis),
                   ),
                 ),
               ],
-              onChanged: (value) => setState(() {
-                _departmentFilter = value;
-                _employeeFilter = null;
-                _selectedItemId = null;
-                _page = 0;
-              }),
+              onChanged: (value) {
+                if (_departmentFilter == value) return;
+                setState(() {
+                  _departmentFilter = value;
+                  _employeeFilter = null;
+                  _selectedItemId = null;
+                  _page = 0;
+                });
+                _load();
+              },
             ),
           ),
           SizedBox(
             width: 240,
             child: DropdownButtonFormField<String?>(
               key: ValueKey('employee-$_departmentFilter-$_employeeFilter'),
-              initialValue: employees.contains(_employeeFilter)
+              initialValue:
+                  employees.any((option) => option.id == _employeeFilter)
                   ? _employeeFilter
                   : null,
               decoration: decoration('Employee'),
@@ -440,36 +410,46 @@ class _AdminLocatorManagementScreenState
                   child: Text('All employees'),
                 ),
                 ...employees.map(
-                  (name) => DropdownMenuItem<String?>(
-                    value: name,
-                    child: Text(name, overflow: TextOverflow.ellipsis),
+                  (option) => DropdownMenuItem<String?>(
+                    value: option.id,
+                    child: Text(option.name, overflow: TextOverflow.ellipsis),
                   ),
                 ),
               ],
-              onChanged: (value) => setState(() {
-                _employeeFilter = value;
-                _selectedItemId = null;
-                _page = 0;
-              }),
+              onChanged: (value) {
+                if (_employeeFilter == value) return;
+                setState(() {
+                  _employeeFilter = value;
+                  _selectedItemId = null;
+                  _page = 0;
+                });
+                _load();
+              },
             ),
           ),
           _locatorDateFilterButton(
             context,
             label: 'From',
             value: _fromDate,
-            onSelected: (date) => setState(() {
-              _fromDate = date;
-              _page = 0;
-            }),
+            onSelected: (date) {
+              setState(() {
+                _fromDate = date;
+                _page = 0;
+              });
+              _load();
+            },
           ),
           _locatorDateFilterButton(
             context,
             label: 'To',
             value: _toDate,
-            onSelected: (date) => setState(() {
-              _toDate = date;
-              _page = 0;
-            }),
+            onSelected: (date) {
+              setState(() {
+                _toDate = date;
+                _page = 0;
+              });
+              _load();
+            },
           ),
           TextButton.icon(
             onPressed: _resetFilters,
@@ -523,6 +503,12 @@ class _AdminLocatorManagementScreenState
       _page = 0;
     });
     _load();
+  }
+
+  String _queryDate(DateTime value) {
+    return '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';
   }
 
   Widget _adminItemsTable({
@@ -603,20 +589,13 @@ class _AdminLocatorManagementScreenState
   }
 
   int get _pageCount {
-    final count = _visibleItems.length;
-    if (count == 0) return 1;
-    return (count / _rowsPerPage).ceil();
-  }
-
-  void _clampPage() {
-    final maxPage = _pageCount - 1;
-    if (_page > maxPage) _page = maxPage;
-    if (_page < 0) _page = 0;
+    return _serverPageCount;
   }
 
   void _goToPage(int page) {
     final maxPage = _pageCount - 1;
     setState(() => _page = page.clamp(0, maxPage).toInt());
+    _load();
   }
 
   Widget _adminTableHeader(BuildContext context, double purposeWidth) {
@@ -1646,6 +1625,7 @@ class _AdminLocatorManagementScreenState
   }
 
   Future<void> _load({bool forceRefresh = false}) async {
+    final loadVersion = ++_loadVersion;
     setState(() {
       _loading = true;
       _error = null;
@@ -1660,46 +1640,59 @@ class _AdminLocatorManagementScreenState
       final statusParam = switch (_queue) {
         _LocatorAdminQueue.all => null,
         _LocatorAdminQueue.pendingDeptHead => 'pending_department_head',
-        _LocatorAdminQueue.pendingHrAdmin => null,
+        _LocatorAdminQueue.pendingHrAdmin => 'pending_hr',
         _LocatorAdminQueue.returned => 'returned_for_correction',
         _LocatorAdminQueue.approved => 'approved',
         _LocatorAdminQueue.revoked => 'revoked',
-        _LocatorAdminQueue.rejected => null,
+        _LocatorAdminQueue.rejected => 'rejected',
         _LocatorAdminQueue.cancelled => 'cancelled',
       };
-      final query = <String, String>{};
+      final query = <String, String>{
+        'page': '${_page + 1}',
+        'page_size': '$_rowsPerPage',
+      };
       if (statusParam != null) query['status'] = statusParam;
       if (_requestTypeFilter != null) {
         query['request_type'] = _requestTypeFilter!.code;
       }
-      final all = (await LocatorSlipDataCache.instance.listAdminRequests(
+      if (_departmentFilter != null) {
+        query['department_id'] = _departmentFilter!;
+      }
+      if (_employeeFilter != null) {
+        query['employee_id'] = _employeeFilter!;
+      }
+      if (_fromDate != null) query['from'] = _queryDate(_fromDate!);
+      if (_toDate != null) query['to'] = _queryDate(_toDate!);
+
+      final result = await LocatorSlipDataCache.instance.listAdminRequests(
         userId: userId,
         role: role,
         query: query,
         forceRefresh: forceRefresh,
-      )).map((e) => _LocatorAdminRecord.fromJson(e)).toList();
-      final filtered = switch (_queue) {
-        _LocatorAdminQueue.pendingHrAdmin =>
-          all.where((e) => e.canHrReview).toList(),
-        _LocatorAdminQueue.rejected =>
-          all
-              .where((e) => e.status.toLowerCase().contains('rejected'))
-              .toList(),
-        _ => all,
-      };
-      if (!mounted) return;
+      );
+      if (!mounted || loadVersion != _loadVersion) return;
+      final items = result.items
+          .map((item) => _LocatorAdminRecord.fromJson(item))
+          .toList();
       setState(() {
-        _items = filtered;
+        _items = items;
+        _page = result.page - 1;
+        _totalItems = result.total;
+        _serverPageCount = result.pageCount;
+        _departmentOptions = result.departments;
+        _employeeOptions = result.employees;
         if (_selectedItemId != null &&
             !_items.any((item) => item.id == _selectedItemId)) {
           _selectedItemId = null;
         }
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || loadVersion != _loadVersion) return;
       setState(() => _error = 'Failed to load locator requests: $e');
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && loadVersion == _loadVersion) {
+        setState(() => _loading = false);
+      }
     }
   }
 
