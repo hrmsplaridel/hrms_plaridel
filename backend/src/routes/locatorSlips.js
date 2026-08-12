@@ -18,8 +18,10 @@ const {
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const {
   canModifyLocatorAttachment,
+  locatorAttachmentRequiredError,
   parseLocatorDateOnly,
   validateLocatorAttachmentForReview,
+  validateLocatorRequiredFields,
   validateLocatorWorkingDayForEmployee,
 } = require('../services/locatorFilingRules');
 const {
@@ -28,6 +30,13 @@ const {
 const {
   createLocatorSubmissionService,
 } = require('../services/locatorSubmissionService');
+const {
+  evaluateEmployeeLocatorDateWindow,
+  normalizeCorrectionReason,
+} = require('../services/locatorDatePolicy');
+const {
+  evaluateLocatorRevocation,
+} = require('../services/locatorRevocationPolicy');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -325,6 +334,7 @@ pool
             'pending_hr',
             'returned_for_correction',
             'approved',
+            'revoked',
             'rejected_by_department_head',
             'rejected_by_hr',
             'cancelled'
@@ -335,8 +345,35 @@ pool
         hr_reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
         hr_reviewed_at TIMESTAMPTZ,
         hr_remarks TEXT,
+        is_retroactive_correction BOOLEAN NOT NULL DEFAULT false,
+        retroactive_correction_reason TEXT,
+        retroactive_corrected_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        retroactive_corrected_at TIMESTAMPTZ,
+        revoked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        revoked_at TIMESTAMPTZ,
+        revocation_reason TEXT,
+        month_end_reconciliation_required BOOLEAN NOT NULL DEFAULT false,
+        month_end_reconciled_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT chk_locator_correction_audit CHECK (
+          is_retroactive_correction = false
+          OR (
+            retroactive_correction_reason IS NOT NULL
+            AND char_length(btrim(retroactive_correction_reason)) BETWEEN 10 AND 1000
+            AND retroactive_corrected_by IS NOT NULL
+            AND retroactive_corrected_at IS NOT NULL
+          )
+        ),
+        CONSTRAINT chk_locator_revocation_audit CHECK (
+          status <> 'revoked'
+          OR (
+            revoked_by IS NOT NULL
+            AND revoked_at IS NOT NULL
+            AND revocation_reason IS NOT NULL
+            AND char_length(btrim(revocation_reason)) BETWEEN 10 AND 1000
+          )
+        )
       );
 
       CREATE INDEX IF NOT EXISTS idx_locator_slips_employee
@@ -363,6 +400,46 @@ pool
       ALTER TABLE locator_slips
         ADD COLUMN IF NOT EXISTS assigned_department_head_id UUID
           REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS is_retroactive_correction BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS retroactive_correction_reason TEXT;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS retroactive_corrected_by UUID
+          REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS retroactive_corrected_at TIMESTAMPTZ;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS revoked_by UUID
+          REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS revocation_reason TEXT;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS month_end_reconciliation_required BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS month_end_reconciled_at TIMESTAMPTZ;
+      ALTER TABLE locator_slips
+        DROP CONSTRAINT IF EXISTS locator_slips_status_check;
+      ALTER TABLE locator_slips
+        ADD CONSTRAINT locator_slips_status_check CHECK (status IN (
+          'pending', 'pending_department_head', 'pending_hr',
+          'returned_for_correction', 'approved', 'revoked',
+          'rejected_by_department_head', 'rejected_by_hr', 'cancelled'
+        ));
+      ALTER TABLE locator_slips
+        DROP CONSTRAINT IF EXISTS chk_locator_revocation_audit;
+      ALTER TABLE locator_slips
+        ADD CONSTRAINT chk_locator_revocation_audit CHECK (
+          status <> 'revoked'
+          OR (
+            revoked_by IS NOT NULL
+            AND revoked_at IS NOT NULL
+            AND revocation_reason IS NOT NULL
+            AND char_length(btrim(revocation_reason)) BETWEEN 10 AND 1000
+          )
+        );
       CREATE INDEX IF NOT EXISTS idx_locator_request_types_active
         ON locator_request_types(is_active, sort_order, label);
       CREATE INDEX IF NOT EXISTS idx_locator_slips_request_type
@@ -444,6 +521,19 @@ function mapLocatorRow(row) {
     hr_reviewer_name: row.hr_reviewer_name || null,
     hr_reviewed_at: row.hr_reviewed_at || null,
     hr_remarks: row.hr_remarks || null,
+    is_retroactive_correction: row.is_retroactive_correction === true,
+    retroactive_correction_reason:
+      row.retroactive_correction_reason || null,
+    retroactive_corrected_by: row.retroactive_corrected_by || null,
+    retroactive_corrector_name: row.retroactive_corrector_name || null,
+    retroactive_corrected_at: row.retroactive_corrected_at || null,
+    revoked_by: row.revoked_by || null,
+    revoked_by_name: row.revoked_by_name || null,
+    revoked_at: row.revoked_at || null,
+    revocation_reason: row.revocation_reason || null,
+    month_end_reconciliation_required:
+      row.month_end_reconciliation_required === true,
+    month_end_reconciled_at: row.month_end_reconciled_at || null,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
   };
@@ -458,6 +548,8 @@ async function fetchLocatorSlipDetails(db, id) {
             assigned_dh.full_name AS assigned_department_head_name,
             dh.full_name AS dept_head_reviewer_name,
             hr.full_name AS hr_reviewer_name,
+            corrector.full_name AS retroactive_corrector_name,
+            revoker.full_name AS revoked_by_name,
             lrt.label AS request_type_label,
             lrt.short_label AS request_type_short_label,
             lrt.location_label AS request_type_location_label,
@@ -472,6 +564,8 @@ async function fetchLocatorSlipDetails(db, id) {
      LEFT JOIN users assigned_dh ON assigned_dh.id = ls.assigned_department_head_id
      LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
      LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
+     LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
+     LEFT JOIN users revoker ON revoker.id = ls.revoked_by
      LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
      WHERE ls.id = $1::uuid`,
     [id]
@@ -498,6 +592,7 @@ function isValidStatus(status) {
     'pending_hr',
     'returned_for_correction',
     'approved',
+    'revoked',
     'rejected_by_department_head',
     'rejected_by_hr',
     'cancelled',
@@ -683,6 +778,8 @@ router.get('/my', protect, async (req, res) => {
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
               hr.full_name AS hr_reviewer_name,
+              corrector.full_name AS retroactive_corrector_name,
+              revoker.full_name AS revoked_by_name,
               lrt.label AS request_type_label,
               lrt.short_label AS request_type_short_label,
               lrt.location_label AS request_type_location_label,
@@ -696,6 +793,8 @@ router.get('/my', protect, async (req, res) => {
        LEFT JOIN departments d ON d.id = ls.department_id
        LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
        LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
+       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
+       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
        LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
        WHERE ls.employee_id = $1::uuid
          AND ($2::text IS NULL OR ls.status = $2::text)
@@ -796,6 +895,197 @@ router.post('/submit-with-attachment', protect, uploadLocatorAttachmentMw, async
   }
 });
 
+// POST /api/locator-slips/admin/corrections - HR/Admin records a documented
+// locator for a past date that cannot use normal employee filing.
+router.post(
+  '/admin/corrections',
+  protect,
+  requireAdminOrHr,
+  uploadLocatorAttachmentMw,
+  async (req, res) => {
+    const reviewerId = req.user?.id;
+    const employeeId = String(req.body?.employee_id || '').trim();
+    const slipDate = String(req.body?.slip_date || '').trim();
+    const office = String(req.body?.office || '').trim();
+    const reason = String(req.body?.reason || '').trim();
+    const requestType = normalizeRequestType(req.body?.request_type);
+    const amIn = boolField(req.body?.am_in);
+    const amOut = boolField(req.body?.am_out);
+    const pmIn = boolField(req.body?.pm_in);
+    const pmOut = boolField(req.body?.pm_out);
+    const correctionReason = normalizeCorrectionReason(
+      req.body?.retroactive_correction_reason
+    );
+    const relPath = req.file
+      ? `${LOCATOR_ATTACHMENT_SUBDIR}/${req.file.filename}`
+      : null;
+    const cleanup = () => {
+      if (relPath) removeLocatorAttachmentFile(relPath);
+    };
+
+    if (!reviewerId) {
+      cleanup();
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+    const fields = validateLocatorRequiredFields({
+      slipDate,
+      requestType,
+      office,
+      reason,
+      slots: { amIn, amOut, pmIn, pmOut },
+    });
+    if (!employeeId || !fields.valid) {
+      cleanup();
+      return res.status(400).json({
+        error: !employeeId
+          ? 'employee_id is required'
+          : fields.error,
+      });
+    }
+    if (!correctionReason) {
+      cleanup();
+      return res.status(400).json({
+        error: 'A correction reason between 10 and 1000 characters is required.',
+        code: 'locator_correction_reason_required',
+      });
+    }
+    const employeeDateWindow = evaluateEmployeeLocatorDateWindow({ slipDate });
+    if (employeeDateWindow.ok) {
+      cleanup();
+      return res.status(409).json({
+        error:
+          'Today and future locator dates must use the normal employee filing and approval workflow.',
+        code: 'locator_correction_not_needed',
+      });
+    }
+    if (employeeDateWindow.code !== 'locator_past_date_not_allowed') {
+      cleanup();
+      return res.status(400).json({
+        error: employeeDateWindow.error,
+        code: employeeDateWindow.code,
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const employee = await client.query(
+        `SELECT id, full_name FROM users WHERE id = $1::uuid LIMIT 1`,
+        [employeeId]
+      );
+      if (!employee.rows[0]) {
+        await client.query('ROLLBACK');
+        cleanup();
+        return res.status(404).json({ error: 'Employee not found' });
+      }
+      const workingDay = await validateLocatorWorkingDayForEmployee(
+        client,
+        employeeId,
+        parseLocatorDateOnly(slipDate)
+      );
+      if (!workingDay.ok) {
+        await client.query('ROLLBACK');
+        cleanup();
+        return res.status(400).json({ error: workingDay.error });
+      }
+      const locatorType = await getLocatorTypeByCode(client, requestType, {
+        activeOnly: true,
+      });
+      if (!locatorType) {
+        await client.query('ROLLBACK');
+        cleanup();
+        return res.status(400).json({ error: 'Invalid request_type' });
+      }
+      const attachmentError = locatorAttachmentRequiredError(
+        locatorType,
+        Boolean(relPath)
+      );
+      if (attachmentError) {
+        await client.query('ROLLBACK');
+        cleanup();
+        return res.status(400).json({ error: attachmentError });
+      }
+      const conflictCheck = await findLocatorRequestConflicts(client, {
+        employeeId,
+        slipDate,
+        slots: { amIn, amOut, pmIn, pmOut },
+        phase: 'approval',
+      });
+      if (!conflictCheck.ok) {
+        await client.query('ROLLBACK');
+        cleanup();
+        return res.status(409).json(locatorConflictPayload(conflictCheck));
+      }
+      const snapshot = await getDepartmentReviewSnapshotForDate(
+        client,
+        employeeId,
+        slipDate
+      );
+      const inserted = await client.query(
+        `INSERT INTO locator_slips (
+           employee_id, department_id, assigned_department_head_id,
+           slip_date, am_in, am_out, pm_in, pm_out, request_type, office, reason,
+           attachment_name, attachment_path, attachment_mime_type,
+           attachment_uploaded_at, status, hr_reviewer_id, hr_reviewed_at,
+           hr_remarks, is_retroactive_correction,
+           retroactive_correction_reason, retroactive_corrected_by,
+           retroactive_corrected_at, created_at, updated_at
+         ) VALUES (
+           $1::uuid, $2::uuid, $3::uuid,
+           $4::date, $5::boolean, $6::boolean, $7::boolean, $8::boolean,
+           $9::text, $10::text, $11::text,
+           $12::text, $13::text, $14::text,
+           CASE WHEN $13::text IS NULL THEN NULL ELSE now() END,
+           'approved', $15::uuid, now(), $16::text, true,
+           $16::text, $15::uuid, now(), now(), now()
+         ) RETURNING id`,
+        [
+          employeeId,
+          snapshot?.departmentId || null,
+          snapshot?.departmentHeadUserId || null,
+          slipDate,
+          amIn,
+          amOut,
+          pmIn,
+          pmOut,
+          requestType,
+          office,
+          reason,
+          relPath ? req.file.originalname || 'attachment' : null,
+          relPath,
+          relPath ? req.file.mimetype || null : null,
+          reviewerId,
+          correctionReason,
+        ]
+      );
+      await client.query('COMMIT');
+
+      const mapped = await fetchLocatorSlipDetails(pool, inserted.rows[0].id);
+      notifySafe(() =>
+        locatorNotifications.notifyEmployee(pool, {
+          employeeUserId: employeeId,
+          slipId: inserted.rows[0].id,
+          type: 'locator_retroactive_correction_recorded',
+          title: 'Locator correction recorded',
+          body: `HR recorded a locator correction for ${slipDate}.`,
+          metadata: { correction_reason: correctionReason },
+        })
+      );
+      broadcastLocatorUpdated('retroactive_correction_recorded', mapped);
+      return res.status(201).json(mapped);
+    } catch (err) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+      cleanup();
+      console.error('[locator POST /admin/corrections]', err);
+      return res.status(500).json({ error: 'Failed to record locator correction' });
+    } finally {
+      client.release();
+    }
+  }
+);
+
 // PATCH /api/locator-slips/:id/cancel
 router.patch('/:id/cancel', protect, async (req, res) => {
   const userId = req.user?.id;
@@ -839,6 +1129,8 @@ router.patch('/:id/cancel', protect, async (req, res) => {
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
               hr.full_name AS hr_reviewer_name,
+              corrector.full_name AS retroactive_corrector_name,
+              revoker.full_name AS revoked_by_name,
               lrt.label AS request_type_label,
               lrt.short_label AS request_type_short_label,
               lrt.location_label AS request_type_location_label,
@@ -852,6 +1144,8 @@ router.patch('/:id/cancel', protect, async (req, res) => {
        LEFT JOIN departments d ON d.id = ls.department_id
        LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
        LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
+       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
+       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
        LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
        WHERE ls.id = $1::uuid`,
       [id]
@@ -906,6 +1200,16 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
     if (attachmentError) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: attachmentError });
+    }
+    const resubmitWindow = evaluateEmployeeLocatorDateWindow({
+      slipDate: row.slip_date_text,
+    });
+    if (!resubmitWindow.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: resubmitWindow.error,
+        code: resubmitWindow.code,
+      });
     }
     const workingDayCheck = await validateLocatorWorkingDayForEmployee(
       client,
@@ -1305,31 +1609,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
         metadata: { reviewer_remarks: remarks },
       })
     );
-    const out = await pool.query(
-      `SELECT ls.*,
-              ls.slip_date::text AS slip_date_text,
-              u.full_name AS employee_name,
-              d.name AS department_name,
-              dh.full_name AS dept_head_reviewer_name,
-              hr.full_name AS hr_reviewer_name,
-              lrt.label AS request_type_label,
-              lrt.short_label AS request_type_short_label,
-              lrt.location_label AS request_type_location_label,
-              lrt.location_hint AS request_type_location_hint,
-              lrt.dtr_slot_label AS request_type_dtr_slot_label,
-              lrt.dtr_print_label AS request_type_dtr_print_label,
-              lrt.requires_attachment AS request_type_requires_attachment,
-              lrt.coverage_mode AS request_type_coverage_mode
-       FROM locator_slips ls
-       LEFT JOIN users u ON u.id = ls.employee_id
-       LEFT JOIN departments d ON d.id = ls.department_id
-       LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
-       LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
-       LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
-       WHERE ls.id = $1::uuid`,
-      [id]
-    );
-    const mapped = mapLocatorRow(out.rows[0]);
+    const mapped = await fetchLocatorSlipDetails(pool, id);
     notifySafe(() =>
       locatorNotifications.notifyDepartmentHeadApprovedForHr(pool, {
         slipId: id,
@@ -1541,6 +1821,8 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
               d.name AS department_name,
               dh.full_name AS dept_head_reviewer_name,
               hr.full_name AS hr_reviewer_name,
+              corrector.full_name AS retroactive_corrector_name,
+              revoker.full_name AS revoked_by_name,
               lrt.label AS request_type_label,
               lrt.short_label AS request_type_short_label,
               lrt.location_label AS request_type_location_label,
@@ -1554,6 +1836,8 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
        LEFT JOIN departments d ON d.id = ls.department_id
        LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
        LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
+       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
+       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
        LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
        WHERE ($1::text IS NULL OR ls.status = $1::text)
          AND ($2::text IS NULL OR ls.request_type = $2::text)
@@ -1751,6 +2035,114 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
     } catch (_) {}
     console.error('[locator PATCH /:id/approve]', err);
     res.status(500).json({ error: 'Failed to approve locator slip' });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/locator-slips/:id/revoke
+// HR/Admin may undo an accidental final approval within three days. The
+// revoked status immediately removes locator coverage without deleting punches.
+router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
+  const reviewerId = req.user?.id;
+  if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
+  const { id } = req.params;
+  const reason = (
+    req.body?.revocation_reason ||
+    req.body?.reviewer_remarks ||
+    req.body?.reason ||
+    ''
+  ).toString().trim();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT id, status, employee_id, slip_date::text AS slip_date,
+              hr_reviewed_at
+       FROM locator_slips
+       WHERE id = $1::uuid
+       FOR UPDATE`,
+      [id]
+    );
+    const row = current.rows[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Locator slip not found' });
+    }
+
+    const policy = evaluateLocatorRevocation({
+      status: row.status,
+      approvedAt: row.hr_reviewed_at,
+      reason,
+    });
+    if (!policy.ok) {
+      await client.query('ROLLBACK');
+      return res.status(policy.statusCode).json({
+        error: policy.error,
+        code: policy.code,
+        ...(policy.deadline
+          ? { revoke_deadline: policy.deadline.toISOString() }
+          : {}),
+      });
+    }
+
+    const postingTable = await client.query(
+      `SELECT to_regclass('public.leave_attendance_deductions') AS table_name`
+    );
+    let reconciliationRequired = false;
+    if (postingTable.rows[0]?.table_name) {
+      const posting = await client.query(
+        `SELECT 1
+         FROM leave_attendance_deductions
+         WHERE user_id = $1::uuid
+           AND service_month = date_trunc('month', $2::date)::date
+         LIMIT 1`,
+        [row.employee_id, row.slip_date]
+      );
+      reconciliationRequired = posting.rowCount > 0;
+    }
+
+    await client.query(
+      `UPDATE locator_slips
+       SET status = 'revoked',
+           revoked_by = $2::uuid,
+           revoked_at = now(),
+           revocation_reason = $3::text,
+           month_end_reconciliation_required = $4::boolean,
+           month_end_reconciled_at = NULL,
+           updated_at = now()
+       WHERE id = $1::uuid`,
+      [id, reviewerId, policy.revocationReason, reconciliationRequired]
+    );
+    await client.query('COMMIT');
+
+    const mapped = await fetchLocatorSlipDetails(pool, id);
+    notifySafe(() =>
+      locatorNotifications.notifyEmployee(pool, {
+        employeeUserId: row.employee_id,
+        slipId: id,
+        type: 'locator_approval_revoked',
+        title: 'Locator approval revoked',
+        body: `HR revoked this locator approval. ${policy.revocationReason}`,
+        metadata: {
+          revocation_reason: policy.revocationReason,
+          reconciliation_required: reconciliationRequired,
+        },
+      })
+    );
+    broadcastLocatorUpdated('revoked', mapped || row, {
+      previousStatus: 'approved',
+      dateFrom: row.slip_date,
+      dateTo: row.slip_date,
+      reconciliationRequired,
+    });
+    return res.json(mapped);
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    console.error('[locator PATCH /:id/revoke]', err);
+    return res.status(500).json({ error: 'Failed to revoke locator approval' });
   } finally {
     client.release();
   }
