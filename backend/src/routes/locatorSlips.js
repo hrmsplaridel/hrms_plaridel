@@ -37,6 +37,10 @@ const {
 const {
   evaluateLocatorRevocation,
 } = require('../services/locatorRevocationPolicy');
+const {
+  captureLocatorTypeSnapshot,
+  resolveLocatorTypeMetadata,
+} = require('../services/locatorTypeSnapshot');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -261,8 +265,11 @@ function removeLocatorAttachmentFile(relativePath) {
 }
 
 function locatorReviewAttachmentError(row) {
+  const requiresAttachment = resolveLocatorTypeMetadata(
+    row
+  ).requiresAttachment;
   return validateLocatorAttachmentForReview({
-    locatorType: { requires_attachment: row.request_type_requires_attachment === true },
+    locatorType: { requires_attachment: requiresAttachment },
     attachmentPath: row.attachment_path,
     attachmentFileExists: locatorAttachmentFileExists(row.attachment_path),
   });
@@ -320,6 +327,20 @@ pool
         pm_in BOOLEAN NOT NULL DEFAULT false,
         pm_out BOOLEAN NOT NULL DEFAULT false,
         request_type TEXT NOT NULL DEFAULT 'locator',
+        request_type_label_snapshot TEXT,
+        request_type_short_label_snapshot TEXT,
+        request_type_location_label_snapshot TEXT,
+        request_type_location_hint_snapshot TEXT,
+        request_type_dtr_slot_label_snapshot TEXT,
+        request_type_dtr_print_label_snapshot TEXT,
+        request_type_requires_attachment_snapshot BOOLEAN,
+        request_type_coverage_mode_snapshot TEXT
+          CONSTRAINT chk_locator_type_coverage_snapshot
+          CHECK (
+            request_type_coverage_mode_snapshot IS NULL
+            OR request_type_coverage_mode_snapshot IN ('manual', 'wfh')
+          ),
+        request_type_snapshot_at TIMESTAMPTZ,
         office TEXT NOT NULL,
         reason TEXT NOT NULL,
         attachment_name TEXT,
@@ -387,6 +408,33 @@ pool
 
       ALTER TABLE locator_slips
         ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'locator';
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type_label_snapshot TEXT;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type_short_label_snapshot TEXT;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type_location_label_snapshot TEXT;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type_location_hint_snapshot TEXT;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type_dtr_slot_label_snapshot TEXT;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type_dtr_print_label_snapshot TEXT;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type_requires_attachment_snapshot BOOLEAN;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type_coverage_mode_snapshot TEXT;
+      ALTER TABLE locator_slips
+        ADD COLUMN IF NOT EXISTS request_type_snapshot_at TIMESTAMPTZ;
+      ALTER TABLE locator_slips
+        DROP CONSTRAINT IF EXISTS chk_locator_type_coverage_snapshot;
+      ALTER TABLE locator_slips
+        DROP CONSTRAINT IF EXISTS locator_slips_request_type_coverage_mode_snapshot_check;
+      ALTER TABLE locator_slips
+        ADD CONSTRAINT chk_locator_type_coverage_snapshot CHECK (
+          request_type_coverage_mode_snapshot IS NULL
+          OR request_type_coverage_mode_snapshot IN ('manual', 'wfh')
+        );
       ALTER TABLE locator_slips
         DROP CONSTRAINT IF EXISTS locator_slips_request_type_check;
       ALTER TABLE locator_slips
@@ -476,6 +524,31 @@ pool
         ]
       );
     }
+    await pool.query(
+      `UPDATE locator_slips AS slip
+       SET request_type_label_snapshot = COALESCE(slip.request_type_label_snapshot, locator_type.label),
+           request_type_short_label_snapshot = COALESCE(slip.request_type_short_label_snapshot, locator_type.short_label),
+           request_type_location_label_snapshot = COALESCE(slip.request_type_location_label_snapshot, locator_type.location_label),
+           request_type_location_hint_snapshot = COALESCE(slip.request_type_location_hint_snapshot, locator_type.location_hint),
+           request_type_dtr_slot_label_snapshot = COALESCE(slip.request_type_dtr_slot_label_snapshot, locator_type.dtr_slot_label),
+           request_type_dtr_print_label_snapshot = COALESCE(slip.request_type_dtr_print_label_snapshot, locator_type.dtr_print_label),
+           request_type_requires_attachment_snapshot = COALESCE(slip.request_type_requires_attachment_snapshot, locator_type.requires_attachment),
+           request_type_coverage_mode_snapshot = COALESCE(slip.request_type_coverage_mode_snapshot, locator_type.coverage_mode),
+           request_type_snapshot_at = COALESCE(slip.request_type_snapshot_at, now())
+       FROM locator_request_types AS locator_type
+       WHERE locator_type.code = slip.request_type
+         AND (
+           slip.request_type_label_snapshot IS NULL
+           OR slip.request_type_short_label_snapshot IS NULL
+           OR slip.request_type_location_label_snapshot IS NULL
+           OR slip.request_type_location_hint_snapshot IS NULL
+           OR slip.request_type_dtr_slot_label_snapshot IS NULL
+           OR slip.request_type_dtr_print_label_snapshot IS NULL
+           OR slip.request_type_requires_attachment_snapshot IS NULL
+           OR slip.request_type_coverage_mode_snapshot IS NULL
+           OR slip.request_type_snapshot_at IS NULL
+         )`
+    );
   })
   .catch((err) =>
     console.error('[locator] failed to ensure locator_slips table', err)
@@ -483,6 +556,7 @@ pool
 
 function mapLocatorRow(row) {
   const requestType = normalizeRequestType(row.request_type) || 'locator';
+  const typeMetadata = resolveLocatorTypeMetadata(row);
   return {
     id: row.id,
     employee_id: row.employee_id,
@@ -498,14 +572,15 @@ function mapLocatorRow(row) {
     pm_in: row.pm_in === true,
     pm_out: row.pm_out === true,
     request_type: requestType,
-    request_type_label: row.request_type_label || null,
-    request_type_short_label: row.request_type_short_label || null,
-    request_type_location_label: row.request_type_location_label || null,
-    request_type_location_hint: row.request_type_location_hint || null,
-    request_type_dtr_slot_label: row.request_type_dtr_slot_label || null,
-    request_type_dtr_print_label: row.request_type_dtr_print_label || null,
-    request_type_requires_attachment: row.request_type_requires_attachment === true,
-    request_type_coverage_mode: row.request_type_coverage_mode || null,
+    request_type_label: typeMetadata.label,
+    request_type_short_label: typeMetadata.shortLabel,
+    request_type_location_label: typeMetadata.locationLabel,
+    request_type_location_hint: typeMetadata.locationHint,
+    request_type_dtr_slot_label: typeMetadata.dtrSlotLabel,
+    request_type_dtr_print_label: typeMetadata.dtrPrintLabel,
+    request_type_requires_attachment: typeMetadata.requiresAttachment,
+    request_type_coverage_mode: typeMetadata.coverageMode,
+    request_type_snapshot_at: typeMetadata.capturedAt,
     office: row.office || '',
     reason: row.reason || '',
     attachment_name: row.attachment_name || null,
@@ -996,6 +1071,7 @@ router.post(
         cleanup();
         return res.status(400).json({ error: 'Invalid request_type' });
       }
+      const typeSnapshot = captureLocatorTypeSnapshot(locatorType);
       const attachmentError = locatorAttachmentRequiredError(
         locatorType,
         Boolean(relPath)
@@ -1025,6 +1101,11 @@ router.post(
         `INSERT INTO locator_slips (
            employee_id, department_id, assigned_department_head_id,
            slip_date, am_in, am_out, pm_in, pm_out, request_type, office, reason,
+           request_type_label_snapshot, request_type_short_label_snapshot,
+           request_type_location_label_snapshot, request_type_location_hint_snapshot,
+           request_type_dtr_slot_label_snapshot, request_type_dtr_print_label_snapshot,
+           request_type_requires_attachment_snapshot,
+           request_type_coverage_mode_snapshot, request_type_snapshot_at,
            attachment_name, attachment_path, attachment_mime_type,
            attachment_uploaded_at, status, hr_reviewer_id, hr_reviewed_at,
            hr_remarks, is_retroactive_correction,
@@ -1034,6 +1115,8 @@ router.post(
            $1::uuid, $2::uuid, $3::uuid,
            $4::date, $5::boolean, $6::boolean, $7::boolean, $8::boolean,
            $9::text, $10::text, $11::text,
+           $17::text, $18::text, $19::text, $20::text,
+           $21::text, $22::text, $23::boolean, $24::text, now(),
            $12::text, $13::text, $14::text,
            CASE WHEN $13::text IS NULL THEN NULL ELSE now() END,
            'approved', $15::uuid, now(), $16::text, true,
@@ -1056,6 +1139,14 @@ router.post(
           relPath ? req.file.mimetype || null : null,
           reviewerId,
           correctionReason,
+          typeSnapshot.label,
+          typeSnapshot.shortLabel,
+          typeSnapshot.locationLabel,
+          typeSnapshot.locationHint,
+          typeSnapshot.dtrSlotLabel,
+          typeSnapshot.dtrPrintLabel,
+          typeSnapshot.requiresAttachment,
+          typeSnapshot.coverageMode,
         ]
       );
       await client.query('COMMIT');
@@ -1546,6 +1637,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
               ls.pm_in,
               ls.pm_out,
               ls.attachment_path,
+              ls.request_type_requires_attachment_snapshot,
               lrt.requires_attachment AS request_type_requires_attachment
        FROM locator_slips ls
        LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
@@ -1944,6 +2036,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
               ls.pm_in,
               ls.pm_out,
               ls.attachment_path,
+              ls.request_type_requires_attachment_snapshot,
               lrt.requires_attachment AS request_type_requires_attachment
        FROM locator_slips ls
        LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type

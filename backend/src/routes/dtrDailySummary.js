@@ -53,14 +53,18 @@ function locatorRequestTypeLabel(value) {
 }
 
 function locatorAttendanceRemark(locator) {
-  if (normalizeLocatorRequestType(locator?.request_type) === 'work_from_home') {
-    return 'WFH';
+  const dtrLabel = String(locator?.dtr_slot_label || '').trim();
+  if (
+    locator?.coverage_mode === 'wfh' ||
+    normalizeLocatorRequestType(locator?.request_type) === 'work_from_home'
+  ) {
+    return dtrLabel || 'WFH';
   }
   const segText =
     locator?.segments && locator.segments.length > 0
       ? ` (${locator.segments.join(', ')})`
       : '';
-  return `${locatorRequestTypeLabel(locator?.request_type)}${segText}`;
+  return `${dtrLabel || locatorRequestTypeLabel(locator?.request_type)}${segText}`;
 }
 
 /** Parse time value to minutes from midnight. Returns null if invalid. */
@@ -586,15 +590,22 @@ async function computeAttendanceRemark(
   if (!hasAnyLog) return 'Absent';
   if (record.status === 'invalid') return 'Invalid Log';
   if (record.status === 'on_field' && !hasPhysicalLog) {
+    const locatorDtrLabel = String(
+      record.locator_slip_dtr_slot_label || ''
+    ).trim();
     if (
+      record.locator_slip_coverage_mode === 'wfh' ||
       normalizeLocatorRequestType(record.locator_slip_request_type) ===
       'work_from_home'
     ) {
-      return 'WFH';
+      return locatorDtrLabel || 'WFH';
     }
     const segments = Array.from(locatorSegSet);
     const segText = segments.length > 0 ? ` (${segments.join(', ')})` : '';
-    return `${locatorRequestTypeLabel(record.locator_slip_request_type)}${segText}`;
+    return `${
+      locatorDtrLabel ||
+      locatorRequestTypeLabel(record.locator_slip_request_type)
+    }${segText}`;
   }
 
   const expected = getExpectedLogsForDay(shiftInfo, holidayInfo);
@@ -778,14 +789,20 @@ async function getApprovedLocatorByDateInRange(employeeIds, startStr, endStr) {
   if (!startStr || !endStr) return out;
   if (!employeeIds || employeeIds.length === 0) return out;
   const res = await pool.query(
-    `SELECT id, employee_id, slip_date::text AS slip_date_str,
-            am_in, am_out, pm_in, pm_out, request_type, office, reason
-     FROM locator_slips
-     WHERE status = 'approved'
-       AND employee_id = ANY($1::uuid[])
-       AND slip_date >= $2::date
-       AND slip_date <= $3::date
-     ORDER BY updated_at DESC, created_at DESC`,
+    `SELECT ls.id, ls.employee_id, ls.slip_date::text AS slip_date_str,
+            ls.am_in, ls.am_out, ls.pm_in, ls.pm_out,
+            ls.request_type, ls.office, ls.reason,
+            COALESCE(ls.request_type_label_snapshot, lrt.label) AS request_type_label,
+            COALESCE(ls.request_type_dtr_slot_label_snapshot, lrt.dtr_slot_label) AS dtr_slot_label,
+            COALESCE(ls.request_type_dtr_print_label_snapshot, lrt.dtr_print_label) AS dtr_print_label,
+            COALESCE(ls.request_type_coverage_mode_snapshot, lrt.coverage_mode) AS coverage_mode
+     FROM locator_slips ls
+     LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
+     WHERE ls.status = 'approved'
+       AND ls.employee_id = ANY($1::uuid[])
+       AND ls.slip_date >= $2::date
+       AND ls.slip_date <= $3::date
+     ORDER BY ls.updated_at DESC, ls.created_at DESC`,
     [employeeIds, startStr, endStr]
   );
   for (const r of res.rows) {
@@ -801,6 +818,10 @@ async function getApprovedLocatorByDateInRange(employeeIds, startStr, endStr) {
     out.set(key, {
       id: r.id,
       request_type: normalizeLocatorRequestType(r.request_type),
+      request_type_label: r.request_type_label || null,
+      dtr_slot_label: r.dtr_slot_label || null,
+      dtr_print_label: r.dtr_print_label || null,
+      coverage_mode: r.coverage_mode || null,
       office: r.office || null,
       reason: r.reason || null,
       coverage,
@@ -1392,6 +1413,10 @@ router.get('/', protect, async (req, res) => {
           leave_request_id: null,
           locator_slip_id: locator.id || null,
           locator_slip_request_type: locator.request_type || 'locator',
+          locator_slip_request_type_label: locator.request_type_label || null,
+          locator_slip_dtr_slot_label: locator.dtr_slot_label || null,
+          locator_slip_dtr_print_label: locator.dtr_print_label || null,
+          locator_slip_coverage_mode: locator.coverage_mode || null,
           locator_slip_office: locator.office || null,
           locator_slip_reason: locator.reason || null,
           locator_slip_segments: locator.segments || [],
@@ -1412,6 +1437,10 @@ router.get('/', protect, async (req, res) => {
         if (!locator) continue;
         row.locator_slip_id = locator.id || null;
         row.locator_slip_request_type = locator.request_type || 'locator';
+        row.locator_slip_request_type_label = locator.request_type_label || null;
+        row.locator_slip_dtr_slot_label = locator.dtr_slot_label || null;
+        row.locator_slip_dtr_print_label = locator.dtr_print_label || null;
+        row.locator_slip_coverage_mode = locator.coverage_mode || null;
         row.locator_slip_office = locator.office || null;
         row.locator_slip_reason = locator.reason || null;
         row.locator_slip_segments = locator.segments || [];
