@@ -38,6 +38,9 @@ const {
   evaluateLocatorRevocation,
 } = require('../services/locatorRevocationPolicy');
 const {
+  parseLocatorAdminFilters,
+} = require('../services/locatorAdminFilters');
+const {
   captureLocatorTypeSnapshot,
   resolveLocatorTypeMetadata,
 } = require('../services/locatorTypeSnapshot');
@@ -1897,16 +1900,70 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
 // GET /api/locator-slips/admin
 router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
   try {
-    const status = (req.query?.status || '').toString().trim() || null;
+    const parsedFilters = parseLocatorAdminFilters(req.query);
+    if (!parsedFilters.ok) {
+      return res.status(400).json({ error: parsedFilters.error });
+    }
+    const {
+      page,
+      pageSize,
+      statuses,
+      departmentId,
+      employeeId,
+      from,
+      to,
+      search,
+    } = parsedFilters.filters;
     const requestTypeRaw = (req.query?.request_type || '').toString().trim();
     const requestType = requestTypeRaw ? normalizeRequestType(requestTypeRaw) : null;
-    if (status && !isValidStatus(status)) {
-      return res.status(400).json({ error: 'Invalid status filter' });
-    }
     if (requestTypeRaw && !requestType) {
       return res.status(400).json({ error: 'Invalid request_type filter' });
     }
-    const rows = await pool.query(
+
+    const filterParams = [
+      statuses,
+      requestType,
+      departmentId,
+      employeeId,
+      from,
+      to,
+      search,
+    ];
+    const filterSql = `
+      FROM locator_slips ls
+      LEFT JOIN users u ON u.id = ls.employee_id
+      LEFT JOIN departments d ON d.id = ls.department_id
+      LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
+      LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
+      LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
+      LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
+      LEFT JOIN users revoker ON revoker.id = ls.revoked_by
+      WHERE ($1::text[] IS NULL OR ls.status = ANY($1::text[]))
+        AND ($2::text IS NULL OR ls.request_type = $2::text)
+        AND ($3::uuid IS NULL OR ls.department_id = $3::uuid)
+        AND ($4::uuid IS NULL OR ls.employee_id = $4::uuid)
+        AND ($5::date IS NULL OR ls.slip_date >= $5::date)
+        AND ($6::date IS NULL OR ls.slip_date <= $6::date)
+        AND (
+          $7::text IS NULL
+          OR u.full_name ILIKE '%' || $7::text || '%'
+          OR d.name ILIKE '%' || $7::text || '%'
+          OR ls.office ILIKE '%' || $7::text || '%'
+          OR ls.reason ILIKE '%' || $7::text || '%'
+          OR COALESCE(ls.request_type_label_snapshot, lrt.label, '')
+             ILIKE '%' || $7::text || '%'
+        )`;
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::integer AS total ${filterSql}`,
+      filterParams
+    );
+    const total = Number(countResult.rows[0]?.total || 0);
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    const effectivePage = Math.min(page, pageCount);
+    const offset = (effectivePage - 1) * pageSize;
+
+    const [rows, departments, employees] = await Promise.all([
+      pool.query(
       `SELECT ls.*,
               ls.slip_date::text AS slip_date_text,
               u.full_name AS employee_name,
@@ -1923,21 +1980,53 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
               lrt.dtr_print_label AS request_type_dtr_print_label,
               lrt.requires_attachment AS request_type_requires_attachment,
               lrt.coverage_mode AS request_type_coverage_mode
-       FROM locator_slips ls
-       LEFT JOIN users u ON u.id = ls.employee_id
-       LEFT JOIN departments d ON d.id = ls.department_id
-       LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
-       LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
-       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
-       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
-       LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
-       WHERE ($1::text IS NULL OR ls.status = $1::text)
-         AND ($2::text IS NULL OR ls.request_type = $2::text)
-       ORDER BY ls.updated_at DESC, ls.created_at DESC
-       LIMIT 500`,
-      [status, requestType]
-    );
-    res.json(rows.rows.map(mapLocatorRow));
+       ${filterSql}
+       ORDER BY ls.updated_at DESC, ls.created_at DESC, ls.id DESC
+       LIMIT $8::integer OFFSET $9::integer`,
+        [...filterParams, pageSize, offset]
+      ),
+      pool.query(
+        `SELECT DISTINCT d.id, d.name
+         FROM locator_slips ls
+         JOIN departments d ON d.id = ls.department_id
+         WHERE d.name IS NOT NULL AND btrim(d.name) <> ''
+         ORDER BY d.name`
+      ),
+      pool.query(
+        `SELECT u.id,
+                u.full_name AS name,
+                COALESCE(
+                  array_agg(DISTINCT ls.department_id::text)
+                    FILTER (WHERE ls.department_id IS NOT NULL),
+                  ARRAY[]::text[]
+                ) AS department_ids
+         FROM locator_slips ls
+         JOIN users u ON u.id = ls.employee_id
+         WHERE u.full_name IS NOT NULL AND btrim(u.full_name) <> ''
+         GROUP BY u.id, u.full_name
+         ORDER BY u.full_name`
+      ),
+    ]);
+    res.json({
+      items: rows.rows.map(mapLocatorRow),
+      pagination: {
+        page: effectivePage,
+        page_size: pageSize,
+        total,
+        page_count: pageCount,
+      },
+      filter_options: {
+        departments: departments.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+        })),
+        employees: employees.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          department_ids: row.department_ids || [],
+        })),
+      },
+    });
   } catch (err) {
     console.error('[locator GET /admin]', err);
     res.status(500).json({ error: 'Failed to fetch locator slips (admin)' });
