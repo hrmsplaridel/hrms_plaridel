@@ -1743,6 +1743,21 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
     const targetId = employee_id || userId;
     if (!targetId) return res.status(401).json({ error: 'Not authenticated' });
 
+    const normalizePunch = (value) => {
+      if (value == null) return null;
+      const normalized = String(value).trim();
+      return normalized || null;
+    };
+    const timeIn = normalizePunch(time_in);
+    const breakOut = normalizePunch(break_out);
+    const breakIn = normalizePunch(break_in);
+    const timeOut = normalizePunch(time_out);
+    if (![timeIn, breakOut, breakIn, timeOut].some(Boolean)) {
+      return res.status(400).json({
+        error: 'At least one attendance punch is required for a manual entry.',
+      });
+    }
+
     const date = attendance_date || new Date().toISOString().slice(0, 10);
     const leaveCoverage = await getApprovedLeaveCoverageForDate(targetId, date);
     if (leaveCoverage) {
@@ -1751,16 +1766,15 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
         leave_request_id: leaveCoverage.leave_request_id,
       });
     }
-    const isAfternoonOnly = break_in && (time_in === null || time_in === undefined);
-    const timeIn = isAfternoonOnly ? null : (time_in || new Date().toISOString());
+    const isAfternoonOnly = Boolean(breakIn) && !timeIn;
     const holiday = await getHolidayByDate(date);
     const coverage = holiday ? (holiday.coverage || 'whole_day') : null;
 
     // Reject PM In (break_in) if after shift end time (skip for holidays)
-    if (break_in && !holiday) {
+    if (breakIn && !holiday) {
       const shiftInfo = await getAssignmentShiftForDate(targetId, date);
       if (shiftInfo && shiftInfo.endMinutes != null) {
-        const breakInMins = minutesFromMidnightInTimeZone(break_in);
+        const breakInMins = minutesFromMidnightInTimeZone(breakIn);
         if (breakInMins != null && breakInMins > shiftInfo.endMinutes) {
           return res.status(400).json({
             error: `PM clock-in time is after shift end. Shift ends at ${minutesToTimeStr(shiftInfo.endMinutes)}. Clock-in not allowed.`,
@@ -1770,25 +1784,25 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
     }
     let status = holiday ? 'holiday' : (isAfternoonOnly ? 'absent' : await computeStatusFromShift(targetId, date, timeIn));
     let pmStatus = null;
-    if (break_in && !holiday) {
-      pmStatus = await computePmLateStatus(targetId, date, break_in);
+    if (breakIn && !holiday) {
+      pmStatus = await computePmLateStatus(targetId, date, breakIn);
     }
     const holidayId = holiday ? holiday.id : null;
-    const total = total_hours != null ? parseFloat(total_hours) : computeTotalHours(timeIn, break_out, break_in, time_out);
+    const total = total_hours != null ? parseFloat(total_hours) : computeTotalHours(timeIn, breakOut, breakIn, timeOut);
     let lateMinutes = 0;
     let undertimeMinutes = 0;
     if ((!holiday || coverage === 'am_only' || coverage === 'pm_only') && status !== 'on_leave') {
-      const rawLate = await computeLateMinutes(targetId, date, timeIn, break_in || null, status, holidayId, coverage);
+      const rawLate = await computeLateMinutes(targetId, date, timeIn, breakIn, status, holidayId, coverage);
       const rawUnder = await computeUndertimeMinutes(
         targetId,
         date,
-        time_out || null,
-        break_out || null,
+        timeOut,
+        breakOut,
         status,
         holidayId,
         coverage,
         timeIn || null,
-        break_in || null
+        breakIn
       );
       const adjusted = await applyAttendancePolicyPenalties(targetId, date, rawLate, rawUnder);
       lateMinutes = adjusted.lateMinutes;
@@ -1801,7 +1815,7 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
       `INSERT INTO dtr_daily_summary (employee_id, attendance_date, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, holiday_id)
        VALUES ($1, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7::numeric, $8, $9, $10, $11, $12, $13)
        RETURNING id, employee_id, attendance_date::text AS attendance_date_iso, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, created_at`,
-      [targetId, date, timeIn, break_out || null, break_in || null, time_out || null, total, lateMinutes, undertimeMinutes, status, pmStatus, sourceValue, holidayId]
+       [targetId, date, timeIn, breakOut, breakIn, timeOut, total, lateMinutes, undertimeMinutes, status, pmStatus, sourceValue, holidayId]
     );
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || date;

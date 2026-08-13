@@ -117,3 +117,39 @@ test('DTR attendance writes reject employees and allow Admin or HR', () => {
   restoreDb();
   clearModule('../src/routes/dtrDailySummary');
 });
+
+test('blank Admin or HR manual DTR entry is rejected before database access', async () => {
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      query: async () => {
+        throw new Error('blank manual entry must not reach the database');
+      },
+    },
+  });
+  const restoreWs = withMockedModule('../src/websockets/biometricStream', {
+    broadcastBiometricUpdate: () => 0,
+  });
+  clearModule('../src/routes/dtrDailySummary');
+  const router = require('../src/routes/dtrDailySummary');
+  const handlers = route(router, 'post', '/');
+  const req = {
+    user: { id: 'admin-1', role: 'admin' },
+    body: {
+      employee_id: 'employee-1',
+      attendance_date: '2026-08-14',
+      time_in: null,
+      break_out: '',
+      break_in: null,
+      time_out: '   ',
+    },
+  };
+  const res = response();
+
+  await handlers[handlers.length - 1](req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.payload?.error || '', /at least one attendance punch/i);
+  restoreWs();
+  restoreDb();
+  clearModule('../src/routes/dtrDailySummary');
+});
