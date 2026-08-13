@@ -85,7 +85,7 @@ class TimeRecord {
   /// Leave type display name when status is on_leave (e.g. Sick Leave, Vacation Leave).
   final String? leaveTypeName;
 
-  /// Attendance source: 'manual' (clock-in button), 'system' (biometric), 'adjusted' (admin correction).
+  /// Attendance source: 'manual' (admin entry), 'system' (biometric), 'adjusted' (admin correction).
   final String? source;
 
   /// Approved locator-slip metadata (when present in DTR payload).
@@ -382,7 +382,7 @@ class TimeRecordRepo {
     );
   }
 
-  /// Get today's record for a user (for clock in/out).
+  /// Get today's biometric attendance record for a user.
   Future<TimeRecord?> getTodayForUser(String userId) async {
     final now = DateTime.now();
     final today = TimeRecord._toDateOnlyString(
@@ -397,7 +397,7 @@ class TimeRecordRepo {
     return list.isEmpty ? null : list.first;
   }
 
-  /// Insert time record (clock in). Uses POST /api/dtr-daily-summary.
+  /// Insert a manual time record. Uses POST /api/dtr-daily-summary.
   Future<TimeRecord> insert(TimeRecord record) async {
     final res = await ApiClient.instance.post<Map<String, dynamic>>(
       '/api/dtr-daily-summary',
@@ -416,7 +416,7 @@ class TimeRecordRepo {
     return TimeRecord.fromJson(data);
   }
 
-  /// Update existing record (clock out or admin edit). Uses PUT /api/dtr-daily-summary/:id.
+  /// Update an existing manual record. Uses PUT /api/dtr-daily-summary/:id.
   Future<void> update(TimeRecord record) async {
     if (record.id == null) return;
     await ApiClient.instance.put(

@@ -667,7 +667,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Showing sample data. DTR data comes from the backend (dtr_daily_summary). Add records via Clock In or admin Time Logs to see live data.',
+                      'Showing sample data. DTR data comes from biometric attendance and manual Admin/HR Time Logs entries.',
                       style: TextStyle(
                         color: dark
                             ? Colors.blue.shade100
