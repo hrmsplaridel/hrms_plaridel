@@ -1707,6 +1707,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   !employeesLoading &&
                   employeeDropdownValue != null &&
                   empList.isNotEmpty &&
+                  hasAnyTime &&
                   validationMessage == null;
               return Material(
                 color: AppTheme.dashPanelOf(ctx),
