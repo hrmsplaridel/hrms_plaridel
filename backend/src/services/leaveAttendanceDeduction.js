@@ -560,19 +560,23 @@ async function calculateMonthlyAttendanceDeductions(
     endStr
   );
   const holidayCoverage = await loadHolidayCoverage(client, startStr, endStr);
-  const [dtrRows, approvedLeaveKeys, fullLocatorKeys] =
-    await Promise.all([
-      loadDtrRows(client, employeeIds, startStr, endStr),
-      loadApprovedLeaveKeys(client, employeeIds, startStr, endStr),
-      loadFullLocatorKeys(
-        client,
-        employeeIds,
-        startStr,
-        endStr,
-        assignmentsByEmployee,
-        holidayCoverage
-      ),
-    ]);
+  // A checked-out pg client can execute only one query at a time. Keep these
+  // transaction-scoped reads sequential so this remains compatible with pg 9.
+  const dtrRows = await loadDtrRows(client, employeeIds, startStr, endStr);
+  const approvedLeaveKeys = await loadApprovedLeaveKeys(
+    client,
+    employeeIds,
+    startStr,
+    endStr
+  );
+  const fullLocatorKeys = await loadFullLocatorKeys(
+    client,
+    employeeIds,
+    startStr,
+    endStr,
+    assignmentsByEmployee,
+    holidayCoverage
+  );
 
   const monthDates = datesInRange(startStr, endStr);
   const summaries = [];

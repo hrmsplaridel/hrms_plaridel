@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   runMonthlyAttendanceDeductions,
+  calculateMonthlyAttendanceDeductions,
   equivalentDaysFromMinutes,
   expectedMinutesForCoverage,
   desiredPosting,
@@ -359,6 +360,46 @@ test('completed-month DTR processing includes closed historical assignments', as
     false,
     'historical assignment queries must not filter out closed rows'
   );
+});
+
+test('month-end calculation never overlaps queries on one pg client', async () => {
+  let activeQueries = 0;
+  let maximumActiveQueries = 0;
+  const client = {
+    async query(sql) {
+      activeQueries += 1;
+      maximumActiveQueries = Math.max(maximumActiveQueries, activeQueries);
+      try {
+        await new Promise((resolve) => setImmediate(resolve));
+        const text = String(sql);
+        if (text.includes('FROM attendance_policies')) {
+          return {
+            rows: [{
+              work_hours_per_day: 8,
+              use_equivalent_day_conversion: true,
+              deduct_late: true,
+              deduct_undertime: true,
+              absent_equals_full_day_deduction: true,
+              deduction_multiplier: 1,
+            }],
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      } finally {
+        activeQueries -= 1;
+      }
+    },
+  };
+
+  await calculateMonthlyAttendanceDeductions(
+    client,
+    new Date('2026-06-01T00:00:00.000Z'),
+    {
+      employees: [{ userId: USER_ID, employeeName: 'Test User' }],
+    }
+  );
+
+  assert.equal(maximumActiveQueries, 1);
 });
 
 test('DTR posting uses available Vacation Leave and records the excess separately', () => {
