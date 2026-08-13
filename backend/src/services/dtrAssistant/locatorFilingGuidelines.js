@@ -19,9 +19,9 @@ const LOCATOR_FORM_FIELDS = {
       'kanus-a',
     ],
     explanation:
-      'Choose the workday the locator slip should cover. It must match a valid scheduled working day.',
-    examples: ['Today if the activity is today', 'The exact workday you were out or on field'],
-    note: 'Do not pick a rest day or holiday unless HR policy allows it for your case.',
+      'Choose today or a future workday that the locator should cover. It must match a valid scheduled working day.',
+    examples: ['Today', 'A future scheduled workday'],
+    note: 'Employees cannot file a past locator. HR/Admin may record one only as a documented correction or emergency exception.',
   },
   locator_type: {
     title: 'Locator Type',

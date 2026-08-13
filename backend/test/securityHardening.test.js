@@ -75,3 +75,45 @@ test('training attachment endpoint requires a signed token', async () => {
   restoreDb();
   clearModule('../src/routes/files');
 });
+
+test('DTR attendance writes reject employees and allow Admin or HR', () => {
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: { query: async () => { throw new Error('database must not be reached'); } },
+  });
+  const restoreWs = withMockedModule('../src/websockets/biometricStream', {
+    broadcastBiometricUpdate: () => 0,
+  });
+  clearModule('../src/routes/dtrDailySummary');
+  const router = require('../src/routes/dtrDailySummary');
+
+  for (const [method, path] of [['post', '/'], ['put', '/:id']]) {
+    const handlers = route(router, method, path);
+    const guard = handlers.find((handler) => handler.name === 'requireAdminOrHr');
+    assert.ok(guard, `${method.toUpperCase()} ${path} is missing the Admin/HR guard`);
+
+    const employeeRes = response();
+    let employeeAdvanced = false;
+    guard(
+      { user: { id: 'employee-1', role: 'employee' } },
+      employeeRes,
+      () => { employeeAdvanced = true; },
+    );
+    assert.equal(employeeRes.statusCode, 403);
+    assert.equal(employeeAdvanced, false);
+
+    for (const role of ['admin', 'hr']) {
+      const allowedRes = response();
+      let allowedAdvanced = false;
+      guard(
+        { user: { id: `${role}-1`, role } },
+        allowedRes,
+        () => { allowedAdvanced = true; },
+      );
+      assert.equal(allowedAdvanced, true, `${role} should be allowed`);
+    }
+  }
+
+  restoreWs();
+  restoreDb();
+  clearModule('../src/routes/dtrDailySummary');
+});

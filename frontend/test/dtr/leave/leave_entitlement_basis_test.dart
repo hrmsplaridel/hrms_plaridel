@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_annual_entitlement_preview.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
@@ -49,5 +50,44 @@ void main() {
     expect(vacation.isCreditBalance, isTrue);
     expect(vacation.isAnnualEntitlement, isFalse);
     expect(vacation.entitlementBasis, LeaveEntitlementBasis.accrual);
+  });
+
+  test('annual preview preserves shift-aware cross-year server counts', () {
+    final preview = LeaveAnnualEntitlementPreview.fromJson({
+      'leave_type': 'soloParentLeave',
+      'display_name': 'Solo Parent Leave',
+      'limit_days': 7,
+      'allowed': false,
+      'years': [
+        {
+          'year': 2026,
+          'limit_days': 7,
+          'approved_days': 4,
+          'pending_days': 1,
+          'requested_days': 2,
+          'requested_counted_dates': ['2026-12-30', '2026-12-31'],
+          'remaining_before_request': 2,
+          'remaining_after_request': 0,
+          'allowed': true,
+        },
+        {
+          'year': 2027,
+          'limit_days': 7,
+          'approved_days': 6,
+          'pending_days': 0,
+          'requested_days': 2,
+          'requested_counted_dates': ['2027-01-02', '2027-01-03'],
+          'remaining_before_request': 1,
+          'remaining_after_request': 0,
+          'allowed': false,
+          'error_message': 'Only 1 day remains for 2027.',
+        },
+      ],
+    });
+
+    expect(preview.years.first.requestedDays, 2);
+    expect(preview.years.first.requestedCountedDates, hasLength(2));
+    expect(preview.firstRejectedYear?.year, 2027);
+    expect(preview.firstRejectedYear?.errorMessage, contains('1 day'));
   });
 }

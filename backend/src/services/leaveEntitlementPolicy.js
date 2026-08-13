@@ -37,10 +37,48 @@ function normalizeEntitlementBasis(value, leaveTypeName) {
     : defaultEntitlementBasisForLeaveType(leaveTypeName);
 }
 
+function buildAnnualEntitlementYearSummary({
+  year,
+  limitDays,
+  approvedDays = 0,
+  pendingDays = 0,
+  requestedDays = 0,
+  requestedCountedDates = [],
+}) {
+  const limit = Number(limitDays) || 0;
+  const approved = Number(approvedDays) || 0;
+  const pending = Number(pendingDays) || 0;
+  const requested = Number(requestedDays) || 0;
+  const used = approved + pending;
+  const remainingBeforeRequest = Math.max(0, limit - used);
+  return {
+    year: Number(year),
+    limit_days: limit,
+    approved_days: approved,
+    pending_days: pending,
+    used_days: used,
+    requested_days: requested,
+    requested_counted_dates: Array.isArray(requestedCountedDates)
+      ? [...requestedCountedDates]
+      : [],
+    remaining_before_request: remainingBeforeRequest,
+    remaining_after_request: Math.max(0, remainingBeforeRequest - requested),
+    allowed: used + requested <= limit + 0.0001,
+  };
+}
+
+function countedDatesForCalendarYear(countedDates, year) {
+  if (!Array.isArray(countedDates)) return [];
+  const prefix = `${Number(year)}-`;
+  return countedDates.filter((date) => String(date || '').startsWith(prefix));
+}
+
 module.exports = {
   ENTITLEMENT_BASES,
   SYSTEM_ENTITLEMENT_BASIS,
   VALID_ENTITLEMENT_BASES,
   defaultEntitlementBasisForLeaveType,
   normalizeEntitlementBasis,
+  buildAnnualEntitlementYearSummary,
+  countedDatesForCalendarYear,
 };

@@ -54,7 +54,7 @@ function evaluateLocatorWorkingDay({ dateInfo, assignment }) {
     return {
       ok: false,
       error:
-        'You cannot file a locator request for this date because you have no active shift assignment.',
+        'You cannot file a locator request for this date because you have no shift assignment effective on this date.',
     };
   }
 
@@ -70,6 +70,32 @@ function evaluateLocatorWorkingDay({ dateInfo, assignment }) {
     };
   }
   return { ok: true };
+}
+
+async function validateLocatorWorkingDayForEmployee(
+  client,
+  employeeId,
+  dateInfo
+) {
+  if (!dateInfo) return { ok: false, error: 'Invalid slip_date' };
+  const result = await client.query(
+    `SELECT a.id,
+            a.shift_id,
+            s.name AS shift_name,
+            s.working_days
+     FROM assignments a
+     LEFT JOIN shifts s ON s.id = a.shift_id
+     WHERE a.employee_id = $1::uuid
+       AND a.effective_from <= $2::date
+       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+     ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+     LIMIT 1`,
+    [employeeId, dateInfo.dateStr]
+  );
+  return evaluateLocatorWorkingDay({
+    dateInfo,
+    assignment: result.rows[0],
+  });
 }
 
 function validateLocatorRequiredFields({
@@ -110,12 +136,34 @@ function locatorAttachmentRequiredError(locatorType, hasAttachment) {
   return null;
 }
 
+function canModifyLocatorAttachment(status) {
+  return status === 'returned_for_correction';
+}
+
+function validateLocatorAttachmentForReview({
+  locatorType,
+  attachmentPath,
+  attachmentFileExists,
+}) {
+  if (locatorType?.requires_attachment !== true) return null;
+  if (!(attachmentPath || '').toString().trim()) {
+    return 'This locator type requires an attachment. Return the request to the employee for correction.';
+  }
+  if (attachmentFileExists !== true) {
+    return 'The required attachment file is missing. Return the request to the employee for correction.';
+  }
+  return null;
+}
+
 module.exports = {
+  canModifyLocatorAttachment,
   DEFAULT_LOCATOR_WORKING_DAYS,
   LOCATOR_REQUIRED_FIELDS,
   evaluateLocatorWorkingDay,
+  validateLocatorWorkingDayForEmployee,
   locatorAttachmentRequiredError,
   normalizeLocatorWorkingDays,
   parseLocatorDateOnly,
+  validateLocatorAttachmentForReview,
   validateLocatorRequiredFields,
 };

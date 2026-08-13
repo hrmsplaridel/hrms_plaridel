@@ -29,6 +29,7 @@ const {
 } = require('../services/leaveRequestHistory');
 const {
   applyAdminLeaveBalanceAdjustment,
+  buildLeaveBalanceHistoryFilters,
   initLeaveBalanceLedger,
   insertLeaveBalanceLedger,
   fetchBalanceSnapshot,
@@ -47,6 +48,7 @@ const {
   resolveApprovalAllocation,
 } = require('../services/leaveApprovalAllocation');
 const {
+  attachmentReplacementCleanupPath,
   assertRequiredLeaveAttachment,
   canModifyLeaveAttachment,
 } = require('../services/leaveAttachmentPolicy');
@@ -77,6 +79,8 @@ const {
 } = require('../services/leaveYearEndForcedLeave');
 const {
   ENTITLEMENT_BASES,
+  buildAnnualEntitlementYearSummary,
+  countedDatesForCalendarYear,
   defaultEntitlementBasisForLeaveType,
   normalizeEntitlementBasis,
 } = require('../services/leaveEntitlementPolicy');
@@ -679,12 +683,27 @@ async function workingDaysWithinYear(client, userId, startStr, endStr, year) {
   return result.days ?? 0;
 }
 
-async function assertAnnualQuotaLeaveLimit(
+function annualQuotaLimitErrorMessage(label, yearSummary) {
+  return (
+    `${label} is limited to ${formatDayCount(yearSummary.limit_days)} days per calendar year. ` +
+    `You only have ${formatDayCount(yearSummary.remaining_before_request)} day(s) remaining for ${yearSummary.year}; ` +
+    `this request needs ${formatDayCount(yearSummary.requested_days)} day(s).`
+  );
+}
+
+async function computeAnnualQuotaLeavePreview(
   client,
-  { userId, leaveTypeName, startStr, endStr, excludeId = null }
+  {
+    userId,
+    leaveTypeName,
+    startStr,
+    endStr,
+    excludeId = null,
+    requestedCountedDates = null,
+  }
 ) {
   const leaveTypeKey = String(leaveTypeName || '').trim();
-  if (!client || !userId || !startStr || !endStr) return;
+  if (!client || !userId || !leaveTypeKey || !startStr || !endStr) return null;
 
   const typeQ = await client.query(
     `SELECT COALESCE(display_name, description, name) AS display_name,
@@ -701,19 +720,19 @@ async function assertAnnualQuotaLeaveLimit(
     normalizeEntitlementBasis(typeRow.entitlement_basis, leaveTypeKey) !==
       ENTITLEMENT_BASES.ANNUAL
   ) {
-    return;
+    return null;
   }
   const limit = Number(typeRow.max_days);
-  if (!Number.isFinite(limit) || limit <= 0) return;
+  if (!Number.isFinite(limit) || limit <= 0) return null;
   const label = typeRow.display_name || systemLeaveTypeDisplayName(leaveTypeKey);
 
   const years = calendarYearsForDateRange(startStr, endStr);
-  if (years.length === 0) return;
+  if (years.length === 0) return null;
 
   const queryFrom = `${Math.min(...years)}-01-01`;
   const queryTo = `${Math.max(...years)}-12-31`;
   const existing = await client.query(
-    `SELECT lr.id, lr.start_date, lr.end_date
+    `SELECT lr.id, lr.start_date, lr.end_date, lr.status
      FROM leave_requests lr
      INNER JOIN leave_types lt ON lt.id = lr.leave_type_id
      WHERE (lr.user_id = $1::uuid OR lr.employee_id = $1::uuid)
@@ -721,7 +740,7 @@ async function assertAnnualQuotaLeaveLimit(
        AND lr.status = ANY($3::text[])
        AND lr.start_date <= $5::date
        AND lr.end_date >= $4::date
-       AND ($6::uuid IS NULL OR lr.id <> $6::uuid)`,
+       AND ($6::text IS NULL OR lr.id::text <> $6::text)`,
     [
       userId,
       leaveTypeKey,
@@ -732,27 +751,78 @@ async function assertAnnualQuotaLeaveLimit(
     ]
   );
 
+  const normalizedRequestedDates = Array.isArray(requestedCountedDates)
+    ? requestedCountedDates.map(toIsoDateStr).filter(Boolean)
+    : null;
+  const yearSummaries = [];
   for (const year of years) {
-    const requestedDays = await workingDaysWithinYear(client, userId, startStr, endStr, year);
+    const requestedDatesForYear = normalizedRequestedDates == null
+      ? null
+      : countedDatesForCalendarYear(normalizedRequestedDates, year);
+    const requestedDays = requestedDatesForYear == null
+      ? await workingDaysWithinYear(client, userId, startStr, endStr, year)
+      : requestedDatesForYear.length;
     if (requestedDays <= 0) continue;
 
-    let usedDays = 0;
+    let approvedDays = 0;
+    let pendingDays = 0;
     for (const row of existing.rows) {
       const existingStart = toIsoDateStr(row.start_date);
       const existingEnd = toIsoDateStr(row.end_date);
-      usedDays += await workingDaysWithinYear(client, userId, existingStart, existingEnd, year);
+      const days = await workingDaysWithinYear(
+        client,
+        userId,
+        existingStart,
+        existingEnd,
+        year
+      );
+      if (row.status === 'approved') approvedDays += days;
+      else pendingDays += days;
     }
 
-    const remaining = Math.max(0, limit - usedDays);
-    if (usedDays + requestedDays > limit + 0.0001) {
-      const err = new Error(
-        `${label} is limited to ${formatDayCount(limit)} days per calendar year. ` +
-        `You only have ${formatDayCount(remaining)} day(s) remaining for ${year}; this request needs ${formatDayCount(requestedDays)} day(s).`
-      );
-      err.statusCode = 400;
-      throw err;
-    }
+    const summary = buildAnnualEntitlementYearSummary({
+      year,
+      limitDays: limit,
+      approvedDays,
+      pendingDays,
+      requestedDays,
+      requestedCountedDates: requestedDatesForYear || [],
+    });
+    summary.error_message = summary.allowed
+      ? null
+      : annualQuotaLimitErrorMessage(label, summary);
+    yearSummaries.push(summary);
   }
+
+  return {
+    leave_type: leaveTypeKey,
+    display_name: label,
+    entitlement_basis: ENTITLEMENT_BASES.ANNUAL,
+    limit_days: limit,
+    allowed: yearSummaries.every((summary) => summary.allowed),
+    years: yearSummaries,
+  };
+}
+
+async function assertAnnualQuotaLeaveLimit(
+  client,
+  { userId, leaveTypeName, startStr, endStr, excludeId = null }
+) {
+  const preview = await computeAnnualQuotaLeavePreview(client, {
+    userId,
+    leaveTypeName,
+    startStr,
+    endStr,
+    excludeId,
+  });
+  const rejectedYear = preview?.years?.find((summary) => !summary.allowed);
+  if (!rejectedYear) return;
+  const err = new Error(
+    rejectedYear.error_message ||
+      annualQuotaLimitErrorMessage(preview.display_name, rejectedYear)
+  );
+  err.statusCode = 400;
+  throw err;
 }
 
 function systemLeaveTypeDisplayName(name) {
@@ -1180,10 +1250,16 @@ function storedLeaveAttachmentFromMemoryFile(file) {
   const safeExt = ['.pdf', '.jpg', '.jpeg', '.png'].includes(ext) ? ext : '.pdf';
   const filename = `lr_${uuidv4()}${safeExt}`;
   const filePath = path.join(leaveAttachmentDir, filename);
-  fs.writeFileSync(filePath, file.buffer);
+  const relPath = `${LEAVE_ATTACHMENT_SUBDIR}/${filename}`;
+  try {
+    fs.writeFileSync(filePath, file.buffer);
+  } catch (err) {
+    cleanupStoredLeaveAttachment(relPath);
+    throw err;
+  }
   return {
     originalName: file.originalname || filename,
-    relPath: `${LEAVE_ATTACHMENT_SUBDIR}/${filename}`,
+    relPath,
     mimeType: file.mimetype || null,
   };
 }
@@ -1798,13 +1874,17 @@ async function releasePendingLeaveBalance(
 // EMPLOYEE ENDPOINTS
 // ============================
 
-// GET /api/leave/working-days?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+// GET /api/leave/working-days?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&leave_type=NAME
 // Counts leave days using the employee's effective shift working days and holidays.
+// Annual types also return the authoritative per-calendar-year entitlement preview.
 router.get('/working-days', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const startStr = toIsoDateStr(req.query.start_date || req.query.startDate);
   const endStr = toIsoDateStr(req.query.end_date || req.query.endDate);
+  const leaveTypeName = String(
+    req.query.leave_type || req.query.leaveType || ''
+  ).trim();
   if (!startStr || !endStr) {
     return res.status(400).json({ error: 'start_date and end_date are required' });
   }
@@ -1813,6 +1893,15 @@ router.get('/working-days', protect, async (req, res) => {
     if (result.days == null) {
       return res.status(400).json({ error: 'Invalid date range' });
     }
+    const annualEntitlement = leaveTypeName
+      ? await computeAnnualQuotaLeavePreview(pool, {
+          userId,
+          leaveTypeName,
+          startStr,
+          endStr,
+          requestedCountedDates: result.countedDates,
+        })
+      : null;
     res.json({
       start_date: startStr,
       end_date: endStr,
@@ -1820,6 +1909,7 @@ router.get('/working-days', protect, async (req, res) => {
       counted_dates: result.countedDates,
       holiday_dates: result.holidayDates || [],
       schedule_source: result.scheduleSource,
+      annual_entitlement: annualEntitlement,
     });
   } catch (err) {
     console.error('[leave GET /working-days]', err);
@@ -3286,7 +3376,7 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
          AND ($4::date IS NULL OR lr.start_date >= $4)
          AND ($5::date IS NULL OR lr.start_date <= $5)
          AND ($6::timestamptz IS NULL OR lr.created_at >= $6)
-         AND ($7::timestamptz IS NULL OR lr.created_at <= $7)
+         AND ($7::date IS NULL OR lr.created_at < ($7::date + interval '1 day'))
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
        ${safeLimit ? 'LIMIT ' + safeLimit : ''}`,
       [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo]
@@ -3427,7 +3517,7 @@ router.get('/department-head', protect, async (req, res) => {
           AND ($5::date IS NULL OR lr.start_date >= $5)
           AND ($6::date IS NULL OR lr.start_date <= $6)
           AND ($7::timestamptz IS NULL OR lr.created_at >= $7)
-          AND ($8::timestamptz IS NULL OR lr.created_at <= $8)
+          AND ($8::date IS NULL OR lr.created_at < ($8::date + interval '1 day'))
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
        LIMIT ${limit}`,
       [
@@ -4401,49 +4491,29 @@ router.get('/ledger', protect, async (req, res) => {
   const scopeAllUsers = isPrivileged && includeAllUsers && !filterUserId;
   const scopedUserId = filterUserId || requesterId;
 
-  const params = [];
-  let p = 1;
-  const where = [];
-  if (!scopeAllUsers) {
-    where.push(`l.user_id = $${p}::uuid`);
-    params.push(scopedUserId);
-    p += 1;
-  }
-  if (leaveType) {
-    where.push(`l.leave_type = $${p}`);
-    params.push(leaveType);
-    p += 1;
-  }
-  if (action) {
-    where.push(`l.action = $${p}`);
-    params.push(action);
-    p += 1;
-  }
-  if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
-    where.push(`l.created_at >= $${p}::date`);
-    params.push(from);
-    p += 1;
-  }
-
-  // Summary remains stable while the user switches activity buckets.
-  const summaryWhereSql = where.length > 0 ? where.join(' AND ') : 'true';
-  const summaryParams = [...params];
-
   if (affectedBucket) {
     if (!['earned', 'used', 'pending', 'adjusted'].includes(affectedBucket)) {
       return res.status(400).json({ error: 'Invalid affected_bucket filter' });
     }
-    where.push(`LOWER(l.affected_bucket) = $${p}`);
-    params.push(affectedBucket);
-    p += 1;
-  }
-  if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
-    where.push(`l.created_at < ($${p}::date + interval '1 day')`);
-    params.push(to);
-    p += 1;
   }
 
-  const whereSql = where.length > 0 ? where.join(' AND ') : 'true';
+  // Summary includes the complete date range and remains stable while the
+  // user switches activity buckets. The row list adds that bucket filter.
+  const {
+    summaryWhereSql,
+    summaryParams,
+    whereSql,
+    params,
+    nextParameter: p,
+  } = buildLeaveBalanceHistoryFilters({
+    scopeAllUsers,
+    scopedUserId,
+    leaveType,
+    action,
+    from,
+    to,
+    affectedBucket,
+  });
 
   try {
     const [countQ, summaryQ] = await Promise.all([
@@ -4786,12 +4856,17 @@ router.put('/balances/:userId', protect, requireAdminOrHr, (_req, res) => {
 router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res) => {
   const userId = req.user?.id;
   const role = req.user?.role;
-  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const newRelPath = req.file?.filename
+    ? `${LEAVE_ATTACHMENT_SUBDIR}/${req.file.filename}`
+    : null;
+  if (!userId) {
+    cleanupStoredLeaveAttachment(newRelPath);
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
   const { id } = req.params;
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded. Allowed: PDF, JPG, JPEG, PNG (max 10MB).' });
   }
-  const newRelPath = `${LEAVE_ATTACHMENT_SUBDIR}/${req.file.filename}`;
   let client = null;
   let committed = false;
   let oldAttachmentPath = null;
@@ -4808,13 +4883,11 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
     );
     if (existing.rows.length === 0) {
       await client.query('ROLLBACK');
-      cleanupStoredLeaveAttachment(newRelPath);
       return res.status(404).json({ error: 'Leave request not found' });
     }
     const row = existing.rows[0];
     if (!canModifyLeaveAttachment(row.status)) {
       await client.query('ROLLBACK');
-      cleanupStoredLeaveAttachment(newRelPath);
       return res.status(409).json({
         error: 'Attachment is locked after submission. It can only be changed while the request is a draft or has been returned.',
       });
@@ -4837,9 +4910,6 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
     );
     await client.query('COMMIT');
     committed = true;
-    if (oldAttachmentPath && oldAttachmentPath !== newRelPath) {
-      cleanupStoredLeaveAttachment(oldAttachmentPath);
-    }
     const mapped = mapLeaveRowToApi(out.rows[0]);
     broadcastLeaveUpdated('attachment_uploaded', mapped);
     res.json(mapped);
@@ -4847,10 +4917,16 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
     if (client) {
       try { await client.query('ROLLBACK'); } catch (_) { }
     }
-    if (!committed) cleanupStoredLeaveAttachment(newRelPath);
     console.error('[leave POST /:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
   } finally {
+    cleanupStoredLeaveAttachment(
+      attachmentReplacementCleanupPath({
+        committed,
+        oldAttachmentPath,
+        newAttachmentPath: newRelPath,
+      })
+    );
     if (client) client.release();
   }
 });

@@ -42,6 +42,37 @@ async function getEmployeeDepartment(client, employeeUserId) {
 }
 
 /**
+ * Resolve the employee department that was effective on a historical date.
+ * Closed assignments remain valid history and must not be filtered by is_active.
+ */
+async function getEmployeeDepartmentForDate(
+  client,
+  employeeUserId,
+  effectiveDate
+) {
+  if (!effectiveDate) return null;
+  const q = await client.query(
+    `SELECT a.department_id, d.name AS department_name
+     FROM assignments a
+     LEFT JOIN departments d ON d.id = a.department_id
+     WHERE a.employee_id = $1
+       AND a.department_id IS NOT NULL
+       AND a.effective_from <= $2::date
+       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+     ORDER BY a.effective_from DESC NULLS LAST,
+              a.created_at DESC NULLS LAST,
+              a.id DESC
+     LIMIT 1`,
+    [employeeUserId, effectiveDate]
+  );
+  if (q.rows.length === 0) return null;
+  return {
+    departmentId: q.rows[0].department_id,
+    departmentName: q.rows[0].department_name || null,
+  };
+}
+
+/**
  * Find the department head for a given department.
  *
  * Strategy:
@@ -133,6 +164,33 @@ async function getDepartmentReviewSnapshot(client, employeeUserId) {
 }
 
 /**
+ * Freeze locator review routing using the employee department effective on the
+ * locator date and the department head assigned when the request is submitted.
+ */
+async function getDepartmentReviewSnapshotForDate(
+  client,
+  employeeUserId,
+  effectiveDate
+) {
+  const dept = await getEmployeeDepartmentForDate(
+    client,
+    employeeUserId,
+    effectiveDate
+  );
+  if (!dept) return null;
+
+  const headUserId = await findDepartmentHeadUserId(client, dept.departmentId);
+  const departmentHeadUserId =
+    headUserId && headUserId !== employeeUserId ? headUserId : null;
+
+  return {
+    departmentHeadUserId,
+    departmentId: dept.departmentId,
+    departmentName: dept.departmentName,
+  };
+}
+
+/**
  * Check if a given user is a department head (in any department).
  * @param {import('pg').PoolClient} client
  * @param {string} userId
@@ -196,7 +254,9 @@ async function isDepartmentHead(client, userId) {
 module.exports = {
   DEPARTMENT_HEAD_POSITION_NAMES,
   getEmployeeDepartment,
+  getEmployeeDepartmentForDate,
   getDepartmentReviewSnapshot,
+  getDepartmentReviewSnapshotForDate,
   findDepartmentHeadUserId,
   getDepartmentHeadForEmployee,
   isDepartmentHead,

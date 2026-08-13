@@ -357,6 +357,7 @@ class LeaveRequestPdf {
     final slDeduction = leaveType == LeaveType.sickLeave ? wdCert : 0.0;
 
     String formatDays(double d) => d == 0 ? '—' : d.toStringAsFixed(3);
+    String formatBalance(double d) => d.toStringAsFixed(3);
 
     final hasDateRange = _isValidDateRange(request.startDate, request.endDate);
     final startStr = request.startDate != null
@@ -981,7 +982,7 @@ class LeaveRequestPdf {
                                     pw.Padding(
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
-                                        formatDays(
+                                        formatBalance(
                                           vlBal.remainingDays - vlDeduction,
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
@@ -990,7 +991,7 @@ class LeaveRequestPdf {
                                     pw.Padding(
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
-                                        formatDays(
+                                        formatBalance(
                                           slBal.remainingDays - slDeduction,
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
@@ -1696,6 +1697,7 @@ class _LeaveRequestPdfFixedEngine {
         : 0.0;
     final slDed = request.leaveType == LeaveType.sickLeave ? (wd ?? 0.0) : 0.0;
     String d3(double v) => v == 0 ? '' : v.toStringAsFixed(3);
+    String balanceD3(double v) => v.toStringAsFixed(3);
 
     final fonts = await _leavePdfThemeAndFonts();
     pw.ImageProvider? logoProvider;
@@ -2512,7 +2514,7 @@ class _LeaveRequestPdfFixedEngine {
                                                         3,
                                                       ),
                                                   child: pw.Text(
-                                                    d3(
+                                                    balanceD3(
                                                       (vl?.remainingDays ?? 0) -
                                                           vlDed,
                                                     ),
@@ -2527,7 +2529,7 @@ class _LeaveRequestPdfFixedEngine {
                                                         3,
                                                       ),
                                                   child: pw.Text(
-                                                    d3(
+                                                    balanceD3(
                                                       (sl?.remainingDays ?? 0) -
                                                           slDed,
                                                     ),

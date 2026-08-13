@@ -1208,6 +1208,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
         '${asOfDate.year}-${asOfDate.month.toString().padLeft(2, '0')}-${asOfDate.day.toString().padLeft(2, '0')}';
 
     String formatDays(double d) => d == 0 ? '—' : d.toStringAsFixed(3);
+    String formatBalance(double d) => d.toStringAsFixed(3);
 
     return _paperPanel(
       title: '7.A CERTIFICATION OF LEAVE CREDITS',
@@ -1256,10 +1257,10 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                 children: [
                   const _TableCell(text: 'Balance'),
                   _TableCell(
-                    text: formatDays(vlBal.remainingDays - vlDeduction),
+                    text: formatBalance(vlBal.remainingDays - vlDeduction),
                   ),
                   _TableCell(
-                    text: formatDays(slBal.remainingDays - slDeduction),
+                    text: formatBalance(slBal.remainingDays - slDeduction),
                   ),
                 ],
               ),

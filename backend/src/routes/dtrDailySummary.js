@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
-const { requireAdmin, requireAdminOrSupervisor } = require('../middleware/rbac');
+const { requireAdmin, requireAdminOrHr, requireAdminOrSupervisor } = require('../middleware/rbac');
 const {
   expandNonRecurringToWindow,
   expandRecurringToWindow,
@@ -17,6 +17,12 @@ const {
   getExpectedLogsForDay: resolveExpectedLogsForDay,
   computeTotalHoursFromRecord,
 } = require('../services/shiftAttendance');
+const {
+  evaluateLocatorCoverage,
+  locatorCoverageSegments,
+  locatorSegmentsForMissingPunches,
+  mergeLocatorCoverages,
+} = require('../services/locatorCoverage');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -47,14 +53,18 @@ function locatorRequestTypeLabel(value) {
 }
 
 function locatorAttendanceRemark(locator) {
-  if (normalizeLocatorRequestType(locator?.request_type) === 'work_from_home') {
-    return 'WFH';
+  const dtrLabel = String(locator?.dtr_slot_label || '').trim();
+  if (
+    locator?.coverage_mode === 'wfh' ||
+    normalizeLocatorRequestType(locator?.request_type) === 'work_from_home'
+  ) {
+    return dtrLabel || 'WFH';
   }
   const segText =
     locator?.segments && locator.segments.length > 0
       ? ` (${locator.segments.join(', ')})`
       : '';
-  return `${locatorRequestTypeLabel(locator?.request_type)}${segText}`;
+  return `${dtrLabel || locatorRequestTypeLabel(locator?.request_type)}${segText}`;
 }
 
 /** Parse time value to minutes from midnight. Returns null if invalid. */
@@ -169,7 +179,6 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
        SELECT a.department_id, a.shift_id
        FROM assignments a
        WHERE a.employee_id = $1::uuid
-         AND (a.is_active IS NULL OR a.is_active = true)
          AND a.effective_from <= $2::date
          AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
@@ -323,7 +332,7 @@ function getExpectedLogsForDay(shiftInfo, holidayInfo) {
 }
 
 /**
- * Get employee's assignment for a date (effective_from <= date <= effective_to, is_active).
+ * Get the employee assignment effective on a date, including closed history.
  * Returns { startMinutes, endMinutes, graceMinutes, breakEndMinutes } or null if no assignment/shift.
  * breakEndMinutes: PM shift start (when late is checked for break_in). Null = no PM late check.
  * endMinutes: shift end time in minutes from midnight (for validating clock-in outside shift).
@@ -343,7 +352,6 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
      FROM assignments a
      LEFT JOIN shifts s ON a.shift_id = s.id
      WHERE a.employee_id = $1
-       AND (a.is_active IS NULL OR a.is_active = true)
        AND a.effective_from <= $2::date
        AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
      ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
@@ -582,15 +590,22 @@ async function computeAttendanceRemark(
   if (!hasAnyLog) return 'Absent';
   if (record.status === 'invalid') return 'Invalid Log';
   if (record.status === 'on_field' && !hasPhysicalLog) {
+    const locatorDtrLabel = String(
+      record.locator_slip_dtr_slot_label || ''
+    ).trim();
     if (
+      record.locator_slip_coverage_mode === 'wfh' ||
       normalizeLocatorRequestType(record.locator_slip_request_type) ===
       'work_from_home'
     ) {
-      return 'WFH';
+      return locatorDtrLabel || 'WFH';
     }
     const segments = Array.from(locatorSegSet);
     const segText = segments.length > 0 ? ` (${segments.join(', ')})` : '';
-    return `${locatorRequestTypeLabel(record.locator_slip_request_type)}${segText}`;
+    return `${
+      locatorDtrLabel ||
+      locatorRequestTypeLabel(record.locator_slip_request_type)
+    }${segText}`;
   }
 
   const expected = getExpectedLogsForDay(shiftInfo, holidayInfo);
@@ -600,7 +615,9 @@ async function computeAttendanceRemark(
   const hasPm =
     (record.break_in != null || locatorSegSet.has('PM IN')) &&
     (record.time_out != null || locatorSegSet.has('PM OUT'));
-  const hasInOut = record.time_in != null && record.time_out != null;
+  const hasInOut =
+    (record.time_in != null || locatorSegSet.has('AM IN')) &&
+    (record.time_out != null || locatorSegSet.has('PM OUT'));
   const missingRequired =
     (expected.needsAm && !hasAm) ||
     (expected.needsPm && !hasPm) ||
@@ -772,31 +789,43 @@ async function getApprovedLocatorByDateInRange(employeeIds, startStr, endStr) {
   if (!startStr || !endStr) return out;
   if (!employeeIds || employeeIds.length === 0) return out;
   const res = await pool.query(
-    `SELECT id, employee_id, slip_date::text AS slip_date_str,
-            am_in, am_out, pm_in, pm_out, request_type, office, reason
-     FROM locator_slips
-     WHERE status = 'approved'
-       AND employee_id = ANY($1::uuid[])
-       AND slip_date >= $2::date
-       AND slip_date <= $3::date
-     ORDER BY updated_at DESC, created_at DESC`,
+    `SELECT ls.id, ls.employee_id, ls.slip_date::text AS slip_date_str,
+            ls.am_in, ls.am_out, ls.pm_in, ls.pm_out,
+            ls.request_type, ls.office, ls.reason,
+            COALESCE(ls.request_type_label_snapshot, lrt.label) AS request_type_label,
+            COALESCE(ls.request_type_dtr_slot_label_snapshot, lrt.dtr_slot_label) AS dtr_slot_label,
+            COALESCE(ls.request_type_dtr_print_label_snapshot, lrt.dtr_print_label) AS dtr_print_label,
+            COALESCE(ls.request_type_coverage_mode_snapshot, lrt.coverage_mode) AS coverage_mode
+     FROM locator_slips ls
+     LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
+     WHERE ls.status = 'approved'
+       AND ls.employee_id = ANY($1::uuid[])
+       AND ls.slip_date >= $2::date
+       AND ls.slip_date <= $3::date
+     ORDER BY ls.updated_at DESC, ls.created_at DESC`,
     [employeeIds, startStr, endStr]
   );
   for (const r of res.rows) {
     const dateStr = String(r.slip_date_str).slice(0, 10);
     const key = `${r.employee_id}|${dateStr}`;
-    if (out.has(key)) continue;
-    const segments = [];
-    if (r.am_in) segments.push('AM IN');
-    if (r.am_out) segments.push('AM OUT');
-    if (r.pm_in) segments.push('PM IN');
-    if (r.pm_out) segments.push('PM OUT');
+    const existing = out.get(key);
+    const coverage = mergeLocatorCoverages([existing?.coverage, r]);
+    if (existing) {
+      existing.coverage = coverage;
+      existing.segments = locatorCoverageSegments(coverage).map((slot) => slot.toUpperCase());
+      continue;
+    }
     out.set(key, {
       id: r.id,
       request_type: normalizeLocatorRequestType(r.request_type),
+      request_type_label: r.request_type_label || null,
+      dtr_slot_label: r.dtr_slot_label || null,
+      dtr_print_label: r.dtr_print_label || null,
+      coverage_mode: r.coverage_mode || null,
       office: r.office || null,
       reason: r.reason || null,
-      segments,
+      coverage,
+      segments: locatorCoverageSegments(coverage).map((slot) => slot.toUpperCase()),
     });
   }
   return out;
@@ -824,7 +853,6 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
      FROM assignments a
      LEFT JOIN shifts s ON s.id = a.shift_id
      WHERE a.employee_id = ANY($1::uuid[])
-       AND (a.is_active IS NULL OR a.is_active = true)
        AND a.effective_from <= $3::date
        AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
      ORDER BY a.employee_id, a.effective_from DESC`,
@@ -947,7 +975,6 @@ router.get('/', protect, async (req, res) => {
       conditions.push(`d.employee_id IN (
         SELECT DISTINCT a.employee_id FROM assignments a
         WHERE a.department_id = $${depIdx}
-          AND (a.is_active IS NULL OR a.is_active = true)
           AND a.effective_from <= $${endIdx}::date
           AND (a.effective_to IS NULL OR a.effective_to >= $${startIdx}::date)
       )`);
@@ -1133,7 +1160,6 @@ router.get('/', protect, async (req, res) => {
            FROM assignments a
            JOIN users u ON u.id = a.employee_id AND u.is_active = true
            WHERE a.department_id = $1
-             AND (a.is_active IS NULL OR a.is_active = true)
              AND a.effective_from <= $2::date
              AND (a.effective_to IS NULL OR a.effective_to >= $3::date)
            ORDER BY u.full_name`,
@@ -1149,8 +1175,7 @@ router.get('/', protect, async (req, res) => {
           `SELECT DISTINCT u.id, u.full_name
            FROM assignments a
            JOIN users u ON u.id = a.employee_id AND u.is_active = true
-           WHERE (a.is_active IS NULL OR a.is_active = true)
-             AND a.effective_from <= $1::date
+           WHERE a.effective_from <= $1::date
              AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
            ORDER BY u.full_name`,
           [endStr, startStr]
@@ -1273,13 +1298,6 @@ router.get('/', protect, async (req, res) => {
         startStr,
         endStr
       );
-      const hasFullDayLocatorCoverage = (locator) => {
-        const locatorSegments = Array.isArray(locator?.segments)
-          ? locator.segments.map((s) => String(s).toUpperCase().trim())
-          : [];
-        return ['AM IN', 'AM OUT', 'PM IN', 'PM OUT']
-          .every((seg) => locatorSegments.includes(seg));
-      };
 
       // Iterate by calendar date (YYYY-MM-DD) to avoid timezone shifting: e.g. "Day 14" must not show as March 13 in UTC+8.
       const startD = new Date(`${startStr}T12:00:00`); // noon avoids UTC date shift
@@ -1297,11 +1315,17 @@ router.get('/', protect, async (req, res) => {
           const key = `${empId}|${dateStr}`;
           if (existingKeys.has(key)) continue;
           if (leaveKeys.has(key)) continue;
-          const locator = locatorByKey.get(key);
-          if (locator && hasFullDayLocatorCoverage(locator)) continue;
-
           const shiftInfo = getShiftInfoForDateFromAssignments(assignmentsByEmployee, empId, dateStr);
           if (!shiftInfo) continue; // no assignment/shift => can't determine working day
+
+          const locator = locatorByKey.get(key);
+          const locatorCoverage = evaluateLocatorCoverage({
+            locator,
+            shiftInfo,
+            holidayInfo: holiday,
+            date: dateStr,
+          });
+          if (locatorCoverage.isFullCoverage) continue;
 
           const workingDays = shiftInfo.workingDays;
           if (!Array.isArray(workingDays) || workingDays.length === 0) continue;
@@ -1353,9 +1377,21 @@ router.get('/', protect, async (req, res) => {
 
       // 4) Inject synthetic rows for approved locator slips with no existing DTR row.
       for (const [key, locator] of locatorByKey.entries()) {
-        if (!hasFullDayLocatorCoverage(locator)) continue;
         if (existingKeys.has(key)) continue;
         const [empId, dateStr] = key.split('|');
+        const shiftInfo = getShiftInfoForDateFromAssignments(
+          assignmentsByEmployee,
+          empId,
+          dateStr
+        );
+        const holidayInfo = holidayByDate.get(dateStr) || null;
+        const locatorCoverage = evaluateLocatorCoverage({
+          locator,
+          shiftInfo,
+          holidayInfo,
+          date: dateStr,
+        });
+        if (!locatorCoverage.isFullCoverage) continue;
         existingKeys.add(key);
         rows.push({
           id: null,
@@ -1377,6 +1413,10 @@ router.get('/', protect, async (req, res) => {
           leave_request_id: null,
           locator_slip_id: locator.id || null,
           locator_slip_request_type: locator.request_type || 'locator',
+          locator_slip_request_type_label: locator.request_type_label || null,
+          locator_slip_dtr_slot_label: locator.dtr_slot_label || null,
+          locator_slip_dtr_print_label: locator.dtr_print_label || null,
+          locator_slip_coverage_mode: locator.coverage_mode || null,
           locator_slip_office: locator.office || null,
           locator_slip_reason: locator.reason || null,
           locator_slip_segments: locator.segments || [],
@@ -1386,7 +1426,7 @@ router.get('/', protect, async (req, res) => {
           created_at: null,
           updated_at: null,
           employee_name: userIdToName[empId] || null,
-          shift_punch_mode: getShiftInfoForDateFromAssignments(assignmentsByEmployee, empId, dateStr)?.punchMode || 'auto',
+          shift_punch_mode: shiftInfo?.punchMode || 'auto',
         });
       }
 
@@ -1397,17 +1437,33 @@ router.get('/', protect, async (req, res) => {
         if (!locator) continue;
         row.locator_slip_id = locator.id || null;
         row.locator_slip_request_type = locator.request_type || 'locator';
+        row.locator_slip_request_type_label = locator.request_type_label || null;
+        row.locator_slip_dtr_slot_label = locator.dtr_slot_label || null;
+        row.locator_slip_dtr_print_label = locator.dtr_print_label || null;
+        row.locator_slip_coverage_mode = locator.coverage_mode || null;
         row.locator_slip_office = locator.office || null;
         row.locator_slip_reason = locator.reason || null;
         row.locator_slip_segments = locator.segments || [];
 
-        const hasFullDayCoverage = hasFullDayLocatorCoverage(locator);
+        const rowDateStr = String(row.record_date).slice(0, 10);
+        const holidayInfo = holidayByDate.get(rowDateStr) || null;
+        const shiftInfo =
+          getShiftInfoForDateFromAssignments(assignmentsByEmployee, row.user_id, rowDateStr) ||
+          await getAssignmentShiftForDate(row.user_id, rowDateStr);
+        const hasFullShiftCoverage = evaluateLocatorCoverage({
+          locator,
+          shiftInfo,
+          holidayInfo,
+          date: rowDateStr,
+        }).isFullCoverage;
+        const hasAnyLog = !!(row.time_in || row.break_out || row.break_in || row.time_out);
+        const effectiveLocatorSegments = locatorSegmentsForMissingPunches(locator, row);
 
-        // Only clear deductions when locator slip covers the full day.
-        // Partial locator segments (e.g., AM IN only) should keep computed
-        // late/undertime from other uncovered segments.
+        // Physical punches are authoritative. Locator coverage can fill missing
+        // slots, but it must not erase penalties calculated from real punches.
         if (
-          hasFullDayCoverage &&
+          !hasAnyLog &&
+          hasFullShiftCoverage &&
           row.status !== 'holiday' &&
           row.status !== 'on_leave'
         ) {
@@ -1415,10 +1471,9 @@ router.get('/', protect, async (req, res) => {
           row.undertime_minutes = 0;
         }
 
-        const hasAnyLog = !!(row.time_in || row.break_out || row.break_in || row.time_out);
         if (
           !hasAnyLog &&
-          hasFullDayCoverage &&
+          hasFullShiftCoverage &&
           row.status !== 'holiday' &&
           row.status !== 'on_leave'
         ) {
@@ -1431,8 +1486,6 @@ router.get('/', protect, async (req, res) => {
         // Re-evaluate remark/undertime with locator segment substitution so
         // partial approved locator segments (e.g., AM IN) can satisfy
         // completeness checks with existing punches.
-        const rowDateStr = String(row.record_date).slice(0, 10);
-        const holidayInfo = holidayByDate.get(rowDateStr) || null;
         const coverage = holidayInfo?.coverage || row.coverage || null;
         row.undertime_minutes = await computeUndertimeMinutes(
           row.user_id,
@@ -1444,18 +1497,15 @@ router.get('/', protect, async (req, res) => {
           coverage,
           row.time_in,
           row.break_in,
-          row.locator_slip_segments || []
+          effectiveLocatorSegments
         );
-        const shiftInfo =
-          getShiftInfoForDateFromAssignments(assignmentsByEmployee, row.user_id, rowDateStr) ||
-          await getAssignmentShiftForDate(row.user_id, rowDateStr);
         row.attendance_remark = await computeAttendanceRemark(
           row,
           shiftInfo,
           row.holiday_id,
           row.leave_request_id,
           holidayInfo,
-          row.locator_slip_segments || []
+          effectiveLocatorSegments
         );
       }
 
@@ -1674,15 +1724,13 @@ function computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo = null)
   );
 }
 
-// POST /api/dtr-daily-summary - clock in or create manual record (employee or admin)
-router.post('/', protect, async (req, res) => {
+// POST /api/dtr-daily-summary - create a manual attendance record (Admin/HR only)
+router.post('/', protect, requireAdminOrHr, async (req, res) => {
   try {
     const { employee_id, attendance_date, time_in, break_out, break_in, time_out, total_hours, reason } = req.body;
     const userId = req.user?.id;
-    const isAdmin = req.user?.role === 'admin' || req.user?.role === 'hr' || req.user?.role === 'supervisor';
-    const targetId = isAdmin && employee_id ? employee_id : userId;
+    const targetId = employee_id || userId;
     if (!targetId) return res.status(401).json({ error: 'Not authenticated' });
-    if (!isAdmin && targetId !== userId) return res.status(403).json({ error: 'Can only create your own record' });
 
     const date = attendance_date || new Date().toISOString().slice(0, 10);
     const leaveCoverage = await getApprovedLeaveCoverageForDate(targetId, date);
@@ -1778,13 +1826,11 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// PUT /api/dtr-daily-summary/:id - update (clock out or admin edit)
-router.put('/:id', protect, async (req, res) => {
+// PUT /api/dtr-daily-summary/:id - correct an attendance record (Admin/HR only)
+router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
   try {
     const { id } = req.params;
     const { time_in, break_out, break_in, time_out, total_hours, status, remarks } = req.body;
-    const userId = req.user?.id;
-    const isAdmin = req.user?.role === 'admin' || req.user?.role === 'hr' || req.user?.role === 'supervisor';
 
     const hasCoverage = await _holidaysHasCoverageColumn();
     const joinCols = hasCoverage ? 'h.coverage AS holiday_coverage' : 'NULL::text AS holiday_coverage';
@@ -1797,7 +1843,6 @@ router.put('/:id', protect, async (req, res) => {
       [id]
     );
     if (check.rows.length === 0) return res.status(404).json({ error: 'Record not found' });
-    if (!isAdmin && check.rows[0].employee_id !== userId) return res.status(403).json({ error: 'Not allowed to update this record' });
 
     const existing = check.rows[0];
     const existingCoverage = existing.holiday_coverage || 'whole_day';

@@ -14,9 +14,30 @@ class EmployeeHrmsAssistantController {
 
   OverlayEntry? _floatingEntry;
   final ValueNotifier<bool> _floatingVisible = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> _baseLauncherSuppressed = ValueNotifier<bool>(
+    false,
+  );
+  int _embeddedLauncherCount = 0;
 
   bool get isFloatingVisible => _floatingEntry != null;
   ValueListenable<bool> get floatingVisible => _floatingVisible;
+  ValueListenable<bool> get baseLauncherSuppressed => _baseLauncherSuppressed;
+
+  void acquireEmbeddedLauncher() {
+    _embeddedLauncherCount += 1;
+    if (!_baseLauncherSuppressed.value) {
+      _baseLauncherSuppressed.value = true;
+    }
+  }
+
+  void releaseEmbeddedLauncher() {
+    if (_embeddedLauncherCount > 0) {
+      _embeddedLauncherCount -= 1;
+    }
+    if (_embeddedLauncherCount == 0 && _baseLauncherSuppressed.value) {
+      _baseLauncherSuppressed.value = false;
+    }
+  }
 
   void showFloating(BuildContext context) {
     final overlay = Overlay.of(context, rootOverlay: true);

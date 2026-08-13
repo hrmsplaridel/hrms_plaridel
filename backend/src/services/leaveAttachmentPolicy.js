@@ -6,6 +6,17 @@ function canModifyLeaveAttachment(status) {
   return ATTACHMENT_MUTABLE_STATUSES.has(String(status || '').trim());
 }
 
+function attachmentReplacementCleanupPath({
+  committed,
+  oldAttachmentPath,
+  newAttachmentPath,
+}) {
+  const oldPath = String(oldAttachmentPath || '').trim() || null;
+  const newPath = String(newAttachmentPath || '').trim() || null;
+  if (!committed) return newPath;
+  return oldPath && oldPath !== newPath ? oldPath : null;
+}
+
 function assertRequiredLeaveAttachment({
   rule,
   leaveType,
@@ -24,6 +35,7 @@ function assertRequiredLeaveAttachment({
 
 module.exports = {
   ATTACHMENT_MUTABLE_STATUSES,
+  attachmentReplacementCleanupPath,
   assertRequiredLeaveAttachment,
   canModifyLeaveAttachment,
 };

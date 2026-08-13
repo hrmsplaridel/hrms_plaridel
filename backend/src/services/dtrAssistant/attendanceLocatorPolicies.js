@@ -137,7 +137,7 @@ const LOCATOR_POLICY_SECTIONS = [
     points: [
       'A locator slip needs a slip date, locator type, covered DTR slot or slots, destination/location, and reason.',
       'Attachment is required only when the selected locator type is configured to require it.',
-      'The selected date should normally be a scheduled working day with required logs unless HR/Admin policy allows otherwise.',
+      'Employees may file only for today or in advance, and the date must be a scheduled working day.',
     ],
   },
   {
@@ -178,6 +178,8 @@ const LOCATOR_POLICY_SECTIONS = [
     ],
     points: [
       'Locator slips may pass through department head review and HR review before final approval.',
+      'A pending request does not become locator DTR coverage until HR gives final approval.',
+      'HR/Admin may record a past locator only as a documented correction or emergency exception with a required reason.',
       'Reviewer remarks explain why a slip was returned or rejected when remarks were saved.',
       'If a slip is pending for a long time, follow up with the current reviewer shown in HRMS.',
     ],
@@ -199,6 +201,7 @@ const LOCATOR_POLICY_SECTIONS = [
     ],
     points: [
       'Before filing, check if the date is a working day, holiday, rest day, or already covered by another approved request.',
+      'Normal employee filing is blocked for past dates.',
       'Choose the locator type that matches what actually happened: official business, WFH, pass slip, or another active type.',
       'The assistant can do an initial check, but final approval still follows the normal HRMS workflow.',
     ],

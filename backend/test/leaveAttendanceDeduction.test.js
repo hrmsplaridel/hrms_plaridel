@@ -7,6 +7,7 @@ const {
   expectedMinutesForCoverage,
   desiredPosting,
   assignmentForDate,
+  hasPhysicalDtrPunches,
   expectedLocatorSlotsForAssignment,
   locatorCoversExpectedShiftSlots,
   loadAssignments,
@@ -32,12 +33,22 @@ function summary(computedDays) {
   };
 }
 
+test('month-end distinguishes locator-only dates from dates with physical punches', () => {
+  assert.equal(hasPhysicalDtrPunches({}), false);
+  assert.equal(hasPhysicalDtrPunches({ time_in: null, time_out: null }), false);
+  assert.equal(
+    hasPhysicalDtrPunches({ break_in: '2026-08-04T05:00:00.000Z' }),
+    true
+  );
+});
+
 function createPostingPool() {
   const state = {
     used: 0,
     posting: null,
     ledgerRows: 0,
     ledgerActions: [],
+    locatorReconciliationClears: 0,
   };
 
   const client = {
@@ -93,6 +104,10 @@ function createPostingPool() {
           deducted_days: Number(params[7]),
           without_pay_days: Number(params[8]),
         };
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes('UPDATE locator_slips')) {
+        state.locatorReconciliationClears += 1;
         return { rows: [], rowCount: 1 };
       }
       if (text.includes('INSERT INTO leave_balance_ledger')) {
@@ -255,6 +270,49 @@ test('full locator keys use the assignment effective on the locator date', async
   assert.equal(keys.has(`${USER_ID}|2026-06-20`), false);
 });
 
+test('full locator keys honor partial-holiday shift coverage', async () => {
+  const client = {
+    async query() {
+      return {
+        rows: [
+          {
+            employee_id: USER_ID,
+            slip_date: '2026-06-10',
+            am_in: false,
+            am_out: false,
+            pm_in: true,
+            pm_out: true,
+          },
+        ],
+      };
+    },
+  };
+  const assignments = new Map([
+    [
+      USER_ID,
+      [
+        {
+          effectiveFrom: '2026-06-01',
+          effectiveTo: null,
+          punchMode: 'full_day',
+          workingDays: [1, 2, 3, 4, 5],
+        },
+      ],
+    ],
+  ]);
+
+  const keys = await loadFullLocatorKeys(
+    client,
+    [USER_ID],
+    '2026-06-01',
+    '2026-06-30',
+    assignments,
+    new Map([['2026-06-10', 'am_only']])
+  );
+
+  assert.equal(keys.has(`${USER_ID}|2026-06-10`), true);
+});
+
 test('completed-month DTR processing includes closed historical assignments', async () => {
   const sqlCalls = [];
   const client = {
@@ -341,6 +399,8 @@ test('month-end DTR posting is idempotent on rerun', async () => {
   assert.equal(second.details[0].reason, 'already_posted');
   assert.equal(state.used, 0.25);
   assert.equal(state.ledgerRows, 1);
+  assert.equal(first.locatorReconciliationsCleared, 1);
+  assert.equal(state.locatorReconciliationClears, 2);
 });
 
 test('corrected month-end DTR creates a correction ledger movement', async () => {

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -423,7 +422,7 @@ class DtrProvider extends ChangeNotifier {
   String? _filterDepartmentId;
   String? get filterDepartmentId => _filterDepartmentId;
 
-  /// Today's record for current user (for clock in/out UI).
+  /// Today's biometric attendance record for the current user.
   TimeRecord? _todayRecord;
   TimeRecord? get todayRecord => _todayRecord;
 
@@ -860,7 +859,7 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Load today's record for current user (clock in/out).
+  /// Load today's biometric attendance record for the current user.
   Future<void> loadTodayRecord() async {
     final uid = _userId;
     if (uid == null) return;
@@ -982,231 +981,6 @@ class DtrProvider extends ChangeNotifier {
     } catch (_) {
       _departments = [];
       notifyListeners();
-    }
-  }
-
-  /// Clock in (AM In) for current user.
-  Future<bool> clockIn() async {
-    final uid = _userId;
-    if (uid == null) return false;
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      final existing = await TimeRecordRepo.instance.getTodayForUser(uid);
-      if (existing != null) {
-        _error = 'Already clocked in today.';
-        _loading = false;
-        notifyListeners();
-        return false;
-      }
-      final record = TimeRecord(
-        userId: uid,
-        recordDate: today,
-        timeIn: now,
-        breakOut: null,
-        breakIn: null,
-        timeOut: null,
-        totalHours: null,
-        status: 'present',
-      );
-      await TimeRecordRepo.instance.insert(record);
-      invalidateCachedDtrData();
-      await loadTodayRecord();
-      if (_filterUserId == null && _filterStart == null) {
-        await loadTimeRecordsForAdmin(forceRefresh: true);
-      }
-      _loading = false;
-      notifyListeners();
-      return true;
-    } on DioException catch (e) {
-      _error = (e.response?.data is Map && e.response?.data['error'] != null)
-          ? e.response!.data['error'] as String
-          : e.message ?? 'Clock-in failed.';
-      _loading = false;
-      notifyListeners();
-      return false;
-    } catch (e) {
-      _error = userFacingApiError(e);
-      _loading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Clock AM Out (lunch out).
-  Future<bool> clockAmOut() async {
-    final uid = _userId;
-    if (uid == null) return false;
-    final existing =
-        _todayRecord ?? await TimeRecordRepo.instance.getTodayForUser(uid);
-    if (existing == null || existing.breakOut != null) {
-      _error = existing == null
-          ? 'No clock-in found for today.'
-          : 'Already clocked out (AM Out).';
-      notifyListeners();
-      return false;
-    }
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final now = DateTime.now();
-      final updated = existing.copyWith(breakOut: now);
-      await TimeRecordRepo.instance.update(updated);
-      invalidateCachedDtrData();
-      await loadTodayRecord();
-      await loadTimeRecordsForUser(forceRefresh: true);
-      _loading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = userFacingApiError(e);
-      _loading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// PM In as first punch (afternoon arrival) - no AM punch, AM is absent.
-  Future<bool> clockPmInAsFirst() async {
-    final uid = _userId;
-    if (uid == null) return false;
-    final existing = await TimeRecordRepo.instance.getTodayForUser(uid);
-    if (existing != null) {
-      _error = 'Already have a record for today. Use PM In or PM Out.';
-      notifyListeners();
-      return false;
-    }
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      final record = TimeRecord(
-        userId: uid,
-        recordDate: today,
-        timeIn: null,
-        breakOut: null,
-        breakIn: now,
-        timeOut: null,
-        totalHours: null,
-        status: 'absent',
-      );
-      await TimeRecordRepo.instance.insert(record);
-      invalidateCachedDtrData();
-      await loadTodayRecord();
-      if (_filterUserId == null && _filterStart == null) {
-        await loadTimeRecordsForAdmin(forceRefresh: true);
-      }
-      _loading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = userFacingApiError(e);
-      _loading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Clock PM In (return from lunch).
-  Future<bool> clockPmIn() async {
-    final uid = _userId;
-    if (uid == null) return false;
-    final existing =
-        _todayRecord ?? await TimeRecordRepo.instance.getTodayForUser(uid);
-    if (existing == null ||
-        existing.breakOut == null ||
-        existing.breakIn != null) {
-      _error = existing == null
-          ? 'No clock-in found for today.'
-          : existing.breakOut == null
-          ? 'Please clock AM Out first.'
-          : 'Already clocked in (PM In).';
-      notifyListeners();
-      return false;
-    }
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final now = DateTime.now();
-      final updated = existing.copyWith(breakIn: now);
-      await TimeRecordRepo.instance.update(updated);
-      invalidateCachedDtrData();
-      await loadTodayRecord();
-      await loadTimeRecordsForUser(forceRefresh: true);
-      _loading = false;
-      notifyListeners();
-      return true;
-    } on DioException catch (e) {
-      _error = (e.response?.data is Map && e.response?.data['error'] != null)
-          ? e.response!.data['error'] as String
-          : e.message ?? 'PM clock-in failed.';
-      _loading = false;
-      notifyListeners();
-      return false;
-    } catch (e) {
-      _error = userFacingApiError(e);
-      _loading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Clock out (PM Out) for current user.
-  Future<bool> clockOut() async {
-    final uid = _userId;
-    if (uid == null) return false;
-    final existing =
-        _todayRecord ?? await TimeRecordRepo.instance.getTodayForUser(uid);
-    if (existing == null || existing.timeOut != null) {
-      _error = existing == null
-          ? 'No clock-in found for today.'
-          : 'Already clocked out.';
-      notifyListeners();
-      return false;
-    }
-    if (existing.breakOut != null && existing.breakIn == null) {
-      _error = 'Please clock PM In first.';
-      notifyListeners();
-      return false;
-    }
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final now = DateTime.now();
-      double? hours;
-      if (existing.timeIn != null) {
-        if (existing.breakOut != null && existing.breakIn != null) {
-          hours =
-              (existing.breakOut!.difference(existing.timeIn!).inMinutes +
-                  now.difference(existing.breakIn!).inMinutes) /
-              60.0;
-        } else {
-          hours = now.difference(existing.timeIn!).inMinutes / 60.0;
-        }
-      } else if (existing.breakIn != null) {
-        hours = now.difference(existing.breakIn!).inMinutes / 60.0;
-      }
-      final updated = existing.copyWith(timeOut: now, totalHours: hours);
-      await TimeRecordRepo.instance.update(updated);
-      invalidateCachedDtrData();
-      await loadTodayRecord();
-      await loadTimeRecordsForUser(forceRefresh: true);
-      _loading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = userFacingApiError(e);
-      _loading = false;
-      notifyListeners();
-      return false;
     }
   }
 

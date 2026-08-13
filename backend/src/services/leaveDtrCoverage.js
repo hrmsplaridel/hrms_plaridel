@@ -1,3 +1,7 @@
+const {
+  findApprovedLocatorConflictsForDates,
+} = require('./locatorConflictPolicy');
+
 function coverageError(message, details = null) {
   const error = new Error(message);
   error.statusCode = 400;
@@ -22,6 +26,17 @@ function attendanceConflictMessage(conflicts) {
   const preview = dates.slice(0, 5).join(', ');
   const suffix = dates.length > 5 ? ` and ${dates.length - 5} more` : '';
   return `Cannot approve leave because attendance already exists on ${preview}${suffix}. Resolve the DTR record first.`;
+}
+
+function locatorConflictMessage(conflicts) {
+  const dates = [
+    ...new Set(
+      conflicts.map((row) => String(row.slip_date || '').slice(0, 10))
+    ),
+  ];
+  const preview = dates.slice(0, 5).join(', ');
+  const suffix = dates.length > 5 ? ` and ${dates.length - 5} more` : '';
+  return `Cannot approve leave because approved locator coverage already exists on ${preview}${suffix}. Resolve the locator request first.`;
 }
 
 function assertCoverageMatchesRequestedDays(dates, requestedDays) {
@@ -81,6 +96,26 @@ async function replaceApprovedLeaveCoverage(
   const coverageDates = normalizeCoverageDates(dates);
   if (!client || !employeeId || !leaveRequestId || coverageDates.length === 0) {
     throw coverageError('Approved leave must contain at least one scheduled working date.');
+  }
+
+  const locatorConflicts = await findApprovedLocatorConflictsForDates(client, {
+    employeeId,
+    dates: coverageDates,
+    acquireLocks: true,
+  });
+  if (locatorConflicts.length > 0) {
+    throw coverageError(locatorConflictMessage(locatorConflicts), {
+      conflict_dates: [
+        ...new Set(
+          locatorConflicts.map((row) =>
+            String(row.slip_date || '').slice(0, 10)
+          )
+        ),
+      ],
+      locator_slip_ids: [
+        ...new Set(locatorConflicts.map((row) => String(row.id))),
+      ],
+    });
   }
 
   const attendanceConflicts = await findAttendanceConflicts(

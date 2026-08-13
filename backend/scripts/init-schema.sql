@@ -816,12 +816,27 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  assigned_department_head_id UUID REFERENCES users(id) ON DELETE SET NULL,
   slip_date DATE NOT NULL,
   am_in BOOLEAN NOT NULL DEFAULT false,
   am_out BOOLEAN NOT NULL DEFAULT false,
   pm_in BOOLEAN NOT NULL DEFAULT false,
   pm_out BOOLEAN NOT NULL DEFAULT false,
   request_type TEXT NOT NULL DEFAULT 'locator',
+  request_type_label_snapshot TEXT,
+  request_type_short_label_snapshot TEXT,
+  request_type_location_label_snapshot TEXT,
+  request_type_location_hint_snapshot TEXT,
+  request_type_dtr_slot_label_snapshot TEXT,
+  request_type_dtr_print_label_snapshot TEXT,
+  request_type_requires_attachment_snapshot BOOLEAN,
+  request_type_coverage_mode_snapshot TEXT
+    CONSTRAINT chk_locator_type_coverage_snapshot
+    CHECK (
+      request_type_coverage_mode_snapshot IS NULL
+      OR request_type_coverage_mode_snapshot IN ('manual', 'wfh')
+    ),
+  request_type_snapshot_at TIMESTAMPTZ,
   office TEXT NOT NULL,
   reason TEXT NOT NULL,
   attachment_name TEXT,
@@ -833,7 +848,9 @@ CREATE TABLE IF NOT EXISTS locator_slips (
       'pending',
       'pending_department_head',
       'pending_hr',
+      'returned_for_correction',
       'approved',
+      'revoked',
       'rejected_by_department_head',
       'rejected_by_hr',
       'cancelled'
@@ -844,8 +861,35 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   hr_reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
   hr_reviewed_at TIMESTAMPTZ,
   hr_remarks TEXT,
+  is_retroactive_correction BOOLEAN NOT NULL DEFAULT false,
+  retroactive_correction_reason TEXT,
+  retroactive_corrected_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  retroactive_corrected_at TIMESTAMPTZ,
+  revoked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  revoked_at TIMESTAMPTZ,
+  revocation_reason TEXT,
+  month_end_reconciliation_required BOOLEAN NOT NULL DEFAULT false,
+  month_end_reconciled_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_locator_correction_audit CHECK (
+    is_retroactive_correction = false
+    OR (
+      retroactive_correction_reason IS NOT NULL
+      AND char_length(btrim(retroactive_correction_reason)) BETWEEN 10 AND 1000
+      AND retroactive_corrected_by IS NOT NULL
+      AND retroactive_corrected_at IS NOT NULL
+    )
+  ),
+  CONSTRAINT chk_locator_revocation_audit CHECK (
+    status <> 'revoked'
+    OR (
+      revoked_by IS NOT NULL
+      AND revoked_at IS NOT NULL
+      AND revocation_reason IS NOT NULL
+      AND char_length(btrim(revocation_reason)) BETWEEN 10 AND 1000
+    )
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_locator_slips_employee
@@ -854,12 +898,67 @@ CREATE INDEX IF NOT EXISTS idx_locator_slips_status
   ON locator_slips(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_department
   ON locator_slips(department_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_locator_slips_assigned_department_head
+  ON locator_slips(assigned_department_head_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_date
   ON locator_slips(slip_date DESC);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_request_type
   ON locator_slips(request_type);
 CREATE INDEX IF NOT EXISTS idx_locator_request_types_active
   ON locator_request_types(is_active, sort_order, label);
+
+-- =========================================
+-- LOCATOR WORKFLOW HISTORY (APPEND-ONLY)
+-- =========================================
+CREATE TABLE IF NOT EXISTS locator_slip_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  locator_slip_id UUID NOT NULL REFERENCES locator_slips(id) ON DELETE RESTRICT,
+  action TEXT NOT NULL CHECK (char_length(btrim(action)) > 0),
+  from_status TEXT,
+  to_status TEXT,
+  actor_id UUID,
+  actor_name_snapshot TEXT,
+  actor_role TEXT,
+  remarks TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_locator_slip_history_request_time
+  ON locator_slip_history(locator_slip_id, created_at, id);
+
+CREATE OR REPLACE FUNCTION prevent_locator_slip_history_mutation()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'locator_slip_history is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_prevent_locator_slip_history_mutation
+  ON locator_slip_history;
+CREATE TRIGGER trg_prevent_locator_slip_history_mutation
+BEFORE UPDATE OR DELETE ON locator_slip_history
+FOR EACH ROW EXECUTE FUNCTION prevent_locator_slip_history_mutation();
+
+-- =========================================
+-- LOCATOR ATTACHMENT ACCESS LOG
+-- =========================================
+CREATE TABLE IF NOT EXISTS locator_attachment_access_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  locator_slip_id UUID REFERENCES locator_slips(id) ON DELETE SET NULL,
+  attachment_name TEXT,
+  accessed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  actor_role TEXT,
+  access_reason TEXT NOT NULL,
+  access_outcome TEXT NOT NULL
+    CHECK (access_outcome IN ('allowed', 'denied', 'missing_attachment', 'missing_file')),
+  ip_address TEXT,
+  user_agent TEXT,
+  accessed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_locator_attachment_access_request_time
+  ON locator_attachment_access_logs(locator_slip_id, accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_locator_attachment_access_actor_time
+  ON locator_attachment_access_logs(accessed_by, accessed_at DESC);
 
 -- =========================================
 -- DTR ASSISTANT FEEDBACK

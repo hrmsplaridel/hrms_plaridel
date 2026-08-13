@@ -23,7 +23,6 @@ class LeaveCardPrintView {
 
   static Future<void> print({
     required String employeeName,
-    required String service,
     required String officeDepartment,
     DateTime? firstDayOfService,
     required List<LeaveRequest> requests,
@@ -68,7 +67,6 @@ class LeaveCardPrintView {
               children: [
                 _buildDocumentHeader(
                   employeeName: employeeName,
-                  service: service,
                   officeDepartment: officeDepartment,
                   firstDayOfService: firstDayOfService,
                 ),
@@ -93,7 +91,6 @@ class LeaveCardPrintView {
 
   static pw.Widget _buildDocumentHeader({
     required String employeeName,
-    required String service,
     required String officeDepartment,
     required DateTime? firstDayOfService,
   }) {
@@ -119,17 +116,7 @@ class LeaveCardPrintView {
         pw.Row(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Expanded(
-              flex: 4,
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-                children: [
-                  _lineField('NAME', employeeName),
-                  pw.SizedBox(height: 1),
-                  _lineField('SERVICE', service),
-                ],
-              ),
-            ),
+            pw.Expanded(flex: 4, child: _lineField('NAME', employeeName)),
             pw.SizedBox(width: 10),
             pw.Expanded(
               flex: 3,
@@ -137,9 +124,9 @@ class LeaveCardPrintView {
             ),
             pw.SizedBox(width: 10),
             pw.Expanded(
-              flex: 2,
+              flex: 3,
               child: _lineField(
-                'FIRST DAY OF',
+                'FIRST DAY OF SERVICE',
                 firstDayOfService != null ? _fmtDate(firstDayOfService) : '',
               ),
             ),

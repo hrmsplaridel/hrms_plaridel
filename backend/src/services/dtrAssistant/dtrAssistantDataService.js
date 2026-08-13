@@ -148,7 +148,6 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
        SELECT a.*
        FROM assignments a
        WHERE a.employee_id = $1::uuid
-         AND (a.is_active IS NULL OR a.is_active = true)
          AND a.effective_from <= day.day::date
          AND (a.effective_to IS NULL OR a.effective_to >= day.day::date)
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
@@ -458,23 +457,29 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
             ls.hr_remarks,
             ls.dept_head_reviewed_at,
             ls.hr_reviewed_at,
+            ls.revoked_at,
+            ls.revocation_reason,
+            ls.month_end_reconciliation_required,
+            ls.month_end_reconciled_at,
             ls.attachment_name,
             ls.attachment_path,
             ls.created_at,
             ls.updated_at,
             dept_head.full_name AS dept_head_reviewer_name,
             hr.full_name AS hr_reviewer_name,
-            lrt.label AS request_type_label,
-            lrt.short_label AS request_type_short_label,
-            lrt.location_label AS request_type_location_label,
-            lrt.location_hint AS request_type_location_hint,
-            lrt.dtr_slot_label AS dtr_slot_label,
-            lrt.dtr_print_label AS dtr_print_label,
-            lrt.requires_attachment AS request_type_requires_attachment,
-            lrt.coverage_mode AS request_type_coverage_mode
+            revoker.full_name AS revoked_by_name,
+            COALESCE(ls.request_type_label_snapshot, lrt.label) AS request_type_label,
+            COALESCE(ls.request_type_short_label_snapshot, lrt.short_label) AS request_type_short_label,
+            COALESCE(ls.request_type_location_label_snapshot, lrt.location_label) AS request_type_location_label,
+            COALESCE(ls.request_type_location_hint_snapshot, lrt.location_hint) AS request_type_location_hint,
+            COALESCE(ls.request_type_dtr_slot_label_snapshot, lrt.dtr_slot_label) AS dtr_slot_label,
+            COALESCE(ls.request_type_dtr_print_label_snapshot, lrt.dtr_print_label) AS dtr_print_label,
+            COALESCE(ls.request_type_requires_attachment_snapshot, lrt.requires_attachment, false) AS request_type_requires_attachment,
+            COALESCE(ls.request_type_coverage_mode_snapshot, lrt.coverage_mode) AS request_type_coverage_mode
      FROM locator_slips ls
      LEFT JOIN users dept_head ON dept_head.id = ls.dept_head_reviewer_id
      LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
+     LEFT JOIN users revoker ON revoker.id = ls.revoked_by
      LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
      WHERE ls.employee_id = $1::uuid
      ORDER BY
@@ -515,8 +520,14 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
     hr_remarks: compactText(row.hr_remarks),
     dept_head_reviewer_name: row.dept_head_reviewer_name,
     hr_reviewer_name: row.hr_reviewer_name,
+    revoked_by_name: row.revoked_by_name,
     dept_head_reviewed_at: toIso(row.dept_head_reviewed_at),
     hr_reviewed_at: toIso(row.hr_reviewed_at),
+    revoked_at: toIso(row.revoked_at),
+    revocation_reason: compactText(row.revocation_reason),
+    month_end_reconciliation_required:
+      row.month_end_reconciliation_required === true,
+    month_end_reconciled_at: toIso(row.month_end_reconciled_at),
     created_at: toIso(row.created_at),
     updated_at: toIso(row.updated_at),
   }));

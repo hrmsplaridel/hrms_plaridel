@@ -14,9 +14,12 @@ const {
 } = require('./holidayRangeUtils');
 const {
   getExpectedWorkMinutes,
-  getShiftExpectedLogs,
   getShiftType,
 } = require('./shiftAttendance');
+const {
+  expectedLocatorSlotsForShift,
+  locatorCoversExpectedShiftSlots,
+} = require('./locatorCoverage');
 const {
   initLeaveBalanceLedger,
   insertLeaveBalanceLedger,
@@ -361,6 +364,7 @@ async function loadDtrRows(client, employeeIds, startStr, endStr) {
   if (employeeIds.length === 0) return map;
   const result = await client.query(
     `SELECT employee_id, attendance_date::text AS attendance_date,
+            time_in, break_out, break_in, time_out,
             late_minutes, undertime_minutes, status, holiday_id, leave_request_id
      FROM dtr_daily_summary
      WHERE employee_id = ANY($1::uuid[])
@@ -373,6 +377,10 @@ async function loadDtrRows(client, employeeIds, startStr, endStr) {
     map.set(key, row);
   }
   return map;
+}
+
+function hasPhysicalDtrPunches(row) {
+  return !!(row?.time_in || row?.break_out || row?.break_in || row?.time_out);
 }
 
 async function loadApprovedLeaveKeys(client, employeeIds, startStr, endStr) {
@@ -423,31 +431,13 @@ async function loadApprovedLeaveKeys(client, employeeIds, startStr, endStr) {
   return keys;
 }
 
-function expectedLocatorSlotsForAssignment(assignment) {
-  const expected = getShiftExpectedLogs(assignment);
-  if (expected.needsInOut) return ['am_in', 'pm_out'];
-
-  const slots = [];
-  if (expected.needsAm) slots.push('am_in', 'am_out');
-  if (expected.needsPm) slots.push('pm_in', 'pm_out');
-  return slots;
-}
-
-function locatorCoversExpectedShiftSlots(locator, assignment) {
-  if (!locator || !assignment) return false;
-  const expectedSlots = expectedLocatorSlotsForAssignment(assignment);
-  return (
-    expectedSlots.length > 0 &&
-    expectedSlots.every((slot) => locator[slot] === true)
-  );
-}
-
 async function loadFullLocatorKeys(
   client,
   employeeIds,
   startStr,
   endStr,
-  assignmentsByEmployee
+  assignmentsByEmployee,
+  holidayCoverageByDate = new Map()
 ) {
   const keys = new Set();
   if (employeeIds.length === 0) return keys;
@@ -488,7 +478,18 @@ async function loadFullLocatorKeys(
       coverage.employeeId,
       coverage.dateStr
     );
-    if (locatorCoversExpectedShiftSlots(coverage, assignment)) keys.add(key);
+    const holidayCoverage = holidayCoverageByDate.get(coverage.dateStr) || null;
+    const holidayInfo = holidayCoverage ? { coverage: holidayCoverage } : null;
+    if (
+      locatorCoversExpectedShiftSlots(
+        coverage,
+        assignment,
+        holidayInfo,
+        coverage.dateStr
+      )
+    ) {
+      keys.add(key);
+    }
   }
   return keys;
 }
@@ -558,7 +559,8 @@ async function calculateMonthlyAttendanceDeductions(
     startStr,
     endStr
   );
-  const [dtrRows, approvedLeaveKeys, fullLocatorKeys, holidayCoverage] =
+  const holidayCoverage = await loadHolidayCoverage(client, startStr, endStr);
+  const [dtrRows, approvedLeaveKeys, fullLocatorKeys] =
     await Promise.all([
       loadDtrRows(client, employeeIds, startStr, endStr),
       loadApprovedLeaveKeys(client, employeeIds, startStr, endStr),
@@ -567,9 +569,9 @@ async function calculateMonthlyAttendanceDeductions(
         employeeIds,
         startStr,
         endStr,
-        assignmentsByEmployee
+        assignmentsByEmployee,
+        holidayCoverage
       ),
-      loadHolidayCoverage(client, startStr, endStr),
     ]);
 
   const monthDates = datesInRange(startStr, endStr);
@@ -595,9 +597,10 @@ async function calculateMonthlyAttendanceDeductions(
 
       const key = `${employee.userId}|${dateStr}`;
       const holiday = holidayCoverage.get(dateStr) || null;
+      const dtr = dtrRows.get(key);
       if (
         approvedLeaveKeys.has(key) ||
-        fullLocatorKeys.has(key) ||
+        (fullLocatorKeys.has(key) && !hasPhysicalDtrPunches(dtr)) ||
         holiday === 'whole_day'
       ) {
         continue;
@@ -612,7 +615,6 @@ async function calculateMonthlyAttendanceDeductions(
       });
       if (!policy.useEquivalentDayConversion) continue;
 
-      const dtr = dtrRows.get(key);
       let dayLate = 0;
       let dayUndertime = 0;
       let dayAbsence = 0;
@@ -792,6 +794,7 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
   let totalComputedDays = 0;
   let totalDeductedDays = 0;
   let totalWithoutPayDays = 0;
+  let locatorReconciliationsCleared = 0;
   const details = [];
 
   try {
@@ -966,7 +969,20 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
       });
     }
 
-    if (!dryRun) await client.query('COMMIT');
+    if (!dryRun) {
+      const reconciledLocators = await client.query(
+        `UPDATE locator_slips
+         SET month_end_reconciliation_required = false,
+             month_end_reconciled_at = now(),
+             updated_at = now()
+         WHERE status = 'revoked'
+           AND month_end_reconciliation_required = true
+           AND date_trunc('month', slip_date)::date = $1::date`,
+        [serviceMonth]
+      );
+      locatorReconciliationsCleared = reconciledLocators.rowCount || 0;
+      await client.query('COMMIT');
+    }
 
     return {
       targetYearMonth,
@@ -976,6 +992,7 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
       totalComputedDays,
       totalDeductedDays,
       totalWithoutPayDays,
+      locatorReconciliationsCleared,
       details,
     };
   } catch (error) {
@@ -1001,7 +1018,8 @@ module.exports = {
   desiredPosting,
   /** @internal exported for regression tests */
   assignmentForDate,
-  expectedLocatorSlotsForAssignment,
+  hasPhysicalDtrPunches,
+  expectedLocatorSlotsForAssignment: expectedLocatorSlotsForShift,
   locatorCoversExpectedShiftSlots,
   loadAssignments,
   loadEmployees,

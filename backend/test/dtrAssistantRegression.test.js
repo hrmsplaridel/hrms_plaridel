@@ -573,6 +573,8 @@ test('DTR assistant regression: DTR and locator policy knowledge appears in repl
   );
   assert.match(locatorReply, /Locator filing requirements/);
   assert.match(locatorReply, /A locator slip needs a slip date/i);
+  assert.match(locatorReply, /today or in advance/i);
+  assert.match(locatorReply, /pending request does not become locator DTR coverage/i);
   assert.match(locatorReply, /A locator slip helps DTR only after approval/i);
 });
 
@@ -612,6 +614,8 @@ test('DTR assistant regression: Bisaya locator filing prompts stay friendly and 
   assert.match(reply, /walay required attachment ani nga type/i);
   assert.match(reply, /ibutang ang office o destination/i);
   assert.match(reply, /DTR label nga gamiton/i);
+  assert.match(reply, /karon o advance/i);
+  assert.match(reply, /Department Head ug HR review/i);
   assert.doesNotMatch(reply, /manual AM\/PM slot selection/i);
   assert.doesNotMatch(reply, /Enter office or destination/i);
 });
@@ -1721,6 +1725,82 @@ test('DTR assistant regression: locator exact slot coverage requires approved ma
   assert.match(reply, /not final coverage until approved/i);
 });
 
+test('DTR assistant regression: Tagalog locator requirements explain date and review workflow', () => {
+  const reply = buildFastEmployeeAssistantReply(
+    'ano ang kailangan para mag-file ng locator?',
+    {
+      locator_types: [
+        {
+          code: 'locator',
+          label: 'Locator / Official Business',
+          short_label: 'Locator',
+          location_label: 'Office / Destination',
+          requires_attachment: false,
+          coverage_mode: 'manual',
+        },
+      ],
+    },
+    'locator_requirements'
+  );
+
+  assert.match(reply, /ngayon o advance/i);
+  assert.match(reply, /Department Head at HR review/i);
+  assert.match(reply, /HR\/Admin lang/i);
+});
+
+test('DTR assistant regression: PM-only approved locator covers the assigned shift', () => {
+  const context = {
+    date_range: {
+      label: 'tomorrow',
+      startDate: '2026-06-16',
+      endDate: '2026-06-16',
+    },
+    dtr_calendar_days: [
+      {
+        attendance_date: '2026-06-16',
+        shift_id: 'pm-shift',
+        shift_name: 'Evening Shift',
+        start_time: '18:00:00',
+        end_time: '19:00:00',
+        punch_mode: 'auto',
+        working_days: [1, 2, 3, 4, 5],
+        holiday_coverage: null,
+      },
+    ],
+    recent_locator_slips: [
+      {
+        slip_date: '2026-06-16',
+        request_type: 'locator',
+        request_type_label: 'Locator Slip',
+        status: 'approved',
+        coverage: {
+          am_in: false,
+          am_out: false,
+          pm_in: true,
+          pm_out: true,
+        },
+      },
+    ],
+  };
+
+  const locatorReply = buildFastEmployeeAssistantReply(
+    'does my locator cover my shift tomorrow?',
+    context,
+    'dtr_locator_coverage_check'
+  );
+  assert.match(locatorReply, /fully satisfies the assigned shift/i);
+  assert.doesNotMatch(locatorReply, /no approved coverage fully satisfies/i);
+
+  const statusReply = buildFastEmployeeAssistantReply(
+    'why is there no DTR tomorrow?',
+    context,
+    'dtr_status_explanation'
+  );
+  assert.match(statusReply, /Status: On field/i);
+  assert.match(statusReply, /PM in, PM out/i);
+  assert.doesNotMatch(statusReply, /Status: Absent/i);
+});
+
 test('DTR assistant regression: DTR export rows include no-record scheduled days', () => {
   const rows = dtrExportRows({
     date_range: {
@@ -1767,6 +1847,47 @@ test('DTR assistant regression: feedback rating aliases normalize safely', () =>
   assert.equal(feedbackServiceTest.normalizeConfidence('-1'), 0);
   assert.equal(feedbackServiceTest.normalizeConfidence('bad'), null);
   assert.match(feedbackServiceTest.hashText('pila akong absent?'), /^[a-f0-9]{64}$/);
+});
+
+test('DTR assistant regression: revoked locator status includes audit context', () => {
+  const context = {
+    recent_locator_slips: [
+      {
+        id: 'locator-1',
+        slip_date: '2026-08-12',
+        request_type: 'locator',
+        request_type_label: 'Locator / Official Business',
+        status: 'revoked',
+        revoked_by_name: 'HR Admin',
+        revoked_at: '2026-08-12T08:30:00.000Z',
+        revocation_reason: 'Approved accidentally during final review.',
+        month_end_reconciliation_required: true,
+        coverage: { am_in: true, am_out: true },
+      },
+    ],
+  };
+
+  const english = buildFastEmployeeAssistantReply(
+    'what is my locator status?',
+    context,
+    'locator_status'
+  );
+  const bisaya = buildFastEmployeeAssistantReply(
+    'unsa status sa akong locator?',
+    context,
+    'locator_status'
+  );
+  const tagalog = buildFastEmployeeAssistantReply(
+    'ano status ng locator ko?',
+    context,
+    'locator_status'
+  );
+
+  assert.match(english, /approval revoked by HR/i);
+  assert.match(english, /Approved accidentally during final review/i);
+  assert.match(english, /rerun month-end processing/i);
+  assert.match(bisaya, /gi-revoke sa HR/i);
+  assert.match(tagalog, /binawi ng HR ang approval/i);
 });
 
 test('DTR assistant regression: replies use friendly dates and day counts', () => {
