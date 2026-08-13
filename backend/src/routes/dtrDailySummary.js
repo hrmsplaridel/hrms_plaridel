@@ -23,6 +23,7 @@ const {
   locatorSegmentsForMissingPunches,
   mergeLocatorCoverages,
 } = require('../services/locatorCoverage');
+const { resolveDtrDailySummaryScope } = require('../services/dtrDailySummaryAccess');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -951,10 +952,17 @@ router.get('/', protect, async (req, res) => {
     const params = [];
     const conditions = [];
     let i = 1;
-    const privileged = ['admin', 'hr', 'supervisor'].includes(req.user?.role);
+    const {
+      privileged,
+      employeeId: scopedEmployeeId,
+      departmentId: scopedDepartmentId,
+    } = resolveDtrDailySummaryScope(req.user, { employee_id, department_id });
+    if (!privileged && !scopedEmployeeId) {
+      return res.status(401).json({ error: 'Authenticated employee id is required' });
+    }
     if (!privileged) {
       conditions.push(`d.employee_id = $${i++}`);
-      params.push(req.user.id);
+      params.push(scopedEmployeeId);
     }
     if (start_date) {
       conditions.push(`d.attendance_date >= $${i++}`);
@@ -964,11 +972,11 @@ router.get('/', protect, async (req, res) => {
       conditions.push(`d.attendance_date <= $${i++}`);
       params.push(end_date);
     }
-    if (employee_id && privileged) {
+    if (scopedEmployeeId && privileged) {
       conditions.push(`d.employee_id = $${i++}`);
-      params.push(employee_id);
+      params.push(scopedEmployeeId);
     }
-    if (department_id && start_date && end_date) {
+    if (scopedDepartmentId && start_date && end_date) {
       const depIdx = i;
       const endIdx = i + 1;
       const startIdx = i + 2;
@@ -978,7 +986,7 @@ router.get('/', protect, async (req, res) => {
           AND a.effective_from <= $${endIdx}::date
           AND (a.effective_to IS NULL OR a.effective_to >= $${startIdx}::date)
       )`);
-      params.push(department_id, end_date, start_date);
+      params.push(scopedDepartmentId, end_date, start_date);
       i += 3;
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -1145,16 +1153,16 @@ router.get('/', protect, async (req, res) => {
         if (r.employee_id && r.employee_name) userIdToName[r.employee_id] = r.employee_name;
       }
       let employeeIds;
-      if (employee_id) {
-        employeeIds = [employee_id];
-        if (!userIdToName[employee_id]) {
+      if (scopedEmployeeId) {
+        employeeIds = [scopedEmployeeId];
+        if (!userIdToName[scopedEmployeeId]) {
           const u = await pool.query(
             'SELECT full_name FROM users WHERE id = $1',
-            [employee_id]
+            [scopedEmployeeId]
           );
-          if (u.rows[0]) userIdToName[employee_id] = u.rows[0].full_name;
+          if (u.rows[0]) userIdToName[scopedEmployeeId] = u.rows[0].full_name;
         }
-      } else if (department_id && startStr && endStr) {
+      } else if (scopedDepartmentId && startStr && endStr) {
         const deptEmps = await pool.query(
           `SELECT DISTINCT u.id, u.full_name
            FROM assignments a
@@ -1163,7 +1171,7 @@ router.get('/', protect, async (req, res) => {
              AND a.effective_from <= $2::date
              AND (a.effective_to IS NULL OR a.effective_to >= $3::date)
            ORDER BY u.full_name`,
-          [department_id, endStr, startStr]
+          [scopedDepartmentId, endStr, startStr]
         );
         employeeIds = deptEmps.rows.map((r) => r.id).filter(Boolean);
         for (const r of deptEmps.rows) {
@@ -1520,13 +1528,16 @@ router.get('/', protect, async (req, res) => {
       });
     }
 
-    let payload = rows;
+    const authorizedRows = privileged
+      ? rows
+      : rows.filter((row) => String(row.user_id) === String(scopedEmployeeId));
+    let payload = authorizedRows;
     if (hasDateRange && limitRaw != null && String(limitRaw).trim() !== '') {
       const off = Math.max(0, parseInt(offsetRaw, 10) || 0);
       const pageSize = Math.min(Math.max(1, parseInt(limitRaw, 10) || 500), 10000);
       res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count');
-      res.setHeader('X-Total-Count', String(rows.length));
-      payload = rows.slice(off, off + pageSize);
+      res.setHeader('X-Total-Count', String(authorizedRows.length));
+      payload = authorizedRows.slice(off, off + pageSize);
     }
 
     res.json(payload);
