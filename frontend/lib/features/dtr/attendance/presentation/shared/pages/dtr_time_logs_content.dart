@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
@@ -976,6 +977,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             case 'import':
                               _showImportBiometricLogsDialog();
                               break;
+                            case 'deleted':
+                              _showDeletedEntriesPanel(dtr);
+                              break;
                           }
                         },
                         itemBuilder: (context) => [
@@ -1005,6 +1009,21 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   ),
                                   const SizedBox(width: 12),
                                   const Text('Import biometric logs'),
+                                ],
+                              ),
+                            ),
+                          if (isAdmin)
+                            PopupMenuItem<String>(
+                              value: 'deleted',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.history_rounded,
+                                    size: 20,
+                                    color: AppTheme.primaryNavy,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  const Text('Deleted entries'),
                                 ],
                               ),
                             ),
@@ -2753,12 +2772,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       final hasAnyTime =
           tin != null || bo != null || bi != null || tout != null;
       if (r.id != null && !hasAnyTime) {
-        _showTimeLogSnack('Time entry removed.', isSuccess: true);
-        final removed = await dtr.deleteEntry(r.id!);
-        if (!mounted) return;
-        if (!removed) {
-          _showTimeLogSnack(dtr.error ?? 'Unable to remove this time entry.');
-        }
+        _showTimeLogSnack(
+          'Enter at least one punch. To remove the record, use Delete from its actions menu.',
+        );
         return;
       }
       final updatedRec = TimeRecord(
@@ -2806,36 +2822,526 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
 
   Future<void> _confirmDelete(DtrProvider dtr, TimeRecord r) async {
     if (!mounted) return;
-    final ok = await showDialog<bool>(
+    final reasonController = TextEditingController();
+    final reason = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete time entry?'),
-        content: Text(
-          'Delete record for ${r.employeeName ?? r.userId} on ${_formatDate(r.recordDate)}?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final reasonIsValid = reasonController.text.trim().length >= 3;
+          return AlertDialog(
+            title: const Text('Delete time entry?'),
+            content: SizedBox(
+              width: 440,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Delete the processed record for ${r.employeeName ?? r.userId} on ${_formatDate(r.recordDate)}?',
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Original biometric logs will be preserved for audit and will not recreate this record.',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(ctx),
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: reasonController,
+                    autofocus: true,
+                    minLines: 2,
+                    maxLines: 4,
+                    maxLength: 1000,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Reason for deletion',
+                      hintText:
+                          'Explain why this processed entry is inaccurate',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: reasonIsValid
+                    ? () => Navigator.pop(ctx, reasonController.text.trim())
+                    : null,
+                child: const Text('Delete'),
+              ),
+            ],
+          );
+        },
       ),
     );
-    if (ok == true && r.id != null) {
-      _showTimeLogSnack('Time entry deleted.', isSuccess: true);
-      final deleted = await dtr.deleteEntry(r.id!);
+    reasonController.dispose();
+    if (reason != null && r.id != null) {
+      final deleted = await dtr.deleteEntry(r.id!, reason: reason);
       if (!mounted) return;
-      if (!deleted) {
+      if (deleted) {
+        _showTimeLogSnack('Time entry deleted.', isSuccess: true);
+      } else {
         _showTimeLogSnack(
           dtr.error ?? 'Unable to delete this time log. Please try again.',
         );
       }
     }
+  }
+
+  Future<void> _showDeletedEntriesPanel(DtrProvider dtr) async {
+    if (!mounted) return;
+    final (filterStart, filterEnd) = _getIntendedFilterRange();
+    final filterEmployeeId = _selectedUserId?.trim().isNotEmpty == true
+        ? _selectedUserId!.trim()
+        : null;
+    final selectedEmployee = filterEmployeeId == null
+        ? null
+        : dtr.employees.where((employee) => employee.id == filterEmployeeId);
+    final employeeLabel = selectedEmployee == null || selectedEmployee.isEmpty
+        ? 'All employees'
+        : selectedEmployee.first.fullName;
+    final dateLabel = filterStart == filterEnd
+        ? _formatDate(filterStart)
+        : '${_months[filterStart.month - 1]} ${filterStart.year}';
+    var items = <DeletedTimeRecord>[];
+    var loading = true;
+    var initialLoadStarted = false;
+    var panelActive = true;
+    var showAllHistory = false;
+    var loadVersion = 0;
+    String? error;
+
+    Future<void> load(StateSetter setPanelState) async {
+      final requestVersion = ++loadVersion;
+      setPanelState(() {
+        loading = true;
+        error = null;
+      });
+      try {
+        final result = await TimeRecordRepo.instance.listDeleted(
+          startDate: showAllHistory ? null : filterStart,
+          endDate: showAllHistory ? null : filterEnd,
+          userId: showAllHistory ? null : filterEmployeeId,
+        );
+        if (!panelActive || requestVersion != loadVersion) return;
+        setPanelState(() {
+          items = result;
+          loading = false;
+        });
+      } catch (e) {
+        if (!panelActive || requestVersion != loadVersion) return;
+        setPanelState(() {
+          loading = false;
+          error = userFacingApiError(e);
+        });
+      }
+    }
+
+    await openResponsiveRightSidePanel<void>(
+      context: context,
+      barrierLabel: 'Close deleted time entries',
+      breakpoint: 0,
+      minWidth: 600,
+      initialWidthFraction: 0.44,
+      builder: (panelContext) => StatefulBuilder(
+        builder: (panelContext, setPanelState) {
+          if (!initialLoadStarted) {
+            initialLoadStarted = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              load(setPanelState);
+            });
+          }
+
+          return Material(
+            color: AppTheme.dashPanelOf(panelContext),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 18, 12, 16),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.history_rounded,
+                          color: AppTheme.primaryNavy,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Deleted Time Entries',
+                              style: TextStyle(
+                                color: AppTheme.dashTextPrimaryOf(panelContext),
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              'Processed DTR records preserved for audit and recovery.',
+                              style: TextStyle(
+                                color: AppTheme.dashTextSecondaryOf(
+                                  panelContext,
+                                ),
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Refresh',
+                        onPressed: loading ? null : () => load(setPanelState),
+                        icon: const Icon(Icons.refresh_rounded),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.of(panelContext).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(
+                  height: 1,
+                  color: AppTheme.dashHairlineOf(panelContext),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment<bool>(
+                            value: false,
+                            icon: Icon(Icons.filter_alt_rounded, size: 18),
+                            label: Text('Current filters'),
+                          ),
+                          ButtonSegment<bool>(
+                            value: true,
+                            icon: Icon(Icons.history_rounded, size: 18),
+                            label: Text('All history'),
+                          ),
+                        ],
+                        selected: {showAllHistory},
+                        showSelectedIcon: false,
+                        onSelectionChanged: loading
+                            ? null
+                            : (selection) {
+                                final next = selection.first;
+                                if (next == showAllHistory) return;
+                                setPanelState(() => showAllHistory = next);
+                                load(setPanelState);
+                              },
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        showAllHistory
+                            ? 'Showing deleted entries across all dates and employees.'
+                            : '$dateLabel • $employeeLabel',
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(panelContext),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (loading) const LinearProgressIndicator(minHeight: 2),
+                Expanded(
+                  child: loading && items.isEmpty
+                      ? const Center(child: CircularProgressIndicator())
+                      : error != null
+                      ? _deletedEntriesError(
+                          panelContext,
+                          error!,
+                          () => load(setPanelState),
+                        )
+                      : items.isEmpty
+                      ? _deletedEntriesEmpty(panelContext)
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(20),
+                          itemCount: items.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, index) {
+                            final item = items[index];
+                            return _deletedEntryCard(
+                              panelContext,
+                              item,
+                              onRestore: item.isRestored
+                                  ? null
+                                  : () async {
+                                      final reason =
+                                          await _askForRestorationReason(
+                                            panelContext,
+                                            item,
+                                          );
+                                      if (reason == null) return;
+                                      final restored = await dtr
+                                          .restoreDeletedEntry(
+                                            item.id,
+                                            reason: reason,
+                                          );
+                                      if (!mounted) return;
+                                      if (!restored) {
+                                        _showTimeLogSnack(
+                                          dtr.error ??
+                                              'Unable to restore this time entry.',
+                                        );
+                                        return;
+                                      }
+                                      _showTimeLogSnack(
+                                        'Time entry restored.',
+                                        isSuccess: true,
+                                      );
+                                      await load(setPanelState);
+                                    },
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+    panelActive = false;
+  }
+
+  Widget _deletedEntriesEmpty(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.history_toggle_off_rounded,
+            size: 46,
+            color: AppTheme.dashTextSecondaryOf(context),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No deleted time entries',
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _deletedEntriesError(
+    BuildContext context,
+    String message,
+    VoidCallback retry,
+  ) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: retry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _deletedEntryCard(
+    BuildContext context,
+    DeletedTimeRecord item, {
+    required Future<void> Function()? onRestore,
+  }) {
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final restored = item.isRestored;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.employeeName?.trim().isNotEmpty == true
+                      ? item.employeeName!
+                      : item.userId,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: restored
+                      ? Colors.green.withValues(alpha: 0.14)
+                      : Colors.red.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  restored ? 'Restored' : 'Deleted',
+                  style: TextStyle(
+                    color: restored ? Colors.green.shade500 : Colors.red,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${_formatDateWithWeekday(item.recordDate)}  •  ${item.source.toUpperCase()}',
+            style: TextStyle(color: secondary, fontSize: 13),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Deletion reason',
+            style: TextStyle(
+              color: secondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            item.reason,
+            style: TextStyle(color: AppTheme.dashTextPrimaryOf(context)),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Deleted by ${item.deletedByName ?? 'Unknown user'} • ${_formatDateTime(item.deletedAt)}',
+            style: TextStyle(color: secondary, fontSize: 12),
+          ),
+          if (restored) ...[
+            const SizedBox(height: 12),
+            Divider(color: AppTheme.dashHairlineOf(context)),
+            Text(
+              'Restored by ${item.restoredByName ?? 'Unknown user'} • ${_formatDateTime(item.restoredAt!)}',
+              style: TextStyle(color: secondary, fontSize: 12),
+            ),
+            if (item.restorationReason?.trim().isNotEmpty == true) ...[
+              const SizedBox(height: 4),
+              Text(
+                item.restorationReason!,
+                style: TextStyle(color: AppTheme.dashTextPrimaryOf(context)),
+              ),
+            ],
+          ] else ...[
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: onRestore,
+                icon: const Icon(Icons.restore_rounded, size: 18),
+                label: const Text('Restore'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _formatDateTime(DateTime value) {
+    final local = value.toLocal();
+    return '${_formatDate(local)} ${_formatTime(local)}';
+  }
+
+  Future<String?> _askForRestorationReason(
+    BuildContext context,
+    DeletedTimeRecord item,
+  ) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final valid = controller.text.trim().length >= 3;
+          return AlertDialog(
+            title: const Text('Restore time entry?'),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Restore ${item.employeeName ?? item.userId}\'s processed record for ${_formatDate(item.recordDate)}?',
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    minLines: 2,
+                    maxLines: 4,
+                    maxLength: 1000,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Reason for restoration',
+                      hintText:
+                          'Explain why this deleted entry should be restored',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: valid
+                    ? () => Navigator.of(
+                        dialogContext,
+                      ).pop(controller.text.trim())
+                    : null,
+                icon: const Icon(Icons.restore_rounded, size: 18),
+                label: const Text('Restore'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    controller.dispose();
+    return result;
   }
 
   void _showTimeLogSnack(String message, {bool isSuccess = false}) {
