@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
-const { requireAdmin, requireAdminOrSupervisor } = require('../middleware/rbac');
+const { requireAdmin, requireAdminOrHr, requireAdminOrSupervisor } = require('../middleware/rbac');
 const {
   expandNonRecurringToWindow,
   expandRecurringToWindow,
@@ -1724,15 +1724,13 @@ function computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo = null)
   );
 }
 
-// POST /api/dtr-daily-summary - clock in or create manual record (employee or admin)
-router.post('/', protect, async (req, res) => {
+// POST /api/dtr-daily-summary - create a manual attendance record (Admin/HR only)
+router.post('/', protect, requireAdminOrHr, async (req, res) => {
   try {
     const { employee_id, attendance_date, time_in, break_out, break_in, time_out, total_hours, reason } = req.body;
     const userId = req.user?.id;
-    const isAdmin = req.user?.role === 'admin' || req.user?.role === 'hr' || req.user?.role === 'supervisor';
-    const targetId = isAdmin && employee_id ? employee_id : userId;
+    const targetId = employee_id || userId;
     if (!targetId) return res.status(401).json({ error: 'Not authenticated' });
-    if (!isAdmin && targetId !== userId) return res.status(403).json({ error: 'Can only create your own record' });
 
     const date = attendance_date || new Date().toISOString().slice(0, 10);
     const leaveCoverage = await getApprovedLeaveCoverageForDate(targetId, date);
@@ -1828,13 +1826,11 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// PUT /api/dtr-daily-summary/:id - update (clock out or admin edit)
-router.put('/:id', protect, async (req, res) => {
+// PUT /api/dtr-daily-summary/:id - correct an attendance record (Admin/HR only)
+router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
   try {
     const { id } = req.params;
     const { time_in, break_out, break_in, time_out, total_hours, status, remarks } = req.body;
-    const userId = req.user?.id;
-    const isAdmin = req.user?.role === 'admin' || req.user?.role === 'hr' || req.user?.role === 'supervisor';
 
     const hasCoverage = await _holidaysHasCoverageColumn();
     const joinCols = hasCoverage ? 'h.coverage AS holiday_coverage' : 'NULL::text AS holiday_coverage';
@@ -1847,7 +1843,6 @@ router.put('/:id', protect, async (req, res) => {
       [id]
     );
     if (check.rows.length === 0) return res.status(404).json({ error: 'Record not found' });
-    if (!isAdmin && check.rows[0].employee_id !== userId) return res.status(403).json({ error: 'Not allowed to update this record' });
 
     const existing = check.rows[0];
     const existingCoverage = existing.holiday_coverage || 'whole_day';
