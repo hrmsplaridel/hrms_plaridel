@@ -2005,15 +2005,220 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
   }
 });
 
-// DELETE /api/dtr-daily-summary/:id - admin only
+// GET /api/dtr-daily-summary/deletions - admin deletion history
+router.get('/deletions', protect, requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const includeRestored = isTruthyQueryFlag(req.query.include_restored);
+    const params = [];
+    const conditions = [];
+    let i = 1;
+
+    if (!includeRestored) conditions.push('dd.restored_at IS NULL');
+    if (req.query.employee_id) {
+      conditions.push(`dd.employee_id = $${i++}::uuid`);
+      params.push(req.query.employee_id);
+    }
+    if (req.query.start_date) {
+      conditions.push(`dd.attendance_date >= $${i++}::date`);
+      params.push(req.query.start_date);
+    }
+    if (req.query.end_date) {
+      conditions.push(`dd.attendance_date <= $${i++}::date`);
+      params.push(req.query.end_date);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit, offset);
+    const result = await pool.query(
+      `SELECT dd.id,
+              dd.deleted_dtr_summary_id,
+              dd.employee_id,
+              dd.attendance_date::text AS attendance_date,
+              dd.source,
+              dd.reason,
+              dd.deleted_by,
+              dd.record_snapshot,
+              dd.deleted_at,
+              dd.restored_by,
+              dd.restoration_reason,
+              dd.restored_at,
+              employee.full_name AS employee_name,
+              deleted_actor.full_name AS deleted_by_name,
+              restored_actor.full_name AS restored_by_name,
+              COUNT(*) OVER()::int AS total_count
+       FROM dtr_daily_summary_deletions dd
+       LEFT JOIN users employee ON employee.id = dd.employee_id
+       LEFT JOIN users deleted_actor ON deleted_actor.id = dd.deleted_by
+       LEFT JOIN users restored_actor ON restored_actor.id = dd.restored_by
+       ${where}
+       ORDER BY (dd.restored_at IS NULL) DESC, dd.deleted_at DESC
+       LIMIT $${i++} OFFSET $${i}`,
+      params
+    );
+
+    res.json({
+      items: result.rows.map(({ total_count, ...row }) => row),
+      total: result.rows[0]?.total_count || 0,
+    });
+  } catch (err) {
+    console.error('[dtr-daily-summary deletions GET]', err);
+    res.status(500).json({ error: 'Failed to fetch deleted DTR entries' });
+  }
+});
+
+// POST /api/dtr-daily-summary/deletions/:deletionId/restore - admin only
+router.post('/deletions/:deletionId/restore', protect, requireAdmin, async (req, res) => {
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length < 3) {
+    return res.status(400).json({ error: 'A restoration reason of at least 3 characters is required' });
+  }
+  if (reason.length > 1000) {
+    return res.status(400).json({ error: 'Restoration reason must not exceed 1000 characters' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const deletionResult = await client.query(
+      `SELECT *
+       FROM dtr_daily_summary_deletions
+       WHERE id = $1::uuid
+       FOR UPDATE`,
+      [req.params.deletionId]
+    );
+    if (deletionResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Deleted DTR entry not found' });
+    }
+
+    const deletion = deletionResult.rows[0];
+    if (deletion.restored_at) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This DTR entry has already been restored' });
+    }
+
+    const existing = await client.query(
+      `SELECT id
+       FROM dtr_daily_summary
+       WHERE employee_id = $1::uuid AND attendance_date = $2::date
+       LIMIT 1`,
+      [deletion.employee_id, deletion.attendance_date]
+    );
+    if (existing.rowCount > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Attendance already exists for this employee and date. Remove the corrected entry before restoring the deleted record.',
+      });
+    }
+
+    const snapshot = deletion.record_snapshot || {};
+    const source = ['system', 'manual', 'adjusted'].includes(snapshot.source)
+      ? snapshot.source
+      : 'adjusted';
+    const status = ['present', 'late', 'absent', 'on_leave', 'holiday', 'rest_day', 'incomplete'].includes(snapshot.status)
+      ? snapshot.status
+      : 'incomplete';
+    const pmStatus = ['present', 'late'].includes(snapshot.pm_status)
+      ? snapshot.pm_status
+      : null;
+
+    const restored = await client.query(
+      `INSERT INTO dtr_daily_summary (
+         id, employee_id, attendance_date,
+         assignment_id, shift_id, attendance_policy_id, holiday_id, leave_request_id,
+         time_in, time_out, break_in, break_out,
+         late_minutes, undertime_minutes, overtime_minutes, total_hours,
+         status, pm_status, source, remarks, created_at, updated_at
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::date,
+         (SELECT id FROM assignments WHERE id = $4::uuid),
+         (SELECT id FROM shifts WHERE id = $5::uuid),
+         (SELECT id FROM attendance_policies WHERE id = $6::uuid),
+         (SELECT id FROM holidays WHERE id = $7::uuid),
+         (SELECT id FROM leave_requests WHERE id = $8::uuid),
+         $9::timestamptz, $10::timestamptz, $11::timestamptz, $12::timestamptz,
+         $13, $14, $15, $16::numeric,
+         $17, $18, $19, $20, COALESCE($21::timestamptz, now()), now()
+       )
+       RETURNING id, employee_id, attendance_date::text AS attendance_date, source, status`,
+      [
+        deletion.deleted_dtr_summary_id,
+        deletion.employee_id,
+        deletion.attendance_date,
+        snapshot.assignment_id || null,
+        snapshot.shift_id || null,
+        snapshot.attendance_policy_id || null,
+        snapshot.holiday_id || null,
+        snapshot.leave_request_id || null,
+        snapshot.time_in || null,
+        snapshot.time_out || null,
+        snapshot.break_in || null,
+        snapshot.break_out || null,
+        Math.max(0, parseInt(snapshot.late_minutes, 10) || 0),
+        Math.max(0, parseInt(snapshot.undertime_minutes, 10) || 0),
+        Math.max(0, parseInt(snapshot.overtime_minutes, 10) || 0),
+        Math.max(0, parseFloat(snapshot.total_hours) || 0),
+        status,
+        pmStatus,
+        source,
+        snapshot.remarks || null,
+        snapshot.created_at || null,
+      ]
+    );
+
+    await client.query(
+      `UPDATE dtr_daily_summary_deletions
+       SET restored_by = $2::uuid,
+           restoration_reason = $3,
+           restored_at = now()
+       WHERE id = $1::uuid`,
+      [deletion.id, req.user?.id || null, reason]
+    );
+    await client.query('COMMIT');
+
+    const row = restored.rows[0];
+    broadcastBiometricUpdate('dtr_refresh', {
+      action: 'dtr_restored',
+      userId: String(row.employee_id),
+      date: row.attendance_date,
+      userIds: [String(row.employee_id)],
+      dates: [row.attendance_date],
+    });
+    res.json(row);
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) { }
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Attendance already exists for this employee and date' });
+    }
+    console.error('[dtr-daily-summary deletion restore POST]', err);
+    res.status(500).json({ error: 'Failed to restore DTR entry' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/dtr-daily-summary/:id - admin only; preserves raw biometric logs and an audit snapshot
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length < 3) {
+    return res.status(400).json({ error: 'A deletion reason of at least 3 characters is required' });
+  }
+  if (reason.length > 1000) {
+    return res.status(400).json({ error: 'Deletion reason must not exceed 1000 characters' });
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const target = await client.query(
-      `SELECT id, employee_id, attendance_date::text AS attendance_date_iso, source
-       FROM dtr_daily_summary
-       WHERE id = $1`,
+      `SELECT d.*, d.attendance_date::text AS attendance_date_iso
+       FROM dtr_daily_summary d
+       WHERE d.id = $1
+       FOR UPDATE`,
       [req.params.id]
     );
     if (target.rowCount === 0) {
@@ -2022,27 +2227,34 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
     }
 
     const row = target.rows[0];
+    await client.query(
+      `INSERT INTO dtr_daily_summary_deletions (
+         deleted_dtr_summary_id,
+         employee_id,
+         attendance_date,
+         source,
+         reason,
+         deleted_by,
+         record_snapshot
+       ) VALUES ($1::uuid, $2::uuid, $3::date, $4, $5, $6::uuid, $7::jsonb)`,
+      [
+        row.id,
+        row.employee_id,
+        row.attendance_date_iso,
+        row.source,
+        reason,
+        req.user?.id || null,
+        JSON.stringify(row),
+      ]
+    );
     await client.query('DELETE FROM dtr_daily_summary WHERE id = $1', [req.params.id]);
-
-    // Biometric rows are rebuilt from biometric_attendance_logs during processing.
-    // Delete matching raw logs for the same employee/date so the summary row does not return.
-    if (row.source === 'system' && row.employee_id && row.attendance_date_iso) {
-      const dateStr = String(row.attendance_date_iso).slice(0, 10);
-      await client.query(
-        `DELETE FROM biometric_attendance_logs
-         WHERE user_id = $1::uuid
-           AND logged_at >= $2::date
-           AND logged_at < ($2::date + INTERVAL '1 day')`,
-        [row.employee_id, dateStr]
-      );
-    }
 
     await client.query('COMMIT');
     const deletedDateStr = row.attendance_date_iso
       ? String(row.attendance_date_iso).slice(0, 10)
       : null;
     broadcastBiometricUpdate('dtr_refresh', {
-      action: 'manual_deleted',
+      action: 'dtr_deleted',
       userId: String(row.employee_id),
       date: deletedDateStr,
       userIds: [String(row.employee_id)],
