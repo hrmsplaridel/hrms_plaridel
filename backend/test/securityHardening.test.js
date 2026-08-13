@@ -155,6 +155,91 @@ test('blank Admin or HR manual DTR entry is rejected before database access', as
   clearModule('../src/routes/dtrDailySummary');
 });
 
+test('direct DTR edits become adjusted and preserve before-and-after audit snapshots', async () => {
+  const recordId = '5cc06130-7dd8-4792-bc4f-ac1b423bb2a9';
+  const employeeId = '5b9fe943-4700-4ff6-a84e-66ef793ecfc4';
+  const actorId = '9da0c4c5-37eb-4c1b-9b55-af79f1336b31';
+  const queries = [];
+  const existing = {
+    id: recordId,
+    employee_id: employeeId,
+    attendance_date: '2026-06-16',
+    attendance_date_iso: '2026-06-16',
+    time_in: '2026-06-16T00:00:00.000Z',
+    break_out: null,
+    break_in: null,
+    time_out: null,
+    total_hours: '0',
+    late_minutes: 0,
+    undertime_minutes: 0,
+    overtime_minutes: 0,
+    status: 'incomplete',
+    pm_status: null,
+    source: 'system',
+    remarks: null,
+    holiday_id: null,
+    holiday_coverage: null,
+    updated_at: '2026-06-16T00:05:00.000Z',
+  };
+  const adjusted = {
+    ...existing,
+    source: 'adjusted',
+    remarks: 'Verified by HR from the device report.',
+    updated_at: '2026-08-14T08:00:00.000Z',
+  };
+  const client = {
+    async query(sql, params = []) {
+      const text = String(sql);
+      queries.push({ sql: text, params });
+      if (/SELECT d\.\*, d\.attendance_date::text/i.test(text)) {
+        return { rowCount: 1, rows: [existing] };
+      }
+      if (/UPDATE dtr_daily_summary SET/i.test(text)) {
+        return { rowCount: 1, rows: [adjusted] };
+      }
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      connect: async () => client,
+      query: async () => ({ rowCount: 0, rows: [] }),
+    },
+  });
+  const restoreWs = withMockedModule('../src/websockets/biometricStream', {
+    broadcastBiometricUpdate: () => 0,
+  });
+  clearModule('../src/routes/dtrDailySummary');
+  const router = require('../src/routes/dtrDailySummary');
+  const handlers = route(router, 'put', '/:id');
+  const req = {
+    user: { id: actorId, role: 'admin' },
+    params: { id: recordId },
+    body: { remarks: adjusted.remarks },
+  };
+  const res = response();
+
+  await handlers[handlers.length - 1](req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload?.source, 'adjusted');
+  const update = queries.find(({ sql }) => /UPDATE dtr_daily_summary SET/i.test(sql));
+  assert.match(update?.sql || '', /source = 'adjusted'/i);
+  const audit = queries.find(({ sql }) => /INSERT INTO audit_logs/i.test(sql));
+  assert.ok(audit, 'DTR edit audit entry was not inserted');
+  assert.equal(audit.params[0], actorId);
+  assert.equal(audit.params[1], recordId);
+  const details = JSON.parse(audit.params[2]);
+  assert.equal(details.before.source, 'system');
+  assert.equal(details.after.source, 'adjusted');
+  assert.ok(queries.some(({ sql }) => String(sql).trim() === 'COMMIT'));
+
+  restoreWs();
+  restoreDb();
+  clearModule('../src/routes/dtrDailySummary');
+});
+
 test('DTR deletion requires an administrator reason before database access', async () => {
   const restoreDb = withMockedModule('../src/config/db', {
     pool: {

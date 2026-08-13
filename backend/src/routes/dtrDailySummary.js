@@ -1735,6 +1735,40 @@ function computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo = null)
   );
 }
 
+function dtrAuditSnapshot(row) {
+  if (!row) return null;
+  const numberOrNull = (value) => {
+    if (value == null || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  return {
+    id: row.id || null,
+    employee_id: row.employee_id || null,
+    attendance_date:
+      (row.attendance_date_iso && String(row.attendance_date_iso).slice(0, 10)) ||
+      toIsoDateStr(row.attendance_date),
+    assignment_id: row.assignment_id || null,
+    shift_id: row.shift_id || null,
+    attendance_policy_id: row.attendance_policy_id || null,
+    holiday_id: row.holiday_id || null,
+    leave_request_id: row.leave_request_id || null,
+    time_in: row.time_in || null,
+    break_out: row.break_out || null,
+    break_in: row.break_in || null,
+    time_out: row.time_out || null,
+    total_hours: numberOrNull(row.total_hours),
+    late_minutes: numberOrNull(row.late_minutes),
+    undertime_minutes: numberOrNull(row.undertime_minutes),
+    overtime_minutes: numberOrNull(row.overtime_minutes),
+    status: row.status || null,
+    pm_status: row.pm_status || null,
+    source: row.source || null,
+    remarks: row.remarks || null,
+    updated_at: row.updated_at || null,
+  };
+}
+
 // POST /api/dtr-daily-summary - create a manual attendance record (Admin/HR only)
 router.post('/', protect, requireAdminOrHr, async (req, res) => {
   try {
@@ -1853,21 +1887,35 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
 
 // PUT /api/dtr-daily-summary/:id - correct an attendance record (Admin/HR only)
 router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
+  let client;
+  let transactionStarted = false;
   try {
     const { id } = req.params;
     const { time_in, break_out, break_in, time_out, total_hours, status, remarks } = req.body;
 
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transactionStarted = true;
+
+    const rejectEdit = async (statusCode, payload) => {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      return res.status(statusCode).json(payload);
+    };
+
     const hasCoverage = await _holidaysHasCoverageColumn();
     const joinCols = hasCoverage ? 'h.coverage AS holiday_coverage' : 'NULL::text AS holiday_coverage';
-    const check = await pool.query(
-      `SELECT d.employee_id, d.attendance_date, d.holiday_id, d.status, d.time_in, d.break_out, d.break_in, d.time_out,
-              ${joinCols}
+    const check = await client.query(
+      `SELECT d.*, d.attendance_date::text AS attendance_date_iso, ${joinCols}
        FROM dtr_daily_summary d
        LEFT JOIN holidays h ON h.id = d.holiday_id
-       WHERE d.id = $1`,
+       WHERE d.id = $1
+       FOR UPDATE OF d`,
       [id]
     );
-    if (check.rows.length === 0) return res.status(404).json({ error: 'Record not found' });
+    if (check.rows.length === 0) {
+      return rejectEdit(404, { error: 'Record not found' });
+    }
 
     const existing = check.rows[0];
     const existingCoverage = existing.holiday_coverage || 'whole_day';
@@ -1875,7 +1923,7 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
     const dateStr = toIsoDateStr(existing.attendance_date);
     const leaveCoverage = await getApprovedLeaveCoverageForDate(employeeId, dateStr);
     if (leaveCoverage) {
-      return res.status(409).json({
+      return rejectEdit(409, {
         error: 'An approved leave covers this date. Revoke or return the leave approval before editing attendance.',
         leave_request_id: leaveCoverage.leave_request_id,
       });
@@ -1887,7 +1935,7 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
       if (shiftInfo && shiftInfo.endMinutes != null) {
         const breakInMins = minutesFromMidnightInTimeZone(break_in);
         if (breakInMins != null && breakInMins > shiftInfo.endMinutes) {
-          return res.status(400).json({
+          return rejectEdit(400, {
             error: `PM clock-in time is after shift end. Shift ends at ${minutesToTimeStr(shiftInfo.endMinutes)}.`,
           });
         }
@@ -1964,19 +2012,44 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
       values.push(adjusted.undertimeMinutes);
     }
 
-    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    if (updates.length === 0) {
+      return rejectEdit(400, { error: 'No fields to update' });
+    }
+    updates.push("source = 'adjusted'");
     updates.push('updated_at = now()');
     values.push(id);
 
-    const result = await pool.query(
-      `UPDATE dtr_daily_summary SET ${updates.join(', ')} WHERE id = $${i} RETURNING id, employee_id, attendance_date::text AS attendance_date_iso, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, updated_at`,
+    const result = await client.query(
+      `UPDATE dtr_daily_summary SET ${updates.join(', ')} WHERE id = $${i}
+       RETURNING *, attendance_date::text AS attendance_date_iso`,
       values
     );
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(existing.attendance_date);
 
+    await client.query(
+      `INSERT INTO audit_logs (
+         user_id, action, entity_type, entity_id, details, created_at
+       ) VALUES (
+         $1::uuid, 'dtr_time_entry_adjusted', 'dtr_daily_summary', $2::uuid, $3, now()
+       )`,
+      [
+        req.user?.id || null,
+        id,
+        JSON.stringify({
+          employee_id: String(r.employee_id),
+          attendance_date: recordDateStr,
+          before: dtrAuditSnapshot(existing),
+          after: dtrAuditSnapshot(r),
+        }),
+      ]
+    );
+
+    await client.query('COMMIT');
+    transactionStarted = false;
+
     broadcastBiometricUpdate('dtr_refresh', {
-      action: 'manual_updated',
+      action: 'dtr_adjusted',
       userId: String(r.employee_id),
       date: recordDateStr,
       userIds: [String(r.employee_id)],
@@ -2000,8 +2073,17 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
       updated_at: r.updated_at,
     });
   } catch (err) {
+    if (transactionStarted && client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {
+        // Preserve the original update or audit failure.
+      }
+    }
     console.error('[dtr-daily-summary PUT]', err);
     res.status(500).json({ error: 'Failed to update DTR record' });
+  } finally {
+    client?.release();
   }
 });
 
