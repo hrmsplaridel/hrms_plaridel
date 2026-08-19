@@ -1039,13 +1039,40 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Delete entry (admin).
-  Future<bool> deleteEntry(String id) async {
+  /// Recalculate one saved DTR entry with the current shift and attendance policy.
+  Future<bool> recalculateEntry(String id) async {
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      await TimeRecordRepo.instance.delete(id);
+      await TimeRecordRepo.instance.recalculate(id);
+      invalidateCachedDtrData();
+      await loadTimeRecordsForAdmin(
+        startDate: _filterStart,
+        endDate: _filterEnd,
+        userId: _filterUserId,
+        departmentId: _filterDepartmentId,
+        forceRefresh: true,
+      );
+      await loadSummary(forceRefresh: true);
+      _loading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = userFacingApiError(e);
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Delete a processed entry with an administrator-provided audit reason.
+  Future<bool> deleteEntry(String id, {required String reason}) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      await TimeRecordRepo.instance.delete(id, reason: reason);
       invalidateCachedDtrData();
       await loadTimeRecordsForAdmin(
         startDate: _filterStart,
@@ -1060,6 +1087,36 @@ class DtrProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _error = e.toString();
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Restore a deleted processed entry from its preserved audit snapshot.
+  Future<bool> restoreDeletedEntry(
+    String deletionId, {
+    required String reason,
+  }) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      await TimeRecordRepo.instance.restoreDeleted(deletionId, reason: reason);
+      invalidateCachedDtrData();
+      await loadTimeRecordsForAdmin(
+        startDate: _filterStart,
+        endDate: _filterEnd,
+        userId: _filterUserId,
+        departmentId: _filterDepartmentId,
+        forceRefresh: true,
+      );
+      await loadSummary(forceRefresh: true);
+      _loading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
       return false;

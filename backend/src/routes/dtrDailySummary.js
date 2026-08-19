@@ -23,6 +23,7 @@ const {
   locatorSegmentsForMissingPunches,
   mergeLocatorCoverages,
 } = require('../services/locatorCoverage');
+const { resolveDtrDailySummaryScope } = require('../services/dtrDailySummaryAccess');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -951,10 +952,17 @@ router.get('/', protect, async (req, res) => {
     const params = [];
     const conditions = [];
     let i = 1;
-    const privileged = ['admin', 'hr', 'supervisor'].includes(req.user?.role);
+    const {
+      privileged,
+      employeeId: scopedEmployeeId,
+      departmentId: scopedDepartmentId,
+    } = resolveDtrDailySummaryScope(req.user, { employee_id, department_id });
+    if (!privileged && !scopedEmployeeId) {
+      return res.status(401).json({ error: 'Authenticated employee id is required' });
+    }
     if (!privileged) {
       conditions.push(`d.employee_id = $${i++}`);
-      params.push(req.user.id);
+      params.push(scopedEmployeeId);
     }
     if (start_date) {
       conditions.push(`d.attendance_date >= $${i++}`);
@@ -964,11 +972,11 @@ router.get('/', protect, async (req, res) => {
       conditions.push(`d.attendance_date <= $${i++}`);
       params.push(end_date);
     }
-    if (employee_id && privileged) {
+    if (scopedEmployeeId && privileged) {
       conditions.push(`d.employee_id = $${i++}`);
-      params.push(employee_id);
+      params.push(scopedEmployeeId);
     }
-    if (department_id && start_date && end_date) {
+    if (scopedDepartmentId && start_date && end_date) {
       const depIdx = i;
       const endIdx = i + 1;
       const startIdx = i + 2;
@@ -978,7 +986,7 @@ router.get('/', protect, async (req, res) => {
           AND a.effective_from <= $${endIdx}::date
           AND (a.effective_to IS NULL OR a.effective_to >= $${startIdx}::date)
       )`);
-      params.push(department_id, end_date, start_date);
+      params.push(scopedDepartmentId, end_date, start_date);
       i += 3;
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -1145,16 +1153,16 @@ router.get('/', protect, async (req, res) => {
         if (r.employee_id && r.employee_name) userIdToName[r.employee_id] = r.employee_name;
       }
       let employeeIds;
-      if (employee_id) {
-        employeeIds = [employee_id];
-        if (!userIdToName[employee_id]) {
+      if (scopedEmployeeId) {
+        employeeIds = [scopedEmployeeId];
+        if (!userIdToName[scopedEmployeeId]) {
           const u = await pool.query(
             'SELECT full_name FROM users WHERE id = $1',
-            [employee_id]
+            [scopedEmployeeId]
           );
-          if (u.rows[0]) userIdToName[employee_id] = u.rows[0].full_name;
+          if (u.rows[0]) userIdToName[scopedEmployeeId] = u.rows[0].full_name;
         }
-      } else if (department_id && startStr && endStr) {
+      } else if (scopedDepartmentId && startStr && endStr) {
         const deptEmps = await pool.query(
           `SELECT DISTINCT u.id, u.full_name
            FROM assignments a
@@ -1163,7 +1171,7 @@ router.get('/', protect, async (req, res) => {
              AND a.effective_from <= $2::date
              AND (a.effective_to IS NULL OR a.effective_to >= $3::date)
            ORDER BY u.full_name`,
-          [department_id, endStr, startStr]
+          [scopedDepartmentId, endStr, startStr]
         );
         employeeIds = deptEmps.rows.map((r) => r.id).filter(Boolean);
         for (const r of deptEmps.rows) {
@@ -1520,13 +1528,16 @@ router.get('/', protect, async (req, res) => {
       });
     }
 
-    let payload = rows;
+    const authorizedRows = privileged
+      ? rows
+      : rows.filter((row) => String(row.user_id) === String(scopedEmployeeId));
+    let payload = authorizedRows;
     if (hasDateRange && limitRaw != null && String(limitRaw).trim() !== '') {
       const off = Math.max(0, parseInt(offsetRaw, 10) || 0);
       const pageSize = Math.min(Math.max(1, parseInt(limitRaw, 10) || 500), 10000);
       res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count');
-      res.setHeader('X-Total-Count', String(rows.length));
-      payload = rows.slice(off, off + pageSize);
+      res.setHeader('X-Total-Count', String(authorizedRows.length));
+      payload = authorizedRows.slice(off, off + pageSize);
     }
 
     res.json(payload);
@@ -1724,6 +1735,40 @@ function computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo = null)
   );
 }
 
+function dtrAuditSnapshot(row) {
+  if (!row) return null;
+  const numberOrNull = (value) => {
+    if (value == null || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  return {
+    id: row.id || null,
+    employee_id: row.employee_id || null,
+    attendance_date:
+      (row.attendance_date_iso && String(row.attendance_date_iso).slice(0, 10)) ||
+      toIsoDateStr(row.attendance_date),
+    assignment_id: row.assignment_id || null,
+    shift_id: row.shift_id || null,
+    attendance_policy_id: row.attendance_policy_id || null,
+    holiday_id: row.holiday_id || null,
+    leave_request_id: row.leave_request_id || null,
+    time_in: row.time_in || null,
+    break_out: row.break_out || null,
+    break_in: row.break_in || null,
+    time_out: row.time_out || null,
+    total_hours: numberOrNull(row.total_hours),
+    late_minutes: numberOrNull(row.late_minutes),
+    undertime_minutes: numberOrNull(row.undertime_minutes),
+    overtime_minutes: numberOrNull(row.overtime_minutes),
+    status: row.status || null,
+    pm_status: row.pm_status || null,
+    source: row.source || null,
+    remarks: row.remarks || null,
+    updated_at: row.updated_at || null,
+  };
+}
+
 // POST /api/dtr-daily-summary - create a manual attendance record (Admin/HR only)
 router.post('/', protect, requireAdminOrHr, async (req, res) => {
   try {
@@ -1731,6 +1776,21 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
     const userId = req.user?.id;
     const targetId = employee_id || userId;
     if (!targetId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const normalizePunch = (value) => {
+      if (value == null) return null;
+      const normalized = String(value).trim();
+      return normalized || null;
+    };
+    const timeIn = normalizePunch(time_in);
+    const breakOut = normalizePunch(break_out);
+    const breakIn = normalizePunch(break_in);
+    const timeOut = normalizePunch(time_out);
+    if (![timeIn, breakOut, breakIn, timeOut].some(Boolean)) {
+      return res.status(400).json({
+        error: 'At least one attendance punch is required for a manual entry.',
+      });
+    }
 
     const date = attendance_date || new Date().toISOString().slice(0, 10);
     const leaveCoverage = await getApprovedLeaveCoverageForDate(targetId, date);
@@ -1740,16 +1800,15 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
         leave_request_id: leaveCoverage.leave_request_id,
       });
     }
-    const isAfternoonOnly = break_in && (time_in === null || time_in === undefined);
-    const timeIn = isAfternoonOnly ? null : (time_in || new Date().toISOString());
+    const isAfternoonOnly = Boolean(breakIn) && !timeIn;
     const holiday = await getHolidayByDate(date);
     const coverage = holiday ? (holiday.coverage || 'whole_day') : null;
 
     // Reject PM In (break_in) if after shift end time (skip for holidays)
-    if (break_in && !holiday) {
+    if (breakIn && !holiday) {
       const shiftInfo = await getAssignmentShiftForDate(targetId, date);
       if (shiftInfo && shiftInfo.endMinutes != null) {
-        const breakInMins = minutesFromMidnightInTimeZone(break_in);
+        const breakInMins = minutesFromMidnightInTimeZone(breakIn);
         if (breakInMins != null && breakInMins > shiftInfo.endMinutes) {
           return res.status(400).json({
             error: `PM clock-in time is after shift end. Shift ends at ${minutesToTimeStr(shiftInfo.endMinutes)}. Clock-in not allowed.`,
@@ -1759,25 +1818,25 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
     }
     let status = holiday ? 'holiday' : (isAfternoonOnly ? 'absent' : await computeStatusFromShift(targetId, date, timeIn));
     let pmStatus = null;
-    if (break_in && !holiday) {
-      pmStatus = await computePmLateStatus(targetId, date, break_in);
+    if (breakIn && !holiday) {
+      pmStatus = await computePmLateStatus(targetId, date, breakIn);
     }
     const holidayId = holiday ? holiday.id : null;
-    const total = total_hours != null ? parseFloat(total_hours) : computeTotalHours(timeIn, break_out, break_in, time_out);
+    const total = total_hours != null ? parseFloat(total_hours) : computeTotalHours(timeIn, breakOut, breakIn, timeOut);
     let lateMinutes = 0;
     let undertimeMinutes = 0;
     if ((!holiday || coverage === 'am_only' || coverage === 'pm_only') && status !== 'on_leave') {
-      const rawLate = await computeLateMinutes(targetId, date, timeIn, break_in || null, status, holidayId, coverage);
+      const rawLate = await computeLateMinutes(targetId, date, timeIn, breakIn, status, holidayId, coverage);
       const rawUnder = await computeUndertimeMinutes(
         targetId,
         date,
-        time_out || null,
-        break_out || null,
+        timeOut,
+        breakOut,
         status,
         holidayId,
         coverage,
         timeIn || null,
-        break_in || null
+        breakIn
       );
       const adjusted = await applyAttendancePolicyPenalties(targetId, date, rawLate, rawUnder);
       lateMinutes = adjusted.lateMinutes;
@@ -1790,7 +1849,7 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
       `INSERT INTO dtr_daily_summary (employee_id, attendance_date, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, holiday_id)
        VALUES ($1, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7::numeric, $8, $9, $10, $11, $12, $13)
        RETURNING id, employee_id, attendance_date::text AS attendance_date_iso, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, created_at`,
-      [targetId, date, timeIn, break_out || null, break_in || null, time_out || null, total, lateMinutes, undertimeMinutes, status, pmStatus, sourceValue, holidayId]
+       [targetId, date, timeIn, breakOut, breakIn, timeOut, total, lateMinutes, undertimeMinutes, status, pmStatus, sourceValue, holidayId]
     );
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || date;
@@ -1828,21 +1887,35 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
 
 // PUT /api/dtr-daily-summary/:id - correct an attendance record (Admin/HR only)
 router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
+  let client;
+  let transactionStarted = false;
   try {
     const { id } = req.params;
     const { time_in, break_out, break_in, time_out, total_hours, status, remarks } = req.body;
 
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transactionStarted = true;
+
+    const rejectEdit = async (statusCode, payload) => {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      return res.status(statusCode).json(payload);
+    };
+
     const hasCoverage = await _holidaysHasCoverageColumn();
     const joinCols = hasCoverage ? 'h.coverage AS holiday_coverage' : 'NULL::text AS holiday_coverage';
-    const check = await pool.query(
-      `SELECT d.employee_id, d.attendance_date, d.holiday_id, d.status, d.time_in, d.break_out, d.break_in, d.time_out,
-              ${joinCols}
+    const check = await client.query(
+      `SELECT d.*, d.attendance_date::text AS attendance_date_iso, ${joinCols}
        FROM dtr_daily_summary d
        LEFT JOIN holidays h ON h.id = d.holiday_id
-       WHERE d.id = $1`,
+       WHERE d.id = $1
+       FOR UPDATE OF d`,
       [id]
     );
-    if (check.rows.length === 0) return res.status(404).json({ error: 'Record not found' });
+    if (check.rows.length === 0) {
+      return rejectEdit(404, { error: 'Record not found' });
+    }
 
     const existing = check.rows[0];
     const existingCoverage = existing.holiday_coverage || 'whole_day';
@@ -1850,7 +1923,7 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
     const dateStr = toIsoDateStr(existing.attendance_date);
     const leaveCoverage = await getApprovedLeaveCoverageForDate(employeeId, dateStr);
     if (leaveCoverage) {
-      return res.status(409).json({
+      return rejectEdit(409, {
         error: 'An approved leave covers this date. Revoke or return the leave approval before editing attendance.',
         leave_request_id: leaveCoverage.leave_request_id,
       });
@@ -1862,7 +1935,7 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
       if (shiftInfo && shiftInfo.endMinutes != null) {
         const breakInMins = minutesFromMidnightInTimeZone(break_in);
         if (breakInMins != null && breakInMins > shiftInfo.endMinutes) {
-          return res.status(400).json({
+          return rejectEdit(400, {
             error: `PM clock-in time is after shift end. Shift ends at ${minutesToTimeStr(shiftInfo.endMinutes)}.`,
           });
         }
@@ -1939,19 +2012,44 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
       values.push(adjusted.undertimeMinutes);
     }
 
-    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    if (updates.length === 0) {
+      return rejectEdit(400, { error: 'No fields to update' });
+    }
+    updates.push("source = 'adjusted'");
     updates.push('updated_at = now()');
     values.push(id);
 
-    const result = await pool.query(
-      `UPDATE dtr_daily_summary SET ${updates.join(', ')} WHERE id = $${i} RETURNING id, employee_id, attendance_date::text AS attendance_date_iso, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, updated_at`,
+    const result = await client.query(
+      `UPDATE dtr_daily_summary SET ${updates.join(', ')} WHERE id = $${i}
+       RETURNING *, attendance_date::text AS attendance_date_iso`,
       values
     );
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(existing.attendance_date);
 
+    await client.query(
+      `INSERT INTO audit_logs (
+         user_id, action, entity_type, entity_id, details, created_at
+       ) VALUES (
+         $1::uuid, 'dtr_time_entry_adjusted', 'dtr_daily_summary', $2::uuid, $3, now()
+       )`,
+      [
+        req.user?.id || null,
+        id,
+        JSON.stringify({
+          employee_id: String(r.employee_id),
+          attendance_date: recordDateStr,
+          before: dtrAuditSnapshot(existing),
+          after: dtrAuditSnapshot(r),
+        }),
+      ]
+    );
+
+    await client.query('COMMIT');
+    transactionStarted = false;
+
     broadcastBiometricUpdate('dtr_refresh', {
-      action: 'manual_updated',
+      action: 'dtr_adjusted',
       userId: String(r.employee_id),
       date: recordDateStr,
       userIds: [String(r.employee_id)],
@@ -1975,20 +2073,422 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
       updated_at: r.updated_at,
     });
   } catch (err) {
+    if (transactionStarted && client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {
+        // Preserve the original update or audit failure.
+      }
+    }
     console.error('[dtr-daily-summary PUT]', err);
     res.status(500).json({ error: 'Failed to update DTR record' });
+  } finally {
+    client?.release();
   }
 });
 
-// DELETE /api/dtr-daily-summary/:id - admin only
+// POST /api/dtr-daily-summary/:id/recalculate - recompute one saved day using current shift/policy
+router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
+  let client;
+  let transactionStarted = false;
+  try {
+    const { id } = req.params;
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transactionStarted = true;
+
+    const rejectRecalc = async (statusCode, payload) => {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      return res.status(statusCode).json(payload);
+    };
+
+    const hasCoverage = await _holidaysHasCoverageColumn();
+    const joinCols = hasCoverage
+      ? 'h.coverage AS holiday_coverage, h.name AS holiday_name'
+      : 'NULL::text AS holiday_coverage, NULL::text AS holiday_name';
+    const check = await client.query(
+      `SELECT d.*, d.attendance_date::text AS attendance_date_iso, ${joinCols}
+       FROM dtr_daily_summary d
+       LEFT JOIN holidays h ON h.id = d.holiday_id
+       WHERE d.id = $1
+       FOR UPDATE OF d`,
+      [id]
+    );
+    if (check.rows.length === 0) {
+      return rejectRecalc(404, { error: 'Record not found' });
+    }
+
+    const existing = check.rows[0];
+    const employeeId = existing.employee_id;
+    const dateStr = toIsoDateStr(existing.attendance_date);
+    const coverage = existing.holiday_coverage || 'whole_day';
+    const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+    const holidayInfo = existing.holiday_id
+      ? {
+        id: existing.holiday_id,
+        name: existing.holiday_name,
+        coverage,
+      }
+      : null;
+
+    let status = existing.status;
+    if (existing.holiday_id != null && (!coverage || coverage === 'whole_day')) {
+      status = 'holiday';
+    } else if (status !== 'on_leave') {
+      status = existing.time_in
+        ? await computeStatusFromShift(employeeId, dateStr, existing.time_in)
+        : existing.status;
+    }
+
+    let pmStatus = existing.pm_status;
+    if (existing.holiday_id == null && status !== 'on_leave') {
+      pmStatus = existing.break_in
+        ? await computePmLateStatus(employeeId, dateStr, existing.break_in)
+        : null;
+    }
+
+    const totalHours = computeTotalHoursFromRecord(existing, shiftInfo);
+    let lateMinutes = 0;
+    let undertimeMinutes = 0;
+    const isHolidayOrLeave =
+      existing.holiday_id != null || status === 'holiday' || status === 'on_leave';
+    const isPartialSuspension =
+      isHolidayOrLeave && (coverage === 'am_only' || coverage === 'pm_only');
+    if (!isHolidayOrLeave || isPartialSuspension) {
+      const rawLate = await computeLateMinutes(
+        employeeId,
+        dateStr,
+        existing.time_in,
+        existing.break_in,
+        status,
+        existing.holiday_id,
+        coverage
+      );
+      const rawUnder = await computeUndertimeMinutes(
+        employeeId,
+        dateStr,
+        existing.time_out,
+        existing.break_out,
+        status,
+        existing.holiday_id,
+        coverage,
+        existing.time_in,
+        existing.break_in
+      );
+      const adjusted = await applyAttendancePolicyPenalties(
+        employeeId,
+        dateStr,
+        rawLate,
+        rawUnder
+      );
+      lateMinutes = adjusted.lateMinutes;
+      undertimeMinutes = adjusted.undertimeMinutes;
+    }
+
+    const attendanceRemark = await computeAttendanceRemark(
+      {
+        ...existing,
+        status,
+        late_minutes: lateMinutes,
+        undertime_minutes: undertimeMinutes,
+      },
+      shiftInfo,
+      existing.holiday_id,
+      existing.leave_request_id,
+      holidayInfo
+    );
+
+    const result = await client.query(
+      `UPDATE dtr_daily_summary
+       SET total_hours = $2::numeric,
+           late_minutes = $3,
+           undertime_minutes = $4,
+           status = $5,
+           pm_status = $6,
+           source = CASE WHEN source = 'system' THEN source ELSE 'adjusted' END,
+           updated_at = now()
+       WHERE id = $1::uuid
+       RETURNING *, attendance_date::text AS attendance_date_iso`,
+      [id, totalHours, lateMinutes, undertimeMinutes, status, pmStatus]
+    );
+    const r = result.rows[0];
+
+    await client.query(
+      `INSERT INTO audit_logs (
+         user_id, action, entity_type, entity_id, details, created_at
+       ) VALUES (
+         $1::uuid, 'dtr_time_entry_recalculated', 'dtr_daily_summary', $2::uuid, $3, now()
+       )`,
+      [
+        req.user?.id || null,
+        id,
+        JSON.stringify({
+          employee_id: String(r.employee_id),
+          attendance_date: dateStr,
+          before: dtrAuditSnapshot(existing),
+          after: dtrAuditSnapshot(r),
+        }),
+      ]
+    );
+
+    await client.query('COMMIT');
+    transactionStarted = false;
+
+    broadcastBiometricUpdate('dtr_refresh', {
+      action: 'dtr_recalculated',
+      userId: String(r.employee_id),
+      date: dateStr,
+      userIds: [String(r.employee_id)],
+      dates: [dateStr],
+    });
+
+    res.json({
+      id: r.id,
+      user_id: r.employee_id,
+      record_date: dateStr,
+      time_in: r.time_in,
+      break_out: r.break_out,
+      break_in: r.break_in,
+      time_out: r.time_out,
+      total_hours: r.total_hours != null ? parseFloat(r.total_hours) : null,
+      late_minutes: r.late_minutes != null ? parseInt(r.late_minutes, 10) : 0,
+      undertime_minutes: r.undertime_minutes != null ? parseInt(r.undertime_minutes, 10) : 0,
+      status: r.status,
+      pm_status: r.pm_status,
+      source: r.source || null,
+      attendance_remark: attendanceRemark,
+      updated_at: r.updated_at,
+    });
+  } catch (err) {
+    if (transactionStarted && client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {
+        // Preserve original recalculation failure.
+      }
+    }
+    console.error('[dtr-daily-summary recalculate POST]', err);
+    res.status(500).json({ error: 'Failed to recalculate DTR record' });
+  } finally {
+    client?.release();
+  }
+});
+
+// GET /api/dtr-daily-summary/deletions - admin deletion history
+router.get('/deletions', protect, requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const includeRestored = isTruthyQueryFlag(req.query.include_restored);
+    const params = [];
+    const conditions = [];
+    let i = 1;
+
+    if (!includeRestored) conditions.push('dd.restored_at IS NULL');
+    if (req.query.employee_id) {
+      conditions.push(`dd.employee_id = $${i++}::uuid`);
+      params.push(req.query.employee_id);
+    }
+    if (req.query.start_date) {
+      conditions.push(`dd.attendance_date >= $${i++}::date`);
+      params.push(req.query.start_date);
+    }
+    if (req.query.end_date) {
+      conditions.push(`dd.attendance_date <= $${i++}::date`);
+      params.push(req.query.end_date);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit, offset);
+    const result = await pool.query(
+      `SELECT dd.id,
+              dd.deleted_dtr_summary_id,
+              dd.employee_id,
+              dd.attendance_date::text AS attendance_date,
+              dd.source,
+              dd.reason,
+              dd.deleted_by,
+              dd.record_snapshot,
+              dd.deleted_at,
+              dd.restored_by,
+              dd.restoration_reason,
+              dd.restored_at,
+              employee.full_name AS employee_name,
+              deleted_actor.full_name AS deleted_by_name,
+              restored_actor.full_name AS restored_by_name,
+              COUNT(*) OVER()::int AS total_count
+       FROM dtr_daily_summary_deletions dd
+       LEFT JOIN users employee ON employee.id = dd.employee_id
+       LEFT JOIN users deleted_actor ON deleted_actor.id = dd.deleted_by
+       LEFT JOIN users restored_actor ON restored_actor.id = dd.restored_by
+       ${where}
+       ORDER BY (dd.restored_at IS NULL) DESC, dd.deleted_at DESC
+       LIMIT $${i++} OFFSET $${i}`,
+      params
+    );
+
+    res.json({
+      items: result.rows.map(({ total_count, ...row }) => row),
+      total: result.rows[0]?.total_count || 0,
+    });
+  } catch (err) {
+    console.error('[dtr-daily-summary deletions GET]', err);
+    res.status(500).json({ error: 'Failed to fetch deleted DTR entries' });
+  }
+});
+
+// POST /api/dtr-daily-summary/deletions/:deletionId/restore - admin only
+router.post('/deletions/:deletionId/restore', protect, requireAdmin, async (req, res) => {
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length < 3) {
+    return res.status(400).json({ error: 'A restoration reason of at least 3 characters is required' });
+  }
+  if (reason.length > 1000) {
+    return res.status(400).json({ error: 'Restoration reason must not exceed 1000 characters' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const deletionResult = await client.query(
+      `SELECT *
+       FROM dtr_daily_summary_deletions
+       WHERE id = $1::uuid
+       FOR UPDATE`,
+      [req.params.deletionId]
+    );
+    if (deletionResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Deleted DTR entry not found' });
+    }
+
+    const deletion = deletionResult.rows[0];
+    if (deletion.restored_at) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This DTR entry has already been restored' });
+    }
+
+    const existing = await client.query(
+      `SELECT id
+       FROM dtr_daily_summary
+       WHERE employee_id = $1::uuid AND attendance_date = $2::date
+       LIMIT 1`,
+      [deletion.employee_id, deletion.attendance_date]
+    );
+    if (existing.rowCount > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Attendance already exists for this employee and date. Remove the corrected entry before restoring the deleted record.',
+      });
+    }
+
+    const snapshot = deletion.record_snapshot || {};
+    const source = ['system', 'manual', 'adjusted'].includes(snapshot.source)
+      ? snapshot.source
+      : 'adjusted';
+    const status = ['present', 'late', 'absent', 'on_leave', 'holiday', 'rest_day', 'incomplete'].includes(snapshot.status)
+      ? snapshot.status
+      : 'incomplete';
+    const pmStatus = ['present', 'late'].includes(snapshot.pm_status)
+      ? snapshot.pm_status
+      : null;
+
+    const restored = await client.query(
+      `INSERT INTO dtr_daily_summary (
+         id, employee_id, attendance_date,
+         assignment_id, shift_id, attendance_policy_id, holiday_id, leave_request_id,
+         time_in, time_out, break_in, break_out,
+         late_minutes, undertime_minutes, overtime_minutes, total_hours,
+         status, pm_status, source, remarks, created_at, updated_at
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::date,
+         (SELECT id FROM assignments WHERE id = $4::uuid),
+         (SELECT id FROM shifts WHERE id = $5::uuid),
+         (SELECT id FROM attendance_policies WHERE id = $6::uuid),
+         (SELECT id FROM holidays WHERE id = $7::uuid),
+         (SELECT id FROM leave_requests WHERE id = $8::uuid),
+         $9::timestamptz, $10::timestamptz, $11::timestamptz, $12::timestamptz,
+         $13, $14, $15, $16::numeric,
+         $17, $18, $19, $20, COALESCE($21::timestamptz, now()), now()
+       )
+       RETURNING id, employee_id, attendance_date::text AS attendance_date, source, status`,
+      [
+        deletion.deleted_dtr_summary_id,
+        deletion.employee_id,
+        deletion.attendance_date,
+        snapshot.assignment_id || null,
+        snapshot.shift_id || null,
+        snapshot.attendance_policy_id || null,
+        snapshot.holiday_id || null,
+        snapshot.leave_request_id || null,
+        snapshot.time_in || null,
+        snapshot.time_out || null,
+        snapshot.break_in || null,
+        snapshot.break_out || null,
+        Math.max(0, parseInt(snapshot.late_minutes, 10) || 0),
+        Math.max(0, parseInt(snapshot.undertime_minutes, 10) || 0),
+        Math.max(0, parseInt(snapshot.overtime_minutes, 10) || 0),
+        Math.max(0, parseFloat(snapshot.total_hours) || 0),
+        status,
+        pmStatus,
+        source,
+        snapshot.remarks || null,
+        snapshot.created_at || null,
+      ]
+    );
+
+    await client.query(
+      `UPDATE dtr_daily_summary_deletions
+       SET restored_by = $2::uuid,
+           restoration_reason = $3,
+           restored_at = now()
+       WHERE id = $1::uuid`,
+      [deletion.id, req.user?.id || null, reason]
+    );
+    await client.query('COMMIT');
+
+    const row = restored.rows[0];
+    broadcastBiometricUpdate('dtr_refresh', {
+      action: 'dtr_restored',
+      userId: String(row.employee_id),
+      date: row.attendance_date,
+      userIds: [String(row.employee_id)],
+      dates: [row.attendance_date],
+    });
+    res.json(row);
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) { }
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Attendance already exists for this employee and date' });
+    }
+    console.error('[dtr-daily-summary deletion restore POST]', err);
+    res.status(500).json({ error: 'Failed to restore DTR entry' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/dtr-daily-summary/:id - admin only; preserves raw biometric logs and an audit snapshot
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length < 3) {
+    return res.status(400).json({ error: 'A deletion reason of at least 3 characters is required' });
+  }
+  if (reason.length > 1000) {
+    return res.status(400).json({ error: 'Deletion reason must not exceed 1000 characters' });
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const target = await client.query(
-      `SELECT id, employee_id, attendance_date::text AS attendance_date_iso, source
-       FROM dtr_daily_summary
-       WHERE id = $1`,
+      `SELECT d.*, d.attendance_date::text AS attendance_date_iso
+       FROM dtr_daily_summary d
+       WHERE d.id = $1
+       FOR UPDATE`,
       [req.params.id]
     );
     if (target.rowCount === 0) {
@@ -1997,27 +2497,34 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
     }
 
     const row = target.rows[0];
+    await client.query(
+      `INSERT INTO dtr_daily_summary_deletions (
+         deleted_dtr_summary_id,
+         employee_id,
+         attendance_date,
+         source,
+         reason,
+         deleted_by,
+         record_snapshot
+       ) VALUES ($1::uuid, $2::uuid, $3::date, $4, $5, $6::uuid, $7::jsonb)`,
+      [
+        row.id,
+        row.employee_id,
+        row.attendance_date_iso,
+        row.source,
+        reason,
+        req.user?.id || null,
+        JSON.stringify(row),
+      ]
+    );
     await client.query('DELETE FROM dtr_daily_summary WHERE id = $1', [req.params.id]);
-
-    // Biometric rows are rebuilt from biometric_attendance_logs during processing.
-    // Delete matching raw logs for the same employee/date so the summary row does not return.
-    if (row.source === 'system' && row.employee_id && row.attendance_date_iso) {
-      const dateStr = String(row.attendance_date_iso).slice(0, 10);
-      await client.query(
-        `DELETE FROM biometric_attendance_logs
-         WHERE user_id = $1::uuid
-           AND logged_at >= $2::date
-           AND logged_at < ($2::date + INTERVAL '1 day')`,
-        [row.employee_id, dateStr]
-      );
-    }
 
     await client.query('COMMIT');
     const deletedDateStr = row.attendance_date_iso
       ? String(row.attendance_date_iso).slice(0, 10)
       : null;
     broadcastBiometricUpdate('dtr_refresh', {
-      action: 'manual_deleted',
+      action: 'dtr_deleted',
       userId: String(row.employee_id),
       date: deletedDateStr,
       userIds: [String(row.employee_id)],

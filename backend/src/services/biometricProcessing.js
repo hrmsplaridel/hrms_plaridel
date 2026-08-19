@@ -9,6 +9,7 @@ const {
   interpretPunchesForShift,
   computeTotalHours: computeShiftTotalHours,
 } = require('./shiftAttendance');
+const { dtrDeletionKey, getDeletedDtrDateKeys } = require('./dtrDeletionAudit');
 
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
@@ -556,6 +557,13 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
   const rowCount = grouped.rows.length;
   console.log('[biometricProcessing] Grouped rows:', rowCount);
 
+  const deletedDtrDateKeys = await getDeletedDtrDateKeys(
+    pool,
+    userIdArr,
+    dateFrom,
+    dateTo
+  );
+
   let inserted = 0;
   let updated = 0;
   let removed = 0;
@@ -568,6 +576,15 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
     if (!attendanceDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(attendanceDateStr)) {
       console.warn('[biometricProcessing] Skipping row with invalid date:', { user_id, attendance_date });
       skipped++;
+      continue;
+    }
+
+    if (deletedDtrDateKeys.has(dtrDeletionKey(user_id, attendanceDateStr))) {
+      skipped++;
+      console.log('[biometricProcessing] SKIP (processed DTR entry deleted by admin)', {
+        employee_id: user_id,
+        attendance_date: attendanceDateStr,
+      });
       continue;
     }
 

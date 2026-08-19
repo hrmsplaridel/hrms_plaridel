@@ -323,6 +323,57 @@ class DtrSummaryCounts {
   final int pendingApproval;
 }
 
+class DeletedTimeRecord {
+  const DeletedTimeRecord({
+    required this.id,
+    required this.deletedDtrSummaryId,
+    required this.userId,
+    required this.recordDate,
+    required this.source,
+    required this.reason,
+    required this.deletedAt,
+    this.employeeName,
+    this.deletedByName,
+    this.restoredByName,
+    this.restorationReason,
+    this.restoredAt,
+  });
+
+  final String id;
+  final String deletedDtrSummaryId;
+  final String userId;
+  final DateTime recordDate;
+  final String source;
+  final String reason;
+  final DateTime deletedAt;
+  final String? employeeName;
+  final String? deletedByName;
+  final String? restoredByName;
+  final String? restorationReason;
+  final DateTime? restoredAt;
+
+  bool get isRestored => restoredAt != null;
+
+  factory DeletedTimeRecord.fromJson(Map<String, dynamic> json) {
+    return DeletedTimeRecord(
+      id: json['id']?.toString() ?? '',
+      deletedDtrSummaryId: json['deleted_dtr_summary_id']?.toString() ?? '',
+      userId: json['employee_id']?.toString() ?? '',
+      recordDate: TimeRecord._parseRecordDate(json['attendance_date']),
+      source: json['source']?.toString() ?? 'system',
+      reason: json['reason']?.toString() ?? '',
+      deletedAt:
+          DateTime.tryParse(json['deleted_at']?.toString() ?? '') ??
+          DateTime.now(),
+      employeeName: json['employee_name']?.toString(),
+      deletedByName: json['deleted_by_name']?.toString(),
+      restoredByName: json['restored_by_name']?.toString(),
+      restorationReason: json['restoration_reason']?.toString(),
+      restoredAt: DateTime.tryParse(json['restored_at']?.toString() ?? ''),
+    );
+  }
+}
+
 /// Repository for DTR time records. Uses backend API (dtr_daily_summary); Supabase logic commented out.
 class TimeRecordRepo {
   TimeRecordRepo._();
@@ -434,6 +485,16 @@ class TimeRecordRepo {
     );
   }
 
+  /// Recalculate one saved DTR row using the current shift and attendance policy.
+  Future<TimeRecord> recalculate(String id) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/dtr-daily-summary/$id/recalculate',
+    );
+    final data = res.data;
+    if (data == null) throw Exception('No data returned');
+    return TimeRecord.fromJson(data);
+  }
+
   /// Get record for a user on a specific date (for upsert by date).
   Future<TimeRecord?> getRecordForUserForDate(
     String userId,
@@ -464,9 +525,56 @@ class TimeRecordRepo {
     }
   }
 
-  /// Delete record (admin). Uses DELETE /api/dtr-daily-summary/:id.
-  Future<void> delete(String id) async {
-    await ApiClient.instance.delete('/api/dtr-daily-summary/$id');
+  /// Delete a processed record while preserving its biometric evidence and audit snapshot.
+  Future<void> delete(String id, {required String reason}) async {
+    await ApiClient.instance.delete(
+      '/api/dtr-daily-summary/$id',
+      data: {'reason': reason},
+    );
+  }
+
+  Future<List<DeletedTimeRecord>> listDeleted({
+    bool includeRestored = true,
+    DateTime? startDate,
+    DateTime? endDate,
+    String? userId,
+    int limit = 500,
+  }) async {
+    final params = <String, dynamic>{
+      'include_restored': includeRestored,
+      'limit': limit,
+    };
+    if (startDate != null) {
+      params['start_date'] = TimeRecord._toDateOnlyString(startDate);
+    }
+    if (endDate != null) {
+      params['end_date'] = TimeRecord._toDateOnlyString(endDate);
+    }
+    if (userId?.trim().isNotEmpty == true) {
+      params['employee_id'] = userId!.trim();
+    }
+    final response = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/dtr-daily-summary/deletions',
+      queryParameters: params,
+    );
+    final items = response.data?['items'];
+    if (items is! List) return const [];
+    return items
+        .whereType<Map>()
+        .map(
+          (item) => DeletedTimeRecord.fromJson(Map<String, dynamic>.from(item)),
+        )
+        .toList();
+  }
+
+  Future<void> restoreDeleted(
+    String deletionId, {
+    required String reason,
+  }) async {
+    await ApiClient.instance.post(
+      '/api/dtr-daily-summary/deletions/$deletionId/restore',
+      data: {'reason': reason},
+    );
   }
 
   /// Admin dashboard counts in one round-trip (DTR + leave).

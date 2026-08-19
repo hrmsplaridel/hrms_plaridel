@@ -1089,6 +1089,35 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
   CONSTRAINT uq_dtr_daily_summary_employee_date UNIQUE (employee_id, attendance_date)
 );
 
+-- Deleting a processed DTR entry must not destroy its raw biometric evidence.
+-- These immutable snapshots also suppress automatic recreation for the same day.
+CREATE TABLE IF NOT EXISTS dtr_daily_summary_deletions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  deleted_dtr_summary_id UUID NOT NULL,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  attendance_date DATE NOT NULL,
+  source TEXT NOT NULL,
+  reason TEXT NOT NULL CHECK (btrim(reason) <> ''),
+  deleted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  record_snapshot JSONB NOT NULL,
+  deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  restored_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  restoration_reason TEXT CHECK (
+    restoration_reason IS NULL OR btrim(restoration_reason) <> ''
+  ),
+  restored_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_summary_deletions_employee_date
+  ON dtr_daily_summary_deletions(employee_id, attendance_date);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_summary_deletions_deleted_at
+  ON dtr_daily_summary_deletions(deleted_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_summary_deletions_active
+  ON dtr_daily_summary_deletions(employee_id, attendance_date)
+  WHERE restored_at IS NULL;
+
 -- Approved leave is an overlay on DTR. Keeping it separate preserves punches,
 -- holidays, absences, and incomplete records when approval is later revoked.
 CREATE TABLE IF NOT EXISTS dtr_leave_coverage (

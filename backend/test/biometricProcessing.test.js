@@ -19,12 +19,12 @@ function withMockedModule(modulePath, exportsValue) {
   };
 }
 
-function loadBiometricProcessing() {
+function loadBiometricProcessing(query) {
   const restoreDb = withMockedModule('../src/config/db', {
     pool: {
-      query: async () => {
+      query: query || (async () => {
         throw new Error('Unexpected database query in biometricProcessing unit test');
-      },
+      }),
     },
   });
   const restoreWs = withMockedModule('../src/websockets/biometricStream', {
@@ -126,6 +126,49 @@ test('after-shift guard does not reject overnight shifts', () => {
       ),
       false
     );
+  } finally {
+    restore();
+  }
+});
+
+test('deleted processed DTR date is not recreated from preserved biometric punches', async () => {
+  const employeeId = '5b9fe943-4700-4ff6-a84e-66ef793ecfc4';
+  const queries = [];
+  const { service, restore } = loadBiometricProcessing(async (sql) => {
+    queries.push(String(sql));
+    if (/FROM biometric_attendance_logs/i.test(String(sql))) {
+      return {
+        rows: [
+          {
+            user_id: employeeId,
+            attendance_date: '2026-06-16',
+            punches: ['2026-06-16T00:00:00.000Z'],
+          },
+        ],
+      };
+    }
+    if (/FROM dtr_daily_summary_deletions/i.test(String(sql))) {
+      return {
+        rows: [
+          {
+            employee_id: employeeId,
+            attendance_date: '2026-06-16',
+          },
+        ],
+      };
+    }
+    throw new Error(`Unexpected query after deleted-date suppression: ${sql}`);
+  });
+
+  try {
+    const result = await service.processBiometricLogsToSummary(
+      [employeeId],
+      '2026-06-01',
+      '2026-06-30',
+    );
+
+    assert.deepEqual(result, { inserted: 0, updated: 0 });
+    assert.equal(queries.length, 2);
   } finally {
     restore();
   }
