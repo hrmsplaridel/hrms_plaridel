@@ -485,6 +485,16 @@ class TimeRecordRepo {
     );
   }
 
+  /// Recalculate one saved DTR row using the current shift and attendance policy.
+  Future<TimeRecord> recalculate(String id) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/dtr-daily-summary/$id/recalculate',
+    );
+    final data = res.data;
+    if (data == null) throw Exception('No data returned');
+    return TimeRecord.fromJson(data);
+  }
+
   /// Get record for a user on a specific date (for upsert by date).
   Future<TimeRecord?> getRecordForUserForDate(
     String userId,

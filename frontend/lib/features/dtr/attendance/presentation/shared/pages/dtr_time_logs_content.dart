@@ -1480,6 +1480,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   onSelected: (value) {
                     if (value == 'edit') {
                       _showEditDialog(dtr, record);
+                    } else if (value == 'recalculate') {
+                      _recalculateRecord(dtr, record);
                     } else if (value == 'delete') {
                       _confirmDelete(dtr, record);
                     }
@@ -1497,6 +1499,25 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                           const SizedBox(width: 12),
                           Text(
                             'Edit',
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(ctx),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem<String>(
+                      value: 'recalculate',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.refresh_rounded,
+                            size: 20,
+                            color: AppTheme.dashTextPrimaryOf(ctx),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Recalculate',
                             style: TextStyle(
                               color: AppTheme.dashTextPrimaryOf(ctx),
                             ),
@@ -2817,6 +2838,21 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       if (!saved) {
         _showTimeLogSnack(dtr.error ?? 'Unable to update this time entry.');
       }
+    }
+  }
+
+  Future<void> _recalculateRecord(DtrProvider dtr, TimeRecord r) async {
+    final id = r.id;
+    if (id == null) {
+      _showTimeLogSnack('This time entry cannot be recalculated yet.');
+      return;
+    }
+    final ok = await dtr.recalculateEntry(id);
+    if (!mounted) return;
+    if (ok) {
+      _showTimeLogSnack('Time entry recalculated.', isSuccess: true);
+    } else {
+      _showTimeLogSnack(dtr.error ?? 'Unable to recalculate this time entry.');
     }
   }
 
