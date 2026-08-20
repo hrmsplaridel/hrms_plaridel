@@ -766,15 +766,28 @@ async function getApprovedLeaveCoverageInRange(employeeIds, startStr, endStr) {
   return out;
 }
 
-async function getApprovedLeaveCoverageForDate(employeeId, dateStr) {
+async function getApprovedLeaveCoverageForDate(employeeId, dateStr, db = pool) {
   if (!employeeId || !dateStr) return null;
-  const result = await pool.query(
-    `SELECT c.id, c.leave_request_id
-     FROM dtr_leave_coverage c
-     JOIN leave_requests lr ON lr.id = c.leave_request_id
-     WHERE c.employee_id = $1::uuid
-       AND c.attendance_date = $2::date
-       AND lr.status = 'approved'
+  const result = await db.query(
+    `SELECT active_coverage.id, active_coverage.leave_request_id
+     FROM (
+       SELECT c.id, c.leave_request_id, 0 AS source_priority
+       FROM dtr_leave_coverage c
+       JOIN leave_requests lr ON lr.id = c.leave_request_id
+       WHERE c.employee_id = $1::uuid
+         AND c.attendance_date = $2::date
+         AND lr.status = 'approved'
+
+       UNION ALL
+
+       SELECT NULL::uuid AS id, d.leave_request_id, 1 AS source_priority
+       FROM dtr_daily_summary d
+       JOIN leave_requests lr ON lr.id = d.leave_request_id
+       WHERE d.employee_id = $1::uuid
+         AND d.attendance_date = $2::date
+         AND lr.status = 'approved'
+     ) active_coverage
+     ORDER BY active_coverage.source_priority
      LIMIT 1`,
     [employeeId, dateStr]
   );
@@ -1005,6 +1018,7 @@ router.get('/', protect, async (req, res) => {
               d.leave_request_id AS base_leave_request_id,
               dlc.id AS leave_coverage_id,
               COALESCE(dlc.leave_request_id, d.leave_request_id) AS leave_request_id,
+              lr.status AS leave_request_status,
               d.created_at, d.updated_at,
               u.full_name AS employee_name,
               ${joinCols},
@@ -1054,7 +1068,9 @@ router.get('/', protect, async (req, res) => {
         )
         : null;
       const coverage = r.holiday_coverage || 'whole_day';
-      const hasLeaveCoverage = r.leave_coverage_id != null;
+      const hasLeaveCoverage =
+        r.leave_coverage_id != null || r.leave_request_status === 'approved';
+      const activeLeaveRequestId = hasLeaveCoverage ? r.leave_request_id : null;
       const effectiveStatus = hasLeaveCoverage ? 'on_leave' : r.status;
       const isPartialSuspension = effectiveStatus === 'holiday' && (coverage === 'am_only' || coverage === 'pm_only');
       let lateMinutes = hasLeaveCoverage
@@ -1104,11 +1120,11 @@ router.get('/', protect, async (req, res) => {
         undertime_minutes: undertimeMinutes,
         status: effectiveStatus,
         holiday_id: r.holiday_id,
-        leave_request_id: r.leave_request_id,
+        leave_request_id: activeLeaveRequestId,
         leave_type_name: r.leave_type_name,
       };
       const holidayInfo = r.holiday_id ? { name: r.holiday_name, holiday_type: r.holiday_type, coverage } : null;
-      let attendanceRemark = await computeAttendanceRemark(recordForRemark, shiftInfo, r.holiday_id, r.leave_request_id, holidayInfo);
+      let attendanceRemark = await computeAttendanceRemark(recordForRemark, shiftInfo, r.holiday_id, activeLeaveRequestId, holidayInfo);
       const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
       return {
         id: r.id,
@@ -1126,7 +1142,8 @@ router.get('/', protect, async (req, res) => {
         remarks: r.remarks,
         attendance_remark: attendanceRemark,
         holiday_id: r.holiday_id,
-        leave_request_id: r.leave_request_id,
+        leave_request_id: activeLeaveRequestId,
+        is_leave_covered: hasLeaveCoverage,
         holiday_name: r.holiday_name,
         holiday_type: r.holiday_type,
         coverage,
@@ -1283,6 +1300,7 @@ router.get('/', protect, async (req, res) => {
           holiday_id: null,
           leave_request_id: leave.leave_request_id,
           leave_coverage_id: leave.leave_coverage_id,
+          is_leave_covered: true,
           holiday_name: null,
           holiday_type: null,
           coverage: null,
@@ -1656,12 +1674,13 @@ router.get('/today', protect, async (req, res) => {
               target.attendance_date,
               target.attendance_date::text AS attendance_date_iso,
               d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours,
-              CASE WHEN dlc.id IS NOT NULL THEN 'on_leave' ELSE d.status END AS status,
+              CASE WHEN dlc.id IS NOT NULL OR lr.status = 'approved' THEN 'on_leave' ELSE d.status END AS status,
               d.pm_status, d.remarks,
-              CASE WHEN dlc.id IS NOT NULL THEN 'adjusted' ELSE d.source END AS source,
+              CASE WHEN dlc.id IS NOT NULL OR lr.status = 'approved' THEN 'adjusted' ELSE d.source END AS source,
               d.holiday_id, d.created_at, d.updated_at,
               dlc.id AS leave_coverage_id,
-              COALESCE(dlc.leave_request_id, d.leave_request_id) AS leave_request_id,
+              COALESCE(dlc.leave_request_id, CASE WHEN lr.status = 'approved' THEN d.leave_request_id END) AS leave_request_id,
+              (dlc.id IS NOT NULL OR lr.status = 'approved') AS is_leave_covered,
               COALESCE(NULLIF(lt.display_name, ''), NULLIF(lt.description, ''), lt.name) AS leave_type_name,
               u.full_name AS employee_name,
               ${joinCols}
@@ -1711,6 +1730,7 @@ router.get('/today', protect, async (req, res) => {
       coverage: r.holiday_coverage || 'whole_day',
       leave_request_id: r.leave_request_id || null,
       leave_coverage_id: r.leave_coverage_id || null,
+      is_leave_covered: r.is_leave_covered === true,
       leave_type_name: r.leave_type_name || null,
       created_at: r.created_at,
       updated_at: r.updated_at,
@@ -1891,7 +1911,17 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
   let transactionStarted = false;
   try {
     const { id } = req.params;
-    const { time_in, break_out, break_in, time_out, total_hours, status, remarks } = req.body;
+    const {
+      time_in,
+      break_out,
+      break_in,
+      time_out,
+      total_hours,
+      status,
+      remarks,
+      edit_underlying_attendance,
+    } = req.body;
+    const editUnderlyingAttendance = edit_underlying_attendance === true;
 
     client = await pool.connect();
     await client.query('BEGIN');
@@ -1921,10 +1951,14 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
     const existingCoverage = existing.holiday_coverage || 'whole_day';
     const employeeId = existing.employee_id;
     const dateStr = toIsoDateStr(existing.attendance_date);
-    const leaveCoverage = await getApprovedLeaveCoverageForDate(employeeId, dateStr);
-    if (leaveCoverage) {
+    const leaveCoverage = await getApprovedLeaveCoverageForDate(
+      employeeId,
+      dateStr,
+      client
+    );
+    if (leaveCoverage && !editUnderlyingAttendance) {
       return rejectEdit(409, {
-        error: 'An approved leave covers this date. Revoke or return the leave approval before editing attendance.',
+        error: 'An approved leave covers this date. Use the Edit underlying attendance action or revoke the leave first.',
         leave_request_id: leaveCoverage.leave_request_id,
       });
     }
@@ -1966,7 +2000,9 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
       values.push(computedTotal);
     }
 
-    let resolvedStatus = status;
+    // The API response uses `on_leave` while coverage is active, but that is an
+    // overlay and must never be written into the underlying attendance row.
+    let resolvedStatus = editUnderlyingAttendance ? undefined : status;
     if (time_in !== undefined) {
       if (existing.holiday_id != null) {
         resolvedStatus = 'holiday';
@@ -2039,6 +2075,8 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
         JSON.stringify({
           employee_id: String(r.employee_id),
           attendance_date: recordDateStr,
+          edited_under_leave_coverage: Boolean(leaveCoverage),
+          leave_request_id: leaveCoverage?.leave_request_id || null,
           before: dtrAuditSnapshot(existing),
           after: dtrAuditSnapshot(r),
         }),
@@ -2497,6 +2535,18 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
     }
 
     const row = target.rows[0];
+    const leaveCoverage = await getApprovedLeaveCoverageForDate(
+      row.employee_id,
+      row.attendance_date_iso,
+      client
+    );
+    if (leaveCoverage) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'This attendance row is covered by approved leave and cannot be deleted. Revoke the leave before deleting the underlying attendance.',
+        leave_request_id: leaveCoverage.leave_request_id,
+      });
+    }
     await client.query(
       `INSERT INTO dtr_daily_summary_deletions (
          deleted_dtr_summary_id,

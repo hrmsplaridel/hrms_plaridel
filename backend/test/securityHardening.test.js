@@ -240,6 +240,96 @@ test('direct DTR edits become adjusted and preserve before-and-after audit snaps
   clearModule('../src/routes/dtrDailySummary');
 });
 
+test('editing underlying attendance preserves an active leave overlay without storing on_leave', async () => {
+  const recordId = '5cc06130-7dd8-4792-bc4f-ac1b423bb2a9';
+  const employeeId = '5b9fe943-4700-4ff6-a84e-66ef793ecfc4';
+  const leaveRequestId = '16c69794-77f2-4dd9-8de7-83067fc89920';
+  const queries = [];
+  const existing = {
+    id: recordId,
+    employee_id: employeeId,
+    attendance_date: '2026-06-16',
+    attendance_date_iso: '2026-06-16',
+    time_in: '2026-06-16T00:00:00.000Z',
+    time_out: '2026-06-16T09:00:00.000Z',
+    total_hours: '8',
+    late_minutes: 0,
+    undertime_minutes: 0,
+    overtime_minutes: 0,
+    status: 'present',
+    source: 'system',
+    holiday_id: null,
+    holiday_coverage: null,
+  };
+  const client = {
+    async query(sql, params = []) {
+      const text = String(sql);
+      queries.push({ sql: text, params });
+      if (/SELECT d\.\*, d\.attendance_date::text/i.test(text)) {
+        return { rowCount: 1, rows: [existing] };
+      }
+      if (/FROM dtr_leave_coverage c/i.test(text)) {
+        return {
+          rowCount: 1,
+          rows: [{ id: 'coverage-1', leave_request_id: leaveRequestId }],
+        };
+      }
+      if (/UPDATE dtr_daily_summary SET/i.test(text)) {
+        return {
+          rowCount: 1,
+          rows: [{
+            ...existing,
+            source: 'adjusted',
+            remarks: 'Underlying attendance verified.',
+          }],
+        };
+      }
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      connect: async () => client,
+      query: async () => ({ rowCount: 0, rows: [] }),
+    },
+  });
+  const restoreWs = withMockedModule('../src/websockets/biometricStream', {
+    broadcastBiometricUpdate: () => 0,
+  });
+  clearModule('../src/routes/dtrDailySummary');
+  const router = require('../src/routes/dtrDailySummary');
+  const handlers = route(router, 'put', '/:id');
+  const res = response();
+
+  await handlers[handlers.length - 1](
+    {
+      user: { id: '9da0c4c5-37eb-4c1b-9b55-af79f1336b31', role: 'admin' },
+      params: { id: recordId },
+      body: {
+        status: 'on_leave',
+        remarks: 'Underlying attendance verified.',
+        edit_underlying_attendance: true,
+      },
+    },
+    res,
+  );
+
+  assert.equal(res.statusCode, 200);
+  const update = queries.find(({ sql }) => /UPDATE dtr_daily_summary SET/i.test(sql));
+  assert.ok(update, 'underlying attendance was not updated');
+  assert.doesNotMatch(update.sql, /status\s*=\s*\$/i);
+  assert.match(update.sql, /source = 'adjusted'/i);
+  const audit = queries.find(({ sql }) => /INSERT INTO audit_logs/i.test(sql));
+  const details = JSON.parse(audit.params[2]);
+  assert.equal(details.edited_under_leave_coverage, true);
+  assert.equal(details.leave_request_id, leaveRequestId);
+
+  restoreWs();
+  restoreDb();
+  clearModule('../src/routes/dtrDailySummary');
+});
+
 test('DTR deletion requires an administrator reason before database access', async () => {
   const restoreDb = withMockedModule('../src/config/db', {
     pool: {
@@ -265,6 +355,73 @@ test('DTR deletion requires an administrator reason before database access', asy
 
   assert.equal(res.statusCode, 400);
   assert.match(res.payload?.error || '', /deletion reason/i);
+  restoreWs();
+  restoreDb();
+  clearModule('../src/routes/dtrDailySummary');
+});
+
+test('DTR deletion refuses to remove legacy attendance linked to approved leave', async () => {
+  const recordId = '5cc06130-7dd8-4792-bc4f-ac1b423bb2a9';
+  const employeeId = '5b9fe943-4700-4ff6-a84e-66ef793ecfc4';
+  const leaveRequestId = '16c69794-77f2-4dd9-8de7-83067fc89920';
+  const queries = [];
+  const client = {
+    async query(sql, params = []) {
+      const text = String(sql);
+      queries.push({ sql: text, params });
+      if (/SELECT d\.\*, d\.attendance_date::text/i.test(text)) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: recordId,
+            employee_id: employeeId,
+            attendance_date_iso: '2026-06-16',
+            leave_request_id: leaveRequestId,
+          }],
+        };
+      }
+      if (/FROM dtr_leave_coverage c/i.test(text)) {
+        return {
+          rowCount: 1,
+          rows: [{ id: null, leave_request_id: leaveRequestId }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+    release() {},
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: { connect: async () => client },
+  });
+  const restoreWs = withMockedModule('../src/websockets/biometricStream', {
+    broadcastBiometricUpdate: () => 0,
+  });
+  clearModule('../src/routes/dtrDailySummary');
+  const router = require('../src/routes/dtrDailySummary');
+  const handlers = route(router, 'delete', '/:id');
+  const res = response();
+
+  await handlers[handlers.length - 1](
+    {
+      user: { id: '9da0c4c5-37eb-4c1b-9b55-af79f1336b31', role: 'admin' },
+      params: { id: recordId },
+      body: { reason: 'Incorrect processed attendance row.' },
+    },
+    res,
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.payload?.leave_request_id, leaveRequestId);
+  assert.equal(
+    queries.some(({ sql }) => /INSERT INTO dtr_daily_summary_deletions/i.test(sql)),
+    false,
+  );
+  assert.equal(
+    queries.some(({ sql }) => /DELETE FROM dtr_daily_summary WHERE id/i.test(sql)),
+    false,
+  );
+  assert.ok(queries.some(({ sql }) => String(sql).trim() === 'ROLLBACK'));
+
   restoreWs();
   restoreDb();
   clearModule('../src/routes/dtrDailySummary');
