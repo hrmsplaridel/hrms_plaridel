@@ -847,7 +847,7 @@ async function getApprovedLocatorByDateInRange(employeeIds, startStr, endStr) {
 
 /**
  * Get assignments+shift info for employees that overlap [startStr, endStr].
- * Returns Map employeeId -> array of { effective_from, effective_to, startMinutes, endMinutes, breakEndMinutes, graceMinutes, workingDays } sorted by effective_from desc.
+ * Returns Map employeeId -> date-effective assignment and shift details sorted by effective_from desc.
  */
 async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) {
   const map = new Map();
@@ -856,6 +856,7 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
   await ensureShiftPunchModeColumn(pool);
   const res = await pool.query(
     `SELECT a.employee_id,
+            a.department_id,
             a.effective_from::text AS effective_from,
             a.effective_to::text AS effective_to,
             COALESCE(a.override_start_time, s.start_time) AS start_time,
@@ -869,17 +870,17 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
      WHERE a.employee_id = ANY($1::uuid[])
        AND a.effective_from <= $3::date
        AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
-     ORDER BY a.employee_id, a.effective_from DESC`,
+     ORDER BY a.employee_id, a.effective_from DESC, a.created_at DESC, a.id DESC`,
     [employeeIds, startStr, endStr]
   );
   for (const r of res.rows) {
     const empId = r.employee_id;
     const startTimeStr = r.start_time;
-    if (!startTimeStr) continue;
     const shift = {
+      departmentId: r.department_id || null,
       effective_from: String(r.effective_from).slice(0, 10),
       effective_to: r.effective_to ? String(r.effective_to).slice(0, 10) : null,
-      startMinutes: timeToMinutes(startTimeStr),
+      startMinutes: startTimeStr ? timeToMinutes(startTimeStr) : null,
       endMinutes: r.end_time ? timeToMinutes(r.end_time) : null,
       breakEndMinutes: r.break_end ? timeToMinutes(r.break_end) : null,
       punchMode: r.punch_mode || 'auto',
@@ -989,18 +990,19 @@ router.get('/', protect, async (req, res) => {
       conditions.push(`d.employee_id = $${i++}`);
       params.push(scopedEmployeeId);
     }
-    if (scopedDepartmentId && start_date && end_date) {
+    if (scopedDepartmentId) {
       const depIdx = i;
-      const endIdx = i + 1;
-      const startIdx = i + 2;
-      conditions.push(`d.employee_id IN (
-        SELECT DISTINCT a.employee_id FROM assignments a
-        WHERE a.department_id = $${depIdx}
-          AND a.effective_from <= $${endIdx}::date
-          AND (a.effective_to IS NULL OR a.effective_to >= $${startIdx}::date)
-      )`);
-      params.push(scopedDepartmentId, end_date, start_date);
-      i += 3;
+      conditions.push(`(
+        SELECT a.department_id
+        FROM assignments a
+        WHERE a.employee_id = d.employee_id
+          AND a.effective_from <= d.attendance_date
+          AND (a.effective_to IS NULL OR a.effective_to >= d.attendance_date)
+        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+        LIMIT 1
+      ) = $${depIdx}::uuid`);
+      params.push(scopedDepartmentId);
+      i += 1;
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const sqlMaxRows = hasDateRange
@@ -1241,6 +1243,12 @@ router.get('/', protect, async (req, res) => {
               h.dateStr
             );
             if (!shiftInfo) continue;
+            if (
+              scopedDepartmentId &&
+              String(shiftInfo.departmentId || '') !== String(scopedDepartmentId)
+            ) {
+              continue;
+            }
             const workingDays = shiftInfo.workingDays;
             if (!Array.isArray(workingDays) || workingDays.length === 0) continue;
             const isoDow = isoWeekdayFromDateStr(h.dateStr);
@@ -1280,6 +1288,17 @@ router.get('/', protect, async (req, res) => {
       for (const [key, leave] of leaveCoverageByKey.entries()) {
         if (existingKeys.has(key)) continue;
         const [empId, dateStr] = key.split('|');
+        const shiftInfo = getShiftInfoForDateFromAssignments(
+          assignmentsByEmployee,
+          empId,
+          dateStr
+        );
+        if (
+          scopedDepartmentId &&
+          String(shiftInfo?.departmentId || '') !== String(scopedDepartmentId)
+        ) {
+          continue;
+        }
         existingKeys.add(key);
         rows.push({
           id: null,
@@ -1308,9 +1327,7 @@ router.get('/', protect, async (req, res) => {
           created_at: null,
           updated_at: null,
           employee_name: userIdToName[empId] || null,
-          shift_punch_mode:
-            getShiftInfoForDateFromAssignments(assignmentsByEmployee, empId, dateStr)?.punchMode ||
-            'auto',
+          shift_punch_mode: shiftInfo?.punchMode || 'auto',
         });
       }
 
@@ -1343,6 +1360,12 @@ router.get('/', protect, async (req, res) => {
           if (leaveKeys.has(key)) continue;
           const shiftInfo = getShiftInfoForDateFromAssignments(assignmentsByEmployee, empId, dateStr);
           if (!shiftInfo) continue; // no assignment/shift => can't determine working day
+          if (
+            scopedDepartmentId &&
+            String(shiftInfo.departmentId || '') !== String(scopedDepartmentId)
+          ) {
+            continue;
+          }
 
           const locator = locatorByKey.get(key);
           const locatorCoverage = evaluateLocatorCoverage({
@@ -1410,6 +1433,12 @@ router.get('/', protect, async (req, res) => {
           empId,
           dateStr
         );
+        if (
+          scopedDepartmentId &&
+          String(shiftInfo?.departmentId || '') !== String(scopedDepartmentId)
+        ) {
+          continue;
+        }
         const holidayInfo = holidayByDate.get(dateStr) || null;
         const locatorCoverage = evaluateLocatorCoverage({
           locator,
