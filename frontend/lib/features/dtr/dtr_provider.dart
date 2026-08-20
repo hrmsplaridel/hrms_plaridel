@@ -1012,13 +1012,19 @@ class DtrProvider extends ChangeNotifier {
   }
 
   /// Update entry (admin).
-  Future<bool> updateEntry(TimeRecord record) async {
+  Future<bool> updateEntry(
+    TimeRecord record, {
+    bool editUnderlyingAttendance = false,
+  }) async {
     if (record.id == null) return false;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      await TimeRecordRepo.instance.update(record);
+      await TimeRecordRepo.instance.update(
+        record,
+        editUnderlyingAttendance: editUnderlyingAttendance,
+      );
       invalidateCachedDtrData();
       await loadTimeRecordsForAdmin(
         startDate: _filterStart,

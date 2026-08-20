@@ -22,6 +22,8 @@ class TimeRecord {
     this.remarks,
     this.holidayId,
     this.leaveRequestId,
+    this.leaveCoverageId,
+    this.isLeaveCovered = false,
     this.createdAt,
     this.updatedAt,
     this.employeeName,
@@ -67,6 +69,12 @@ class TimeRecord {
 
   /// Set when date has approved leave.
   final String? leaveRequestId;
+
+  /// Active approved-leave overlay covering an underlying DTR row.
+  final String? leaveCoverageId;
+
+  /// True for both current coverage rows and approved legacy leave-linked rows.
+  final bool isLeaveCovered;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -162,6 +170,11 @@ class TimeRecord {
       remarks: json['remarks']?.toString(),
       holidayId: json['holiday_id']?.toString(),
       leaveRequestId: json['leave_request_id']?.toString(),
+      leaveCoverageId: json['leave_coverage_id']?.toString(),
+      isLeaveCovered:
+          json['is_leave_covered'] == true ||
+          json['leave_coverage_id'] != null ||
+          (json['status'] == 'on_leave' && json['leave_request_id'] != null),
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
@@ -254,6 +267,8 @@ class TimeRecord {
     String? remarks,
     String? holidayId,
     String? leaveRequestId,
+    String? leaveCoverageId,
+    bool? isLeaveCovered,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? employeeName,
@@ -285,6 +300,8 @@ class TimeRecord {
       remarks: remarks ?? this.remarks,
       holidayId: holidayId ?? this.holidayId,
       leaveRequestId: leaveRequestId ?? this.leaveRequestId,
+      leaveCoverageId: leaveCoverageId ?? this.leaveCoverageId,
+      isLeaveCovered: isLeaveCovered ?? this.isLeaveCovered,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       employeeName: employeeName ?? this.employeeName,
@@ -468,7 +485,10 @@ class TimeRecordRepo {
   }
 
   /// Update an existing manual record. Uses PUT /api/dtr-daily-summary/:id.
-  Future<void> update(TimeRecord record) async {
+  Future<void> update(
+    TimeRecord record, {
+    bool editUnderlyingAttendance = false,
+  }) async {
     if (record.id == null) return;
     await ApiClient.instance.put(
       '/api/dtr-daily-summary/${record.id}',
@@ -481,6 +501,7 @@ class TimeRecordRepo {
         'status': record.status,
         'pm_status': record.pmStatus,
         'remarks': record.remarks,
+        if (editUnderlyingAttendance) 'edit_underlying_attendance': true,
       },
     );
   }

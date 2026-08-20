@@ -1308,7 +1308,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               isHoliday: record.status == 'holiday' || record.holidayId != null,
             ),
             source: record.source,
-            showActions: !isHardcodedPreview,
+            showActions: !isHardcodedPreview && record.id != null,
+            isLeaveCovered: record.isLeaveCovered,
             onEdit: () => _showEditDialog(dtr, record),
             onDelete: () => _confirmDelete(dtr, record),
           ),
@@ -1324,6 +1325,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     required DtrProvider dtr,
     required bool isHardcodedPreview,
   }) {
+    final isLeaveCovered = record.isLeaveCovered;
     final dark = AppTheme.dashIsDark(context);
     final cellStyle = TextStyle(
       fontSize: 13,
@@ -1464,7 +1466,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               ),
             ),
           ),
-          if (!isHardcodedPreview)
+          if (!isHardcodedPreview && record.id != null)
             Expanded(
               flex: 1,
               child: Center(
@@ -1498,7 +1500,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                           ),
                           const SizedBox(width: 12),
                           Text(
-                            'Edit',
+                            isLeaveCovered
+                                ? 'Edit underlying attendance'
+                                : 'Edit',
                             style: TextStyle(
                               color: AppTheme.dashTextPrimaryOf(ctx),
                             ),
@@ -1506,42 +1510,44 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ],
                       ),
                     ),
-                    PopupMenuItem<String>(
-                      value: 'recalculate',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.refresh_rounded,
-                            size: 20,
-                            color: AppTheme.dashTextPrimaryOf(ctx),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Recalculate',
-                            style: TextStyle(
+                    if (!isLeaveCovered)
+                      PopupMenuItem<String>(
+                        value: 'recalculate',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.refresh_rounded,
+                              size: 20,
                               color: AppTheme.dashTextPrimaryOf(ctx),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 12),
+                            Text(
+                              'Recalculate',
+                              style: TextStyle(
+                                color: AppTheme.dashTextPrimaryOf(ctx),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    PopupMenuItem<String>(
-                      value: 'delete',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.delete_rounded,
-                            size: 20,
-                            color: Colors.red.shade700,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Delete',
-                            style: TextStyle(color: Colors.red.shade700),
-                          ),
-                        ],
+                    if (!isLeaveCovered)
+                      PopupMenuItem<String>(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.delete_rounded,
+                              size: 20,
+                              color: Colors.red.shade700,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Delete',
+                              style: TextStyle(color: Colors.red.shade700),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -2431,7 +2437,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Edit time entry',
+                                r.isLeaveCovered
+                                    ? 'Edit underlying attendance'
+                                    : 'Edit time entry',
                                 style: TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.w700,
@@ -2814,6 +2822,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         remarks: r.remarks,
         holidayId: r.holidayId,
         leaveRequestId: r.leaveRequestId,
+        leaveCoverageId: r.leaveCoverageId,
+        isLeaveCovered: r.isLeaveCovered,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
         employeeName: r.employeeName,
@@ -2830,13 +2840,17 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         locatorSlipCoverageMode: r.locatorSlipCoverageMode,
         locatorSlipSegments: r.locatorSlipSegments,
       );
-      _showTimeLogSnack('Time entry updated.', isSuccess: true);
       final saved = r.id != null
-          ? await dtr.updateEntry(updatedRec)
+          ? await dtr.updateEntry(
+              updatedRec,
+              editUnderlyingAttendance: r.isLeaveCovered,
+            )
           : await dtr.addManualEntry(updatedRec);
       if (!mounted) return;
       if (!saved) {
         _showTimeLogSnack(dtr.error ?? 'Unable to update this time entry.');
+      } else {
+        _showTimeLogSnack('Time entry updated.', isSuccess: true);
       }
     }
   }
@@ -2858,6 +2872,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
 
   Future<void> _confirmDelete(DtrProvider dtr, TimeRecord r) async {
     if (!mounted) return;
+    if (r.isLeaveCovered) {
+      _showTimeLogSnack(
+        'Approved leave covers this date. Revoke the leave before deleting its underlying attendance.',
+      );
+      return;
+    }
     final reasonController = TextEditingController();
     final reason = await showDialog<String>(
       context: context,
