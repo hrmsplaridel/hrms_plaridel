@@ -294,186 +294,211 @@ class _HolidayTemplateUploadDialogState
         '2027-01-01,,New Year\'s Day,regular,Regular holiday,whole_day\n'
         '2027-03-27,,Black Saturday,special,Special non-working day,whole_day';
 
-    return AlertDialog(
-      backgroundColor: AppTheme.dashPanelOf(context),
-      surfaceTintColor: Colors.transparent,
-      titlePadding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
-      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-      title: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.upload_file_rounded,
-              color: AppTheme.primaryNavy,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Add PH Holiday Template',
-              style: TextStyle(
-                color: headingColor,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Close',
-            onPressed: _saving ? null : () => Navigator.of(context).pop(),
-            icon: Icon(Icons.close_rounded, color: mutedColor),
-          ),
-        ],
-      ),
-      content: SizedBox(
-        width: 760,
-        height: 580,
+    return Material(
+      color: AppTheme.dashPanelOf(context),
+      child: SafeArea(
         child: Column(
           children: [
-            Row(
-              children: [
-                SizedBox(
-                  width: 140,
-                  child: TextField(
-                    controller: _yearController,
-                    keyboardType: TextInputType.number,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      labelText: 'Year',
-                      radius: 10,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 18, 12, 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.upload_file_rounded,
+                      color: AppTheme.primaryNavy,
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _labelController,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      labelText: 'Template label',
-                      radius: 10,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _sourceController,
-              decoration: AppTheme.dashInputDecoration(
-                context,
-                labelText: 'Source',
-                hintText: 'Official proclamation / DOLE advisory',
-                radius: 10,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _noteController,
-              decoration: AppTheme.dashInputDecoration(
-                context,
-                labelText: 'Note',
-                hintText: 'Optional',
-                radius: 10,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Template CSV',
-                    style: TextStyle(
-                      color: headingColor,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _saving ? null : _pickCsv,
-                  icon: const Icon(Icons.upload_rounded, size: 18),
-                  label: const Text('Upload CSV'),
-                ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: _saving ? null : _validateCsv,
-                  icon: const Icon(
-                    Icons.check_circle_outline_rounded,
-                    size: 18,
-                  ),
-                  label: const Text('Validate'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: TextField(
-                controller: _csvController,
-                maxLines: null,
-                expands: true,
-                textAlignVertical: TextAlignVertical.top,
-                style: AppTheme.dashFieldTextStyle(
-                  context,
-                ).copyWith(fontFamily: 'Consolas', fontSize: 13),
-                decoration: AppTheme.dashInputDecoration(
-                  context,
-                  hintText: sampleCsv,
-                  radius: 10,
-                  contentPadding: const EdgeInsets.all(14),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                if (_parsedCount > 0)
-                  _InlineTemplateStatus(
-                    icon: Icons.check_circle_rounded,
-                    text: '$_parsedCount holidays ready',
-                    color: Colors.green,
-                  ),
-                if (_error != null)
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: _InlineTemplateStatus(
-                      icon: Icons.error_outline_rounded,
-                      text: _error!,
-                      color: Colors.red,
+                    child: Text(
+                      'Add PH Holiday Template',
+                      style: TextStyle(
+                        color: headingColor,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-              ],
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: _saving
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    icon: Icon(Icons.close_rounded, color: mutedColor),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 140,
+                          child: TextField(
+                            controller: _yearController,
+                            keyboardType: TextInputType.number,
+                            decoration: AppTheme.dashInputDecoration(
+                              context,
+                              labelText: 'Year',
+                              radius: 10,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: _labelController,
+                            decoration: AppTheme.dashInputDecoration(
+                              context,
+                              labelText: 'Template label',
+                              radius: 10,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _sourceController,
+                      decoration: AppTheme.dashInputDecoration(
+                        context,
+                        labelText: 'Source',
+                        hintText: 'Official proclamation / DOLE advisory',
+                        radius: 10,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _noteController,
+                      decoration: AppTheme.dashInputDecoration(
+                        context,
+                        labelText: 'Note',
+                        hintText: 'Optional',
+                        radius: 10,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Template CSV',
+                            style: TextStyle(
+                              color: headingColor,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _saving ? null : _pickCsv,
+                          icon: const Icon(Icons.upload_rounded, size: 18),
+                          label: const Text('Upload CSV'),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton.icon(
+                          onPressed: _saving ? null : _validateCsv,
+                          icon: const Icon(
+                            Icons.check_circle_outline_rounded,
+                            size: 18,
+                          ),
+                          label: const Text('Validate'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _csvController,
+                        maxLines: null,
+                        expands: true,
+                        textAlignVertical: TextAlignVertical.top,
+                        style: AppTheme.dashFieldTextStyle(
+                          context,
+                        ).copyWith(fontFamily: 'Consolas', fontSize: 13),
+                        decoration: AppTheme.dashInputDecoration(
+                          context,
+                          hintText: sampleCsv,
+                          radius: 10,
+                          contentPadding: const EdgeInsets.all(14),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        if (_parsedCount > 0)
+                          _InlineTemplateStatus(
+                            icon: Icons.check_circle_rounded,
+                            text: '$_parsedCount holidays ready',
+                            color: Colors.green,
+                          ),
+                        if (_error != null)
+                          Expanded(
+                            child: _InlineTemplateStatus(
+                              icon: Icons.error_outline_rounded,
+                              text: _error!,
+                              color: Colors.red,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppTheme.dashMutedSurfaceOf(context),
+                border: Border(
+                  top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _saving
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton.icon(
+                    onPressed: _saving ? null : _saveTemplate,
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_rounded, size: 18),
+                    label: const Text('Save Template'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primaryNavy,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton.icon(
-          onPressed: _saving ? null : _saveTemplate,
-          icon: _saving
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.save_rounded, size: 18),
-          label: const Text('Save Template'),
-          style: FilledButton.styleFrom(
-            backgroundColor: AppTheme.primaryNavy,
-            foregroundColor: Colors.white,
-          ),
-        ),
-      ],
     );
   }
 }

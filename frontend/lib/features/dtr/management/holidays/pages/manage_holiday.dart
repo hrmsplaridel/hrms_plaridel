@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 
 part '../models/holiday_models.dart';
 part '../widgets/philippine_holiday_defaults_dialog.dart';
@@ -423,8 +424,12 @@ class _ManageHolidayState extends State<ManageHoliday> {
   }
 
   Future<void> _openPhilippineDefaultsDialog() async {
-    final result = await showDialog<_HolidayImportResult>(
+    final result = await openResponsiveRightSidePanel<_HolidayImportResult>(
       context: context,
+      barrierLabel: 'Close Philippine holiday defaults',
+      breakpoint: 900,
+      minWidth: 720,
+      initialWidthFraction: 0.58,
       builder: (_) => const _PhilippineHolidayDefaultsDialog(),
     );
     if (!mounted || result == null) return;

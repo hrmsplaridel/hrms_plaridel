@@ -109,9 +109,12 @@ class _PhilippineHolidayDefaultsDialogState
   }
 
   Future<void> _openTemplateUploadDialog() async {
-    final savedYear = await showDialog<int>(
+    final savedYear = await openResponsiveRightSidePanel<int>(
       context: context,
-      barrierDismissible: false,
+      barrierLabel: 'Close holiday template upload',
+      breakpoint: 900,
+      minWidth: 760,
+      initialWidthFraction: 0.58,
       builder: (_) =>
           _HolidayTemplateUploadDialog(initialYear: _selectedYear + 1),
     );
@@ -165,218 +168,245 @@ class _PhilippineHolidayDefaultsDialogState
     final headingColor = AppTheme.dashTextPrimaryOf(context);
     final mutedColor = AppTheme.dashTextSecondaryOf(context);
 
-    return AlertDialog(
-      backgroundColor: AppTheme.dashPanelOf(context),
-      surfaceTintColor: Colors.transparent,
-      titlePadding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
-      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-      title: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: const Color(0xFFE85D04).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.event_available_rounded,
-              color: Color(0xFFE85D04),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Generate PH Holidays',
-              style: TextStyle(
-                color: headingColor,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Close',
-            onPressed: _importing ? null : () => Navigator.of(context).pop(),
-            icon: Icon(Icons.close_rounded, color: mutedColor),
-          ),
-        ],
-      ),
-      content: SizedBox(
-        width: 720,
-        height: 520,
+    return Material(
+      color: AppTheme.dashPanelOf(context),
+      child: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                SizedBox(
-                  width: 180,
-                  child: DropdownButtonFormField<int>(
-                    key: ValueKey(_selectedYear),
-                    initialValue: _selectedYear,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      labelText: 'Year',
-                      radius: 10,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                    ),
-                    items: _yearOptions
-                        .map(
-                          (year) => DropdownMenuItem<int>(
-                            value: year,
-                            child: Text(year.toString()),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: _loading || _importing
-                        ? null
-                        : (year) {
-                            if (year != null) _loadPreview(year);
-                          },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                if (preview != null) ...[
-                  _summaryChip(
-                    '${preview.readyCount} ready',
-                    const Color(0xFFE85D04),
-                  ),
-                  const SizedBox(width: 8),
-                  _summaryChip(
-                    '${preview.existingCount} existing',
-                    Colors.green,
-                  ),
-                ],
-                const Spacer(),
-                OutlinedButton.icon(
-                  onPressed: _loading || _importing
-                      ? null
-                      : _openTemplateUploadDialog,
-                  icon: const Icon(Icons.upload_file_rounded, size: 18),
-                  label: const Text('Add Template'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            if (preview != null) ...[
-              Row(
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 18, 12, 12),
+              child: Row(
                 children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE85D04).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.event_available_rounded,
+                      color: Color(0xFFE85D04),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      preview.source,
+                      'Generate PH Holidays',
                       style: TextStyle(
                         color: headingColor,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ),
-                  if ((preview.sourceMode ?? '').isNotEmpty)
-                    _summaryChip(
-                      preview.sourceMode == 'database'
-                          ? 'Saved template'
-                          : 'Built-in fallback',
-                      preview.sourceMode == 'database'
-                          ? const Color(0xFF2563EB)
-                          : const Color(0xFF64748B),
-                    ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: _importing
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    icon: Icon(Icons.close_rounded, color: mutedColor),
+                  ),
                 ],
               ),
-              if ((preview.note ?? '').trim().isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  preview.note!,
-                  style: TextStyle(color: mutedColor, fontSize: 12),
-                ),
-              ],
-              const SizedBox(height: 12),
-            ],
-            if (_error != null) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
-                ),
-                child: Text(
-                  _error!,
-                  style: const TextStyle(
-                    color: Colors.red,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
+            ),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
             Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : preview == null || preview.items.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No maintained template is available for this year.',
-                        style: TextStyle(color: mutedColor),
-                      ),
-                    )
-                  : ListView.separated(
-                      itemCount: preview.items.length,
-                      separatorBuilder: (_, __) => Divider(
-                        height: 1,
-                        color: AppTheme.dashHairlineOf(context),
-                      ),
-                      itemBuilder: (_, index) {
-                        final item = preview.items[index];
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(
-                            item.name,
-                            style: TextStyle(
-                              color: headingColor,
-                              fontWeight: FontWeight.w700,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 180,
+                          child: DropdownButtonFormField<int>(
+                            key: ValueKey(_selectedYear),
+                            initialValue: _selectedYear,
+                            decoration: AppTheme.dashInputDecoration(
+                              context,
+                              labelText: 'Year',
+                              radius: 10,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                            ),
+                            items: _yearOptions
+                                .map(
+                                  (year) => DropdownMenuItem<int>(
+                                    value: year,
+                                    child: Text(year.toString()),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: _loading || _importing
+                                ? null
+                                : (year) {
+                                    if (year != null) _loadPreview(year);
+                                  },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        if (preview != null) ...[
+                          _summaryChip(
+                            '${preview.readyCount} ready',
+                            const Color(0xFFE85D04),
+                          ),
+                          const SizedBox(width: 8),
+                          _summaryChip(
+                            '${preview.existingCount} existing',
+                            Colors.green,
+                          ),
+                        ],
+                        const Spacer(),
+                        OutlinedButton.icon(
+                          onPressed: _loading || _importing
+                              ? null
+                              : _openTemplateUploadDialog,
+                          icon: const Icon(Icons.upload_file_rounded, size: 18),
+                          label: const Text('Add Template'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    if (preview != null) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              preview.source,
+                              style: TextStyle(
+                                color: headingColor,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
-                          subtitle: Text(
-                            '${_dateLabel(item)} · ${_typeLabel(item.holidayType)}',
-                            style: TextStyle(color: mutedColor),
+                          if ((preview.sourceMode ?? '').isNotEmpty)
+                            _summaryChip(
+                              preview.sourceMode == 'database'
+                                  ? 'Saved template'
+                                  : 'Built-in fallback',
+                              preview.sourceMode == 'database'
+                                  ? const Color(0xFF2563EB)
+                                  : const Color(0xFF64748B),
+                            ),
+                        ],
+                      ),
+                      if ((preview.note ?? '').trim().isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          preview.note!,
+                          style: TextStyle(color: mutedColor, fontSize: 12),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                    ],
+                    if (_error != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.25),
                           ),
-                          trailing: _statusPill(item.exists),
-                        );
-                      },
+                        ),
+                        child: Text(
+                          _error!,
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    Expanded(
+                      child: _loading
+                          ? const Center(child: CircularProgressIndicator())
+                          : preview == null || preview.items.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No maintained template is available for this year.',
+                                style: TextStyle(color: mutedColor),
+                              ),
+                            )
+                          : ListView.separated(
+                              itemCount: preview.items.length,
+                              separatorBuilder: (_, __) => Divider(
+                                height: 1,
+                                color: AppTheme.dashHairlineOf(context),
+                              ),
+                              itemBuilder: (_, index) {
+                                final item = preview.items[index];
+                                return ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text(
+                                    item.name,
+                                    style: TextStyle(
+                                      color: headingColor,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    '${_dateLabel(item)} · ${_typeLabel(item.holidayType)}',
+                                    style: TextStyle(color: mutedColor),
+                                  ),
+                                  trailing: _statusPill(item.exists),
+                                );
+                              },
+                            ),
                     ),
+                  ],
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppTheme.dashMutedSurfaceOf(context),
+                border: Border(
+                  top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _importing
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton.icon(
+                    onPressed: canImport ? _importDefaults : null,
+                    icon: _importing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.download_done_rounded, size: 18),
+                    label: Text(
+                      preview == null || preview.readyCount == 0
+                          ? 'Nothing to import'
+                          : 'Import ${preview.readyCount}',
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFE85D04),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _importing ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton.icon(
-          onPressed: canImport ? _importDefaults : null,
-          icon: _importing
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.download_done_rounded, size: 18),
-          label: Text(
-            preview == null || preview.readyCount == 0
-                ? 'Nothing to import'
-                : 'Import ${preview.readyCount}',
-          ),
-          style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFFE85D04),
-            foregroundColor: Colors.white,
-          ),
-        ),
-      ],
     );
   }
 
