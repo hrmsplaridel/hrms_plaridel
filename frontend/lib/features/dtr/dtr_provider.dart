@@ -181,20 +181,27 @@ class _EmployeeOptionsCacheKey {
   const _EmployeeOptionsCacheKey({
     required this.departmentId,
     required this.includePrivileged,
+    required this.startDate,
+    required this.endDate,
   });
 
   final String? departmentId;
   final bool includePrivileged;
+  final String? startDate;
+  final String? endDate;
 
   @override
   bool operator ==(Object other) {
     return other is _EmployeeOptionsCacheKey &&
         other.departmentId == departmentId &&
-        other.includePrivileged == includePrivileged;
+        other.includePrivileged == includePrivileged &&
+        other.startDate == startDate &&
+        other.endDate == endDate;
   }
 
   @override
-  int get hashCode => Object.hash(departmentId, includePrivileged);
+  int get hashCode =>
+      Object.hash(departmentId, includePrivileged, startDate, endDate);
 }
 
 class _DateRangeCacheKey {
@@ -897,13 +904,19 @@ class DtrProvider extends ChangeNotifier {
   /// also appear in the selector.
   Future<void> loadEmployees({
     String? departmentId,
+    DateTime? startDate,
+    DateTime? endDate,
     bool includePrivileged = false,
     bool forceRefresh = false,
   }) async {
     final normalizedDepartmentId = _normalizeOptional(departmentId);
+    final normalizedStartDate = _dateKey(startDate);
+    final normalizedEndDate = _dateKey(endDate);
     final cacheKey = _EmployeeOptionsCacheKey(
       departmentId: normalizedDepartmentId,
       includePrivileged: includePrivileged,
+      startDate: normalizedStartDate,
+      endDate: normalizedEndDate,
     );
     final cached = _employeesCache[cacheKey];
     if (!forceRefresh && cached != null && cached.isFresh(_referenceCacheTtl)) {
@@ -918,6 +931,10 @@ class DtrProvider extends ChangeNotifier {
       }
       if (normalizedDepartmentId != null) {
         params['department_id'] = normalizedDepartmentId;
+      }
+      if (normalizedStartDate != null && normalizedEndDate != null) {
+        params['start_date'] = normalizedStartDate;
+        params['end_date'] = normalizedEndDate;
       }
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employees',

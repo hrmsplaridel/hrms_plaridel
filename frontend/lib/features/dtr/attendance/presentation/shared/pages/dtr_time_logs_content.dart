@@ -383,10 +383,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   Future<void> _load() async {
     if (!mounted) return;
     final dtr = context.read<DtrProvider>();
-    await Future.wait([
-      dtr.loadEmployees(departmentId: _selectedDepartmentId),
-      dtr.loadDepartments(),
-    ]);
+    await dtr.loadDepartments();
     if (!mounted) return;
     await _applyFilters();
   }
@@ -415,6 +412,16 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     } else {
       start = DateTime(_selectedYear, _selectedMonth, 1);
       end = DateTime(_selectedYear, _selectedMonth + 1, 0);
+    }
+    await dtr.loadEmployees(
+      departmentId: _selectedDepartmentId,
+      startDate: start,
+      endDate: end,
+    );
+    if (!mounted) return;
+    if (_selectedUserId != null &&
+        !dtr.employees.any((employee) => employee.id == _selectedUserId)) {
+      setState(() => _selectedUserId = null);
     }
     await dtr.loadTimeRecordsForAdmin(
       startDate: start,
@@ -890,15 +897,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             ),
                           ),
                         ],
-                        onChanged: (v) async {
-                          final dtr = context.read<DtrProvider>();
+                        onChanged: (v) {
                           setState(() {
                             _selectedDepartmentId = v;
                             _selectedUserId = null;
                           });
-                          await dtr.loadEmployees(departmentId: v);
-                          if (!mounted) return;
-                          setState(() {});
                           _applyFilters();
                         },
                       ),
@@ -934,9 +937,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         },
                       ),
                       OutlinedButton(
-                        onPressed: () async {
+                        onPressed: () {
                           final now = DateTime.now();
-                          final dtr = context.read<DtrProvider>();
                           setState(() {
                             _searchController.clear();
                             _selectedMonth = now.month;
@@ -945,8 +947,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             _selectedUserId = null;
                             _selectedDepartmentId = null;
                           });
-                          await dtr.loadEmployees();
-                          if (!mounted) return;
                           _applyFilters();
                         },
                         style: OutlinedButton.styleFrom(
@@ -1645,15 +1645,25 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       if (!context.mounted) return;
     }
 
+    // Use the currently selected day/month/year so manual entry goes to the right date
+    final day = _selectedDay;
+    final lastDay = _lastDayOfSelectedMonth;
+    DateTime recordDate = (day != null && day >= 1 && day <= lastDay)
+        ? DateTime(_selectedYear, _selectedMonth, day)
+        : DateTime.now();
     var addDeptId = _selectedDepartmentId;
-    await dtr.loadEmployees(departmentId: addDeptId);
+    await dtr.loadEmployees(
+      departmentId: addDeptId,
+      startDate: recordDate,
+      endDate: recordDate,
+    );
     if (!context.mounted) return;
 
     if (dtr.employees.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'No employees for this department filter. Try All departments or add employee profiles.',
+            'No employees for this department and date. Try All departments or another date.',
           ),
         ),
       );
@@ -1661,12 +1671,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     }
 
     String? userId = _pickUserIdForEmployeeList(dtr.employees, _selectedUserId);
-    // Use the currently selected day/month/year so manual entry goes to the right date
-    final day = _selectedDay;
-    final lastDay = _lastDayOfSelectedMonth;
-    DateTime recordDate = (day != null && day >= 1 && day <= lastDay)
-        ? DateTime(_selectedYear, _selectedMonth, day)
-        : DateTime.now();
     TimeOfDay? timeIn;
     TimeOfDay? breakOut;
     TimeOfDay? breakIn;
@@ -1850,7 +1854,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   : (v) async {
                                       addDeptId = v;
                                       setState(() => employeesLoading = true);
-                                      await dtr.loadEmployees(departmentId: v);
+                                      await dtr.loadEmployees(
+                                        departmentId: v,
+                                        startDate: recordDate,
+                                        endDate: recordDate,
+                                      );
                                       if (!ctx.mounted) return;
                                       setState(() {
                                         employeesLoading = false;
@@ -1940,7 +1948,23 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                     lastDate: DateTime(2030),
                                   );
                                   if (d != null) {
-                                    setState(() => recordDate = d);
+                                    setState(() {
+                                      recordDate = d;
+                                      employeesLoading = true;
+                                    });
+                                    await dtr.loadEmployees(
+                                      departmentId: addDeptId,
+                                      startDate: d,
+                                      endDate: d,
+                                    );
+                                    if (!ctx.mounted) return;
+                                    setState(() {
+                                      employeesLoading = false;
+                                      userId = _pickUserIdForEmployeeList(
+                                        dtr.employees,
+                                        userId,
+                                      );
+                                    });
                                   }
                                 },
                                 borderRadius: BorderRadius.circular(12),
@@ -2204,7 +2228,18 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       );
     } finally {
       if (mounted) {
-        await dtr.loadEmployees(departmentId: _selectedDepartmentId);
+        final selectedDay = _selectedDay;
+        final start = selectedDay != null
+            ? DateTime(_selectedYear, _selectedMonth, selectedDay)
+            : DateTime(_selectedYear, _selectedMonth, 1);
+        final end = selectedDay != null
+            ? start
+            : DateTime(_selectedYear, _selectedMonth + 1, 0);
+        await dtr.loadEmployees(
+          departmentId: _selectedDepartmentId,
+          startDate: start,
+          endDate: end,
+        );
       }
     }
 
