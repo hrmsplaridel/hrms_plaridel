@@ -83,8 +83,14 @@ class _DtrReportsState extends State<DtrReports> {
 
   Future<void> _load() async {
     final dtr = context.read<DtrProvider>();
+    final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
+    final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
     await Future.wait([
-      dtr.loadEmployees(departmentId: _selectedDepartmentId),
+      dtr.loadEmployees(
+        departmentId: _selectedDepartmentId,
+        startDate: monthStart,
+        endDate: monthEnd,
+      ),
       dtr.loadDepartments(),
     ]);
     if (!mounted) return;
@@ -158,7 +164,7 @@ class _DtrReportsState extends State<DtrReports> {
       _rangeStartDay = 1;
       _rangeEndDay = _daysInSelectedMonth();
     });
-    _loadEmployeeRecords();
+    _load();
   }
 
   void _setSelectedYear(int year) {
@@ -167,7 +173,7 @@ class _DtrReportsState extends State<DtrReports> {
       _rangeStartDay = 1;
       _rangeEndDay = _daysInSelectedMonth();
     });
-    _loadEmployeeRecords();
+    _load();
   }
 
   static String _formatOfficialHours(String start, String end) {

@@ -170,9 +170,49 @@ function employeeListLateralCurSql() {
        ) cur ON true`;
 }
 
+function resolveEmployeeListDateRange(query = {}) {
+  const startDate = typeof query.start_date === 'string'
+    ? query.start_date.trim()
+    : '';
+  const endDate = typeof query.end_date === 'string'
+    ? query.end_date.trim()
+    : '';
+  if (!startDate && !endDate) {
+    return { startDate: null, endDate: null, error: null };
+  }
+  if (!startDate || !endDate) {
+    return {
+      startDate: null,
+      endDate: null,
+      error: 'start_date and end_date must be provided together',
+    };
+  }
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/;
+  const start = dateOnly.test(startDate) ? new Date(`${startDate}T00:00:00Z`) : null;
+  const end = dateOnly.test(endDate) ? new Date(`${endDate}T00:00:00Z`) : null;
+  if (
+    !start ||
+    !end ||
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    start.toISOString().slice(0, 10) !== startDate ||
+    end.toISOString().slice(0, 10) !== endDate
+  ) {
+    return { startDate: null, endDate: null, error: 'Invalid employee date range' };
+  }
+  if (start > end) {
+    return { startDate: null, endDate: null, error: 'start_date must not be after end_date' };
+  }
+  const inclusiveDays = Math.floor((end - start) / 86400000) + 1;
+  if (inclusiveDays > 366) {
+    return { startDate: null, endDate: null, error: 'Employee date range cannot exceed 366 days' };
+  }
+  return { startDate, endDate, error: null };
+}
+
 /** Shared FROM + filters for employee list / export (excludes biometric_user_ids shortcut). */
 function buildEmployeeListFromSql(req, options = {}) {
-  const { deviceBiometricIds = null } = options;
+  const { deviceBiometricIds = null, historicalRange = null } = options;
   const conditions = [];
   const params = [];
   let i = 1;
@@ -194,15 +234,44 @@ function buildEmployeeListFromSql(req, options = {}) {
     params.push('employee');
   }
   if (departmentId) {
-    conditions.push(`${tbl}.id IN (
-      SELECT DISTINCT a.employee_id FROM assignments a
-      WHERE a.department_id = $${i}
-        AND (a.is_active IS NULL OR a.is_active = true)
-        AND a.effective_from <= CURRENT_DATE
-        AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
-    )`);
-    params.push(departmentId);
-    i++;
+    if (historicalRange?.startDate && historicalRange?.endDate) {
+      const departmentIdx = i++;
+      const startIdx = i++;
+      const endIdx = i++;
+      conditions.push(`EXISTS (
+        SELECT 1
+        FROM generate_series(
+          $${startIdx}::date,
+          $${endIdx}::date,
+          INTERVAL '1 day'
+        ) AS selected_date(attendance_date)
+        CROSS JOIN LATERAL (
+          SELECT a.department_id
+          FROM assignments a
+          WHERE a.employee_id = ${tbl}.id
+            AND a.effective_from <= selected_date.attendance_date::date
+            AND (a.effective_to IS NULL OR a.effective_to >= selected_date.attendance_date::date)
+          ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+          LIMIT 1
+        ) historical_assignment
+        WHERE historical_assignment.department_id = $${departmentIdx}::uuid
+      )`);
+      params.push(
+        departmentId,
+        historicalRange.startDate,
+        historicalRange.endDate
+      );
+    } else {
+      conditions.push(`${tbl}.id IN (
+        SELECT DISTINCT a.employee_id FROM assignments a
+        WHERE a.department_id = $${i}
+          AND (a.is_active IS NULL OR a.is_active = true)
+          AND a.effective_from <= CURRENT_DATE
+          AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+      )`);
+      params.push(departmentId);
+      i++;
+    }
   }
 
   const bioFilterRaw =
@@ -288,6 +357,7 @@ function employeeRowsForRequester(rows, requester) {
 }
 
 // GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid, ?biometric_user_ids=id1,id2,id3)
+// Optional: ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD makes department membership historical for that range.
 // Optional: ?biometric_device_id=<uuid> — admin only; restrict to employees whose biometric_user_id is enrolled on that ZKTeco (reads device live)
 // Optional: ?biometric_filter=set|has|missing|none — filter by whether biometric_user_id is set (set/has = non-empty; missing/none = empty)
 // Optional: ?q= search; ?sort= & ?order=asc|desc (sort whitelist: full_name, employee_number, role, email, department, position, employment_status, is_active)
@@ -334,7 +404,14 @@ router.get('/', protect, async (req, res) => {
       deviceBiometricIds = devRes.ids;
     }
 
-    const { fromSql, params, nextParamIndex } = buildEmployeeListFromSql(req, { deviceBiometricIds });
+    const historicalRange = resolveEmployeeListDateRange(req.query);
+    if (historicalRange.error) {
+      return res.status(400).json({ error: historicalRange.error });
+    }
+    const { fromSql, params, nextParamIndex } = buildEmployeeListFromSql(req, {
+      deviceBiometricIds,
+      historicalRange,
+    });
     const orderBy = resolveEmployeeOrderBy(req.query.sort, req.query.order);
     let i = nextParamIndex;
 
@@ -400,7 +477,14 @@ router.get('/export/csv', protect, requireAdmin, async (req, res) => {
       deviceBiometricIds = devRes.ids;
     }
 
-    const { fromSql, params } = buildEmployeeListFromSql(req, { deviceBiometricIds });
+    const historicalRange = resolveEmployeeListDateRange(req.query);
+    if (historicalRange.error) {
+      return res.status(400).json({ error: historicalRange.error });
+    }
+    const { fromSql, params } = buildEmployeeListFromSql(req, {
+      deviceBiometricIds,
+      historicalRange,
+    });
     const orderBy = resolveEmployeeOrderBy(req.query.sort, req.query.order);
     const result = await pool.query(
       `SELECT u.employee_number, u.full_name, u.email, u.role, u.is_active, u.employment_status,

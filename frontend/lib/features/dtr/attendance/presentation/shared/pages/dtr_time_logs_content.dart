@@ -383,10 +383,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   Future<void> _load() async {
     if (!mounted) return;
     final dtr = context.read<DtrProvider>();
-    await Future.wait([
-      dtr.loadEmployees(departmentId: _selectedDepartmentId),
-      dtr.loadDepartments(),
-    ]);
+    await dtr.loadDepartments();
     if (!mounted) return;
     await _applyFilters();
   }
@@ -415,6 +412,16 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     } else {
       start = DateTime(_selectedYear, _selectedMonth, 1);
       end = DateTime(_selectedYear, _selectedMonth + 1, 0);
+    }
+    await dtr.loadEmployees(
+      departmentId: _selectedDepartmentId,
+      startDate: start,
+      endDate: end,
+    );
+    if (!mounted) return;
+    if (_selectedUserId != null &&
+        !dtr.employees.any((employee) => employee.id == _selectedUserId)) {
+      setState(() => _selectedUserId = null);
     }
     await dtr.loadTimeRecordsForAdmin(
       startDate: start,
@@ -890,15 +897,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             ),
                           ),
                         ],
-                        onChanged: (v) async {
-                          final dtr = context.read<DtrProvider>();
+                        onChanged: (v) {
                           setState(() {
                             _selectedDepartmentId = v;
                             _selectedUserId = null;
                           });
-                          await dtr.loadEmployees(departmentId: v);
-                          if (!mounted) return;
-                          setState(() {});
                           _applyFilters();
                         },
                       ),
@@ -934,9 +937,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         },
                       ),
                       OutlinedButton(
-                        onPressed: () async {
+                        onPressed: () {
                           final now = DateTime.now();
-                          final dtr = context.read<DtrProvider>();
                           setState(() {
                             _searchController.clear();
                             _selectedMonth = now.month;
@@ -945,8 +947,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             _selectedUserId = null;
                             _selectedDepartmentId = null;
                           });
-                          await dtr.loadEmployees();
-                          if (!mounted) return;
                           _applyFilters();
                         },
                         style: OutlinedButton.styleFrom(
@@ -1308,7 +1308,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               isHoliday: record.status == 'holiday' || record.holidayId != null,
             ),
             source: record.source,
-            showActions: !isHardcodedPreview,
+            showActions: !isHardcodedPreview && record.id != null,
+            isLeaveCovered: record.isLeaveCovered,
             onEdit: () => _showEditDialog(dtr, record),
             onDelete: () => _confirmDelete(dtr, record),
           ),
@@ -1324,6 +1325,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     required DtrProvider dtr,
     required bool isHardcodedPreview,
   }) {
+    final isLeaveCovered = record.isLeaveCovered;
     final dark = AppTheme.dashIsDark(context);
     final cellStyle = TextStyle(
       fontSize: 13,
@@ -1464,7 +1466,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               ),
             ),
           ),
-          if (!isHardcodedPreview)
+          if (!isHardcodedPreview && record.id != null)
             Expanded(
               flex: 1,
               child: Center(
@@ -1498,7 +1500,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                           ),
                           const SizedBox(width: 12),
                           Text(
-                            'Edit',
+                            isLeaveCovered
+                                ? 'Edit underlying attendance'
+                                : 'Edit',
                             style: TextStyle(
                               color: AppTheme.dashTextPrimaryOf(ctx),
                             ),
@@ -1506,42 +1510,44 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ],
                       ),
                     ),
-                    PopupMenuItem<String>(
-                      value: 'recalculate',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.refresh_rounded,
-                            size: 20,
-                            color: AppTheme.dashTextPrimaryOf(ctx),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Recalculate',
-                            style: TextStyle(
+                    if (!isLeaveCovered)
+                      PopupMenuItem<String>(
+                        value: 'recalculate',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.refresh_rounded,
+                              size: 20,
                               color: AppTheme.dashTextPrimaryOf(ctx),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 12),
+                            Text(
+                              'Recalculate',
+                              style: TextStyle(
+                                color: AppTheme.dashTextPrimaryOf(ctx),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    PopupMenuItem<String>(
-                      value: 'delete',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.delete_rounded,
-                            size: 20,
-                            color: Colors.red.shade700,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Delete',
-                            style: TextStyle(color: Colors.red.shade700),
-                          ),
-                        ],
+                    if (!isLeaveCovered)
+                      PopupMenuItem<String>(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.delete_rounded,
+                              size: 20,
+                              color: Colors.red.shade700,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Delete',
+                              style: TextStyle(color: Colors.red.shade700),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -1639,15 +1645,25 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       if (!context.mounted) return;
     }
 
+    // Use the currently selected day/month/year so manual entry goes to the right date
+    final day = _selectedDay;
+    final lastDay = _lastDayOfSelectedMonth;
+    DateTime recordDate = (day != null && day >= 1 && day <= lastDay)
+        ? DateTime(_selectedYear, _selectedMonth, day)
+        : DateTime.now();
     var addDeptId = _selectedDepartmentId;
-    await dtr.loadEmployees(departmentId: addDeptId);
+    await dtr.loadEmployees(
+      departmentId: addDeptId,
+      startDate: recordDate,
+      endDate: recordDate,
+    );
     if (!context.mounted) return;
 
     if (dtr.employees.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'No employees for this department filter. Try All departments or add employee profiles.',
+            'No employees for this department and date. Try All departments or another date.',
           ),
         ),
       );
@@ -1655,12 +1671,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     }
 
     String? userId = _pickUserIdForEmployeeList(dtr.employees, _selectedUserId);
-    // Use the currently selected day/month/year so manual entry goes to the right date
-    final day = _selectedDay;
-    final lastDay = _lastDayOfSelectedMonth;
-    DateTime recordDate = (day != null && day >= 1 && day <= lastDay)
-        ? DateTime(_selectedYear, _selectedMonth, day)
-        : DateTime.now();
     TimeOfDay? timeIn;
     TimeOfDay? breakOut;
     TimeOfDay? breakIn;
@@ -1844,7 +1854,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   : (v) async {
                                       addDeptId = v;
                                       setState(() => employeesLoading = true);
-                                      await dtr.loadEmployees(departmentId: v);
+                                      await dtr.loadEmployees(
+                                        departmentId: v,
+                                        startDate: recordDate,
+                                        endDate: recordDate,
+                                      );
                                       if (!ctx.mounted) return;
                                       setState(() {
                                         employeesLoading = false;
@@ -1934,7 +1948,23 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                     lastDate: DateTime(2030),
                                   );
                                   if (d != null) {
-                                    setState(() => recordDate = d);
+                                    setState(() {
+                                      recordDate = d;
+                                      employeesLoading = true;
+                                    });
+                                    await dtr.loadEmployees(
+                                      departmentId: addDeptId,
+                                      startDate: d,
+                                      endDate: d,
+                                    );
+                                    if (!ctx.mounted) return;
+                                    setState(() {
+                                      employeesLoading = false;
+                                      userId = _pickUserIdForEmployeeList(
+                                        dtr.employees,
+                                        userId,
+                                      );
+                                    });
                                   }
                                 },
                                 borderRadius: BorderRadius.circular(12),
@@ -2198,7 +2228,18 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       );
     } finally {
       if (mounted) {
-        await dtr.loadEmployees(departmentId: _selectedDepartmentId);
+        final selectedDay = _selectedDay;
+        final start = selectedDay != null
+            ? DateTime(_selectedYear, _selectedMonth, selectedDay)
+            : DateTime(_selectedYear, _selectedMonth, 1);
+        final end = selectedDay != null
+            ? start
+            : DateTime(_selectedYear, _selectedMonth + 1, 0);
+        await dtr.loadEmployees(
+          departmentId: _selectedDepartmentId,
+          startDate: start,
+          endDate: end,
+        );
       }
     }
 
@@ -2431,7 +2472,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Edit time entry',
+                                r.isLeaveCovered
+                                    ? 'Edit underlying attendance'
+                                    : 'Edit time entry',
                                 style: TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.w700,
@@ -2814,6 +2857,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         remarks: r.remarks,
         holidayId: r.holidayId,
         leaveRequestId: r.leaveRequestId,
+        leaveCoverageId: r.leaveCoverageId,
+        isLeaveCovered: r.isLeaveCovered,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
         employeeName: r.employeeName,
@@ -2830,13 +2875,17 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         locatorSlipCoverageMode: r.locatorSlipCoverageMode,
         locatorSlipSegments: r.locatorSlipSegments,
       );
-      _showTimeLogSnack('Time entry updated.', isSuccess: true);
       final saved = r.id != null
-          ? await dtr.updateEntry(updatedRec)
+          ? await dtr.updateEntry(
+              updatedRec,
+              editUnderlyingAttendance: r.isLeaveCovered,
+            )
           : await dtr.addManualEntry(updatedRec);
       if (!mounted) return;
       if (!saved) {
         _showTimeLogSnack(dtr.error ?? 'Unable to update this time entry.');
+      } else {
+        _showTimeLogSnack('Time entry updated.', isSuccess: true);
       }
     }
   }
@@ -2858,6 +2907,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
 
   Future<void> _confirmDelete(DtrProvider dtr, TimeRecord r) async {
     if (!mounted) return;
+    if (r.isLeaveCovered) {
+      _showTimeLogSnack(
+        'Approved leave covers this date. Revoke the leave before deleting its underlying attendance.',
+      );
+      return;
+    }
     final reasonController = TextEditingController();
     final reason = await showDialog<String>(
       context: context,
