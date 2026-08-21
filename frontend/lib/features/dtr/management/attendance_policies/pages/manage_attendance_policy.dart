@@ -12,7 +12,6 @@ class _PolicyRecord {
     required this.useEquivalentDayConversion,
 
     required this.deductLate,
-    this.maxLateMinutesPerMonth,
     required this.convertLateToEquivalentDay,
 
     required this.deductUndertime,
@@ -33,7 +32,6 @@ class _PolicyRecord {
   final bool useEquivalentDayConversion;
 
   final bool deductLate;
-  final int? maxLateMinutesPerMonth;
   final bool convertLateToEquivalentDay;
 
   final bool deductUndertime;
@@ -85,7 +83,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   // Late settings
   bool _deductLate = false;
-  final _maxLateMinutesPerMonthController = TextEditingController();
   bool _convertLateToEquivalentDay = true;
 
   // Undertime settings
@@ -143,7 +140,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     _nameController.dispose();
     _descriptionController.dispose();
     _workHoursPerDayController.dispose();
-    _maxLateMinutesPerMonthController.dispose();
     _deductionMultiplierController.dispose();
     super.dispose();
   }
@@ -152,14 +148,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     final workHours = double.tryParse(_workHoursPerDayController.text.trim());
     if (workHours == null || workHours <= 0) {
       return 'Work Hours Per Day must be greater than 0.';
-    }
-
-    final maxLateRaw = _maxLateMinutesPerMonthController.text.trim();
-    if (maxLateRaw.isNotEmpty) {
-      final maxLate = int.tryParse(maxLateRaw);
-      if (maxLate == null || maxLate < 0) {
-        return 'Max Late Minutes Per Month must be empty or >= 0.';
-      }
     }
 
     final mult = double.tryParse(_deductionMultiplierController.text.trim());
@@ -294,7 +282,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       final data = res.data ?? [];
       _policies = (data).map((e) {
         final m = e as Map<String, dynamic>;
-        final maxLate = m['max_late_minutes_per_month'];
         return _PolicyRecord(
           id: m['id'] as String,
           policyName:
@@ -304,9 +291,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           useEquivalentDayConversion:
               m['use_equivalent_day_conversion'] as bool? ?? true,
           deductLate: m['deduct_late'] as bool? ?? false,
-          maxLateMinutesPerMonth: maxLate == null
-              ? null
-              : (maxLate as num?)?.toInt(),
           convertLateToEquivalentDay:
               m['convert_late_to_equivalent_day'] as bool? ?? true,
           deductUndertime: m['deduct_undertime'] as bool? ?? true,
@@ -342,8 +326,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       _useEquivalentDayConversion = p.useEquivalentDayConversion;
 
       _deductLate = p.deductLate;
-      _maxLateMinutesPerMonthController.text =
-          p.maxLateMinutesPerMonth?.toString() ?? '';
       _convertLateToEquivalentDay = p.convertLateToEquivalentDay;
 
       _deductUndertime = p.deductUndertime;
@@ -370,7 +352,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       _useEquivalentDayConversion = true;
 
       _deductLate = false;
-      _maxLateMinutesPerMonthController.clear();
       _convertLateToEquivalentDay = true;
 
       _deductUndertime = true;
@@ -413,10 +394,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               double.tryParse(_workHoursPerDayController.text.trim()) ?? 8,
           'use_equivalent_day_conversion': _useEquivalentDayConversion,
           'deduct_late': _deductLate,
-          'max_late_minutes_per_month':
-              _maxLateMinutesPerMonthController.text.trim().isEmpty
-              ? null
-              : int.tryParse(_maxLateMinutesPerMonthController.text.trim()),
           'convert_late_to_equivalent_day': _convertLateToEquivalentDay,
           'deduct_undertime': _deductUndertime,
           'convert_undertime_to_equivalent_day':
@@ -486,10 +463,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               double.tryParse(_workHoursPerDayController.text.trim()) ?? 8,
           'use_equivalent_day_conversion': _useEquivalentDayConversion,
           'deduct_late': _deductLate,
-          'max_late_minutes_per_month':
-              _maxLateMinutesPerMonthController.text.trim().isEmpty
-              ? null
-              : int.tryParse(_maxLateMinutesPerMonthController.text.trim()),
           'convert_late_to_equivalent_day': _convertLateToEquivalentDay,
           'deduct_undertime': _deductUndertime,
           'convert_undertime_to_equivalent_day':
@@ -1076,15 +1049,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           title: 'Deduct Late',
           value: _deductLate,
           onChanged: (v) => _updatePolicyFormState(() => _deductLate = v),
-        ),
-        const SizedBox(height: 12),
-        _label('Max Late Minutes Per Month'),
-        const SizedBox(height: 6),
-        TextFormField(
-          controller: _maxLateMinutesPerMonthController,
-          style: AppTheme.dashFieldTextStyle(context),
-          keyboardType: TextInputType.number,
-          decoration: _decoration('Optional'),
         ),
         const SizedBox(height: 12),
         _switchTile(
