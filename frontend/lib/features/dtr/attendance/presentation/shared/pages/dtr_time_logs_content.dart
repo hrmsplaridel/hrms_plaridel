@@ -260,6 +260,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   StreamSubscription? _wsSub;
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
+  static const int _recordPageSize = 100;
+  int _recordPage = 0;
 
   /// When non-null and >= 1, filter to this day only (realtime-style single-day view).
   int? _selectedDay;
@@ -391,8 +393,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   Future<void> _applyFilters({
     bool silent = false,
     bool forceRefresh = false,
+    bool resetPage = false,
   }) async {
     if (!mounted) return;
+    if (resetPage && _recordPage != 0) {
+      setState(() => _recordPage = 0);
+    }
     final dayBefore = _selectedDay;
     _clampSelectedDayIfNeeded();
     if (dayBefore != _selectedDay && mounted) {
@@ -430,6 +436,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       departmentId: _selectedDepartmentId?.isEmpty == true
           ? null
           : _selectedDepartmentId,
+      limit: _recordPageSize,
+      offset: _recordPage * _recordPageSize,
       silent: silent,
       forceRefresh: forceRefresh,
     );
@@ -799,7 +807,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               _clampSelectedDayIfNeeded();
                             });
                           }
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<int>(
@@ -834,7 +842,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               _clampSelectedDayIfNeeded();
                             });
                           }
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<int?>(
@@ -868,7 +876,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ],
                         onChanged: (v) {
                           setState(() => _selectedDay = v);
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<String?>(
@@ -902,7 +910,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             _selectedDepartmentId = v;
                             _selectedUserId = null;
                           });
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<String?>(
@@ -933,7 +941,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ],
                         onChanged: (v) {
                           setState(() => _selectedUserId = v);
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       OutlinedButton(
@@ -947,7 +955,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             _selectedUserId = null;
                             _selectedDepartmentId = null;
                           });
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                         style: OutlinedButton.styleFrom(
                           backgroundColor: dark
@@ -1259,8 +1267,60 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                 );
               },
             ),
+          if (!dtr.loading &&
+              !isHardcodedPreview &&
+              dtr.timeRecordTotal > _recordPageSize) ...[
+            const SizedBox(height: 12),
+            _buildTimeLogPagination(context, dtr),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildTimeLogPagination(BuildContext context, DtrProvider dtr) {
+    final totalPages = (dtr.timeRecordTotal / _recordPageSize).ceil();
+    final currentPage = _recordPage.clamp(0, totalPages - 1).toInt();
+    final firstRow = currentPage * _recordPageSize + 1;
+    final lastRow = (firstRow + dtr.timeRecords.length - 1)
+        .clamp(firstRow, dtr.timeRecordTotal)
+        .toInt();
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Text(
+          '$firstRow-$lastRow of ${dtr.timeRecordTotal}',
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 12),
+        IconButton(
+          tooltip: 'Previous page',
+          onPressed: currentPage > 0
+              ? () {
+                  setState(() => _recordPage = currentPage - 1);
+                  _applyFilters();
+                }
+              : null,
+          icon: const Icon(Icons.chevron_left_rounded),
+        ),
+        Text(
+          '${currentPage + 1} of $totalPages',
+          style: TextStyle(color: AppTheme.dashTextPrimaryOf(context)),
+        ),
+        IconButton(
+          tooltip: 'Next page',
+          onPressed: currentPage + 1 < totalPages
+              ? () {
+                  setState(() => _recordPage = currentPage + 1);
+                  _applyFilters();
+                }
+              : null,
+          icon: const Icon(Icons.chevron_right_rounded),
+        ),
+      ],
     );
   }
 
@@ -1466,90 +1526,94 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               ),
             ),
           ),
-          if (!isHardcodedPreview && record.id != null)
+          if (!isHardcodedPreview)
             Expanded(
               flex: 1,
               child: Center(
-                child: PopupMenuButton<String>(
-                  icon: Icon(
-                    Icons.more_vert,
-                    size: 22,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  tooltip: 'Actions',
-                  onSelected: (value) {
-                    if (value == 'edit') {
-                      _showEditDialog(dtr, record);
-                    } else if (value == 'recalculate') {
-                      _recalculateRecord(dtr, record);
-                    } else if (value == 'delete') {
-                      _confirmDelete(dtr, record);
-                    }
-                  },
-                  itemBuilder: (ctx) => [
-                    PopupMenuItem<String>(
-                      value: 'edit',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.edit_rounded,
-                            size: 20,
-                            color: AppTheme.dashTextPrimaryOf(ctx),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            isLeaveCovered
-                                ? 'Edit underlying attendance'
-                                : 'Edit',
-                            style: TextStyle(
-                              color: AppTheme.dashTextPrimaryOf(ctx),
+                child: record.id == null
+                    ? const SizedBox.shrink()
+                    : PopupMenuButton<String>(
+                        icon: Icon(
+                          Icons.more_vert,
+                          size: 22,
+                          color: AppTheme.dashTextSecondaryOf(context),
+                        ),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Actions',
+                        onSelected: (value) {
+                          if (value == 'edit') {
+                            _showEditDialog(dtr, record);
+                          } else if (value == 'recalculate') {
+                            _recalculateRecord(dtr, record);
+                          } else if (value == 'delete') {
+                            _confirmDelete(dtr, record);
+                          }
+                        },
+                        itemBuilder: (ctx) => [
+                          PopupMenuItem<String>(
+                            value: 'edit',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.edit_rounded,
+                                  size: 20,
+                                  color: AppTheme.dashTextPrimaryOf(ctx),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  isLeaveCovered
+                                      ? 'Edit underlying attendance'
+                                      : 'Edit',
+                                  style: TextStyle(
+                                    color: AppTheme.dashTextPrimaryOf(ctx),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                    if (!isLeaveCovered)
-                      PopupMenuItem<String>(
-                        value: 'recalculate',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.refresh_rounded,
-                              size: 20,
-                              color: AppTheme.dashTextPrimaryOf(ctx),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Recalculate',
-                              style: TextStyle(
-                                color: AppTheme.dashTextPrimaryOf(ctx),
+                          if (!isLeaveCovered)
+                            PopupMenuItem<String>(
+                              value: 'recalculate',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.refresh_rounded,
+                                    size: 20,
+                                    color: AppTheme.dashTextPrimaryOf(ctx),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Recalculate',
+                                    style: TextStyle(
+                                      color: AppTheme.dashTextPrimaryOf(ctx),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    if (!isLeaveCovered)
-                      PopupMenuItem<String>(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.delete_rounded,
-                              size: 20,
-                              color: Colors.red.shade700,
+                          if (!isLeaveCovered)
+                            PopupMenuItem<String>(
+                              value: 'delete',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.delete_rounded,
+                                    size: 20,
+                                    color: Colors.red.shade700,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Delete',
+                                    style: TextStyle(
+                                      color: Colors.red.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Delete',
-                              style: TextStyle(color: Colors.red.shade700),
-                            ),
-                          ],
-                        ),
+                        ],
                       ),
-                  ],
-                ),
               ),
             ),
         ],
