@@ -3,14 +3,50 @@ function normalizeAttendancePolicy(row) {
     id: row?.id || null,
     workHoursPerDay: row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
     deductLate: row?.deduct_late ?? true,
-    maxLateMinutesPerMonth:
-      row?.max_late_minutes_per_month != null ? parseInt(row.max_late_minutes_per_month, 10) : null,
     convertLateToEquivalentDay: row?.convert_late_to_equivalent_day ?? false,
     deductUndertime: row?.deduct_undertime ?? true,
     convertUndertimeToEquivalentDay: row?.convert_undertime_to_equivalent_day ?? false,
     absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ?? true,
     combineLateAndUndertime: row?.combine_late_and_undertime ?? false,
     deductionMultiplier: row?.deduction_multiplier != null ? parseFloat(row.deduction_multiplier) : 1,
+  };
+}
+
+function applyPolicyConversion(minutes, convertToEquivalentDay, workHoursPerDay, multiplier) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
+  const appliedMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  if (!convertToEquivalentDay) return Math.round(minutes * appliedMultiplier);
+  const workMinutes = Math.max(
+    1,
+    Math.round((Number.isFinite(workHoursPerDay) ? workHoursPerDay : 8) * 60)
+  );
+  return Math.round((minutes / workMinutes) * appliedMultiplier * workMinutes);
+}
+
+function calculateAttendancePolicyPenalties(policy, rawLateMinutes, rawUndertimeMinutes) {
+  let late = policy?.deductLate ? Math.max(0, Number(rawLateMinutes) || 0) : 0;
+  let undertime = policy?.deductUndertime
+    ? Math.max(0, Number(rawUndertimeMinutes) || 0)
+    : 0;
+
+  if (policy?.combineLateAndUndertime) {
+    undertime += late;
+    late = 0;
+  }
+
+  return {
+    lateMinutes: applyPolicyConversion(
+      late,
+      policy?.convertLateToEquivalentDay,
+      policy?.workHoursPerDay,
+      policy?.deductionMultiplier
+    ),
+    undertimeMinutes: applyPolicyConversion(
+      undertime,
+      policy?.convertUndertimeToEquivalentDay,
+      policy?.workHoursPerDay,
+      policy?.deductionMultiplier
+    ),
   };
 }
 
@@ -62,7 +98,7 @@ async function loadAttendancePolicyContext(
   }
 
   const policyColumns = `p.id, p.work_hours_per_day, p.deduct_late,
-    p.max_late_minutes_per_month, p.convert_late_to_equivalent_day,
+    p.convert_late_to_equivalent_day,
     p.deduct_undertime, p.convert_undertime_to_equivalent_day,
     p.absent_equals_full_day_deduction, p.combine_late_and_undertime,
     p.deduction_multiplier`;
@@ -146,6 +182,7 @@ function resolveAttendancePolicy(context, employeeId, dateStr, assignment) {
 }
 
 module.exports = {
+  calculateAttendancePolicyPenalties,
   loadAttendancePolicyContext,
   normalizeAttendancePolicy,
   resolveAttendancePolicy,
