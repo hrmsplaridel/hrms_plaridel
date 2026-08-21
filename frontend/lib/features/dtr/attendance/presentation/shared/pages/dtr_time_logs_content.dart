@@ -453,6 +453,39 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     return '$h12:${m.toString().padLeft(2, '0')} $ampm';
   }
 
+  static bool _isOvernightShift(EmployeeShiftForDate? shift) {
+    final start = shift?.startMinutes;
+    final end = shift?.endMinutes;
+    return start != null && end != null && end <= start;
+  }
+
+  static int? _orderedPunchMinutes(
+    int? value, {
+    required int? after,
+    required bool overnight,
+  }) {
+    if (value == null) return null;
+    return overnight && after != null && value <= after ? value + 1440 : value;
+  }
+
+  static DateTime _manualPunchTimestamp({
+    required DateTime attendanceDate,
+    required TimeOfDay time,
+    required EmployeeShiftForDate? shift,
+    bool mayFallOnNextDay = false,
+  }) {
+    final minutes = time.hour * 60 + time.minute;
+    final nextDay =
+        mayFallOnNextDay &&
+        _isOvernightShift(shift) &&
+        shift?.endMinutes != null &&
+        minutes <= shift!.endMinutes!;
+    final date = nextDay
+        ? attendanceDate.add(const Duration(days: 1))
+        : attendanceDate;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
   static String _formatDate(DateTime d) {
     return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
@@ -1715,6 +1748,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     DateTime recordDate = (day != null && day >= 1 && day <= lastDay)
         ? DateTime(_selectedYear, _selectedMonth, day)
         : DateTime.now();
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    if (recordDate.isAfter(todayDate)) recordDate = todayDate;
     var addDeptId = _selectedDepartmentId;
     await dtr.loadEmployees(
       departmentId: addDeptId,
@@ -1820,6 +1856,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               final isAmOnly = punchMode == 'am_only';
               final isPmOnly = punchMode == 'pm_only';
               final isSingleSession = punchMode == 'single_session';
+              final isOvernight = _isOvernightShift(selectedShift);
               final hasAnyTime = isAmOnly
                   ? timeIn != null || breakOut != null
                   : isPmOnly
@@ -1845,12 +1882,24 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               } else if (isPmOnly &&
                   pmInMinutes != null &&
                   pmOutMinutes != null &&
-                  pmOutMinutes <= pmInMinutes) {
+                  (_orderedPunchMinutes(
+                            pmOutMinutes,
+                            after: pmInMinutes,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutMinutes) <=
+                      pmInMinutes) {
                 validationMessage = 'PM Out must be later than PM In.';
               } else if (isSingleSession &&
                   amInMinutes != null &&
                   pmOutMinutes != null &&
-                  pmOutMinutes <= amInMinutes) {
+                  (_orderedPunchMinutes(
+                            pmOutMinutes,
+                            after: amInMinutes,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutMinutes) <=
+                      amInMinutes) {
                 validationMessage = 'Time Out must be later than Time In.';
               } else if (!isAmOnly && !isPmOnly && !isSingleSession) {
                 if (amInMinutes != null &&
@@ -1859,11 +1908,23 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   validationMessage = 'AM Out must be later than AM In.';
                 } else if (pmInMinutes != null &&
                     pmOutMinutes != null &&
-                    pmOutMinutes <= pmInMinutes) {
+                    (_orderedPunchMinutes(
+                              pmOutMinutes,
+                              after: pmInMinutes,
+                              overnight: isOvernight,
+                            ) ??
+                            pmOutMinutes) <=
+                        pmInMinutes) {
                   validationMessage = 'PM Out must be later than PM In.';
                 } else if (amOutMinutes != null &&
                     pmInMinutes != null &&
-                    pmInMinutes < amOutMinutes) {
+                    (_orderedPunchMinutes(
+                              pmInMinutes,
+                              after: amOutMinutes,
+                              overnight: isOvernight,
+                            ) ??
+                            pmInMinutes) <
+                        amOutMinutes) {
                   validationMessage =
                       'PM In should not be earlier than AM Out.';
                 }
@@ -2049,7 +2110,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                     context: ctx,
                                     initialDate: recordDate,
                                     firstDate: DateTime(2020),
-                                    lastDate: DateTime(2030),
+                                    lastDate: todayDate,
                                   );
                                   if (d != null) {
                                     setState(() {
@@ -2374,39 +2435,34 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       DateTime? bi;
       DateTime? tout;
       if (!addIsPmOnly && timeIn != null) {
-        tin = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeIn!.hour,
-          timeIn!.minute,
+        tin = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: timeIn!,
+          shift: selectedShift,
         );
       }
       if (!addIsPmOnly && !addIsSingleSession && breakOut != null) {
-        bo = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakOut!.hour,
-          breakOut!.minute,
+        bo = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: breakOut!,
+          shift: selectedShift,
+          mayFallOnNextDay: true,
         );
       }
       if (!addIsAmOnly && !addIsSingleSession && breakIn != null) {
-        bi = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakIn!.hour,
-          breakIn!.minute,
+        bi = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: breakIn!,
+          shift: selectedShift,
+          mayFallOnNextDay: true,
         );
       }
       if (!addIsAmOnly && timeOut != null) {
-        tout = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeOut!.hour,
-          timeOut!.minute,
+        tout = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: timeOut!,
+          shift: selectedShift,
+          mayFallOnNextDay: true,
         );
       }
       double? hours;
@@ -2469,16 +2525,27 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         ? TimeOfDay(hour: timeOutLocal.hour, minute: timeOutLocal.minute)
         : null;
     final recordDate = r.recordDate;
+    EmployeeShiftForDate editShift;
+    try {
+      editShift = await dtr.fetchEmployeeShiftForDate(
+        employeeId: r.userId,
+        date: recordDate,
+      );
+    } catch (e) {
+      if (mounted) _showTimeLogSnack(userFacingApiError(e));
+      return;
+    }
     final originalTimeIn = timeIn;
     final originalBreakOut = breakOut;
     final originalBreakIn = breakIn;
     final originalTimeOut = timeOut;
 
     // Derive shift-awareness flags once (r is immutable, so these never change).
-    final punchMode = r.shiftPunchMode;
+    final punchMode = editShift.punchMode;
     final isAmOnly = punchMode == 'am_only';
     final isPmOnly = punchMode == 'pm_only';
     final isSingleSession = punchMode == 'single_session';
+    final isOvernight = _isOvernightShift(editShift);
 
     if (!mounted) return;
     final updated = await openResponsiveRightSidePanel<bool>(
@@ -2514,19 +2581,51 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                 validationMessage = 'AM Out must be later than AM In.';
               }
             } else if (isPmOnly) {
-              if (pmInM != null && pmOutM != null && pmOutM <= pmInM) {
+              if (pmInM != null &&
+                  pmOutM != null &&
+                  (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) <=
+                      pmInM) {
                 validationMessage = 'PM Out must be later than PM In.';
               }
             } else if (isSingleSession) {
-              if (amInM != null && pmOutM != null && pmOutM <= amInM) {
+              if (amInM != null &&
+                  pmOutM != null &&
+                  (_orderedPunchMinutes(
+                            pmOutM,
+                            after: amInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) <=
+                      amInM) {
                 validationMessage = 'Time Out must be later than Time In.';
               }
             } else {
               if (amInM != null && amOutM != null && amOutM <= amInM) {
                 validationMessage = 'AM Out must be later than AM In.';
-              } else if (pmInM != null && pmOutM != null && pmOutM <= pmInM) {
+              } else if (pmInM != null &&
+                  pmOutM != null &&
+                  (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) <=
+                      pmInM) {
                 validationMessage = 'PM Out must be later than PM In.';
-              } else if (amOutM != null && pmInM != null && pmInM < amOutM) {
+              } else if (amOutM != null &&
+                  pmInM != null &&
+                  (_orderedPunchMinutes(
+                            pmInM,
+                            after: amOutM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmInM) <
+                      amOutM) {
                 validationMessage = 'PM In should not be earlier than AM Out.';
               }
             }
@@ -2539,21 +2638,49 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                 }
               } else if (isPmOnly) {
                 if (pmInM != null && pmOutM != null) {
-                  workedMinutes = pmOutM - pmInM;
+                  workedMinutes =
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      pmInM;
                 }
               } else if (isSingleSession) {
                 if (amInM != null && pmOutM != null) {
-                  workedMinutes = pmOutM - amInM;
+                  workedMinutes =
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: amInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      amInM;
                 }
               } else {
                 if (amInM != null && amOutM != null) {
                   workedMinutes += amOutM - amInM;
                 }
                 if (pmInM != null && pmOutM != null) {
-                  workedMinutes += pmOutM - pmInM;
+                  workedMinutes +=
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      pmInM;
                 }
                 if (workedMinutes == 0 && amInM != null && pmOutM != null) {
-                  workedMinutes = pmOutM - amInM;
+                  workedMinutes =
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: amInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      amInM;
                 }
               }
             }
@@ -2902,39 +3029,34 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       DateTime? tout;
       // Only build fields relevant to the shift's punch mode.
       if (!isPmOnly && timeIn != null) {
-        tin = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeIn!.hour,
-          timeIn!.minute,
+        tin = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: timeIn!,
+          shift: editShift,
         );
       }
       if (!isPmOnly && !isSingleSession && breakOut != null) {
-        bo = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakOut!.hour,
-          breakOut!.minute,
+        bo = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: breakOut!,
+          shift: editShift,
+          mayFallOnNextDay: true,
         );
       }
       if (!isAmOnly && !isSingleSession && breakIn != null) {
-        bi = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakIn!.hour,
-          breakIn!.minute,
+        bi = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: breakIn!,
+          shift: editShift,
+          mayFallOnNextDay: true,
         );
       }
       if (!isAmOnly && timeOut != null) {
-        tout = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeOut!.hour,
-          timeOut!.minute,
+        tout = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: timeOut!,
+          shift: editShift,
+          mayFallOnNextDay: true,
         );
       }
       double? hours;
