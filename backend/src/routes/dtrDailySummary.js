@@ -3,10 +3,9 @@ const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin, requireAdminOrHr, requireAdminOrSupervisor } = require('../middleware/rbac');
 const {
-  expandNonRecurringToWindow,
-  expandRecurringToWindow,
-  dateInRecurringRange,
-} = require('../services/holidayRangeUtils');
+  loadHolidayOverlayMap,
+  resolveAttendanceHolidayOverlay,
+} = require('../services/holidayOverlay');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
   ensureShiftPunchModeColumn,
@@ -633,73 +632,6 @@ async function computeAttendanceRemark(
   return 'On Time';
 }
 
-/** YYYY-MM-DD from pg date (avoid TZ shift). */
-function holidayDateToStr(v) {
-  if (v == null) return null;
-  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.split('T')[0];
-  if (v instanceof Date) {
-    const y = v.getFullYear();
-    const m = String(v.getMonth() + 1).padStart(2, '0');
-    const d = String(v.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return String(v).split('T')[0];
-}
-
-/** Get all active holiday dates in [startStr, endStr]. Returns array of { dateStr, id, name, holiday_type, coverage }. Tolerates missing coverage column. */
-async function getHolidaysInRange(startStr, endStr) {
-  if (!startStr || !endStr) return [];
-  const hasCoverage = await _holidaysHasCoverageColumn();
-  const cov = hasCoverage ? ', coverage' : '';
-  const nonRecur = await pool.query(
-    `SELECT id, name, holiday_type, date_from, date_to, recurring${cov}
-     FROM holidays
-     WHERE (is_active IS NULL OR is_active = true)
-       AND recurring = false
-       AND date_from <= $2::date AND date_to >= $1::date`,
-    [startStr, endStr]
-  );
-  const recur = await pool.query(
-    `SELECT id, name, holiday_type, date_from, date_to, recurring${cov}
-     FROM holidays
-     WHERE (is_active IS NULL OR is_active = true) AND recurring = true`
-  );
-  if (!hasCoverage) {
-    for (const r of nonRecur.rows) r.coverage = 'whole_day';
-    for (const r of recur.rows) r.coverage = 'whole_day';
-  }
-  const byDate = new Map();
-  function pushDate(ds, r) {
-    if (byDate.has(ds)) return;
-    byDate.set(ds, {
-      dateStr: ds,
-      id: r.id,
-      name: r.name,
-      holiday_type: r.holiday_type,
-      coverage: r.coverage || 'whole_day',
-    });
-  }
-  for (const r of nonRecur.rows) {
-    const dates = expandNonRecurringToWindow(
-      holidayDateToStr(r.date_from),
-      holidayDateToStr(r.date_to),
-      startStr,
-      endStr
-    );
-    for (const ds of dates) pushDate(ds, r);
-  }
-  for (const r of recur.rows) {
-    const dates = expandRecurringToWindow(
-      holidayDateToStr(r.date_from),
-      holidayDateToStr(r.date_to),
-      startStr,
-      endStr
-    );
-    for (const ds of dates) pushDate(ds, r);
-  }
-  return Array.from(byDate.values()).sort((a, b) => a.dateStr.localeCompare(b.dateStr));
-}
-
 /** Get approved leave dates in [startStr, endStr] for employees. Returns Set of "employeeId|YYYY-MM-DD". */
 async function getApprovedLeaveKeysInRange(employeeIds, startStr, endStr) {
   if (!startStr || !endStr) return new Set();
@@ -928,30 +860,8 @@ async function _holidaysHasCoverageColumn() {
 
 /** Get active holiday for a date, if any. Non-recurring range match first, then recurring template. Returns { id, name, holiday_type, coverage } or null. Tolerates missing coverage column. */
 async function getHolidayByDate(dateStr) {
-  const hasCoverage = await _holidaysHasCoverageColumn();
-  const cols = hasCoverage ? 'id, name, holiday_type, coverage' : 'id, name, holiday_type';
-  const exact = await pool.query(
-    `SELECT ${cols} FROM holidays
-     WHERE (is_active IS NULL OR is_active = true) AND recurring = false
-       AND date_from <= $1::date AND date_to >= $1::date
-     ORDER BY date_from
-     LIMIT 1`,
-    [dateStr]
-  );
-  if (exact.rows[0]) {
-    const r = exact.rows[0];
-    return { ...r, coverage: r.coverage || 'whole_day' };
-  }
-  const recurring = await pool.query(
-    `SELECT ${cols}, date_from, date_to FROM holidays
-     WHERE recurring = true AND (is_active IS NULL OR is_active = true)`
-  );
-  for (const r of recurring.rows) {
-    if (dateInRecurringRange(dateStr, holidayDateToStr(r.date_from), holidayDateToStr(r.date_to))) {
-      return { id: r.id, name: r.name, holiday_type: r.holiday_type, coverage: r.coverage || 'whole_day' };
-    }
-  }
-  return null;
+  const byDate = await loadHolidayOverlayMap(pool, dateStr, dateStr);
+  return byDate.get(String(dateStr).slice(0, 10)) || null;
 }
 
 // GET /api/dtr-daily-summary - list for admin (filters: start_date, end_date, employee_id, department_id, limit, offset)
@@ -1059,6 +969,10 @@ router.get('/', protect, async (req, res) => {
       rawEmployeeIds.length > 0 && rawRangeStart && rawRangeEnd
         ? await getAssignmentsForEmployeesInRange(rawEmployeeIds, rawRangeStart, rawRangeEnd)
         : new Map();
+    const activeHolidayByDate =
+      rawRangeStart && rawRangeEnd
+        ? await loadHolidayOverlayMap(pool, rawRangeStart, rawRangeEnd)
+        : new Map();
 
     const rows = await Promise.all(rawRows.map(async (r) => {
       // Use the date-only text from SQL to avoid timezone shifting issues when JS receives Date objects.
@@ -1069,19 +983,34 @@ router.get('/', protect, async (req, res) => {
           await getAssignmentShiftForDate(r.employee_id, dateStr)
         )
         : null;
-      const coverage = r.holiday_coverage || 'whole_day';
+      const activeHoliday = activeHolidayByDate.get(dateStr) || null;
+      const holidayState = resolveAttendanceHolidayOverlay(r, activeHoliday);
+      const activeHolidayId = holidayState.holidayId;
+      const coverage = holidayState.coverage;
       const hasLeaveCoverage =
         r.leave_coverage_id != null || r.leave_request_status === 'approved';
       const activeLeaveRequestId = hasLeaveCoverage ? r.leave_request_id : null;
-      const effectiveStatus = hasLeaveCoverage ? 'on_leave' : r.status;
-      const isPartialSuspension = effectiveStatus === 'holiday' && (coverage === 'am_only' || coverage === 'pm_only');
-      let lateMinutes = hasLeaveCoverage
+      const effectiveStatus = activeHoliday
+        ? 'holiday'
+        : (hasLeaveCoverage ? 'on_leave' : holidayState.status);
+      const isWholeDayHoliday = activeHoliday?.coverage === 'whole_day';
+      const isPartialSuspension =
+        activeHoliday != null &&
+        (coverage === 'am_only' || coverage === 'pm_only');
+      let lateMinutes = hasLeaveCoverage || isWholeDayHoliday
         ? 0
         : (r.late_minutes != null ? parseInt(r.late_minutes, 10) : 0);
-      let undertimeMinutes = hasLeaveCoverage
+      let undertimeMinutes = hasLeaveCoverage || isWholeDayHoliday
         ? 0
         : (r.undertime_minutes != null ? parseInt(r.undertime_minutes, 10) : 0);
-      if (recomputeExistingRows && dateStr && effectiveStatus !== 'on_leave' && (effectiveStatus !== 'holiday' || isPartialSuspension)) {
+      const reconcileHolidayChange =
+        isPartialSuspension || holidayState.staleStoredHoliday;
+      if (
+        (recomputeExistingRows || reconcileHolidayChange) &&
+        dateStr &&
+        effectiveStatus !== 'on_leave' &&
+        !isWholeDayHoliday
+      ) {
         // Optional expensive path for after schedule/policy changes. The normal
         // Time Logs view uses stored summary values for fast reads.
         lateMinutes = await computeLateMinutes(
@@ -1090,7 +1019,7 @@ router.get('/', protect, async (req, res) => {
           r.time_in,
           r.break_in,
           effectiveStatus,
-          r.holiday_id,
+          activeHolidayId,
           coverage
         );
         undertimeMinutes = await computeUndertimeMinutes(
@@ -1099,7 +1028,7 @@ router.get('/', protect, async (req, res) => {
           r.time_out,
           r.break_out,
           effectiveStatus,
-          r.holiday_id,
+          activeHolidayId,
           coverage,
           r.time_in,
           r.break_in
@@ -1121,12 +1050,17 @@ router.get('/', protect, async (req, res) => {
         late_minutes: lateMinutes,
         undertime_minutes: undertimeMinutes,
         status: effectiveStatus,
-        holiday_id: r.holiday_id,
+        holiday_id: activeHolidayId,
         leave_request_id: activeLeaveRequestId,
         leave_type_name: r.leave_type_name,
       };
-      const holidayInfo = r.holiday_id ? { name: r.holiday_name, holiday_type: r.holiday_type, coverage } : null;
-      let attendanceRemark = await computeAttendanceRemark(recordForRemark, shiftInfo, r.holiday_id, activeLeaveRequestId, holidayInfo);
+      let attendanceRemark = await computeAttendanceRemark(
+        recordForRemark,
+        shiftInfo,
+        activeHolidayId,
+        activeLeaveRequestId,
+        activeHoliday
+      );
       const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
       return {
         id: r.id,
@@ -1143,14 +1077,14 @@ router.get('/', protect, async (req, res) => {
         pm_status: r.pm_status,
         remarks: r.remarks,
         attendance_remark: attendanceRemark,
-        holiday_id: r.holiday_id,
+        holiday_id: activeHolidayId,
         leave_request_id: activeLeaveRequestId,
         is_leave_covered: hasLeaveCoverage,
-        holiday_name: r.holiday_name,
-        holiday_type: r.holiday_type,
+        holiday_name: activeHoliday?.name || null,
+        holiday_type: activeHoliday?.holiday_type || null,
         coverage,
         leave_type_name: r.leave_type_name || null,
-        source: hasLeaveCoverage ? 'adjusted' : (r.source || null),
+        source: hasLeaveCoverage || activeHoliday ? 'adjusted' : (r.source || null),
         leave_coverage_id: r.leave_coverage_id || null,
         created_at: r.created_at,
         updated_at: r.updated_at,
@@ -1215,9 +1149,8 @@ router.get('/', protect, async (req, res) => {
 
       const assignmentsByEmployee = await getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr);
 
-      const holidaysInRange = await getHolidaysInRange(startStr, endStr);
-      const holidayByDate = new Map();
-      for (const h of holidaysInRange) holidayByDate.set(h.dateStr, h);
+      const holidayByDate = activeHolidayByDate;
+      const holidaysInRange = Array.from(holidayByDate.values());
       const leaveCoverageByKey = await getApprovedLeaveCoverageInRange(
         employeeIds,
         startStr,
@@ -1598,6 +1531,8 @@ router.get('/', protect, async (req, res) => {
 router.get('/summary', protect, requireAdminOrSupervisor, async (req, res) => {
   try {
     const today = todayInHrmsTimezone();
+    const todayHoliday = await getHolidayByDate(today);
+    const isWholeDayHoliday = todayHoliday?.coverage === 'whole_day';
     const present = await pool.query(
       `SELECT COUNT(*) AS c FROM dtr_daily_summary WHERE attendance_date = $1::date AND time_in IS NOT NULL`,
       [today]
@@ -1651,8 +1586,12 @@ router.get('/summary', protect, requireAdminOrSupervisor, async (req, res) => {
     }
 
     res.json({
-      present_today: parseInt(present.rows[0]?.c ?? 0, 10),
-      late_today: parseInt(late.rows[0]?.c ?? 0, 10),
+      present_today: isWholeDayHoliday
+        ? 0
+        : parseInt(present.rows[0]?.c ?? 0, 10),
+      late_today: isWholeDayHoliday
+        ? 0
+        : parseInt(late.rows[0]?.c ?? 0, 10),
       on_leave_today: onLeaveToday,
       pending_approval: pendingApproval,
     });
@@ -1668,6 +1607,7 @@ router.get('/my-shift-today', protect, async (req, res) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
     const today = todayInHrmsTimezone();
+    const activeHoliday = await getHolidayByDate(today);
     const shiftInfo = await getAssignmentShiftForDate(userId, today);
     if (!shiftInfo || shiftInfo.endMinutes == null) {
       return res.json({ start_time: null, end_time: null }); // no shift or no end = no restriction
@@ -1733,10 +1673,41 @@ router.get('/today', protect, async (req, res) => {
     );
     const r = result.rows[0];
     if (r && !hasCoverage) r.holiday_coverage = 'whole_day';
-    if (!r) return res.json(null);
+    if (!r && !activeHoliday) return res.json(null);
+    if (!r) {
+      return res.json({
+        id: null,
+        user_id: userId,
+        record_date: today,
+        time_in: null,
+        break_out: null,
+        break_in: null,
+        time_out: null,
+        total_hours: null,
+        status: 'holiday',
+        pm_status: null,
+        remarks: null,
+        source: 'adjusted',
+        holiday_id: activeHoliday.id,
+        holiday_name: activeHoliday.name,
+        holiday_type: activeHoliday.holiday_type,
+        coverage: activeHoliday.coverage || 'whole_day',
+        leave_request_id: null,
+        leave_coverage_id: null,
+        is_leave_covered: false,
+        leave_type_name: null,
+        created_at: null,
+        updated_at: null,
+        employee_name: null,
+      });
+    }
     const todayRecordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || today;
+    const holidayState = resolveAttendanceHolidayOverlay(r, activeHoliday);
+    const effectiveStatus = activeHoliday
+      ? 'holiday'
+      : (r.is_leave_covered === true ? 'on_leave' : holidayState.status);
     let pmStatus = r.pm_status;
-    if (pmStatus == null && r.break_in != null && r.holiday_id == null) {
+    if (pmStatus == null && r.break_in != null && activeHoliday == null) {
       const dateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
       pmStatus = dateStr ? await computePmLateStatus(r.employee_id, dateStr, r.break_in) : 'present';
     }
@@ -1749,14 +1720,14 @@ router.get('/today', protect, async (req, res) => {
       break_in: r.break_in,
       time_out: r.time_out,
       total_hours: r.total_hours != null ? parseFloat(r.total_hours) : null,
-      status: r.status,
+      status: effectiveStatus,
       pm_status: pmStatus,
       remarks: r.remarks,
-      source: r.source || null,
-      holiday_id: r.holiday_id,
-      holiday_name: r.holiday_name,
-      holiday_type: r.holiday_type,
-      coverage: r.holiday_coverage || 'whole_day',
+      source: activeHoliday ? 'adjusted' : (r.source || null),
+      holiday_id: holidayState.holidayId,
+      holiday_name: holidayState.holidayName,
+      holiday_type: holidayState.holidayType,
+      coverage: holidayState.coverage,
       leave_request_id: r.leave_request_id || null,
       leave_coverage_id: r.leave_coverage_id || null,
       is_leave_covered: r.is_leave_covered === true,
@@ -2189,27 +2160,23 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
     const existing = check.rows[0];
     const employeeId = existing.employee_id;
     const dateStr = toIsoDateStr(existing.attendance_date);
-    const coverage = existing.holiday_coverage || 'whole_day';
+    const holidayByDate = await loadHolidayOverlayMap(client, dateStr, dateStr);
+    const holidayInfo = holidayByDate.get(dateStr) || null;
+    const holidayId = holidayInfo?.id || null;
+    const coverage = holidayInfo?.coverage || null;
     const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
-    const holidayInfo = existing.holiday_id
-      ? {
-        id: existing.holiday_id,
-        name: existing.holiday_name,
-        coverage,
-      }
-      : null;
 
     let status = existing.status;
-    if (existing.holiday_id != null && (!coverage || coverage === 'whole_day')) {
+    if (holidayId != null && coverage === 'whole_day') {
       status = 'holiday';
     } else if (status !== 'on_leave') {
       status = existing.time_in
         ? await computeStatusFromShift(employeeId, dateStr, existing.time_in)
-        : existing.status;
+        : (existing.status === 'holiday' ? 'absent' : existing.status);
     }
 
     let pmStatus = existing.pm_status;
-    if (existing.holiday_id == null && status !== 'on_leave') {
+    if (holidayId == null && status !== 'on_leave') {
       pmStatus = existing.break_in
         ? await computePmLateStatus(employeeId, dateStr, existing.break_in)
         : null;
@@ -2219,7 +2186,7 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
     let lateMinutes = 0;
     let undertimeMinutes = 0;
     const isHolidayOrLeave =
-      existing.holiday_id != null || status === 'holiday' || status === 'on_leave';
+      holidayId != null || status === 'holiday' || status === 'on_leave';
     const isPartialSuspension =
       isHolidayOrLeave && (coverage === 'am_only' || coverage === 'pm_only');
     if (!isHolidayOrLeave || isPartialSuspension) {
@@ -2229,7 +2196,7 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
         existing.time_in,
         existing.break_in,
         status,
-        existing.holiday_id,
+        holidayId,
         coverage
       );
       const rawUnder = await computeUndertimeMinutes(
@@ -2238,7 +2205,7 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
         existing.time_out,
         existing.break_out,
         status,
-        existing.holiday_id,
+        holidayId,
         coverage,
         existing.time_in,
         existing.break_in
@@ -2259,9 +2226,12 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
         status,
         late_minutes: lateMinutes,
         undertime_minutes: undertimeMinutes,
+        holiday_id: holidayId,
+        holiday_name: holidayInfo?.name || null,
+        coverage,
       },
       shiftInfo,
-      existing.holiday_id,
+      holidayId,
       existing.leave_request_id,
       holidayInfo
     );
@@ -2273,11 +2243,12 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
            undertime_minutes = $4,
            status = $5,
            pm_status = $6,
+           holiday_id = $7::uuid,
            source = CASE WHEN source = 'system' THEN source ELSE 'adjusted' END,
            updated_at = now()
        WHERE id = $1::uuid
        RETURNING *, attendance_date::text AS attendance_date_iso`,
-      [id, totalHours, lateMinutes, undertimeMinutes, status, pmStatus]
+       [id, totalHours, lateMinutes, undertimeMinutes, status, pmStatus, holidayId]
     );
     const r = result.rows[0];
 
@@ -2621,55 +2592,25 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/dtr-daily-summary/sync-holidays - admin only; set holiday_id and status='holiday' for existing rows whose attendance_date falls in a holiday range (non-recurring or recurring template)
+// POST /api/dtr-daily-summary/sync-holidays - compatibility endpoint. Holidays
+// are now resolved as date overlays, so syncing refreshes clients without
+// rewriting or destroying the underlying attendance state.
 router.post('/sync-holidays', protect, requireAdmin, async (req, res) => {
   try {
     const { start_date, end_date } = req.body;
     const start = start_date || new Date().toISOString().slice(0, 10);
     const end = end_date || start;
-    const exact = await pool.query(
-      `UPDATE dtr_daily_summary d
-       SET holiday_id = h.id, status = 'holiday', source = 'adjusted', updated_at = now()
-       FROM holidays h
-       WHERE h.recurring = false
-         AND (h.is_active IS NULL OR h.is_active = true)
-         AND d.attendance_date >= h.date_from AND d.attendance_date <= h.date_to
-         AND d.attendance_date >= $1::date AND d.attendance_date <= $2::date
-       RETURNING d.id`,
-      [start, end]
-    );
-    let updated = exact.rowCount;
-    const recurringRows = await pool.query(
-      `SELECT id, date_from, date_to FROM holidays
-       WHERE recurring = true AND (is_active IS NULL OR is_active = true)`
-    );
-    for (const h of recurringRows.rows) {
-      const dates = expandRecurringToWindow(
-        holidayDateToStr(h.date_from),
-        holidayDateToStr(h.date_to),
-        start,
-        end
-      );
-      if (dates.length === 0) continue;
-      const rUp = await pool.query(
-        `UPDATE dtr_daily_summary
-         SET holiday_id = $1, status = 'holiday', source = 'adjusted', updated_at = now()
-         WHERE attendance_date = ANY($2::date[])
-           AND attendance_date >= $3::date AND attendance_date <= $4::date
-           AND holiday_id IS NULL`,
-        [h.id, dates, start, end]
-      );
-      updated += rUp.rowCount;
+    if (start > end) {
+      return res.status(400).json({ error: 'end_date must be on or after start_date' });
     }
-    if (updated > 0) {
-      broadcastBiometricUpdate('dtr_refresh', {
-        action: 'holidays_synced',
-        updated,
-        dateFrom: start,
-        dateTo: end,
-      });
-    }
-    res.json({ updated });
+    const overlays = await loadHolidayOverlayMap(pool, start, end);
+    broadcastBiometricUpdate('dtr_refresh', {
+      action: 'holidays_refreshed',
+      coveredDates: overlays.size,
+      dateFrom: start,
+      dateTo: end,
+    });
+    res.json({ updated: 0, covered_dates: overlays.size, overlay_only: true });
   } catch (err) {
     console.error('[dtr-daily-summary sync-holidays POST]', err);
     res.status(500).json({ error: 'Failed to sync holidays to DTR summary' });
