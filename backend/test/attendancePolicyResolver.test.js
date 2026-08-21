@@ -4,9 +4,28 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  calculateAttendancePolicyPenalties,
   loadAttendancePolicyContext,
   resolveAttendancePolicy,
 } = require('../src/services/attendancePolicyResolver');
+
+test('attendance penalties count every late minute without a monthly cap', () => {
+  const policy = {
+    deductLate: true,
+    maxLateMinutesPerMonth: 60,
+    deductUndertime: true,
+    combineLateAndUndertime: true,
+    convertLateToEquivalentDay: false,
+    convertUndertimeToEquivalentDay: false,
+    workHoursPerDay: 8,
+    deductionMultiplier: 1,
+  };
+
+  assert.deepEqual(calculateAttendancePolicyPenalties(policy, 90, 15), {
+    lateMinutes: 0,
+    undertimeMinutes: 105,
+  });
+});
 
 const employeeId = '11111111-1111-4111-8111-111111111111';
 const departmentId = '22222222-2222-4222-8222-222222222222';
