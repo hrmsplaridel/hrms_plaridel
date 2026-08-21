@@ -28,6 +28,7 @@ const {
   normalizeAttendancePolicy,
   resolveAttendancePolicy,
 } = require('../services/attendancePolicyResolver');
+const { validateDtrPunchDates } = require('../services/dtrPunchDateValidation');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -1900,7 +1901,27 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
       });
     }
 
-    const date = attendance_date || new Date().toISOString().slice(0, 10);
+    const date = String(attendance_date || '').trim();
+    if (inclusiveIsoDateRangeDays(date, date) !== 1) {
+      return res.status(400).json({ error: 'attendance_date must be a valid YYYY-MM-DD date.' });
+    }
+    const todayDate = todayInHrmsTimezone();
+    if (date > todayDate) {
+      return res.status(400).json({
+        error: `Future attendance is not allowed. The latest permitted date is ${todayDate}.`,
+      });
+    }
+    const shiftInfo = await getAssignmentShiftForDate(targetId, date);
+    const punchDateValidation = validateDtrPunchDates({
+      attendanceDate: date,
+      punches: { time_in: timeIn, break_out: breakOut, break_in: breakIn, time_out: timeOut },
+      shiftInfo,
+      todayDate,
+      timeZone: HRMS_TIMEZONE,
+    });
+    if (!punchDateValidation.valid) {
+      return res.status(400).json({ error: punchDateValidation.error });
+    }
     const leaveCoverage = await getApprovedLeaveCoverageForDate(targetId, date);
     if (leaveCoverage) {
       return res.status(409).json({
@@ -1914,10 +1935,11 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
 
     // Reject PM In (break_in) if after shift end time (skip for holidays)
     if (breakIn && !holiday) {
-      const shiftInfo = await getAssignmentShiftForDate(targetId, date);
       if (shiftInfo && shiftInfo.endMinutes != null) {
         const breakInMins = minutesFromMidnightInTimeZone(breakIn);
-        if (breakInMins != null && breakInMins > shiftInfo.endMinutes) {
+        const isOvernightShift =
+          shiftInfo.startMinutes != null && shiftInfo.endMinutes <= shiftInfo.startMinutes;
+        if (!isOvernightShift && breakInMins != null && breakInMins > shiftInfo.endMinutes) {
           return res.status(400).json({
             error: `PM clock-in time is after shift end. Shift ends at ${minutesToTimeStr(shiftInfo.endMinutes)}. Clock-in not allowed.`,
           });
@@ -1930,7 +1952,9 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
       pmStatus = await computePmLateStatus(targetId, date, breakIn);
     }
     const holidayId = holiday ? holiday.id : null;
-    const total = total_hours != null ? parseFloat(total_hours) : computeTotalHours(timeIn, breakOut, breakIn, timeOut);
+    const total = total_hours != null
+      ? parseFloat(total_hours)
+      : computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo);
     let lateMinutes = 0;
     let undertimeMinutes = 0;
     if ((!holiday || coverage === 'am_only' || coverage === 'pm_only') && status !== 'on_leave') {
@@ -2051,12 +2075,29 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
       });
     }
 
+    const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+    const ti = time_in !== undefined ? time_in : existing.time_in;
+    const bo = break_out !== undefined ? break_out : existing.break_out;
+    const bi = break_in !== undefined ? break_in : existing.break_in;
+    const to = time_out !== undefined ? time_out : existing.time_out;
+    const punchDateValidation = validateDtrPunchDates({
+      attendanceDate: dateStr,
+      punches: { time_in: ti, break_out: bo, break_in: bi, time_out: to },
+      shiftInfo,
+      todayDate: todayInHrmsTimezone(),
+      timeZone: HRMS_TIMEZONE,
+    });
+    if (!punchDateValidation.valid) {
+      return rejectEdit(400, { error: punchDateValidation.error });
+    }
+
     // Reject PM In (break_in) if after shift end time
     if (break_in !== undefined && break_in != null && existing.holiday_id == null) {
-      const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
       if (shiftInfo && shiftInfo.endMinutes != null) {
         const breakInMins = minutesFromMidnightInTimeZone(break_in);
-        if (breakInMins != null && breakInMins > shiftInfo.endMinutes) {
+        const isOvernightShift =
+          shiftInfo.startMinutes != null && shiftInfo.endMinutes <= shiftInfo.startMinutes;
+        if (!isOvernightShift && breakInMins != null && breakInMins > shiftInfo.endMinutes) {
           return rejectEdit(400, {
             error: `PM clock-in time is after shift end. Shift ends at ${minutesToTimeStr(shiftInfo.endMinutes)}.`,
           });
@@ -2072,12 +2113,8 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
     if (break_in !== undefined) { updates.push(`break_in = $${i++}`); values.push(break_in); }
     if (time_out !== undefined) { updates.push(`time_out = $${i++}`); values.push(time_out); }
 
-    const ti = time_in !== undefined ? time_in : existing.time_in;
-    const bo = break_out !== undefined ? break_out : existing.break_out;
-    const bi = break_in !== undefined ? break_in : existing.break_in;
-    const to = time_out !== undefined ? time_out : existing.time_out;
     const anyTimeChanged = time_in !== undefined || break_out !== undefined || break_in !== undefined || time_out !== undefined;
-    const computedTotal = computeTotalHours(ti, bo, bi, to);
+    const computedTotal = computeTotalHours(ti, bo, bi, to, shiftInfo);
     if (total_hours !== undefined) {
       updates.push(`total_hours = $${i++}::numeric`);
       const parsedTotal = total_hours === null || total_hours === '' ? null : parseFloat(total_hours);
