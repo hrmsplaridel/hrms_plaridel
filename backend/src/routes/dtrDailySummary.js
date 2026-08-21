@@ -23,6 +23,11 @@ const {
   mergeLocatorCoverages,
 } = require('../services/locatorCoverage');
 const { resolveDtrDailySummaryScope } = require('../services/dtrDailySummaryAccess');
+const {
+  loadAttendancePolicyContext,
+  normalizeAttendancePolicy,
+  resolveAttendancePolicy,
+} = require('../services/attendancePolicyResolver');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -98,6 +103,20 @@ const NOON_MINUTES = 12 * 60;
 
 /** Default timezone for interpreting shift rules vs log timestamps. */
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
+const MAX_DTR_RANGE_DAYS = 62;
+const DEFAULT_DTR_PAGE_SIZE = 500;
+const MAX_DTR_PAGE_SIZE = 2000;
+
+function inclusiveIsoDateRangeDays(startDate, endDate) {
+  const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!isoDatePattern.test(String(startDate || '')) || !isoDatePattern.test(String(endDate || ''))) {
+    return null;
+  }
+  const startMs = Date.parse(`${startDate}T00:00:00Z`);
+  const endMs = Date.parse(`${endDate}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return null;
+  return Math.floor((endMs - startMs) / 86400000) + 1;
+}
 
 /**
  * Returns today's date string (YYYY-MM-DD) in HRMS_TIMEZONE, not UTC.
@@ -133,19 +152,7 @@ let _cachedAttendancePolicyAt = 0;
 const _policyByEmployeeDateCache = new Map();
 
 function _normalizePolicy(row) {
-  return {
-    id: row?.id || null,
-    workHoursPerDay: row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
-    deductLate: row?.deduct_late ?? true,
-    maxLateMinutesPerMonth:
-      row?.max_late_minutes_per_month != null ? parseInt(row.max_late_minutes_per_month, 10) : null,
-    convertLateToEquivalentDay: row?.convert_late_to_equivalent_day ?? false,
-    deductUndertime: row?.deduct_undertime ?? true,
-    convertUndertimeToEquivalentDay: row?.convert_undertime_to_equivalent_day ?? false,
-    absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ?? true,
-    combineLateAndUndertime: row?.combine_late_and_undertime ?? false,
-    deductionMultiplier: row?.deduction_multiplier != null ? parseFloat(row.deduction_multiplier) : 1,
-  };
+  return normalizeAttendancePolicy(row);
 }
 
 async function getActiveDefaultAttendancePolicy() {
@@ -789,6 +796,7 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
   const res = await pool.query(
     `SELECT a.employee_id,
             a.department_id,
+            a.shift_id,
             a.effective_from::text AS effective_from,
             a.effective_to::text AS effective_to,
             COALESCE(a.override_start_time, s.start_time) AS start_time,
@@ -810,6 +818,7 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
     const startTimeStr = r.start_time;
     const shift = {
       departmentId: r.department_id || null,
+      shiftId: r.shift_id || null,
       effective_from: String(r.effective_from).slice(0, 10),
       effective_to: r.effective_to ? String(r.effective_to).slice(0, 10) : null,
       startMinutes: startTimeStr ? timeToMinutes(startTimeStr) : null,
@@ -866,12 +875,25 @@ async function getHolidayByDate(dateStr) {
 
 // GET /api/dtr-daily-summary - list for admin (filters: start_date, end_date, employee_id, department_id, limit, offset)
 // - No date range: `limit` applies to SQL only (default 500, max 1000), e.g. dashboard "recent" list.
-// - With start_date + end_date: SQL uses a high cap so merge/injection sees all dtr_daily_summary rows; optional
-//   `limit` + `offset` slice the *final* merged array (omit `limit` to return everyone for that range, e.g. Time Logs "all").
+// - With start_date + end_date: the final merged result is paginated and exposes its total count.
 router.get('/', protect, async (req, res) => {
   try {
     const { start_date, end_date, employee_id, department_id, limit: limitRaw, offset: offsetRaw } = req.query;
+    if (!!start_date !== !!end_date) {
+      return res.status(400).json({ error: 'start_date and end_date must be provided together' });
+    }
     const hasDateRange = !!(start_date && end_date);
+    if (hasDateRange) {
+      const rangeDays = inclusiveIsoDateRangeDays(start_date, end_date);
+      if (rangeDays == null) {
+        return res.status(400).json({ error: 'Invalid attendance date range' });
+      }
+      if (rangeDays > MAX_DTR_RANGE_DAYS) {
+        return res.status(400).json({
+          error: `Attendance date range cannot exceed ${MAX_DTR_RANGE_DAYS} days`,
+        });
+      }
+    }
     const recomputeExistingRows = isTruthyQueryFlag(req.query.recompute);
     const params = [];
     const conditions = [];
@@ -978,10 +1000,7 @@ router.get('/', protect, async (req, res) => {
       // Use the date-only text from SQL to avoid timezone shifting issues when JS receives Date objects.
       const dateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
       const shiftInfo = dateStr
-        ? (
-          getShiftInfoForDateFromAssignments(rawAssignmentsByEmployee, r.employee_id, dateStr) ||
-          await getAssignmentShiftForDate(r.employee_id, dateStr)
-        )
+        ? getShiftInfoForDateFromAssignments(rawAssignmentsByEmployee, r.employee_id, dateStr)
         : null;
       const activeHoliday = activeHolidayByDate.get(dateStr) || null;
       const holidayState = resolveAttendanceHolidayOverlay(r, activeHoliday);
@@ -1148,6 +1167,13 @@ router.get('/', protect, async (req, res) => {
       }
 
       const assignmentsByEmployee = await getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr);
+      const attendancePolicyContext = await loadAttendancePolicyContext(
+        pool,
+        employeeIds,
+        startStr,
+        endStr,
+        assignmentsByEmployee
+      );
 
       const holidayByDate = activeHolidayByDate;
       const holidaysInRange = Array.from(holidayByDate.values());
@@ -1322,7 +1348,12 @@ router.get('/', protect, async (req, res) => {
 
           // Absent = no rendered work; undertime baseline should be net expected
           // work minutes (exclude lunch for full-day shifts).
-          const policyForDay = await getAttendancePolicyForEmployeeDate(empId, dateStr);
+          const policyForDay = resolveAttendancePolicy(
+            attendancePolicyContext,
+            empId,
+            dateStr,
+            shiftInfo
+          );
           const absentUndertime = policyForDay.absentEqualsFullDayDeduction
             ? getExpectedWorkMinutes(shiftInfo)
             : 0;
@@ -1435,9 +1466,11 @@ router.get('/', protect, async (req, res) => {
 
         const rowDateStr = String(row.record_date).slice(0, 10);
         const holidayInfo = holidayByDate.get(rowDateStr) || null;
-        const shiftInfo =
-          getShiftInfoForDateFromAssignments(assignmentsByEmployee, row.user_id, rowDateStr) ||
-          await getAssignmentShiftForDate(row.user_id, rowDateStr);
+        const shiftInfo = getShiftInfoForDateFromAssignments(
+          assignmentsByEmployee,
+          row.user_id,
+          rowDateStr
+        );
         const hasFullShiftCoverage = evaluateLocatorCoverage({
           locator,
           shiftInfo,
@@ -1512,11 +1545,16 @@ router.get('/', protect, async (req, res) => {
       ? rows
       : rows.filter((row) => String(row.user_id) === String(scopedEmployeeId));
     let payload = authorizedRows;
-    if (hasDateRange && limitRaw != null && String(limitRaw).trim() !== '') {
+    if (hasDateRange) {
       const off = Math.max(0, parseInt(offsetRaw, 10) || 0);
-      const pageSize = Math.min(Math.max(1, parseInt(limitRaw, 10) || 500), 10000);
-      res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count');
+      const pageSize = Math.min(
+        Math.max(1, parseInt(limitRaw, 10) || DEFAULT_DTR_PAGE_SIZE),
+        MAX_DTR_PAGE_SIZE
+      );
+      res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count, X-Limit, X-Offset');
       res.setHeader('X-Total-Count', String(authorizedRows.length));
+      res.setHeader('X-Limit', String(pageSize));
+      res.setHeader('X-Offset', String(off));
       payload = authorizedRows.slice(off, off + pageSize);
     }
 
