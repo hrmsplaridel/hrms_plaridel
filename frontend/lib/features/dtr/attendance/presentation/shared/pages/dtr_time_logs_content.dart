@@ -7,7 +7,7 @@ import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart'
-    show DtrProvider, DtrUpdateEvent, EmployeeOption;
+    show DtrProvider, DtrUpdateEvent, EmployeeOption, EmployeeShiftForDate;
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/mobile/widgets/dtr_time_logs_mobile_list.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_source_badge.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/import_biometric_attendance_logs_dialog.dart';
@@ -1740,6 +1740,29 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     TimeOfDay? breakIn;
     TimeOfDay? timeOut;
     var employeesLoading = false;
+    var shiftLoading = false;
+    EmployeeShiftForDate? selectedShift;
+    String? shiftLookupError;
+
+    void retainExpectedPunches(EmployeeShiftForDate shift) {
+      if (!shift.expectedPunches.contains('time_in')) timeIn = null;
+      if (!shift.expectedPunches.contains('break_out')) breakOut = null;
+      if (!shift.expectedPunches.contains('break_in')) breakIn = null;
+      if (!shift.expectedPunches.contains('time_out')) timeOut = null;
+    }
+
+    final initialEmployeeId = userId;
+    if (initialEmployeeId != null) {
+      try {
+        selectedShift = await dtr.fetchEmployeeShiftForDate(
+          employeeId: initialEmployeeId,
+          date: recordDate,
+        );
+      } catch (e) {
+        shiftLookupError = userFacingApiError(e);
+      }
+      if (!context.mounted) return;
+    }
 
     bool? updated;
     try {
@@ -1752,20 +1775,48 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         builder: (ctx) {
           return StatefulBuilder(
             builder: (ctx, setState) {
+              Future<void> refreshSelectedShift() async {
+                final selectedEmployeeId = userId;
+                if (selectedEmployeeId == null) {
+                  setState(() {
+                    selectedShift = null;
+                    shiftLookupError = null;
+                    shiftLoading = false;
+                  });
+                  return;
+                }
+                setState(() {
+                  shiftLoading = true;
+                  shiftLookupError = null;
+                });
+                try {
+                  final shift = await dtr.fetchEmployeeShiftForDate(
+                    employeeId: selectedEmployeeId,
+                    date: recordDate,
+                  );
+                  if (!ctx.mounted) return;
+                  setState(() {
+                    selectedShift = shift;
+                    retainExpectedPunches(shift);
+                    shiftLoading = false;
+                  });
+                } catch (e) {
+                  if (!ctx.mounted) return;
+                  setState(() {
+                    selectedShift = null;
+                    shiftLookupError = userFacingApiError(e);
+                    shiftLoading = false;
+                  });
+                }
+              }
+
               final empList = dtr.employees;
               final String? employeeDropdownValue = empList.isEmpty
                   ? null
                   : (userId != null && empList.any((e) => e.id == userId))
                   ? userId
                   : empList.first.id;
-              final selectedEmployee = employeeDropdownValue == null
-                  ? null
-                  : empList
-                        .where(
-                          (employee) => employee.id == employeeDropdownValue,
-                        )
-                        .firstOrNull;
-              final punchMode = selectedEmployee?.shiftPunchMode ?? 'auto';
+              final punchMode = selectedShift?.punchMode ?? 'auto';
               final isAmOnly = punchMode == 'am_only';
               final isPmOnly = punchMode == 'pm_only';
               final isSingleSession = punchMode == 'single_session';
@@ -1819,6 +1870,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               }
               final canSubmit =
                   !employeesLoading &&
+                  !shiftLoading &&
+                  selectedShift != null &&
+                  shiftLookupError == null &&
                   employeeDropdownValue != null &&
                   empList.isNotEmpty &&
                   hasAnyTime &&
@@ -1931,6 +1985,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                           userId,
                                         );
                                       });
+                                      await refreshSelectedShift();
                                     },
                             ),
                             const SizedBox(height: 10),
@@ -1977,25 +2032,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   .toList(),
                               onChanged: employeesLoading || empList.isEmpty
                                   ? null
-                                  : (v) {
+                                  : (v) async {
                                       if (v != null) {
-                                        setState(() {
-                                          userId = v;
-                                          final mode = empList
-                                              .where((e) => e.id == v)
-                                              .firstOrNull
-                                              ?.shiftPunchMode;
-                                          if (mode == 'am_only') {
-                                            breakIn = null;
-                                            timeOut = null;
-                                          } else if (mode == 'pm_only') {
-                                            timeIn = null;
-                                            breakOut = null;
-                                          } else if (mode == 'single_session') {
-                                            breakOut = null;
-                                            breakIn = null;
-                                          }
-                                        });
+                                        setState(() => userId = v);
+                                        await refreshSelectedShift();
                                       }
                                     },
                             ),
@@ -2029,6 +2069,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                         userId,
                                       );
                                     });
+                                    await refreshSelectedShift();
                                   }
                                 },
                                 borderRadius: BorderRadius.circular(12),
@@ -2092,6 +2133,20 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               ),
                             ),
                             const SizedBox(height: 18),
+                            if (shiftLoading) ...[
+                              const LinearProgressIndicator(minHeight: 3),
+                              const SizedBox(height: 12),
+                            ],
+                            if (shiftLookupError != null) ...[
+                              Text(
+                                shiftLookupError!,
+                                style: TextStyle(
+                                  color: Colors.orange.shade900,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                             if (isAmOnly || isPmOnly || isSingleSession) ...[
                               Container(
                                 padding: const EdgeInsets.symmetric(
@@ -2309,10 +2364,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
 
     final uid = userId;
     if (updated == true && uid != null && uid.isNotEmpty) {
-      final selectedPunchMode = dtr.employees
-          .where((employee) => employee.id == uid)
-          .firstOrNull
-          ?.shiftPunchMode;
+      final selectedPunchMode = selectedShift?.punchMode;
       final addIsAmOnly = selectedPunchMode == 'am_only';
       final addIsPmOnly = selectedPunchMode == 'pm_only';
       final addIsSingleSession = selectedPunchMode == 'single_session';

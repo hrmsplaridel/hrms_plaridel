@@ -115,6 +115,12 @@ function inclusiveIsoDateRangeDays(startDate, endDate) {
   const startMs = Date.parse(`${startDate}T00:00:00Z`);
   const endMs = Date.parse(`${endDate}T00:00:00Z`);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return null;
+  if (
+    new Date(startMs).toISOString().slice(0, 10) !== startDate ||
+    new Date(endMs).toISOString().slice(0, 10) !== endDate
+  ) {
+    return null;
+  }
   return Math.floor((endMs - startMs) / 86400000) + 1;
 }
 
@@ -1636,6 +1642,50 @@ router.get('/summary', protect, requireAdminOrSupervisor, async (req, res) => {
   } catch (err) {
     console.error('[dtr-daily-summary/summary GET]', err);
     res.status(500).json({ error: 'Failed to fetch DTR summary counts' });
+  }
+});
+
+// GET /api/dtr-daily-summary/shift-for-date?employee_id=<uuid>&date=YYYY-MM-DD
+// Returns the shift assignment effective on the correction date for manual DTR entry.
+router.get('/shift-for-date', protect, requireAdminOrHr, async (req, res) => {
+  try {
+    const employeeId = String(req.query.employee_id || '').trim();
+    const date = String(req.query.date || '').trim();
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(employeeId)) {
+      return res.status(400).json({ error: 'A valid employee_id is required' });
+    }
+    if (inclusiveIsoDateRangeDays(date, date) !== 1) {
+      return res.status(400).json({ error: 'A valid date is required' });
+    }
+
+    const shiftInfo = await getAssignmentShiftForDate(employeeId, date);
+    if (!shiftInfo) {
+      return res.status(404).json({
+        error: 'No employee shift assignment is effective on the selected date',
+      });
+    }
+
+    const expected = resolveExpectedLogsForDay(shiftInfo, null);
+    const resolvedPunchMode = resolveShiftType(shiftInfo) || shiftInfo.punchMode || 'auto';
+    const expectedPunches = expected.needsInOut
+      ? ['time_in', 'time_out']
+      : [
+          ...(expected.needsAm ? ['time_in', 'break_out'] : []),
+          ...(expected.needsPm ? ['break_in', 'time_out'] : []),
+        ];
+    return res.json({
+      employee_id: employeeId,
+      date,
+      punch_mode: resolvedPunchMode,
+      start_minutes: shiftInfo.startMinutes,
+      end_minutes: shiftInfo.endMinutes,
+      break_end_minutes: shiftInfo.breakEndMinutes,
+      expected_punches: expectedPunches,
+    });
+  } catch (err) {
+    console.error('[dtr-daily-summary shift-for-date GET]', err);
+    return res.status(500).json({ error: 'Failed to fetch the employee shift for the selected date' });
   }
 });
 

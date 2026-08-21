@@ -249,6 +249,35 @@ class EmployeeOption {
       : '—';
 }
 
+class EmployeeShiftForDate {
+  const EmployeeShiftForDate({
+    required this.punchMode,
+    required this.expectedPunches,
+    this.startMinutes,
+    this.endMinutes,
+    this.breakEndMinutes,
+  });
+
+  final String punchMode;
+  final Set<String> expectedPunches;
+  final int? startMinutes;
+  final int? endMinutes;
+  final int? breakEndMinutes;
+
+  factory EmployeeShiftForDate.fromJson(Map<String, dynamic> json) {
+    final punches = json['expected_punches'];
+    return EmployeeShiftForDate(
+      punchMode: json['punch_mode']?.toString() ?? 'auto',
+      expectedPunches: punches is List
+          ? punches.map((value) => value.toString()).toSet()
+          : const <String>{},
+      startMinutes: (json['start_minutes'] as num?)?.toInt(),
+      endMinutes: (json['end_minutes'] as num?)?.toInt(),
+      breakEndMinutes: (json['break_end_minutes'] as num?)?.toInt(),
+    );
+  }
+}
+
 /// Simple department for admin filters.
 class DepartmentOption {
   const DepartmentOption({required this.id, required this.name});
@@ -944,6 +973,19 @@ class DtrProvider extends ChangeNotifier {
       _myShiftEndMinutes = null;
       notifyListeners();
     }
+  }
+
+  Future<EmployeeShiftForDate> fetchEmployeeShiftForDate({
+    required String employeeId,
+    required DateTime date,
+  }) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/dtr-daily-summary/shift-for-date',
+      queryParameters: {'employee_id': employeeId, 'date': _dateKey(date)},
+    );
+    final data = res.data;
+    if (data == null) throw StateError('No shift information returned');
+    return EmployeeShiftForDate.fromJson(data);
   }
 
   /// Load employee list for admin filter.
