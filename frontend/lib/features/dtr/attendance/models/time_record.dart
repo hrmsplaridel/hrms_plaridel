@@ -391,6 +391,20 @@ class DeletedTimeRecord {
   }
 }
 
+class TimeRecordPage {
+  const TimeRecordPage({
+    required this.items,
+    required this.total,
+    required this.limit,
+    required this.offset,
+  });
+
+  final List<TimeRecord> items;
+  final int total;
+  final int limit;
+  final int offset;
+}
+
 /// Repository for DTR time records. Uses backend API (dtr_daily_summary); Supabase logic commented out.
 class TimeRecordRepo {
   TimeRecordRepo._();
@@ -398,10 +412,28 @@ class TimeRecordRepo {
 
   /// List time records for admin (all users). Uses GET /api/dtr-daily-summary.
   ///
-  /// With [startDate] and [endDate], omit [limit] to load the full merged list (all employees for
-  /// that range). Pass [limit] (+ optional [offset]) to page the *merged* result (server sets
-  /// `X-Total-Count` when [limit] is sent).
+  /// Date-range responses are paginated by the backend. Use [listPageForAdmin]
+  /// when the caller needs the total count or subsequent pages.
   Future<List<TimeRecord>> listForAdmin({
+    DateTime? startDate,
+    DateTime? endDate,
+    String? userId,
+    String? departmentId,
+    int? limit,
+    int? offset,
+  }) async {
+    final page = await listPageForAdmin(
+      startDate: startDate,
+      endDate: endDate,
+      userId: userId,
+      departmentId: departmentId,
+      limit: limit,
+      offset: offset,
+    );
+    return page.items;
+  }
+
+  Future<TimeRecordPage> listPageForAdmin({
     DateTime? startDate,
     DateTime? endDate,
     String? userId,
@@ -428,9 +460,20 @@ class TimeRecordRepo {
         queryParameters: params,
       );
       final data = res.data ?? [];
-      return data
+      final items = data
           .map((e) => TimeRecord.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
+      final responseTotal = int.tryParse(
+        res.headers.value('x-total-count') ?? '',
+      );
+      final responseLimit = int.tryParse(res.headers.value('x-limit') ?? '');
+      final responseOffset = int.tryParse(res.headers.value('x-offset') ?? '');
+      return TimeRecordPage(
+        items: items,
+        total: responseTotal ?? items.length,
+        limit: responseLimit ?? limit ?? items.length,
+        offset: responseOffset ?? offset ?? 0,
+      );
     } on DioException catch (_) {
       rethrow;
     }
