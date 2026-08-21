@@ -16,13 +16,6 @@ function toBool(v, fallback = false) {
   return fallback;
 }
 
-function toIntOrNull(v) {
-  if (v === undefined) return undefined;
-  if (v === null || String(v).trim() === '') return null;
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : null;
-}
-
 function toIntOrDefault(v, def) {
   if (v === undefined) return undefined;
   const n = parseInt(v, 10);
@@ -39,10 +32,6 @@ function validatePolicyPayload(p) {
   const workHoursPerDay = p.work_hours_per_day;
   if (workHoursPerDay != null && !(parseFloat(workHoursPerDay) > 0)) {
     return 'Work hours per day must be greater than 0.';
-  }
-  const maxLate = p.max_late_minutes_per_month;
-  if (maxLate != null && !(parseInt(maxLate, 10) >= 0)) {
-    return 'Max late minutes per month must be null or >= 0.';
   }
   const mult = p.deduction_multiplier;
   if (mult != null && !(parseFloat(mult) > 0)) {
@@ -62,7 +51,7 @@ router.get('/', protect, async (req, res) => {
     const result = await pool.query(
       `SELECT id, name, description,
               work_hours_per_day, use_equivalent_day_conversion,
-              deduct_late, max_late_minutes_per_month, convert_late_to_equivalent_day,
+              deduct_late, convert_late_to_equivalent_day,
               deduct_undertime, convert_undertime_to_equivalent_day,
               absent_equals_full_day_deduction,
               combine_late_and_undertime, deduction_multiplier,
@@ -80,7 +69,6 @@ router.get('/', protect, async (req, res) => {
       work_hours_per_day: r.work_hours_per_day != null ? parseFloat(r.work_hours_per_day) : 8,
       use_equivalent_day_conversion: r.use_equivalent_day_conversion ?? true,
       deduct_late: r.deduct_late ?? false,
-      max_late_minutes_per_month: r.max_late_minutes_per_month,
       convert_late_to_equivalent_day: r.convert_late_to_equivalent_day ?? true,
       deduct_undertime: r.deduct_undertime ?? true,
       convert_undertime_to_equivalent_day: r.convert_undertime_to_equivalent_day ?? true,
@@ -112,7 +100,6 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       work_hours_per_day: toNumberOrDefault(body.work_hours_per_day, 8),
       use_equivalent_day_conversion: toBool(body.use_equivalent_day_conversion, true),
       deduct_late: toBool(body.deduct_late, false),
-      max_late_minutes_per_month: toIntOrNull(body.max_late_minutes_per_month),
       convert_late_to_equivalent_day: toBool(body.convert_late_to_equivalent_day, true),
       deduct_undertime: toBool(body.deduct_undertime, true),
       convert_undertime_to_equivalent_day: toBool(body.convert_undertime_to_equivalent_day, true),
@@ -126,15 +113,15 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     const result = await pool.query(
       `INSERT INTO attendance_policies (name, description,
         work_hours_per_day, use_equivalent_day_conversion,
-        deduct_late, max_late_minutes_per_month, convert_late_to_equivalent_day,
+        deduct_late, convert_late_to_equivalent_day,
         deduct_undertime, convert_undertime_to_equivalent_day,
         absent_equals_full_day_deduction,
         combine_late_and_undertime, deduction_multiplier,
         is_default, is_active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING id, name, description,
         work_hours_per_day, use_equivalent_day_conversion,
-        deduct_late, max_late_minutes_per_month, convert_late_to_equivalent_day,
+        deduct_late, convert_late_to_equivalent_day,
         deduct_undertime, convert_undertime_to_equivalent_day,
         absent_equals_full_day_deduction,
         combine_late_and_undertime, deduction_multiplier,
@@ -145,7 +132,6 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         payload.work_hours_per_day,
         payload.use_equivalent_day_conversion,
         payload.deduct_late,
-        payload.max_late_minutes_per_month,
         payload.convert_late_to_equivalent_day,
         payload.deduct_undertime,
         payload.convert_undertime_to_equivalent_day,
@@ -165,7 +151,6 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       work_hours_per_day: r.work_hours_per_day != null ? parseFloat(r.work_hours_per_day) : 8,
       use_equivalent_day_conversion: r.use_equivalent_day_conversion ?? true,
       deduct_late: r.deduct_late ?? false,
-      max_late_minutes_per_month: r.max_late_minutes_per_month,
       convert_late_to_equivalent_day: r.convert_late_to_equivalent_day ?? true,
       deduct_undertime: r.deduct_undertime ?? true,
       convert_undertime_to_equivalent_day: r.convert_undertime_to_equivalent_day ?? true,
@@ -202,7 +187,6 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (body.use_equivalent_day_conversion !== undefined) { updates.push(`use_equivalent_day_conversion = $${i++}`); values.push(toBool(body.use_equivalent_day_conversion, true)); }
 
     if (body.deduct_late !== undefined) { updates.push(`deduct_late = $${i++}`); values.push(toBool(body.deduct_late, false)); }
-    if (body.max_late_minutes_per_month !== undefined) { updates.push(`max_late_minutes_per_month = $${i++}`); values.push(toIntOrNull(body.max_late_minutes_per_month)); }
     if (body.convert_late_to_equivalent_day !== undefined) { updates.push(`convert_late_to_equivalent_day = $${i++}`); values.push(toBool(body.convert_late_to_equivalent_day, true)); }
 
     if (body.deduct_undertime !== undefined) { updates.push(`deduct_undertime = $${i++}`); values.push(toBool(body.deduct_undertime, true)); }
@@ -219,7 +203,6 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const validateErr = validatePolicyPayload({
       work_hours_per_day: body.work_hours_per_day,
-      max_late_minutes_per_month: body.max_late_minutes_per_month,
       deduction_multiplier: body.deduction_multiplier,
     });
     if (validateErr) return res.status(400).json({ error: validateErr });
@@ -231,7 +214,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       `UPDATE attendance_policies SET ${updates.join(', ')} WHERE id = $${i}
        RETURNING id, name, description,
         work_hours_per_day, use_equivalent_day_conversion,
-        deduct_late, max_late_minutes_per_month, convert_late_to_equivalent_day,
+        deduct_late, convert_late_to_equivalent_day,
         deduct_undertime, convert_undertime_to_equivalent_day,
         absent_equals_full_day_deduction,
         combine_late_and_undertime, deduction_multiplier,
@@ -248,7 +231,6 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       work_hours_per_day: r.work_hours_per_day != null ? parseFloat(r.work_hours_per_day) : 8,
       use_equivalent_day_conversion: r.use_equivalent_day_conversion ?? true,
       deduct_late: r.deduct_late ?? false,
-      max_late_minutes_per_month: r.max_late_minutes_per_month,
       convert_late_to_equivalent_day: r.convert_late_to_equivalent_day ?? true,
       deduct_undertime: r.deduct_undertime ?? true,
       convert_undertime_to_equivalent_day: r.convert_undertime_to_equivalent_day ?? true,
