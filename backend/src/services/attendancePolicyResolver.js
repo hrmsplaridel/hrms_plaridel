@@ -24,15 +24,10 @@ function applyPolicyConversion(minutes, convertToEquivalentDay, workHoursPerDay,
 }
 
 function calculateAttendancePolicyPenalties(policy, rawLateMinutes, rawUndertimeMinutes) {
-  let late = policy?.deductLate ? Math.max(0, Number(rawLateMinutes) || 0) : 0;
-  let undertime = policy?.deductUndertime
+  const late = policy?.deductLate ? Math.max(0, Number(rawLateMinutes) || 0) : 0;
+  const undertime = policy?.deductUndertime
     ? Math.max(0, Number(rawUndertimeMinutes) || 0)
     : 0;
-
-  if (policy?.combineLateAndUndertime) {
-    undertime += late;
-    late = 0;
-  }
 
   return {
     lateMinutes: applyPolicyConversion(
