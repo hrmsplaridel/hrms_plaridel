@@ -995,6 +995,7 @@ router.get('/', protect, async (req, res) => {
       let undertimeMinutes = hasLeaveCoverage || isWholeDayHoliday
         ? 0
         : (r.undertime_minutes != null ? parseInt(r.undertime_minutes, 10) : 0);
+      let effectiveAttendancePolicy = null;
       const reconcileHolidayChange =
         isPartialSuspension || holidayState.staleStoredHoliday;
       if (
@@ -1033,6 +1034,7 @@ router.get('/', protect, async (req, res) => {
         );
         lateMinutes = adjusted.lateMinutes;
         undertimeMinutes = adjusted.undertimeMinutes;
+        effectiveAttendancePolicy = adjusted.policy;
       }
       const recordForRemark = {
         time_in: r.time_in,
@@ -1082,6 +1084,8 @@ router.get('/', protect, async (req, res) => {
         updated_at: r.updated_at,
         employee_name: r.employee_name,
         shift_punch_mode: shiftInfo?.punchMode || 'auto',
+        combine_late_and_undertime:
+          effectiveAttendancePolicy?.combineLateAndUndertime ?? false,
       };
     }));
 
@@ -1357,6 +1361,7 @@ router.get('/', protect, async (req, res) => {
           updated_at: null,
           employee_name: userIdToName[empId] || null,
           shift_punch_mode: shiftInfo?.punchMode || 'auto',
+          combine_late_and_undertime: policyForDay.combineLateAndUndertime,
           });
         }
       }
