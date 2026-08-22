@@ -4,7 +4,6 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/escalation_config.dart';
-import 'package:hrms_plaridel/features/docutracker/models/document_ai_summary.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
@@ -338,46 +337,6 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       return true;
     } catch (_) {
       return false;
-    }
-  }
-
-  Future<DocuTrackerResult<DocumentAiSummary?>> getAiSummary(
-    String documentId,
-  ) async {
-    try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>(
-        '$_base/documents/$documentId/ai-summary',
-      );
-      final row = res.data;
-      if (row == null) return const DocuTrackerSuccess(null);
-      return DocuTrackerSuccess(DocumentAiSummary.fromJson(row));
-    } on DioException catch (e) {
-      if (e.response?.statusCode == 404) {
-        return const DocuTrackerSuccess(null);
-      }
-      return DocuTrackerFailure(_apiErrorMessage(e));
-    } catch (e) {
-      return DocuTrackerFailure(_apiErrorMessage(e));
-    }
-  }
-
-  Future<DocuTrackerResult<DocumentAiSummary>> generateAiSummary(
-    String documentId,
-  ) async {
-    try {
-      final res = await ApiClient.instance.post<Map<String, dynamic>>(
-        '$_base/documents/$documentId/ai-summary',
-        data: const <String, dynamic>{},
-      );
-      final row = res.data;
-      if (row == null) {
-        return DocuTrackerFailure<DocumentAiSummary>(
-          'Empty response from server',
-        );
-      }
-      return DocuTrackerSuccess(DocumentAiSummary.fromJson(row));
-    } catch (e) {
-      return DocuTrackerFailure(_apiErrorMessage(e));
     }
   }
 

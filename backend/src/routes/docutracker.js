@@ -18,11 +18,6 @@ const {
 const {
   ACTIVE_WORKFLOW_STATUSES_FOR_OVERDUE,
 } = require('../services/docutrackerStatusSemantics');
-const {
-  generateAiSummary,
-  getLatestAiSummary,
-} = require('../services/docutrackerAiSummaryService');
-
 const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
 const { sameEntityId } = require('../utils/sameEntityId');
 
@@ -110,6 +105,76 @@ async function canDownloadDocumentFile(client, docRow, user) {
     return true;
   }
   return canUserPerformDocumentAction(client, { user, document: docRow, action: 'view' });
+}
+
+let docutrackerDocumentFilesTableReady = null;
+
+async function hasDocutrackerDocumentFilesTable(client) {
+  if (docutrackerDocumentFilesTableReady !== null) return docutrackerDocumentFilesTableReady;
+  const result = await client.query(
+    `SELECT 1
+     FROM information_schema.tables
+     WHERE table_schema = 'public'
+       AND table_name = 'docutracker_document_files'
+     LIMIT 1`
+  );
+  docutrackerDocumentFilesTableReady = result.rowCount > 0;
+  return docutrackerDocumentFilesTableReady;
+}
+
+async function recordCurrentDocumentFile(client, {
+  documentId,
+  fileName,
+  filePath,
+  mimeType,
+  fileSize,
+  uploadedBy,
+}) {
+  if (!(await hasDocutrackerDocumentFilesTable(client))) return null;
+
+  await client.query(
+    `UPDATE docutracker_document_files
+     SET is_current = false
+     WHERE document_id = $1
+       AND is_current = true`,
+    [documentId]
+  );
+
+  const nextVersion = await client.query(
+    `SELECT COALESCE(MAX(version), 0) + 1 AS version
+     FROM docutracker_document_files
+     WHERE document_id = $1`,
+    [documentId]
+  );
+  const version = Number(nextVersion.rows[0]?.version || 1);
+
+  const inserted = await client.query(
+    `INSERT INTO docutracker_document_files
+       (document_id, file_name, file_path, mime_type, file_size, version, uploaded_by, is_current)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+     RETURNING *`,
+    [
+      documentId,
+      fileName,
+      filePath,
+      mimeType || null,
+      Number.isFinite(fileSize) ? fileSize : null,
+      version,
+      uploadedBy || null,
+    ]
+  );
+  return inserted.rows[0] || null;
+}
+
+async function clearCurrentDocumentFiles(client, documentId) {
+  if (!(await hasDocutrackerDocumentFilesTable(client))) return;
+  await client.query(
+    `UPDATE docutracker_document_files
+     SET is_current = false
+     WHERE document_id = $1
+       AND is_current = true`,
+    [documentId]
+  );
 }
 
 // Role/user permission rows cover baseline access and draft-start capability.
@@ -245,20 +310,6 @@ function mapDocumentRow(row) {
     needs_admin_intervention: row.needs_admin_intervention,
     created_at: row.created_at,
     updated_at: row.updated_at,
-  };
-}
-
-function mapAiSummaryRow(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    document_id: row.document_id,
-    summary: row.summary_json || {},
-    generated_by: row.generated_by,
-    generated_by_name: row.generated_by_name || null,
-    provider: row.provider,
-    model: row.model,
-    generated_at: row.generated_at,
   };
 }
 
@@ -408,7 +459,7 @@ router.get('/next-document-number', protect, async (_req, res) => {
 });
 
 /**
- * GET /api/docutracker/documents-overdue (admin — escalation worker)
+ * GET /api/docutracker/documents-overdue (admin Ã¢â‚¬â€ escalation worker)
  */
 router.get('/documents-overdue', protect, requireAdmin, async (_req, res) => {
   try {
@@ -457,7 +508,8 @@ router.post('/notifications/mark-all-read', protect, async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE docutracker_notifications
-       SET read = true
+       SET read = true,
+           read_at = COALESCE(read_at, now())
        WHERE user_id = $1 AND read = false`,
       [req.user.id]
     );
@@ -501,7 +553,8 @@ router.patch('/notifications/:id/read', protect, async (req, res) => {
     const { id } = req.params;
     const result = await pool.query(
       `UPDATE docutracker_notifications
-       SET read = true
+       SET read = true,
+           read_at = COALESCE(read_at, now())
        WHERE id = $1 AND user_id = $2
        RETURNING *`,
       [id, req.user.id]
@@ -766,61 +819,7 @@ router.post('/documents/:id/history', protect, async (req, res) => {
 });
 
 /**
- * GET /api/docutracker/documents/:id/ai-summary
- * Returns the latest saved AI summary for a readable document.
- */
-router.get('/documents/:id/ai-summary', protect, async (req, res) => {
-  const { id } = req.params;
-  try {
-    if (!(await assertDocumentReadable(req, id))) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    const row = await getLatestAiSummary(pool, id);
-    if (!row) return res.status(404).json({ error: 'AI summary not found' });
-    return res.json(mapAiSummaryRow(row));
-  } catch (err) {
-    console.error('[docutracker GET /documents/:id/ai-summary]', err);
-    return res.status(500).json({ error: 'Failed to fetch AI summary' });
-  }
-});
-
-/**
- * POST /api/docutracker/documents/:id/ai-summary
- * Generates and saves a metadata-only AI summary for a readable document.
- */
-router.post('/documents/:id/ai-summary', protect, async (req, res) => {
-  const { id } = req.params;
-  try {
-    if (!(await assertDocumentReadable(req, id))) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    const row = await generateAiSummary(pool, {
-      documentId: id,
-      userId: req.user?.id,
-    });
-    return res.status(201).json(mapAiSummaryRow(row));
-  } catch (err) {
-    console.error('[docutracker POST /documents/:id/ai-summary]', err);
-    if (err?.code === 'NOT_FOUND') {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    if (err?.code === 'AI_LOCAL_UNAVAILABLE') {
-      return res.status(503).json({
-        error:
-          'Local AI is not available. Start Ollama and pull the configured model.',
-      });
-    }
-    if (err?.code === 'AI_PROVIDER_FAILED') {
-      return res.status(err.status === 404 ? 503 : 502).json({
-        error: err.providerMessage || 'Local AI provider failed.',
-      });
-    }
-    return res.status(500).json({ error: 'Failed to generate AI summary' });
-  }
-});
-
-/**
- * PUT /api/docutracker/documents/:id — full update (Flutter client)
+ * PUT /api/docutracker/documents/:id Ã¢â‚¬â€ full update (Flutter client)
  */
 router.put('/documents/:id', protect, async (req, res) => {
   const { id } = req.params;
@@ -1940,6 +1939,7 @@ router.post('/documents/:id/remark', protect, async (req, res) => {
  */
 router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw, async (req, res) => {
   const { id } = req.params;
+  let uploadedRelPath = null;
   try {
     if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
     if (!req.file) {
@@ -1957,21 +1957,40 @@ router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw,
     }
 
     const relPath = `${DOCUTRACKER_ATTACHMENT_SUBDIR}/${req.file.filename}`;
-    if (docRow.file_path) {
-      const oldPath = path.join(UPLOAD_DIR, docRow.file_path);
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    uploadedRelPath = relPath;
+    const fileName = req.file.originalname || req.file.filename;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const updated = await client.query(
+        `UPDATE docutracker_documents
+         SET file_path = $1, file_name = $2, updated_at = NOW()
+         WHERE id = $3
+         RETURNING *`,
+        [relPath, fileName, id]
+      );
+      await recordCurrentDocumentFile(client, {
+        documentId: id,
+        fileName,
+        filePath: relPath,
+        mimeType: req.file.mimetype || null,
+        fileSize: req.file.size,
+        uploadedBy: req.user.id,
+      });
+      await client.query('COMMIT');
+      uploadedRelPath = null;
+      return res.json(mapDocumentRow(updated.rows[0]));
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
     }
-
-    const updated = await pool.query(
-      `UPDATE docutracker_documents
-       SET file_path = $1, file_name = $2, updated_at = NOW()
-       WHERE id = $3
-       RETURNING *`,
-      [relPath, req.file.originalname || req.file.filename, id]
-    );
-
-    return res.json(mapDocumentRow(updated.rows[0]));
   } catch (err) {
+    if (uploadedRelPath) {
+      const filePath = path.join(UPLOAD_DIR, uploadedRelPath);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
     console.error('[docutracker POST /documents/:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
   }
@@ -1992,18 +2011,25 @@ router.delete('/documents/:id/attachment', protect, async (req, res) => {
     if (!(await canModifyDocumentAttachment(pool, docRow, req.user))) {
       return res.status(403).json({ error: 'You do not have permission to remove the file.' });
     }
-    if (docRow.file_path) {
-      const filePath = path.join(UPLOAD_DIR, docRow.file_path);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await clearCurrentDocumentFiles(client, id);
+      const updated = await client.query(
+        `UPDATE docutracker_documents
+         SET file_path = NULL, file_name = NULL, updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id]
+      );
+      await client.query('COMMIT');
+      return res.json(mapDocumentRow(updated.rows[0]));
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
     }
-    const updated = await pool.query(
-      `UPDATE docutracker_documents
-       SET file_path = NULL, file_name = NULL, updated_at = NOW()
-       WHERE id = $1
-       RETURNING *`,
-      [id]
-    );
-    return res.json(mapDocumentRow(updated.rows[0]));
   } catch (err) {
     console.error('[docutracker DELETE /documents/:id/attachment]', err);
     res.status(500).json({ error: 'Failed to remove attachment' });

@@ -1,26 +1,26 @@
 -- =============================================================================
--- HRMS Plaridel — DocuTracker: INSTALL PHASE 1 (core, 01–08)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 1 (core, 01-08)
 -- =============================================================================
 -- PREREQUISITE: psql -d YOUR_DB -f scripts/init-schema.sql
 -- Requires: uuid-ossp, users, departments (and related core HR tables).
 -- NEXT (required before post-hardening phases): run docutracker-install-production-hardening-apply-once.sql
 --
 -- TABLE OF CONTENTS
---   01 — BASE SCHEMA (tables, indexes)
---   02 — MVP CONSTRAINTS (status checks, permissions, routing indexes)
---   03 — SUPABASE / STANDALONE PARITY (columns, nullable assignee)
---   04 — WORKFLOW VERSIONING (routing_config_versions, workflow_version on documents)
---   05 — WORKFLOW STEPS + STEP ASSIGNEES (normalized selected-person)
---   06 — STEP ASSIGNEE CONSTRAINT TRIGGER (primary + enabled rules)
---   07 — ROUTING RECORD ASSIGNEES (junction + backfill)
---   08 — HARDENING V2 (numeric guards, notifications event_key, permissions uniqueness, transition_requests)
+--   01 - BASE SCHEMA (tables, indexes)
+--   02 - MVP CONSTRAINTS (status checks, permissions, routing indexes)
+--   03 - SUPABASE / STANDALONE PARITY (columns, nullable assignee)
+--   04 - WORKFLOW VERSIONING (routing_config_versions, workflow_version on documents)
+--   05 - WORKFLOW STEPS + STEP ASSIGNEES (normalized selected-person)
+--   06 - STEP ASSIGNEE CONSTRAINT TRIGGER (primary + enabled rules)
+--   07 - ROUTING RECORD ASSIGNEES (junction + backfill)
+--   08 - HARDENING V2 (numeric guards, notifications event_key, permissions uniqueness, transition_requests)
 --
 -- =============================================================================
 
 
 
 -- #############################################################################
--- 01 — BASE SCHEMA (tables, indexes)
+-- 01 - BASE SCHEMA (tables, indexes)
 -- Source file: init-schema-docutracker.sql
 -- #############################################################################
 
@@ -150,7 +150,7 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_routing_record_assignees_user
 
 
 -- #############################################################################
--- 02 — MVP CONSTRAINTS (status checks, permissions, routing indexes)
+-- 02 - MVP CONSTRAINTS (status checks, permissions, routing indexes)
 -- Source file: migrate-docutracker-mvp-constraints.sql
 -- #############################################################################
 
@@ -226,7 +226,7 @@ ALTER TABLE docutracker_routing_records
 
 
 -- #############################################################################
--- 03 — SUPABASE / STANDALONE PARITY (columns, nullable assignee)
+-- 03 - SUPABASE / STANDALONE PARITY (columns, nullable assignee)
 -- Source file: migrate-docutracker-supabase-parity.sql
 -- #############################################################################
 
@@ -252,7 +252,7 @@ ALTER TABLE docutracker_documents DROP CONSTRAINT IF EXISTS docutracker_document
 
 
 -- #############################################################################
--- 04 — WORKFLOW VERSIONING (routing_config_versions, workflow_version on documents)
+-- 04 - WORKFLOW VERSIONING (routing_config_versions, workflow_version on documents)
 -- Source file: migrate-docutracker-workflow-versioning.sql
 -- #############################################################################
 
@@ -308,7 +308,7 @@ COMMIT;
 
 
 -- #############################################################################
--- 05 — WORKFLOW STEPS + STEP ASSIGNEES (normalized selected-person)
+-- 05 - WORKFLOW STEPS + STEP ASSIGNEES (normalized selected-person)
 -- Source file: migrate-docutracker-workflow-step-assignees-v1.sql
 -- #############################################################################
 
@@ -494,7 +494,7 @@ COMMIT;
 
 
 -- #############################################################################
--- 06 — STEP ASSIGNEE CONSTRAINT TRIGGER (primary + enabled rules)
+-- 06 - STEP ASSIGNEE CONSTRAINT TRIGGER (primary + enabled rules)
 -- Source file: migrate-docutracker-workflow-step-assignees-constraints-v1.sql
 -- #############################################################################
 
@@ -562,7 +562,7 @@ COMMIT;
 
 
 -- #############################################################################
--- 07 — ROUTING RECORD ASSIGNEES (junction + backfill)
+-- 07 - ROUTING RECORD ASSIGNEES (junction + backfill)
 -- Source file: migrate-docutracker-routing-record-assignees-v1.sql
 -- #############################################################################
 
@@ -594,7 +594,7 @@ COMMIT;
 
 
 -- #############################################################################
--- 08 — HARDENING V2 (numeric guards, notifications event_key, permissions uniqueness, transition_requests)
+-- 08 - HARDENING V2 (numeric guards, notifications event_key, permissions uniqueness, transition_requests)
 -- Source file: migrate-docutracker-hardening-v2.sql
 -- #############################################################################
 
