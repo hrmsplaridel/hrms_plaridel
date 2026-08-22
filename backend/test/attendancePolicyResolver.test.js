@@ -9,7 +9,7 @@ const {
   resolveAttendancePolicy,
 } = require('../src/services/attendancePolicyResolver');
 
-test('attendance penalties count every late minute without a monthly cap', () => {
+test('attendance penalties preserve late and undertime as separate source buckets', () => {
   const policy = {
     deductLate: true,
     maxLateMinutesPerMonth: 60,
@@ -22,8 +22,8 @@ test('attendance penalties count every late minute without a monthly cap', () =>
   };
 
   assert.deepEqual(calculateAttendancePolicyPenalties(policy, 90, 15), {
-    lateMinutes: 0,
-    undertimeMinutes: 105,
+    lateMinutes: 90,
+    undertimeMinutes: 15,
   });
 });
 
