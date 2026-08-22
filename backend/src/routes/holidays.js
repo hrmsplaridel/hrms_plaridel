@@ -9,6 +9,7 @@ const {
   listHolidayDefaultTemplates,
   upsertHolidayDefaultTemplate,
 } = require('../services/holidayDefaultTemplates');
+const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -58,6 +59,23 @@ function rowToJson(r) {
     coverage: r.coverage || 'whole_day',
     created_at: r.created_at,
   };
+}
+
+function broadcastHolidayRefresh(action, holidays) {
+  const rows = (Array.isArray(holidays) ? holidays : [holidays]).filter(Boolean);
+  broadcastBiometricUpdate('dtr_refresh', {
+    action,
+    holidayIds: rows.map((row) => row.id).filter(Boolean),
+    dateFrom: rows.reduce((min, row) => {
+      const value = toDateString(row.date_from);
+      return !min || (value && value < min) ? value : min;
+    }, null),
+    dateTo: rows.reduce((max, row) => {
+      const value = toDateString(row.date_to);
+      return !max || (value && value > max) ? value : max;
+    }, null),
+    recurring: rows.some((row) => row.recurring === true),
+  });
 }
 
 function holidayDefaultKey(item) {
@@ -261,6 +279,9 @@ router.post('/ph-defaults/import', protect, requireAdmin, async (req, res) => {
     }
 
     await client.query('COMMIT');
+    if (created.length > 0) {
+      broadcastHolidayRefresh('holidays_imported', created);
+    }
     res.status(201).json({
       year: template.year,
       source: template.source,
@@ -301,6 +322,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       [dateFrom, dateTo, name.trim(), type, description?.trim() || null, !!is_active, !!recurring, coverage]
     );
     const row = result.rows[0];
+    broadcastHolidayRefresh('holiday_created', row);
     res.status(201).json(rowToJson(row));
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'A holiday with this name and date range already exists.' });
@@ -313,6 +335,16 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const previousResult = await pool.query(
+      `SELECT id, date_from, date_to, recurring
+         FROM holidays
+        WHERE id = $1`,
+      [id]
+    );
+    if (previousResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Holiday not found' });
+    }
+    const previous = previousResult.rows[0];
     const { name, holiday_type, description, is_active, recurring, coverage: bodyCoverage } = req.body;
     const hasRangeKey = ['date_from', 'date_to', 'holiday_date', 'dateFrom', 'dateTo', 'holidayDate'].some(
       (k) => req.body[k] !== undefined
@@ -354,8 +386,8 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
        RETURNING id, date_from, date_to, name, holiday_type, description, is_active, recurring, coverage, created_at`,
       values
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Holiday not found' });
     const row = result.rows[0];
+    broadcastHolidayRefresh('holiday_updated', [previous, row]);
     res.json(rowToJson(row));
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'A holiday with this name and date range already exists.' });
@@ -367,8 +399,14 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 // DELETE /api/holidays/:id (admin only)
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM holidays WHERE id = $1 RETURNING id', [req.params.id]);
+    const result = await pool.query(
+      `DELETE FROM holidays
+        WHERE id = $1
+        RETURNING id, date_from, date_to, recurring`,
+      [req.params.id]
+    );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Holiday not found' });
+    broadcastHolidayRefresh('holiday_deleted', result.rows[0]);
     res.status(204).send();
   } catch (err) {
     console.error('[holidays DELETE]', err);

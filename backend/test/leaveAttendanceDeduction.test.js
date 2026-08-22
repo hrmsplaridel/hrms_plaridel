@@ -9,6 +9,7 @@ const {
   desiredPosting,
   assignmentForDate,
   hasPhysicalDtrPunches,
+  isDtrAbsenceForHolidayCoverage,
   expectedLocatorSlotsForAssignment,
   locatorCoversExpectedShiftSlots,
   loadAssignments,
@@ -40,6 +41,28 @@ test('month-end distinguishes locator-only dates from dates with physical punche
   assert.equal(
     hasPhysicalDtrPunches({ break_in: '2026-08-04T05:00:00.000Z' }),
     true
+  );
+});
+
+test('month-end ignores only current whole-day holidays, not stale stored holiday statuses', () => {
+  const staleHoliday = { status: 'holiday' };
+  const holidayWithPunches = {
+    status: 'holiday',
+    time_in: '2026-08-21T00:00:00.000Z',
+  };
+
+  assert.equal(isDtrAbsenceForHolidayCoverage(staleHoliday, null), true);
+  assert.equal(
+    isDtrAbsenceForHolidayCoverage(staleHoliday, 'am_only'),
+    true
+  );
+  assert.equal(
+    isDtrAbsenceForHolidayCoverage(staleHoliday, 'whole_day'),
+    false
+  );
+  assert.equal(
+    isDtrAbsenceForHolidayCoverage(holidayWithPunches, null),
+    false
   );
 });
 

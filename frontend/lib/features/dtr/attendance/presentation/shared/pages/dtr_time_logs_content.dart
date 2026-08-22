@@ -7,7 +7,7 @@ import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart'
-    show DtrProvider, DtrUpdateEvent, EmployeeOption;
+    show DtrProvider, DtrUpdateEvent, EmployeeOption, EmployeeShiftForDate;
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/mobile/widgets/dtr_time_logs_mobile_list.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_source_badge.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/import_biometric_attendance_logs_dialog.dart';
@@ -260,6 +260,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   StreamSubscription? _wsSub;
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
+  static const int _recordPageSize = 100;
+  int _recordPage = 0;
 
   /// When non-null and >= 1, filter to this day only (realtime-style single-day view).
   int? _selectedDay;
@@ -391,8 +393,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   Future<void> _applyFilters({
     bool silent = false,
     bool forceRefresh = false,
+    bool resetPage = false,
   }) async {
     if (!mounted) return;
+    if (resetPage && _recordPage != 0) {
+      setState(() => _recordPage = 0);
+    }
     final dayBefore = _selectedDay;
     _clampSelectedDayIfNeeded();
     if (dayBefore != _selectedDay && mounted) {
@@ -430,6 +436,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       departmentId: _selectedDepartmentId?.isEmpty == true
           ? null
           : _selectedDepartmentId,
+      limit: _recordPageSize,
+      offset: _recordPage * _recordPageSize,
       silent: silent,
       forceRefresh: forceRefresh,
     );
@@ -443,6 +451,39 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     final ampm = h >= 12 ? 'PM' : 'AM';
     final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
     return '$h12:${m.toString().padLeft(2, '0')} $ampm';
+  }
+
+  static bool _isOvernightShift(EmployeeShiftForDate? shift) {
+    final start = shift?.startMinutes;
+    final end = shift?.endMinutes;
+    return start != null && end != null && end <= start;
+  }
+
+  static int? _orderedPunchMinutes(
+    int? value, {
+    required int? after,
+    required bool overnight,
+  }) {
+    if (value == null) return null;
+    return overnight && after != null && value <= after ? value + 1440 : value;
+  }
+
+  static DateTime _manualPunchTimestamp({
+    required DateTime attendanceDate,
+    required TimeOfDay time,
+    required EmployeeShiftForDate? shift,
+    bool mayFallOnNextDay = false,
+  }) {
+    final minutes = time.hour * 60 + time.minute;
+    final nextDay =
+        mayFallOnNextDay &&
+        _isOvernightShift(shift) &&
+        shift?.endMinutes != null &&
+        minutes <= shift!.endMinutes!;
+    final date = nextDay
+        ? attendanceDate.add(const Duration(days: 1))
+        : attendanceDate;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
   }
 
   static String _formatDate(DateTime d) {
@@ -799,7 +840,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               _clampSelectedDayIfNeeded();
                             });
                           }
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<int>(
@@ -834,7 +875,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               _clampSelectedDayIfNeeded();
                             });
                           }
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<int?>(
@@ -868,7 +909,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ],
                         onChanged: (v) {
                           setState(() => _selectedDay = v);
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<String?>(
@@ -902,7 +943,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             _selectedDepartmentId = v;
                             _selectedUserId = null;
                           });
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<String?>(
@@ -933,7 +974,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ],
                         onChanged: (v) {
                           setState(() => _selectedUserId = v);
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       OutlinedButton(
@@ -947,7 +988,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             _selectedUserId = null;
                             _selectedDepartmentId = null;
                           });
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                         style: OutlinedButton.styleFrom(
                           backgroundColor: dark
@@ -1259,8 +1300,60 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                 );
               },
             ),
+          if (!dtr.loading &&
+              !isHardcodedPreview &&
+              dtr.timeRecordTotal > _recordPageSize) ...[
+            const SizedBox(height: 12),
+            _buildTimeLogPagination(context, dtr),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildTimeLogPagination(BuildContext context, DtrProvider dtr) {
+    final totalPages = (dtr.timeRecordTotal / _recordPageSize).ceil();
+    final currentPage = _recordPage.clamp(0, totalPages - 1).toInt();
+    final firstRow = currentPage * _recordPageSize + 1;
+    final lastRow = (firstRow + dtr.timeRecords.length - 1)
+        .clamp(firstRow, dtr.timeRecordTotal)
+        .toInt();
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Text(
+          '$firstRow-$lastRow of ${dtr.timeRecordTotal}',
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 12),
+        IconButton(
+          tooltip: 'Previous page',
+          onPressed: currentPage > 0
+              ? () {
+                  setState(() => _recordPage = currentPage - 1);
+                  _applyFilters();
+                }
+              : null,
+          icon: const Icon(Icons.chevron_left_rounded),
+        ),
+        Text(
+          '${currentPage + 1} of $totalPages',
+          style: TextStyle(color: AppTheme.dashTextPrimaryOf(context)),
+        ),
+        IconButton(
+          tooltip: 'Next page',
+          onPressed: currentPage + 1 < totalPages
+              ? () {
+                  setState(() => _recordPage = currentPage + 1);
+                  _applyFilters();
+                }
+              : null,
+          icon: const Icon(Icons.chevron_right_rounded),
+        ),
+      ],
     );
   }
 
@@ -1466,90 +1559,94 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               ),
             ),
           ),
-          if (!isHardcodedPreview && record.id != null)
+          if (!isHardcodedPreview)
             Expanded(
               flex: 1,
               child: Center(
-                child: PopupMenuButton<String>(
-                  icon: Icon(
-                    Icons.more_vert,
-                    size: 22,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  tooltip: 'Actions',
-                  onSelected: (value) {
-                    if (value == 'edit') {
-                      _showEditDialog(dtr, record);
-                    } else if (value == 'recalculate') {
-                      _recalculateRecord(dtr, record);
-                    } else if (value == 'delete') {
-                      _confirmDelete(dtr, record);
-                    }
-                  },
-                  itemBuilder: (ctx) => [
-                    PopupMenuItem<String>(
-                      value: 'edit',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.edit_rounded,
-                            size: 20,
-                            color: AppTheme.dashTextPrimaryOf(ctx),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            isLeaveCovered
-                                ? 'Edit underlying attendance'
-                                : 'Edit',
-                            style: TextStyle(
-                              color: AppTheme.dashTextPrimaryOf(ctx),
+                child: record.id == null
+                    ? const SizedBox.shrink()
+                    : PopupMenuButton<String>(
+                        icon: Icon(
+                          Icons.more_vert,
+                          size: 22,
+                          color: AppTheme.dashTextSecondaryOf(context),
+                        ),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Actions',
+                        onSelected: (value) {
+                          if (value == 'edit') {
+                            _showEditDialog(dtr, record);
+                          } else if (value == 'recalculate') {
+                            _recalculateRecord(dtr, record);
+                          } else if (value == 'delete') {
+                            _confirmDelete(dtr, record);
+                          }
+                        },
+                        itemBuilder: (ctx) => [
+                          PopupMenuItem<String>(
+                            value: 'edit',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.edit_rounded,
+                                  size: 20,
+                                  color: AppTheme.dashTextPrimaryOf(ctx),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  isLeaveCovered
+                                      ? 'Edit underlying attendance'
+                                      : 'Edit',
+                                  style: TextStyle(
+                                    color: AppTheme.dashTextPrimaryOf(ctx),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                    if (!isLeaveCovered)
-                      PopupMenuItem<String>(
-                        value: 'recalculate',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.refresh_rounded,
-                              size: 20,
-                              color: AppTheme.dashTextPrimaryOf(ctx),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Recalculate',
-                              style: TextStyle(
-                                color: AppTheme.dashTextPrimaryOf(ctx),
+                          if (!isLeaveCovered)
+                            PopupMenuItem<String>(
+                              value: 'recalculate',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.refresh_rounded,
+                                    size: 20,
+                                    color: AppTheme.dashTextPrimaryOf(ctx),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Recalculate',
+                                    style: TextStyle(
+                                      color: AppTheme.dashTextPrimaryOf(ctx),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    if (!isLeaveCovered)
-                      PopupMenuItem<String>(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.delete_rounded,
-                              size: 20,
-                              color: Colors.red.shade700,
+                          if (!isLeaveCovered)
+                            PopupMenuItem<String>(
+                              value: 'delete',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.delete_rounded,
+                                    size: 20,
+                                    color: Colors.red.shade700,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Delete',
+                                    style: TextStyle(
+                                      color: Colors.red.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Delete',
-                              style: TextStyle(color: Colors.red.shade700),
-                            ),
-                          ],
-                        ),
+                        ],
                       ),
-                  ],
-                ),
               ),
             ),
         ],
@@ -1651,6 +1748,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     DateTime recordDate = (day != null && day >= 1 && day <= lastDay)
         ? DateTime(_selectedYear, _selectedMonth, day)
         : DateTime.now();
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    if (recordDate.isAfter(todayDate)) recordDate = todayDate;
     var addDeptId = _selectedDepartmentId;
     await dtr.loadEmployees(
       departmentId: addDeptId,
@@ -1676,6 +1776,29 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     TimeOfDay? breakIn;
     TimeOfDay? timeOut;
     var employeesLoading = false;
+    var shiftLoading = false;
+    EmployeeShiftForDate? selectedShift;
+    String? shiftLookupError;
+
+    void retainExpectedPunches(EmployeeShiftForDate shift) {
+      if (!shift.expectedPunches.contains('time_in')) timeIn = null;
+      if (!shift.expectedPunches.contains('break_out')) breakOut = null;
+      if (!shift.expectedPunches.contains('break_in')) breakIn = null;
+      if (!shift.expectedPunches.contains('time_out')) timeOut = null;
+    }
+
+    final initialEmployeeId = userId;
+    if (initialEmployeeId != null) {
+      try {
+        selectedShift = await dtr.fetchEmployeeShiftForDate(
+          employeeId: initialEmployeeId,
+          date: recordDate,
+        );
+      } catch (e) {
+        shiftLookupError = userFacingApiError(e);
+      }
+      if (!context.mounted) return;
+    }
 
     bool? updated;
     try {
@@ -1688,23 +1811,52 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         builder: (ctx) {
           return StatefulBuilder(
             builder: (ctx, setState) {
+              Future<void> refreshSelectedShift() async {
+                final selectedEmployeeId = userId;
+                if (selectedEmployeeId == null) {
+                  setState(() {
+                    selectedShift = null;
+                    shiftLookupError = null;
+                    shiftLoading = false;
+                  });
+                  return;
+                }
+                setState(() {
+                  shiftLoading = true;
+                  shiftLookupError = null;
+                });
+                try {
+                  final shift = await dtr.fetchEmployeeShiftForDate(
+                    employeeId: selectedEmployeeId,
+                    date: recordDate,
+                  );
+                  if (!ctx.mounted) return;
+                  setState(() {
+                    selectedShift = shift;
+                    retainExpectedPunches(shift);
+                    shiftLoading = false;
+                  });
+                } catch (e) {
+                  if (!ctx.mounted) return;
+                  setState(() {
+                    selectedShift = null;
+                    shiftLookupError = userFacingApiError(e);
+                    shiftLoading = false;
+                  });
+                }
+              }
+
               final empList = dtr.employees;
               final String? employeeDropdownValue = empList.isEmpty
                   ? null
                   : (userId != null && empList.any((e) => e.id == userId))
                   ? userId
                   : empList.first.id;
-              final selectedEmployee = employeeDropdownValue == null
-                  ? null
-                  : empList
-                        .where(
-                          (employee) => employee.id == employeeDropdownValue,
-                        )
-                        .firstOrNull;
-              final punchMode = selectedEmployee?.shiftPunchMode ?? 'auto';
+              final punchMode = selectedShift?.punchMode ?? 'auto';
               final isAmOnly = punchMode == 'am_only';
               final isPmOnly = punchMode == 'pm_only';
               final isSingleSession = punchMode == 'single_session';
+              final isOvernight = _isOvernightShift(selectedShift);
               final hasAnyTime = isAmOnly
                   ? timeIn != null || breakOut != null
                   : isPmOnly
@@ -1730,12 +1882,24 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               } else if (isPmOnly &&
                   pmInMinutes != null &&
                   pmOutMinutes != null &&
-                  pmOutMinutes <= pmInMinutes) {
+                  (_orderedPunchMinutes(
+                            pmOutMinutes,
+                            after: pmInMinutes,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutMinutes) <=
+                      pmInMinutes) {
                 validationMessage = 'PM Out must be later than PM In.';
               } else if (isSingleSession &&
                   amInMinutes != null &&
                   pmOutMinutes != null &&
-                  pmOutMinutes <= amInMinutes) {
+                  (_orderedPunchMinutes(
+                            pmOutMinutes,
+                            after: amInMinutes,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutMinutes) <=
+                      amInMinutes) {
                 validationMessage = 'Time Out must be later than Time In.';
               } else if (!isAmOnly && !isPmOnly && !isSingleSession) {
                 if (amInMinutes != null &&
@@ -1744,17 +1908,32 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   validationMessage = 'AM Out must be later than AM In.';
                 } else if (pmInMinutes != null &&
                     pmOutMinutes != null &&
-                    pmOutMinutes <= pmInMinutes) {
+                    (_orderedPunchMinutes(
+                              pmOutMinutes,
+                              after: pmInMinutes,
+                              overnight: isOvernight,
+                            ) ??
+                            pmOutMinutes) <=
+                        pmInMinutes) {
                   validationMessage = 'PM Out must be later than PM In.';
                 } else if (amOutMinutes != null &&
                     pmInMinutes != null &&
-                    pmInMinutes < amOutMinutes) {
+                    (_orderedPunchMinutes(
+                              pmInMinutes,
+                              after: amOutMinutes,
+                              overnight: isOvernight,
+                            ) ??
+                            pmInMinutes) <
+                        amOutMinutes) {
                   validationMessage =
                       'PM In should not be earlier than AM Out.';
                 }
               }
               final canSubmit =
                   !employeesLoading &&
+                  !shiftLoading &&
+                  selectedShift != null &&
+                  shiftLookupError == null &&
                   employeeDropdownValue != null &&
                   empList.isNotEmpty &&
                   hasAnyTime &&
@@ -1867,6 +2046,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                           userId,
                                         );
                                       });
+                                      await refreshSelectedShift();
                                     },
                             ),
                             const SizedBox(height: 10),
@@ -1913,25 +2093,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   .toList(),
                               onChanged: employeesLoading || empList.isEmpty
                                   ? null
-                                  : (v) {
+                                  : (v) async {
                                       if (v != null) {
-                                        setState(() {
-                                          userId = v;
-                                          final mode = empList
-                                              .where((e) => e.id == v)
-                                              .firstOrNull
-                                              ?.shiftPunchMode;
-                                          if (mode == 'am_only') {
-                                            breakIn = null;
-                                            timeOut = null;
-                                          } else if (mode == 'pm_only') {
-                                            timeIn = null;
-                                            breakOut = null;
-                                          } else if (mode == 'single_session') {
-                                            breakOut = null;
-                                            breakIn = null;
-                                          }
-                                        });
+                                        setState(() => userId = v);
+                                        await refreshSelectedShift();
                                       }
                                     },
                             ),
@@ -1945,7 +2110,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                     context: ctx,
                                     initialDate: recordDate,
                                     firstDate: DateTime(2020),
-                                    lastDate: DateTime(2030),
+                                    lastDate: todayDate,
                                   );
                                   if (d != null) {
                                     setState(() {
@@ -1965,6 +2130,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                         userId,
                                       );
                                     });
+                                    await refreshSelectedShift();
                                   }
                                 },
                                 borderRadius: BorderRadius.circular(12),
@@ -2028,6 +2194,20 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               ),
                             ),
                             const SizedBox(height: 18),
+                            if (shiftLoading) ...[
+                              const LinearProgressIndicator(minHeight: 3),
+                              const SizedBox(height: 12),
+                            ],
+                            if (shiftLookupError != null) ...[
+                              Text(
+                                shiftLookupError!,
+                                style: TextStyle(
+                                  color: Colors.orange.shade900,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                             if (isAmOnly || isPmOnly || isSingleSession) ...[
                               Container(
                                 padding: const EdgeInsets.symmetric(
@@ -2245,10 +2425,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
 
     final uid = userId;
     if (updated == true && uid != null && uid.isNotEmpty) {
-      final selectedPunchMode = dtr.employees
-          .where((employee) => employee.id == uid)
-          .firstOrNull
-          ?.shiftPunchMode;
+      final selectedPunchMode = selectedShift?.punchMode;
       final addIsAmOnly = selectedPunchMode == 'am_only';
       final addIsPmOnly = selectedPunchMode == 'pm_only';
       final addIsSingleSession = selectedPunchMode == 'single_session';
@@ -2258,39 +2435,34 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       DateTime? bi;
       DateTime? tout;
       if (!addIsPmOnly && timeIn != null) {
-        tin = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeIn!.hour,
-          timeIn!.minute,
+        tin = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: timeIn!,
+          shift: selectedShift,
         );
       }
       if (!addIsPmOnly && !addIsSingleSession && breakOut != null) {
-        bo = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakOut!.hour,
-          breakOut!.minute,
+        bo = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: breakOut!,
+          shift: selectedShift,
+          mayFallOnNextDay: true,
         );
       }
       if (!addIsAmOnly && !addIsSingleSession && breakIn != null) {
-        bi = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakIn!.hour,
-          breakIn!.minute,
+        bi = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: breakIn!,
+          shift: selectedShift,
+          mayFallOnNextDay: true,
         );
       }
       if (!addIsAmOnly && timeOut != null) {
-        tout = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeOut!.hour,
-          timeOut!.minute,
+        tout = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: timeOut!,
+          shift: selectedShift,
+          mayFallOnNextDay: true,
         );
       }
       double? hours;
@@ -2353,16 +2525,27 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         ? TimeOfDay(hour: timeOutLocal.hour, minute: timeOutLocal.minute)
         : null;
     final recordDate = r.recordDate;
+    EmployeeShiftForDate editShift;
+    try {
+      editShift = await dtr.fetchEmployeeShiftForDate(
+        employeeId: r.userId,
+        date: recordDate,
+      );
+    } catch (e) {
+      if (mounted) _showTimeLogSnack(userFacingApiError(e));
+      return;
+    }
     final originalTimeIn = timeIn;
     final originalBreakOut = breakOut;
     final originalBreakIn = breakIn;
     final originalTimeOut = timeOut;
 
     // Derive shift-awareness flags once (r is immutable, so these never change).
-    final punchMode = r.shiftPunchMode;
+    final punchMode = editShift.punchMode;
     final isAmOnly = punchMode == 'am_only';
     final isPmOnly = punchMode == 'pm_only';
     final isSingleSession = punchMode == 'single_session';
+    final isOvernight = _isOvernightShift(editShift);
 
     if (!mounted) return;
     final updated = await openResponsiveRightSidePanel<bool>(
@@ -2398,19 +2581,51 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                 validationMessage = 'AM Out must be later than AM In.';
               }
             } else if (isPmOnly) {
-              if (pmInM != null && pmOutM != null && pmOutM <= pmInM) {
+              if (pmInM != null &&
+                  pmOutM != null &&
+                  (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) <=
+                      pmInM) {
                 validationMessage = 'PM Out must be later than PM In.';
               }
             } else if (isSingleSession) {
-              if (amInM != null && pmOutM != null && pmOutM <= amInM) {
+              if (amInM != null &&
+                  pmOutM != null &&
+                  (_orderedPunchMinutes(
+                            pmOutM,
+                            after: amInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) <=
+                      amInM) {
                 validationMessage = 'Time Out must be later than Time In.';
               }
             } else {
               if (amInM != null && amOutM != null && amOutM <= amInM) {
                 validationMessage = 'AM Out must be later than AM In.';
-              } else if (pmInM != null && pmOutM != null && pmOutM <= pmInM) {
+              } else if (pmInM != null &&
+                  pmOutM != null &&
+                  (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) <=
+                      pmInM) {
                 validationMessage = 'PM Out must be later than PM In.';
-              } else if (amOutM != null && pmInM != null && pmInM < amOutM) {
+              } else if (amOutM != null &&
+                  pmInM != null &&
+                  (_orderedPunchMinutes(
+                            pmInM,
+                            after: amOutM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmInM) <
+                      amOutM) {
                 validationMessage = 'PM In should not be earlier than AM Out.';
               }
             }
@@ -2423,21 +2638,49 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                 }
               } else if (isPmOnly) {
                 if (pmInM != null && pmOutM != null) {
-                  workedMinutes = pmOutM - pmInM;
+                  workedMinutes =
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      pmInM;
                 }
               } else if (isSingleSession) {
                 if (amInM != null && pmOutM != null) {
-                  workedMinutes = pmOutM - amInM;
+                  workedMinutes =
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: amInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      amInM;
                 }
               } else {
                 if (amInM != null && amOutM != null) {
                   workedMinutes += amOutM - amInM;
                 }
                 if (pmInM != null && pmOutM != null) {
-                  workedMinutes += pmOutM - pmInM;
+                  workedMinutes +=
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      pmInM;
                 }
                 if (workedMinutes == 0 && amInM != null && pmOutM != null) {
-                  workedMinutes = pmOutM - amInM;
+                  workedMinutes =
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: amInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      amInM;
                 }
               }
             }
@@ -2786,39 +3029,34 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       DateTime? tout;
       // Only build fields relevant to the shift's punch mode.
       if (!isPmOnly && timeIn != null) {
-        tin = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeIn!.hour,
-          timeIn!.minute,
+        tin = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: timeIn!,
+          shift: editShift,
         );
       }
       if (!isPmOnly && !isSingleSession && breakOut != null) {
-        bo = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakOut!.hour,
-          breakOut!.minute,
+        bo = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: breakOut!,
+          shift: editShift,
+          mayFallOnNextDay: true,
         );
       }
       if (!isAmOnly && !isSingleSession && breakIn != null) {
-        bi = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakIn!.hour,
-          breakIn!.minute,
+        bi = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: breakIn!,
+          shift: editShift,
+          mayFallOnNextDay: true,
         );
       }
       if (!isAmOnly && timeOut != null) {
-        tout = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeOut!.hour,
-          timeOut!.minute,
+        tout = _manualPunchTimestamp(
+          attendanceDate: date,
+          time: timeOut!,
+          shift: editShift,
+          mayFallOnNextDay: true,
         );
       }
       double? hours;

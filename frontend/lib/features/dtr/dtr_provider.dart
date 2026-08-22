@@ -152,6 +152,7 @@ class _DtrRecordsCacheKey {
     required this.departmentId,
     required this.limit,
     required this.offset,
+    required this.recompute,
   });
 
   final String? startDate;
@@ -160,6 +161,7 @@ class _DtrRecordsCacheKey {
   final String? departmentId;
   final int? limit;
   final int? offset;
+  final bool recompute;
 
   @override
   bool operator ==(Object other) {
@@ -169,12 +171,20 @@ class _DtrRecordsCacheKey {
         other.userId == userId &&
         other.departmentId == departmentId &&
         other.limit == limit &&
-        other.offset == offset;
+        other.offset == offset &&
+        other.recompute == recompute;
   }
 
   @override
-  int get hashCode =>
-      Object.hash(startDate, endDate, userId, departmentId, limit, offset);
+  int get hashCode => Object.hash(
+    startDate,
+    endDate,
+    userId,
+    departmentId,
+    limit,
+    offset,
+    recompute,
+  );
 }
 
 class _EmployeeOptionsCacheKey {
@@ -247,6 +257,35 @@ class EmployeeOption {
   String get displayEmployeeNo => employeeNumber != null
       ? 'EMP-${employeeNumber!.toString().padLeft(3, '0')}'
       : '—';
+}
+
+class EmployeeShiftForDate {
+  const EmployeeShiftForDate({
+    required this.punchMode,
+    required this.expectedPunches,
+    this.startMinutes,
+    this.endMinutes,
+    this.breakEndMinutes,
+  });
+
+  final String punchMode;
+  final Set<String> expectedPunches;
+  final int? startMinutes;
+  final int? endMinutes;
+  final int? breakEndMinutes;
+
+  factory EmployeeShiftForDate.fromJson(Map<String, dynamic> json) {
+    final punches = json['expected_punches'];
+    return EmployeeShiftForDate(
+      punchMode: json['punch_mode']?.toString() ?? 'auto',
+      expectedPunches: punches is List
+          ? punches.map((value) => value.toString()).toSet()
+          : const <String>{},
+      startMinutes: (json['start_minutes'] as num?)?.toInt(),
+      endMinutes: (json['end_minutes'] as num?)?.toInt(),
+      breakEndMinutes: (json['break_end_minutes'] as num?)?.toInt(),
+    );
+  }
 }
 
 /// Simple department for admin filters.
@@ -361,6 +400,12 @@ class DtrProvider extends ChangeNotifier {
 
   List<TimeRecord> _timeRecords = [];
   List<TimeRecord> get timeRecords => List.unmodifiable(_timeRecords);
+  int _timeRecordTotal = 0;
+  int get timeRecordTotal => _timeRecordTotal;
+  int _timeRecordLimit = 0;
+  int get timeRecordLimit => _timeRecordLimit;
+  int _timeRecordOffset = 0;
+  int get timeRecordOffset => _timeRecordOffset;
 
   /// Admin dashboard analytics window (last 30 days); isolated from [timeRecords] / Time Logs.
   List<TimeRecord> _dashboardAnalyticsRecords = [];
@@ -382,6 +427,7 @@ class DtrProvider extends ChangeNotifier {
   final LeaveRepository _leaveRepository = const ApiLeaveRepository();
   final Map<_DtrRecordsCacheKey, _DtrCacheEntry<List<TimeRecord>>>
   _recordsCache = {};
+  final Map<_DtrRecordsCacheKey, int> _recordTotalCache = {};
   final Map<_EmployeeOptionsCacheKey, _DtrCacheEntry<List<EmployeeOption>>>
   _employeesCache = {};
   final Map<_DateRangeCacheKey, _DtrCacheEntry<Map<String, double>>>
@@ -512,6 +558,7 @@ class DtrProvider extends ChangeNotifier {
     String? departmentId,
     int? limit,
     int? offset,
+    bool recompute = false,
   }) {
     return _DtrRecordsCacheKey(
       startDate: _dateKey(startDate),
@@ -520,6 +567,7 @@ class DtrProvider extends ChangeNotifier {
       departmentId: _normalizeOptional(departmentId),
       limit: limit,
       offset: offset,
+      recompute: recompute,
     );
   }
 
@@ -529,11 +577,16 @@ class DtrProvider extends ChangeNotifier {
     return List<TimeRecord>.from(entry.value);
   }
 
-  void _writeRecordsCache(_DtrRecordsCacheKey key, List<TimeRecord> records) {
+  void _writeRecordsCache(
+    _DtrRecordsCacheKey key,
+    List<TimeRecord> records, {
+    int? total,
+  }) {
     _recordsCache[key] = _DtrCacheEntry<List<TimeRecord>>(
       List<TimeRecord>.unmodifiable(records),
       DateTime.now(),
     );
+    _recordTotalCache[key] = total ?? records.length;
   }
 
   /// Clears cached DTR reads. Call this after writes/imports or external DTR refresh events.
@@ -542,6 +595,7 @@ class DtrProvider extends ChangeNotifier {
     bool notify = false,
   }) {
     _recordsCache.clear();
+    _recordTotalCache.clear();
     _leaveDistributionCache.clear();
     _summaryCache = null;
     if (includeReferenceData) {
@@ -597,9 +651,11 @@ class DtrProvider extends ChangeNotifier {
     String? userId,
     String? departmentId,
     int? limit,
+    int? offset,
     bool silent = false,
     bool forDashboardAnalytics = false,
     bool forceRefresh = false,
+    bool recompute = false,
   }) async {
     if (forDashboardAnalytics) {
       await _loadDashboardAnalyticsData(forceRefresh: forceRefresh);
@@ -613,6 +669,8 @@ class DtrProvider extends ChangeNotifier {
       userId: normalizedUserId,
       departmentId: normalizedDepartmentId,
       limit: limit,
+      offset: offset,
+      recompute: recompute,
     );
     final cached = forceRefresh ? null : _readRecordsCache(cacheKey);
     if (cached != null) {
@@ -623,6 +681,9 @@ class DtrProvider extends ChangeNotifier {
       _filterUserId = normalizedUserId;
       _filterDepartmentId = normalizedDepartmentId;
       _timeRecords = cached;
+      _timeRecordTotal = _recordTotalCache[cacheKey] ?? cached.length;
+      _timeRecordLimit = limit ?? cached.length;
+      _timeRecordOffset = offset ?? 0;
       if (!silent) _loading = false;
       notifyListeners();
       return;
@@ -638,15 +699,20 @@ class DtrProvider extends ChangeNotifier {
       _filterEnd = endDate;
       _filterUserId = normalizedUserId;
       _filterDepartmentId = normalizedDepartmentId;
-      final list = await TimeRecordRepo.instance.listForAdmin(
+      final page = await TimeRecordRepo.instance.listPageForAdmin(
         startDate: startDate,
         endDate: endDate,
         userId: normalizedUserId,
         departmentId: normalizedDepartmentId,
         limit: limit,
+        offset: offset,
+        recompute: recompute,
       );
-      _writeRecordsCache(cacheKey, list);
-      _timeRecords = List<TimeRecord>.from(list);
+      _writeRecordsCache(cacheKey, page.items, total: page.total);
+      _timeRecords = List<TimeRecord>.from(page.items);
+      _timeRecordTotal = page.total;
+      _timeRecordLimit = page.limit;
+      _timeRecordOffset = page.offset;
       if (!silent) _loading = false;
       notifyListeners();
     } catch (e) {
@@ -654,10 +720,12 @@ class DtrProvider extends ChangeNotifier {
         _tableMissing = true;
         _error = null;
         _timeRecords = [];
+        _timeRecordTotal = 0;
       } else {
         _error = e.toString();
         _timeRecords =
             []; // Show sample data on any load failure for flexible UI
+        _timeRecordTotal = 0;
       }
       if (!silent) _loading = false;
       notifyListeners();
@@ -703,7 +771,7 @@ class DtrProvider extends ChangeNotifier {
     notifyListeners();
     try {
       _tableMissing = false;
-      final list = await TimeRecordRepo.instance.listForAdmin(
+      final list = await _loadAllAdminTimeRecordPages(
         startDate: startDay,
         endDate: endDay,
       );
@@ -738,6 +806,31 @@ class DtrProvider extends ChangeNotifier {
       _dashboardAnalyticsLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<List<TimeRecord>> _loadAllAdminTimeRecordPages({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? userId,
+    String? departmentId,
+  }) async {
+    const pageSize = 2000;
+    final records = <TimeRecord>[];
+    var offset = 0;
+    while (true) {
+      final page = await TimeRecordRepo.instance.listPageForAdmin(
+        startDate: startDate,
+        endDate: endDate,
+        userId: userId,
+        departmentId: departmentId,
+        limit: pageSize,
+        offset: offset,
+      );
+      records.addAll(page.items);
+      offset += page.items.length;
+      if (page.items.isEmpty || offset >= page.total) break;
+    }
+    return records;
   }
 
   Future<Map<String, double>> _loadLeaveDistributionForWindow(
@@ -895,6 +988,19 @@ class DtrProvider extends ChangeNotifier {
       _myShiftEndMinutes = null;
       notifyListeners();
     }
+  }
+
+  Future<EmployeeShiftForDate> fetchEmployeeShiftForDate({
+    required String employeeId,
+    required DateTime date,
+  }) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/dtr-daily-summary/shift-for-date',
+      queryParameters: {'employee_id': employeeId, 'date': _dateKey(date)},
+    );
+    final data = res.data;
+    if (data == null) throw StateError('No shift information returned');
+    return EmployeeShiftForDate.fromJson(data);
   }
 
   /// Load employee list for admin filter.

@@ -8,10 +8,7 @@
  * retries idempotent and lets a later DTR correction post only the difference.
  */
 
-const {
-  expandNonRecurringToWindow,
-  expandRecurringToWindow,
-} = require('./holidayRangeUtils');
+const { loadHolidayOverlayMap } = require('./holidayOverlay');
 const {
   getExpectedWorkMinutes,
   getShiftType,
@@ -383,6 +380,13 @@ function hasPhysicalDtrPunches(row) {
   return !!(row?.time_in || row?.break_out || row?.break_in || row?.time_out);
 }
 
+function isDtrAbsenceForHolidayCoverage(dtr, holidayCoverage) {
+  if (!dtr) return false;
+  if (dtr.status === 'absent') return true;
+  if (dtr.status !== 'holiday' || hasPhysicalDtrPunches(dtr)) return false;
+  return holidayCoverage !== 'whole_day';
+}
+
 async function loadApprovedLeaveKeys(client, employeeIds, startStr, endStr) {
   const keys = new Set();
   if (employeeIds.length === 0) return keys;
@@ -495,39 +499,13 @@ async function loadFullLocatorKeys(
 }
 
 async function loadHolidayCoverage(client, startStr, endStr) {
-  const result = await client.query(
-    `SELECT id, date_from::text AS date_from, date_to::text AS date_to,
-            recurring, coverage
-     FROM holidays
-     WHERE (is_active IS NULL OR is_active = true)
-       AND (
-         recurring = true
-         OR (date_from <= $2::date AND date_to >= $1::date)
-       )`,
-    [startStr, endStr]
+  const overlays = await loadHolidayOverlayMap(client, startStr, endStr);
+  return new Map(
+    Array.from(overlays.entries(), ([dateStr, holiday]) => [
+      dateStr,
+      holiday.coverage || 'whole_day',
+    ])
   );
-  const byDate = new Map();
-  for (const row of result.rows) {
-    const dates = row.recurring
-      ? expandRecurringToWindow(
-          dateOnly(row.date_from),
-          dateOnly(row.date_to),
-          startStr,
-          endStr
-        )
-      : expandNonRecurringToWindow(
-          dateOnly(row.date_from),
-          dateOnly(row.date_to),
-          startStr,
-          endStr
-        );
-    for (const dateStr of dates) {
-      if (!byDate.has(dateStr)) {
-        byDate.set(dateStr, row.coverage || 'whole_day');
-      }
-    }
-  }
-  return byDate;
 }
 
 async function calculateMonthlyAttendanceDeductions(
@@ -626,7 +604,6 @@ async function calculateMonthlyAttendanceDeductions(
       if (dtr) {
         if (
           dtr.status === 'on_leave' ||
-          dtr.status === 'holiday' ||
           dtr.status === 'rest_day'
         ) {
           continue;
@@ -639,7 +616,7 @@ async function calculateMonthlyAttendanceDeductions(
           ? Math.max(0, parseInt(dtr.undertime_minutes, 10) || 0)
           : 0;
         if (
-          dtr.status === 'absent' &&
+          isDtrAbsenceForHolidayCoverage(dtr, holiday) &&
           policy.deductUndertime &&
           policy.absentEqualsFullDayDeduction
         ) {
@@ -1023,9 +1000,11 @@ module.exports = {
   /** @internal exported for regression tests */
   assignmentForDate,
   hasPhysicalDtrPunches,
+  isDtrAbsenceForHolidayCoverage,
   expectedLocatorSlotsForAssignment: expectedLocatorSlotsForShift,
   locatorCoversExpectedShiftSlots,
   loadAssignments,
   loadEmployees,
   loadFullLocatorKeys,
+  loadHolidayCoverage,
 };

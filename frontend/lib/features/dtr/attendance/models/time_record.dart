@@ -40,6 +40,7 @@ class TimeRecord {
     this.locatorSlipCoverageMode,
     this.locatorSlipSegments,
     this.shiftPunchMode = 'auto',
+    this.combineLateAndUndertime = false,
   });
 
   final String? id;
@@ -108,6 +109,10 @@ class TimeRecord {
   /// Employee's shift punch mode for this record's date.
   /// Values: 'auto', 'full_day', 'am_only', 'pm_only', 'single_session'.
   final String shiftPunchMode;
+
+  /// When true, official DTR exports display late minutes in the undertime column.
+  /// Stored and on-screen late/undertime values remain separate.
+  final bool combineLateAndUndertime;
 
   LocatorRequestType get locatorRequestType =>
       LocatorRequestType.fromCode(locatorSlipRequestType);
@@ -201,6 +206,7 @@ class TimeRecord {
                 .toList()
           : null,
       shiftPunchMode: json['shift_punch_mode']?.toString() ?? 'auto',
+      combineLateAndUndertime: json['combine_late_and_undertime'] == true,
     );
   }
 
@@ -283,6 +289,8 @@ class TimeRecord {
     String? locatorSlipDtrPrintLabel,
     String? locatorSlipCoverageMode,
     List<String>? locatorSlipSegments,
+    String? shiftPunchMode,
+    bool? combineLateAndUndertime,
   }) {
     return TimeRecord(
       id: id ?? this.id,
@@ -321,6 +329,9 @@ class TimeRecord {
       locatorSlipCoverageMode:
           locatorSlipCoverageMode ?? this.locatorSlipCoverageMode,
       locatorSlipSegments: locatorSlipSegments ?? this.locatorSlipSegments,
+      shiftPunchMode: shiftPunchMode ?? this.shiftPunchMode,
+      combineLateAndUndertime:
+          combineLateAndUndertime ?? this.combineLateAndUndertime,
     );
   }
 }
@@ -391,6 +402,20 @@ class DeletedTimeRecord {
   }
 }
 
+class TimeRecordPage {
+  const TimeRecordPage({
+    required this.items,
+    required this.total,
+    required this.limit,
+    required this.offset,
+  });
+
+  final List<TimeRecord> items;
+  final int total;
+  final int limit;
+  final int offset;
+}
+
 /// Repository for DTR time records. Uses backend API (dtr_daily_summary); Supabase logic commented out.
 class TimeRecordRepo {
   TimeRecordRepo._();
@@ -398,9 +423,8 @@ class TimeRecordRepo {
 
   /// List time records for admin (all users). Uses GET /api/dtr-daily-summary.
   ///
-  /// With [startDate] and [endDate], omit [limit] to load the full merged list (all employees for
-  /// that range). Pass [limit] (+ optional [offset]) to page the *merged* result (server sets
-  /// `X-Total-Count` when [limit] is sent).
+  /// Date-range responses are paginated by the backend. Use [listPageForAdmin]
+  /// when the caller needs the total count or subsequent pages.
   Future<List<TimeRecord>> listForAdmin({
     DateTime? startDate,
     DateTime? endDate,
@@ -408,6 +432,28 @@ class TimeRecordRepo {
     String? departmentId,
     int? limit,
     int? offset,
+    bool recompute = false,
+  }) async {
+    final page = await listPageForAdmin(
+      startDate: startDate,
+      endDate: endDate,
+      userId: userId,
+      departmentId: departmentId,
+      limit: limit,
+      offset: offset,
+      recompute: recompute,
+    );
+    return page.items;
+  }
+
+  Future<TimeRecordPage> listPageForAdmin({
+    DateTime? startDate,
+    DateTime? endDate,
+    String? userId,
+    String? departmentId,
+    int? limit,
+    int? offset,
+    bool recompute = false,
   }) async {
     try {
       final params = <String, dynamic>{};
@@ -423,14 +469,26 @@ class TimeRecordRepo {
       }
       if (limit != null) params['limit'] = limit;
       if (offset != null) params['offset'] = offset;
+      if (recompute) params['recompute'] = true;
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/dtr-daily-summary',
         queryParameters: params,
       );
       final data = res.data ?? [];
-      return data
+      final items = data
           .map((e) => TimeRecord.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
+      final responseTotal = int.tryParse(
+        res.headers.value('x-total-count') ?? '',
+      );
+      final responseLimit = int.tryParse(res.headers.value('x-limit') ?? '');
+      final responseOffset = int.tryParse(res.headers.value('x-offset') ?? '');
+      return TimeRecordPage(
+        items: items,
+        total: responseTotal ?? items.length,
+        limit: responseLimit ?? limit ?? items.length,
+        offset: responseOffset ?? offset ?? 0,
+      );
     } on DioException catch (_) {
       rethrow;
     }

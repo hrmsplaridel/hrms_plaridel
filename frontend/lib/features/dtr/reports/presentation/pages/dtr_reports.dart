@@ -128,6 +128,8 @@ class _DtrReportsState extends State<DtrReports> {
         endDate: end,
         userId: _selectedEmployeeId,
         limit: 100,
+        recompute: true,
+        forceRefresh: true,
       ),
       _loadShiftWorkingDays(),
     ]);
@@ -909,6 +911,7 @@ class _DtrReportsState extends State<DtrReports> {
       endDate: monthEnd,
       userId: employee.id,
       limit: 500,
+      recompute: true,
     );
     final assignment = await _fetchAssignmentInfoForEmployee(employee.id);
     final rawRecordsByDate = <DateTime, TimeRecord>{};

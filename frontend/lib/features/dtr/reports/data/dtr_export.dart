@@ -380,6 +380,7 @@ class DtrExport {
     DateTime dt,
     bool isWeekendOrNonWorking,
     double workHoursPerDay,
+    bool combineLateAndUndertime,
   ) {
     if (isWeekendOrNonWorking) return (0, 0);
     if (r != null && r.status == 'holiday') return (0, 0);
@@ -398,15 +399,19 @@ class DtrExport {
     // Prefer backend-calculated undertime_minutes when available.
     final undertimeMinutes = r.undertimeMinutes;
     if (undertimeMinutes != null) {
-      return (undertimeMinutes ~/ 60, undertimeMinutes % 60);
+      final displayedMinutes =
+          undertimeMinutes +
+          (combineLateAndUndertime ? (r.lateMinutes ?? 0) : 0);
+      return (displayedMinutes ~/ 60, displayedMinutes % 60);
     }
 
     // Fallback: derive from total hours.
     final actual = r.totalHours ?? 0;
     final undertime = (wh - actual).clamp(0.0, wh);
-    final h = undertime.floor();
-    final m = ((undertime - h) * 60).round();
-    return (h, m);
+    final fallbackMinutes =
+        (undertime * 60).round() +
+        (combineLateAndUndertime ? (r.lateMinutes ?? 0) : 0);
+    return (fallbackMinutes ~/ 60, fallbackMinutes % 60);
   }
 
   static double _round3(double x) => (x * 1000).roundToDouble() / 1000;
@@ -992,6 +997,7 @@ class DtrExport {
     DateTime? assignmentEffectiveTo,
   }) {
     var totalUndertimeMin = 0;
+    var totalRawUndertimeMin = 0;
     var totalLateMin = 0;
     const fs = 5.0;
     final rows = <pw.TableRow>[];
@@ -1016,9 +1022,20 @@ class DtrExport {
         dt,
         isNonScheduled,
         scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
-      if (!isNonScheduled) totalUndertimeMin += uh * 60 + um;
-      if (!isNonScheduled) totalLateMin += (rec?.lateMinutes ?? 0);
+      final (rawUh, rawUm) = _computeUndertime(
+        rec,
+        dt,
+        isNonScheduled,
+        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        false,
+      );
+      if (!isNonScheduled) {
+        totalUndertimeMin += uh * 60 + um;
+        totalRawUndertimeMin += rawUh * 60 + rawUm;
+        totalLateMin += rec?.lateMinutes ?? 0;
+      }
 
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
@@ -1112,7 +1129,9 @@ class DtrExport {
       ),
     );
 
-    final undertimeDeductMin = policy.deductUndertime ? totalUndertimeMin : 0;
+    final undertimeDeductMin = policy.deductUndertime
+        ? totalRawUndertimeMin
+        : 0;
     final lateDeductMin = policy.deductLate ? totalLateMin : 0;
     final totalDeductMin = undertimeDeductMin + lateDeductMin;
     final (eq, adj) = _computeEquivalentDay(
@@ -1126,7 +1145,7 @@ class DtrExport {
       rows,
       _ExportTotals(
         totalLateMinutes: totalLateMin,
-        totalUndertimeMinutes: totalUndertimeMin,
+        totalUndertimeMinutes: totalRawUndertimeMin,
         totalDeductionMinutes: totalDeductMin,
         equivalentDay: eq,
         adjustedEquivalentDay: adj,
@@ -1260,6 +1279,7 @@ class DtrExport {
       }
     }
     var totalUndertimeMin = 0;
+    var totalRawUndertimeMin = 0;
     var totalLateMin = 0;
     final excel = Excel.createExcel();
     final defaultName = excel.getDefaultSheet() ?? 'Sheet1';
@@ -1459,9 +1479,20 @@ class DtrExport {
         dt,
         isNonScheduled,
         scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
-      if (!isNonScheduled) totalUndertimeMin += uh * 60 + um;
-      if (!isNonScheduled) totalLateMin += (rec?.lateMinutes ?? 0);
+      final (rawUh, rawUm) = _computeUndertime(
+        rec,
+        dt,
+        isNonScheduled,
+        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        false,
+      );
+      if (!isNonScheduled) {
+        totalUndertimeMin += uh * 60 + um;
+        totalRawUndertimeMin += rawUh * 60 + rawUm;
+        totalLateMin += rec?.lateMinutes ?? 0;
+      }
 
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
@@ -1571,7 +1602,9 @@ class DtrExport {
     );
     row += 2;
 
-    final undertimeDeductMin = policy.deductUndertime ? totalUndertimeMin : 0;
+    final undertimeDeductMin = policy.deductUndertime
+        ? totalRawUndertimeMin
+        : 0;
     final lateDeductMin = policy.deductLate ? totalLateMin : 0;
     final totalDeductMin = undertimeDeductMin + lateDeductMin;
     final (equivalentDay, adjustedEquivalentDay) = _computeEquivalentDay(
@@ -1727,6 +1760,7 @@ class DtrExport {
       }
     }
     var totalUndertimeMin = 0;
+    var totalRawUndertimeMin = 0;
     var totalLateMin = 0;
     final title = reportTitle ?? 'DAILY TIME RECORD';
     final oneCopy = StringBuffer();
@@ -1789,9 +1823,20 @@ class DtrExport {
         dt,
         isNonScheduled,
         scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
-      if (!isNonScheduled) totalUndertimeMin += uh * 60 + um;
-      if (!isNonScheduled) totalLateMin += (rec?.lateMinutes ?? 0);
+      final (rawUh, rawUm) = _computeUndertime(
+        rec,
+        dt,
+        isNonScheduled,
+        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        false,
+      );
+      if (!isNonScheduled) {
+        totalUndertimeMin += uh * 60 + um;
+        totalRawUndertimeMin += rawUh * 60 + rawUm;
+        totalLateMin += rec?.lateMinutes ?? 0;
+      }
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
       final hasAnyPunch =
@@ -1848,7 +1893,9 @@ class DtrExport {
     );
     oneCopy.writeln('</tbody></table>');
 
-    final undertimeDeductMin = policy.deductUndertime ? totalUndertimeMin : 0;
+    final undertimeDeductMin = policy.deductUndertime
+        ? totalRawUndertimeMin
+        : 0;
     final lateDeductMin = policy.deductLate ? totalLateMin : 0;
     final totalDeductMin = undertimeDeductMin + lateDeductMin;
     final (equivalentDay, adjustedEquivalentDay) = _computeEquivalentDay(
@@ -1962,6 +2009,7 @@ class DtrExport {
       }
     }
     var totalUndertimeMin = 0;
+    var totalRawUndertimeMin = 0;
     var totalLateMin = 0;
     final title = reportTitle ?? 'DAILY TIME RECORD';
     final oneCopy = StringBuffer();
@@ -2024,9 +2072,20 @@ class DtrExport {
         dt,
         isNonScheduled,
         scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
-      if (!isNonScheduled) totalUndertimeMin += uh * 60 + um;
-      if (!isNonScheduled) totalLateMin += (rec?.lateMinutes ?? 0);
+      final (rawUh, rawUm) = _computeUndertime(
+        rec,
+        dt,
+        isNonScheduled,
+        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        false,
+      );
+      if (!isNonScheduled) {
+        totalUndertimeMin += uh * 60 + um;
+        totalRawUndertimeMin += rawUh * 60 + rawUm;
+        totalLateMin += rec?.lateMinutes ?? 0;
+      }
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
       final hasAnyPunch =
@@ -2083,7 +2142,9 @@ class DtrExport {
     );
     oneCopy.writeln('</tbody></table>');
 
-    final undertimeDeductMin = policy.deductUndertime ? totalUndertimeMin : 0;
+    final undertimeDeductMin = policy.deductUndertime
+        ? totalRawUndertimeMin
+        : 0;
     final lateDeductMin = policy.deductLate ? totalLateMin : 0;
     final totalDeductMin = undertimeDeductMin + lateDeductMin;
     final (equivalentDay, adjustedEquivalentDay) = _computeEquivalentDay(

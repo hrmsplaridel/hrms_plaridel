@@ -1,5 +1,5 @@
 const { pool } = require('../config/db');
-const { dateInRecurringRange } = require('./holidayRangeUtils');
+const { loadHolidayOverlayMap } = require('./holidayOverlay');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
   ensureShiftPunchModeColumn,
@@ -10,6 +10,7 @@ const {
   computeTotalHours: computeShiftTotalHours,
 } = require('./shiftAttendance');
 const { dtrDeletionKey, getDeletedDtrDateKeys } = require('./dtrDeletionAudit');
+const { calculateAttendancePolicyPenalties } = require('./attendancePolicyResolver');
 
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
@@ -24,8 +25,6 @@ function _normalizePolicy(row) {
     id: row?.id || null,
     workHoursPerDay: row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
     deductLate: row?.deduct_late ?? true,
-    maxLateMinutesPerMonth:
-      row?.max_late_minutes_per_month != null ? parseInt(row.max_late_minutes_per_month, 10) : null,
     convertLateToEquivalentDay: row?.convert_late_to_equivalent_day ?? false,
     deductUndertime: row?.deduct_undertime ?? true,
     convertUndertimeToEquivalentDay: row?.convert_undertime_to_equivalent_day ?? false,
@@ -41,7 +40,7 @@ async function getActiveDefaultAttendancePolicy() {
     return _cachedAttendancePolicy;
   }
   const result = await pool.query(
-    `SELECT id, work_hours_per_day, deduct_late, max_late_minutes_per_month,
+    `SELECT id, work_hours_per_day, deduct_late,
             convert_late_to_equivalent_day, deduct_undertime, convert_undertime_to_equivalent_day,
             absent_equals_full_day_deduction, combine_late_and_undertime, deduction_multiplier
      FROM attendance_policies
@@ -72,7 +71,7 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
        LIMIT 1
      )
-     SELECT p.id, p.work_hours_per_day, p.deduct_late, p.max_late_minutes_per_month,
+     SELECT p.id, p.work_hours_per_day, p.deduct_late,
             p.convert_late_to_equivalent_day, p.deduct_undertime, p.convert_undertime_to_equivalent_day,
             p.absent_equals_full_day_deduction, p.combine_late_and_undertime, p.deduction_multiplier
      FROM policy_assignments pa
@@ -103,47 +102,12 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
   return resolved;
 }
 
-function applyPolicyConversion(minutes, convertToEquivalentDay, workHoursPerDay, multiplier) {
-  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
-  const mult = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
-  if (!convertToEquivalentDay) return Math.round(minutes * mult);
-  const workMinutes = Math.max(1, Math.round((Number.isFinite(workHoursPerDay) ? workHoursPerDay : 8) * 60));
-  const dayValue = minutes / workMinutes;
-  return Math.round(dayValue * mult * workMinutes);
-}
-
 async function applyAttendancePolicyPenalties(employeeId, dateStr, rawLateMinutes, rawUndertimeMinutes) {
   const policy = await getAttendancePolicyForEmployeeDate(employeeId, dateStr);
-  let late = policy.deductLate ? Math.max(0, rawLateMinutes || 0) : 0;
-  let under = policy.deductUndertime ? Math.max(0, rawUndertimeMinutes || 0) : 0;
-
-  if (policy.maxLateMinutesPerMonth != null && policy.maxLateMinutesPerMonth >= 0 && late > 0) {
-    const used = await pool.query(
-      `SELECT COALESCE(SUM(late_minutes), 0) AS total
-       FROM dtr_daily_summary
-       WHERE employee_id = $1::uuid
-         AND date_trunc('month', attendance_date) = date_trunc('month', $2::date)
-         AND attendance_date < $2::date`,
-      [employeeId, dateStr]
-    );
-    const consumed = parseInt(used.rows[0]?.total ?? 0, 10) || 0;
-    const remaining = Math.max(0, policy.maxLateMinutesPerMonth - consumed);
-    late = Math.min(late, remaining);
-  }
-
-  if (policy.combineLateAndUndertime) {
-    under += late;
-    late = 0;
-  }
-
-  late = applyPolicyConversion(late, policy.convertLateToEquivalentDay, policy.workHoursPerDay, policy.deductionMultiplier);
-  under = applyPolicyConversion(
-    under,
-    policy.convertUndertimeToEquivalentDay,
-    policy.workHoursPerDay,
-    policy.deductionMultiplier
-  );
-  return { lateMinutes: late, undertimeMinutes: under, policy };
+  return {
+    ...calculateAttendancePolicyPenalties(policy, rawLateMinutes, rawUndertimeMinutes),
+    policy,
+  };
 }
 
 function timeToMinutes(timeStr) {
@@ -309,39 +273,9 @@ function isFirstPunchAfterShiftEnd(punchList, shiftInfo, timeZone = HRMS_TIMEZON
   );
 }
 
-function holidayDateToStr(v) {
-  if (v == null) return null;
-  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.split('T')[0];
-  if (v instanceof Date) {
-    const y = v.getFullYear();
-    const m = String(v.getMonth() + 1).padStart(2, '0');
-    const d = String(v.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return String(v).split('T')[0];
-}
-
 async function getHolidayForDate(dateStr) {
-  const exact = await pool.query(
-    `SELECT id, COALESCE(coverage, 'whole_day') AS coverage
-     FROM holidays
-     WHERE (is_active IS NULL OR is_active = true) AND recurring = false
-       AND date_from <= $1::date AND date_to >= $1::date
-     ORDER BY date_from
-     LIMIT 1`,
-    [dateStr]
-  );
-  if (exact.rows[0]) return exact.rows[0];
-  const recurring = await pool.query(
-    `SELECT id, COALESCE(coverage, 'whole_day') AS coverage, date_from, date_to FROM holidays
-     WHERE recurring = true AND (is_active IS NULL OR is_active = true)`
-  );
-  for (const r of recurring.rows) {
-    if (dateInRecurringRange(dateStr, holidayDateToStr(r.date_from), holidayDateToStr(r.date_to))) {
-      return { id: r.id, coverage: r.coverage };
-    }
-  }
-  return null;
+  const byDate = await loadHolidayOverlayMap(pool, dateStr, dateStr);
+  return byDate.get(String(dateStr).slice(0, 10)) || null;
 }
 
 async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, status, holidayId, coverage) {
