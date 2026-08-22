@@ -40,6 +40,7 @@ class TimeRecord {
     this.locatorSlipCoverageMode,
     this.locatorSlipSegments,
     this.shiftPunchMode = 'auto',
+    this.combineLateAndUndertime = false,
   });
 
   final String? id;
@@ -108,6 +109,10 @@ class TimeRecord {
   /// Employee's shift punch mode for this record's date.
   /// Values: 'auto', 'full_day', 'am_only', 'pm_only', 'single_session'.
   final String shiftPunchMode;
+
+  /// When true, official DTR exports display late minutes in the undertime column.
+  /// Stored and on-screen late/undertime values remain separate.
+  final bool combineLateAndUndertime;
 
   LocatorRequestType get locatorRequestType =>
       LocatorRequestType.fromCode(locatorSlipRequestType);
@@ -201,6 +206,7 @@ class TimeRecord {
                 .toList()
           : null,
       shiftPunchMode: json['shift_punch_mode']?.toString() ?? 'auto',
+      combineLateAndUndertime: json['combine_late_and_undertime'] == true,
     );
   }
 
@@ -283,6 +289,8 @@ class TimeRecord {
     String? locatorSlipDtrPrintLabel,
     String? locatorSlipCoverageMode,
     List<String>? locatorSlipSegments,
+    String? shiftPunchMode,
+    bool? combineLateAndUndertime,
   }) {
     return TimeRecord(
       id: id ?? this.id,
@@ -321,6 +329,9 @@ class TimeRecord {
       locatorSlipCoverageMode:
           locatorSlipCoverageMode ?? this.locatorSlipCoverageMode,
       locatorSlipSegments: locatorSlipSegments ?? this.locatorSlipSegments,
+      shiftPunchMode: shiftPunchMode ?? this.shiftPunchMode,
+      combineLateAndUndertime:
+          combineLateAndUndertime ?? this.combineLateAndUndertime,
     );
   }
 }
@@ -421,6 +432,7 @@ class TimeRecordRepo {
     String? departmentId,
     int? limit,
     int? offset,
+    bool recompute = false,
   }) async {
     final page = await listPageForAdmin(
       startDate: startDate,
@@ -429,6 +441,7 @@ class TimeRecordRepo {
       departmentId: departmentId,
       limit: limit,
       offset: offset,
+      recompute: recompute,
     );
     return page.items;
   }
@@ -440,6 +453,7 @@ class TimeRecordRepo {
     String? departmentId,
     int? limit,
     int? offset,
+    bool recompute = false,
   }) async {
     try {
       final params = <String, dynamic>{};
@@ -455,6 +469,7 @@ class TimeRecordRepo {
       }
       if (limit != null) params['limit'] = limit;
       if (offset != null) params['offset'] = offset;
+      if (recompute) params['recompute'] = true;
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/dtr-daily-summary',
         queryParameters: params,
