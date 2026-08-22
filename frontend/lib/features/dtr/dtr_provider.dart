@@ -152,6 +152,7 @@ class _DtrRecordsCacheKey {
     required this.departmentId,
     required this.limit,
     required this.offset,
+    required this.recompute,
   });
 
   final String? startDate;
@@ -160,6 +161,7 @@ class _DtrRecordsCacheKey {
   final String? departmentId;
   final int? limit;
   final int? offset;
+  final bool recompute;
 
   @override
   bool operator ==(Object other) {
@@ -169,12 +171,20 @@ class _DtrRecordsCacheKey {
         other.userId == userId &&
         other.departmentId == departmentId &&
         other.limit == limit &&
-        other.offset == offset;
+        other.offset == offset &&
+        other.recompute == recompute;
   }
 
   @override
-  int get hashCode =>
-      Object.hash(startDate, endDate, userId, departmentId, limit, offset);
+  int get hashCode => Object.hash(
+    startDate,
+    endDate,
+    userId,
+    departmentId,
+    limit,
+    offset,
+    recompute,
+  );
 }
 
 class _EmployeeOptionsCacheKey {
@@ -548,6 +558,7 @@ class DtrProvider extends ChangeNotifier {
     String? departmentId,
     int? limit,
     int? offset,
+    bool recompute = false,
   }) {
     return _DtrRecordsCacheKey(
       startDate: _dateKey(startDate),
@@ -556,6 +567,7 @@ class DtrProvider extends ChangeNotifier {
       departmentId: _normalizeOptional(departmentId),
       limit: limit,
       offset: offset,
+      recompute: recompute,
     );
   }
 
@@ -643,6 +655,7 @@ class DtrProvider extends ChangeNotifier {
     bool silent = false,
     bool forDashboardAnalytics = false,
     bool forceRefresh = false,
+    bool recompute = false,
   }) async {
     if (forDashboardAnalytics) {
       await _loadDashboardAnalyticsData(forceRefresh: forceRefresh);
@@ -657,6 +670,7 @@ class DtrProvider extends ChangeNotifier {
       departmentId: normalizedDepartmentId,
       limit: limit,
       offset: offset,
+      recompute: recompute,
     );
     final cached = forceRefresh ? null : _readRecordsCache(cacheKey);
     if (cached != null) {
@@ -692,6 +706,7 @@ class DtrProvider extends ChangeNotifier {
         departmentId: normalizedDepartmentId,
         limit: limit,
         offset: offset,
+        recompute: recompute,
       );
       _writeRecordsCache(cacheKey, page.items, total: page.total);
       _timeRecords = List<TimeRecord>.from(page.items);
