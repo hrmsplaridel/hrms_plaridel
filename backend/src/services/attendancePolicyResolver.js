@@ -2,6 +2,7 @@ function normalizeAttendancePolicy(row) {
   return {
     id: row?.id || null,
     workHoursPerDay: row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
+    useEquivalentDayConversion: row?.use_equivalent_day_conversion ?? true,
     deductLate: row?.deduct_late ?? true,
     convertLateToEquivalentDay: row?.convert_late_to_equivalent_day ?? false,
     deductUndertime: row?.deduct_undertime ?? true,
@@ -9,6 +10,90 @@ function normalizeAttendancePolicy(row) {
     absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ?? true,
     combineLateAndUndertime: row?.combine_late_and_undertime ?? false,
     deductionMultiplier: row?.deduction_multiplier != null ? parseFloat(row.deduction_multiplier) : 1,
+  };
+}
+
+function round3(value) {
+  return Math.round((Number(value) || 0) * 1000) / 1000;
+}
+
+function attendancePolicyPayload(policy) {
+  const normalized = policy || normalizeAttendancePolicy(null);
+  return {
+    id: normalized.id || null,
+    work_hours_per_day: normalized.workHoursPerDay,
+    use_equivalent_day_conversion: normalized.useEquivalentDayConversion,
+    deduct_late: normalized.deductLate,
+    convert_late_to_equivalent_day: normalized.convertLateToEquivalentDay,
+    deduct_undertime: normalized.deductUndertime,
+    convert_undertime_to_equivalent_day: normalized.convertUndertimeToEquivalentDay,
+    absent_equals_full_day_deduction: normalized.absentEqualsFullDayDeduction,
+    combine_late_and_undertime: normalized.combineLateAndUndertime,
+    deduction_multiplier: normalized.deductionMultiplier,
+  };
+}
+
+/**
+ * Build the official report contribution from already policy-processed DTR
+ * minutes. This mirrors month-end treatment without applying the multiplier a
+ * second time.
+ */
+function calculateAttendanceReportDeduction({
+  policy,
+  lateMinutes,
+  undertimeMinutes,
+  status,
+  expectedWorkMinutes,
+}) {
+  const normalized = policy || normalizeAttendancePolicy(null);
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  const excluded = new Set(['holiday', 'on_leave', 'rest_day', 'on_field']);
+  if (!normalized.useEquivalentDayConversion || excluded.has(normalizedStatus)) {
+    return {
+      late_minutes: 0,
+      undertime_minutes: 0,
+      absence_minutes: 0,
+      total_minutes: 0,
+      equivalent_day: 0,
+    };
+  }
+
+  let appliedLate = normalized.deductLate
+    ? Math.max(0, parseInt(lateMinutes, 10) || 0)
+    : 0;
+  let appliedUndertime = normalized.deductUndertime
+    ? Math.max(0, parseInt(undertimeMinutes, 10) || 0)
+    : 0;
+  let appliedAbsence = 0;
+
+  if (
+    normalizedStatus === 'absent' &&
+    normalized.deductUndertime &&
+    normalized.absentEqualsFullDayDeduction
+  ) {
+    const expected = Math.max(0, Number(expectedWorkMinutes) || 0);
+    appliedAbsence = appliedUndertime > 0
+      ? appliedUndertime
+      : Math.round(expected * Math.max(0, normalized.deductionMultiplier || 1));
+    appliedUndertime = 0;
+  }
+
+  const total = appliedLate + appliedUndertime + appliedAbsence;
+  const workMinutes = Math.max(
+    1,
+    Math.round(
+      (Number.isFinite(normalized.workHoursPerDay) && normalized.workHoursPerDay > 0
+        ? normalized.workHoursPerDay
+        : 8) * 60
+    )
+  );
+
+  return {
+    late_minutes: appliedLate,
+    undertime_minutes: appliedUndertime,
+    absence_minutes: appliedAbsence,
+    total_minutes: total,
+    equivalent_day: total > 0 ? round3(total / workMinutes) : 0,
   };
 }
 
@@ -92,7 +177,8 @@ async function loadAttendancePolicyContext(
     }
   }
 
-  const policyColumns = `p.id, p.work_hours_per_day, p.deduct_late,
+  const policyColumns = `p.id, p.work_hours_per_day, p.use_equivalent_day_conversion,
+    p.deduct_late,
     p.convert_late_to_equivalent_day,
     p.deduct_undertime, p.convert_undertime_to_equivalent_day,
     p.absent_equals_full_day_deduction, p.combine_late_and_undertime,
@@ -177,6 +263,8 @@ function resolveAttendancePolicy(context, employeeId, dateStr, assignment) {
 }
 
 module.exports = {
+  attendancePolicyPayload,
+  calculateAttendanceReportDeduction,
   calculateAttendancePolicyPenalties,
   loadAttendancePolicyContext,
   normalizeAttendancePolicy,

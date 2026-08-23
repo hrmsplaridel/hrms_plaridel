@@ -24,6 +24,8 @@ const {
 } = require('../services/locatorCoverage');
 const { resolveDtrDailySummaryScope } = require('../services/dtrDailySummaryAccess');
 const {
+  attendancePolicyPayload,
+  calculateAttendanceReportDeduction,
   calculateAttendancePolicyPenalties,
   loadAttendancePolicyContext,
   normalizeAttendancePolicy,
@@ -1506,6 +1508,34 @@ router.get('/', protect, async (req, res) => {
           holidayInfo,
           effectiveLocatorSegments
         );
+      }
+
+      // Reports must use the same date-aware policy precedence as DTR and
+      // month-end processing. Attach both the resolved policy and the official
+      // per-day contribution after locator/leave/holiday overlays are final.
+      for (const row of rows) {
+        const rowDateStr = String(row.record_date || '').slice(0, 10);
+        if (!rowDateStr) continue;
+        const shiftInfo = getShiftInfoForDateFromAssignments(
+          assignmentsByEmployee,
+          row.user_id,
+          rowDateStr
+        );
+        const policyForDay = resolveAttendancePolicy(
+          attendancePolicyContext,
+          row.user_id,
+          rowDateStr,
+          shiftInfo
+        );
+        row.combine_late_and_undertime = policyForDay.combineLateAndUndertime;
+        row.attendance_policy = attendancePolicyPayload(policyForDay);
+        row.report_deduction = calculateAttendanceReportDeduction({
+          policy: policyForDay,
+          lateMinutes: row.late_minutes,
+          undertimeMinutes: row.undertime_minutes,
+          status: row.status,
+          expectedWorkMinutes: shiftInfo ? getExpectedWorkMinutes(shiftInfo) : 0,
+        });
       }
 
       rows.sort((a, b) => {

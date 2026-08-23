@@ -13,8 +13,6 @@ import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_as
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_message_bubble.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_prompt_chips.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
-import 'package:hrms_plaridel/features/dtr/dtr_main.dart';
-import 'package:hrms_plaridel/features/dtr/dtr_routes.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_main.dart';
@@ -23,6 +21,7 @@ import 'package:hrms_plaridel/features/dtr/leave/utils/responsive_leave_form_hos
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_slip_form_initial_values.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/employee_locator_slip_screen.dart'
     as locator;
+import 'package:hrms_plaridel/features/dtr/reports/presentation/pages/dtr_reports.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
@@ -502,8 +501,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         return;
       case 'open_dtr_reports':
         _openStandalonePage(
-          title: 'DTR Reports',
-          child: const DtrMain(section: DtrSection.reports),
+          title: 'My DTR Report',
+          child: const DtrReports(selfService: true),
         );
         return;
     }

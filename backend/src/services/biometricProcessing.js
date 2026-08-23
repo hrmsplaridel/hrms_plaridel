@@ -438,6 +438,34 @@ function computeTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType) {
   return computeShiftTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType);
 }
 
+function timestampsMatch(left, right) {
+  if (left == null || right == null) return left == null && right == null;
+  const leftMs = new Date(left).getTime();
+  const rightMs = new Date(right).getTime();
+  return Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs === rightMs;
+}
+
+function numbersMatch(left, right, tolerance = 0) {
+  const leftNumber = Number(left ?? 0);
+  const rightNumber = Number(right ?? 0);
+  return Number.isFinite(leftNumber) &&
+    Number.isFinite(rightNumber) &&
+    Math.abs(leftNumber - rightNumber) <= tolerance;
+}
+
+function hasBiometricSummaryChanged(existing, candidate) {
+  return !(
+    timestampsMatch(existing?.time_in, candidate?.timeIn) &&
+    timestampsMatch(existing?.break_out, candidate?.breakOut) &&
+    timestampsMatch(existing?.break_in, candidate?.breakIn) &&
+    timestampsMatch(existing?.time_out, candidate?.timeOut) &&
+    String(existing?.status || '') === String(candidate?.status || '') &&
+    numbersMatch(existing?.total_hours, candidate?.totalHours, 0.005) &&
+    numbersMatch(existing?.late_minutes, candidate?.lateMinutes) &&
+    numbersMatch(existing?.undertime_minutes, candidate?.undertimeMinutes)
+  );
+}
+
 /**
  * Process biometric_attendance_logs into dtr_daily_summary for the given scope.
  * Groups by user_id + attendance_date (Asia/Manila), sorts punches, maps to time_in / break_out / break_in / time_out.
@@ -703,7 +731,8 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
     let existing;
     try {
       existing = await pool.query(
-        `SELECT id, source, time_in, break_in, time_out
+        `SELECT id, source, time_in, break_out, break_in, time_out,
+                status, total_hours, late_minutes, undertime_minutes
          FROM dtr_daily_summary
          WHERE employee_id = $1::uuid AND attendance_date = $2::date`,
         [user_id, attendanceDateStr]
@@ -750,12 +779,19 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
       }
     } else if (existing.rows[0].source === 'system') {
       const existingRow = existing.rows[0];
-      const isCompletedSummary =
-        existingRow.time_out != null &&
-        (existingRow.time_in != null || existingRow.break_in != null);
-      if (isCompletedSummary) {
+      const candidateSummary = {
+        timeIn,
+        breakOut,
+        breakIn,
+        timeOut,
+        status,
+        totalHours,
+        lateMinutes,
+        undertimeMinutes,
+      };
+      if (!hasBiometricSummaryChanged(existingRow, candidateSummary)) {
         skipped++;
-        console.log('[biometricProcessing] SKIP (completed system summary locked)', {
+        console.log('[biometricProcessing] SKIP (system summary unchanged)', {
           employee_id: user_id,
           attendance_date: attendanceDateStr,
           punches: punchCount,
@@ -763,7 +799,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
         continue;
       }
       try {
-        await pool.query(
+        const updateResult = await pool.query(
           `UPDATE dtr_daily_summary SET
              time_in = $3::timestamptz,
              break_out = $4::timestamptz,
@@ -775,7 +811,10 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
              undertime_minutes = $10,
              overtime_minutes = 0,
              updated_at = now()
-           WHERE employee_id = $1::uuid AND attendance_date = $2::date`,
+           WHERE employee_id = $1::uuid
+             AND attendance_date = $2::date
+             AND source = 'system'
+           RETURNING id`,
           [
             user_id,
             attendanceDateStr,
@@ -789,17 +828,25 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
             undertimeMinutes,
           ]
         );
-        updated++;
-        affected.push({
-          action: 'biometric_updated',
-          userId: String(user_id),
-          date: attendanceDateStr,
-        });
-        console.log('[biometricProcessing] UPDATE', {
-          employee_id: user_id,
-          attendance_date: attendanceDateStr,
-          punches: punchCount,
-        });
+        if (updateResult.rowCount > 0) {
+          updated++;
+          affected.push({
+            action: 'biometric_updated',
+            userId: String(user_id),
+            date: attendanceDateStr,
+          });
+          console.log('[biometricProcessing] UPDATE', {
+            employee_id: user_id,
+            attendance_date: attendanceDateStr,
+            punches: punchCount,
+          });
+        } else {
+          skipped++;
+          console.log('[biometricProcessing] SKIP (summary protected during rebuild)', {
+            employee_id: user_id,
+            attendance_date: attendanceDateStr,
+          });
+        }
       } catch (err) {
         console.error('[biometricProcessing] UPDATE failed:', { user_id, attendanceDateStr, err });
         throw err;
@@ -839,6 +886,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
 module.exports = {
   processBiometricLogsToSummary,
   interpretPunchesForDay,
+  hasBiometricSummaryChanged,
   computeTotalHours,
   evaluateBiometricDayGate,
   isPunchAfterShiftEnd,

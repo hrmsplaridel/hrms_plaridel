@@ -64,14 +64,22 @@ class _ExportTotals {
     required this.totalUndertimeMinutes,
     required this.totalDeductionMinutes,
     required this.equivalentDay,
-    required this.adjustedEquivalentDay,
   });
 
   final int totalLateMinutes;
   final int totalUndertimeMinutes;
   final int totalDeductionMinutes;
   final double equivalentDay;
-  final double adjustedEquivalentDay;
+}
+
+class _ExportDailyDeduction {
+  const _ExportDailyDeduction({
+    required this.totalMinutes,
+    required this.equivalentDay,
+  });
+
+  final int totalMinutes;
+  final double equivalentDay;
 }
 
 const String _meedoManagerPositionTitle = 'MEEDO A-Manager';
@@ -118,6 +126,7 @@ class DtrExportItem {
     this.workingDays,
     this.assignmentEffectiveFrom,
     this.assignmentEffectiveTo,
+    this.assignmentSegments = const [],
   });
 
   final String employeeName;
@@ -130,6 +139,29 @@ class DtrExportItem {
   final List<int>? workingDays;
   final DateTime? assignmentEffectiveFrom;
   final DateTime? assignmentEffectiveTo;
+  final List<DtrAssignmentSegment> assignmentSegments;
+}
+
+class DtrAssignmentSegment {
+  const DtrAssignmentSegment({
+    required this.effectiveFrom,
+    this.effectiveTo,
+    this.department,
+    this.position,
+    this.officialHours,
+    this.scheduledWorkHoursPerDay,
+    this.punchMode,
+    this.workingDays,
+  });
+
+  final DateTime? effectiveFrom;
+  final DateTime? effectiveTo;
+  final String? department;
+  final String? position;
+  final String? officialHours;
+  final double? scheduledWorkHoursPerDay;
+  final String? punchMode;
+  final List<int>? workingDays;
 }
 
 /// DTR export to PDF, Excel, and Word (HTML) — single page, matches official form.
@@ -258,6 +290,88 @@ class DtrExport {
       if (dt.isAfter(to)) return false;
     }
     return true;
+  }
+
+  static DtrAssignmentSegment? _assignmentSegmentForDate(
+    DateTime date,
+    List<DtrAssignmentSegment> segments,
+  ) {
+    for (final segment in segments.reversed) {
+      if (!_isInAssignmentWindow(
+        date,
+        segment.effectiveFrom,
+        segment.effectiveTo,
+      )) {
+        continue;
+      }
+      return segment;
+    }
+    return null;
+  }
+
+  static bool _isScheduledForAssignment({
+    required DateTime date,
+    required List<DtrAssignmentSegment> assignmentSegments,
+    required Set<int> fallbackWorkingDays,
+    required DateTime? fallbackEffectiveFrom,
+    required DateTime? fallbackEffectiveTo,
+  }) {
+    if (assignmentSegments.isEmpty) {
+      return fallbackWorkingDays.contains(date.weekday) &&
+          _isInAssignmentWindow(
+            date,
+            fallbackEffectiveFrom,
+            fallbackEffectiveTo,
+          );
+    }
+    final segment = _assignmentSegmentForDate(date, assignmentSegments);
+    if (segment == null) return false;
+    final workingDays = segment.workingDays?.toSet();
+    return (workingDays == null || workingDays.isEmpty
+            ? const {1, 2, 3, 4, 5}
+            : workingDays)
+        .contains(date.weekday);
+  }
+
+  static String _formatScheduleDate(DateTime date) =>
+      '${_months[date.month - 1]} ${date.day}, ${date.year}';
+
+  static List<String> _buildAssignmentNoteLines(
+    List<DtrAssignmentSegment> segments,
+    DateTime start,
+    DateTime end,
+  ) {
+    final relevantSegments = segments
+        .where((segment) {
+          final from = segment.effectiveFrom;
+          final to = segment.effectiveTo;
+          return (from == null || !from.isAfter(end)) &&
+              (to == null || !to.isBefore(start));
+        })
+        .toList(growable: false);
+    if (relevantSegments.length < 2) return const [];
+    return relevantSegments
+        .map((segment) {
+          final from =
+              segment.effectiveFrom != null &&
+                  segment.effectiveFrom!.isAfter(start)
+              ? segment.effectiveFrom!
+              : start;
+          final to =
+              segment.effectiveTo != null && segment.effectiveTo!.isBefore(end)
+              ? segment.effectiveTo!
+              : end;
+          final details = <String>[
+            if (segment.department?.trim().isNotEmpty == true)
+              segment.department!.trim(),
+            if (segment.position?.trim().isNotEmpty == true)
+              segment.position!.trim(),
+            if (segment.officialHours?.trim().isNotEmpty == true)
+              segment.officialHours!.trim(),
+          ];
+          return 'Schedule ${_formatScheduleDate(from)}-${_formatScheduleDate(to)}: ${details.isEmpty ? "Assignment on record" : details.join(", ")}';
+        })
+        .toList(growable: false);
   }
 
   /// Last date in [year]/[month] included in undertime/absent for print/PDF/Excel/Word.
@@ -416,67 +530,32 @@ class DtrExport {
 
   static double _round3(double x) => (x * 1000).roundToDouble() / 1000;
 
-  static (double equivalentDay, double adjustedEquivalentDay)
-  _computeEquivalentDay({
-    required int minutes,
-    required double workHoursPerDay,
-    required bool useEquivalentDayConversion,
-    required double deductionMultiplier,
+  static _ExportDailyDeduction _dailyDeduction({
+    required TimeRecord? record,
+    required int fallbackUndertimeMinutes,
+    required double fallbackWorkHours,
+    required _ExportAttendancePolicy fallbackPolicy,
   }) {
-    if (!useEquivalentDayConversion) return (0, 0);
-    final wh = workHoursPerDay > 0 ? workHoursPerDay : 8.0;
-    final eq = _round3(minutes / (wh * 60.0));
-    final mult = deductionMultiplier > 0 ? deductionMultiplier : 1.0;
-    final adj = _round3(eq * mult);
-    return (eq, adj);
-  }
-
-  static Future<_ExportAttendancePolicy> _loadDefaultAttendancePolicy() async {
-    try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/attendance-policies',
-        queryParameters: {'status': 'Active'},
+    final authoritative = record?.reportDeduction;
+    if (authoritative != null) {
+      return _ExportDailyDeduction(
+        totalMinutes: authoritative.totalMinutes,
+        equivalentDay: authoritative.equivalentDay,
       );
-      final data = res.data ?? [];
-      final items = data
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList(growable: false);
-      if (items.isEmpty) return _ExportAttendancePolicy.defaults;
-
-      final m = items.firstWhere(
-        (x) => (x['is_default'] as bool?) == true,
-        orElse: () => items.first,
-      );
-
-      double toDouble(dynamic v, double fallback) {
-        if (v == null) return fallback;
-        if (v is num) return v.toDouble();
-        return double.tryParse(v.toString()) ?? fallback;
-      }
-
-      bool toBool(dynamic v, bool fallback) {
-        if (v == null) return fallback;
-        if (v is bool) return v;
-        final s = v.toString().trim().toLowerCase();
-        if (s == 'true' || s == '1' || s == 'yes') return true;
-        if (s == 'false' || s == '0' || s == 'no') return false;
-        return fallback;
-      }
-
-      return _ExportAttendancePolicy(
-        workHoursPerDay: toDouble(m['work_hours_per_day'], 8),
-        useEquivalentDayConversion: toBool(
-          m['use_equivalent_day_conversion'],
-          true,
-        ),
-        deductLate: toBool(m['deduct_late'], false),
-        deductUndertime: toBool(m['deduct_undertime'], true),
-        combineLateAndUndertime: toBool(m['combine_late_and_undertime'], false),
-        deductionMultiplier: toDouble(m['deduction_multiplier'], 1.0),
-      );
-    } catch (_) {
-      return _ExportAttendancePolicy.defaults;
     }
+
+    if (!fallbackPolicy.useEquivalentDayConversion || fallbackWorkHours <= 0) {
+      return const _ExportDailyDeduction(totalMinutes: 0, equivalentDay: 0);
+    }
+    final late = fallbackPolicy.deductLate ? (record?.lateMinutes ?? 0) : 0;
+    final undertime = fallbackPolicy.deductUndertime
+        ? fallbackUndertimeMinutes
+        : 0;
+    final total = late + undertime;
+    return _ExportDailyDeduction(
+      totalMinutes: total,
+      equivalentDay: total / (fallbackWorkHours * 60),
+    );
   }
 
   static List<String> _buildNoteLinesForRange({
@@ -520,21 +599,17 @@ class DtrExport {
 
   /// Government-style form footer: certification, verified, signature line, officers, notes.
   static pw.Widget _buildFormFooter(
-    _ExportTotals totals,
-    _ExportAttendancePolicy policy, {
+    _ExportTotals totals, {
     required DtrExportSignatories signatories,
     List<String> noteLines = const [],
   }) {
     const double lineWidth = 170;
 
-    final hasMultiplier = (policy.deductionMultiplier - 1.0).abs() > 0.0001;
-
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
         pw.Text(
-          'Equivalent Day (deduction): ${totals.equivalentDay.toStringAsFixed(3)}'
-          '${hasMultiplier ? '  |  Adjusted: ${totals.adjustedEquivalentDay.toStringAsFixed(3)}' : ''}',
+          'Equivalent Day (deduction): ${totals.equivalentDay.toStringAsFixed(3)}',
           style: const pw.TextStyle(fontSize: 6),
         ),
         pw.SizedBox(height: 2),
@@ -614,18 +689,22 @@ class DtrExport {
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
+    List<DtrAssignmentSegment> assignmentSegments = const [],
     DtrExportSignatories? signatories,
     PdfPageFormat pageFormat = PdfPageFormat.legal,
   }) async {
-    final policy = await _loadDefaultAttendancePolicy();
+    const policy = _ExportAttendancePolicy.defaults;
     final exportSignatories = signatories ?? await resolveSignatories();
-    final noteLines = _buildNoteLinesForRange(
-      year: year,
-      month: month,
-      start: start,
-      end: end,
-      recordsByDate: recordsByDate,
-    );
+    final noteLines = [
+      ..._buildAssignmentNoteLines(assignmentSegments, start, end),
+      ..._buildNoteLinesForRange(
+        year: year,
+        month: month,
+        start: start,
+        end: end,
+        recordsByDate: recordsByDate,
+      ),
+    ];
     final title = reportTitle ?? 'DAILY TIME RECORD';
 
     pw.Widget buildCopy() {
@@ -641,6 +720,7 @@ class DtrExport {
         workingDays: workingDays,
         assignmentEffectiveFrom: assignmentEffectiveFrom,
         assignmentEffectiveTo: assignmentEffectiveTo,
+        assignmentSegments: assignmentSegments,
       );
       return _buildOneDtrForm(
         employeeName: employeeName,
@@ -707,19 +787,22 @@ class DtrExport {
         'At least one DTR item is required',
       );
     }
-    final policy = await _loadDefaultAttendancePolicy();
+    const policy = _ExportAttendancePolicy.defaults;
     final exportSignatories = signatories ?? await resolveSignatories();
     final title = reportTitle ?? 'DAILY TIME RECORD';
     final doc = pw.Document(theme: await _resolvePdfTheme());
 
     for (final item in items) {
-      final noteLines = _buildNoteLinesForRange(
-        year: year,
-        month: month,
-        start: start,
-        end: end,
-        recordsByDate: item.recordsByDate,
-      );
+      final noteLines = [
+        ..._buildAssignmentNoteLines(item.assignmentSegments, start, end),
+        ..._buildNoteLinesForRange(
+          year: year,
+          month: month,
+          start: start,
+          end: end,
+          recordsByDate: item.recordsByDate,
+        ),
+      ];
 
       pw.Widget buildCopy() {
         final (formRows, totals) = _buildFormTableRows(
@@ -734,6 +817,7 @@ class DtrExport {
           workingDays: item.workingDays,
           assignmentEffectiveFrom: item.assignmentEffectiveFrom,
           assignmentEffectiveTo: item.assignmentEffectiveTo,
+          assignmentSegments: item.assignmentSegments,
         );
         return _buildOneDtrForm(
           employeeName: item.employeeName,
@@ -995,10 +1079,13 @@ class DtrExport {
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
+    List<DtrAssignmentSegment> assignmentSegments = const [],
   }) {
     var totalUndertimeMin = 0;
     var totalRawUndertimeMin = 0;
     var totalLateMin = 0;
+    var totalDeductionMin = 0;
+    var equivalentDayTotal = 0.0;
     const fs = 5.0;
     final rows = <pw.TableRow>[];
     final shiftWd = workingDays != null && workingDays.isNotEmpty
@@ -1009,32 +1096,46 @@ class DtrExport {
     for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
-      final isNonWorking = !shiftWd.contains(dt.weekday);
-      final inAssignment = _isInAssignmentWindow(
-        dt,
-        assignmentEffectiveFrom,
-        assignmentEffectiveTo,
+      final assignment = _assignmentSegmentForDate(dt, assignmentSegments);
+      final isScheduled = _isScheduledForAssignment(
+        date: dt,
+        assignmentSegments: assignmentSegments,
+        fallbackWorkingDays: shiftWd,
+        fallbackEffectiveFrom: assignmentEffectiveFrom,
+        fallbackEffectiveTo: assignmentEffectiveTo,
       );
       final isNotElapsed = dt.isAfter(statsEnd);
-      final isNonScheduled = isNonWorking || !inAssignment || isNotElapsed;
+      final isNonScheduled = !isScheduled || isNotElapsed;
+      final effectiveWorkHours =
+          assignment?.scheduledWorkHoursPerDay ??
+          scheduledWorkHoursPerDay ??
+          policy.workHoursPerDay;
       final (uh, um) = _computeUndertime(
         rec,
         dt,
         isNonScheduled,
-        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        effectiveWorkHours,
         rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
       final (rawUh, rawUm) = _computeUndertime(
         rec,
         dt,
         isNonScheduled,
-        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        effectiveWorkHours,
         false,
       );
       if (!isNonScheduled) {
         totalUndertimeMin += uh * 60 + um;
         totalRawUndertimeMin += rawUh * 60 + rawUm;
         totalLateMin += rec?.lateMinutes ?? 0;
+        final deduction = _dailyDeduction(
+          record: rec,
+          fallbackUndertimeMinutes: rawUh * 60 + rawUm,
+          fallbackWorkHours: effectiveWorkHours,
+          fallbackPolicy: policy,
+        );
+        totalDeductionMin += deduction.totalMinutes;
+        equivalentDayTotal += deduction.equivalentDay;
       }
 
       final remark = _getRowRemark(rec, dt, isNonScheduled);
@@ -1074,7 +1175,7 @@ class DtrExport {
             : (displayVal == 'ABSENT' ? 'ABSENT' : '');
         (amInStr, amOutStr, pmInStr, pmOutStr) = _statusPunchCells(
           statusText,
-          punchMode,
+          assignment?.punchMode ?? punchMode,
         );
         final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
         statusColor = _pdfColorForStatus(
@@ -1129,26 +1230,15 @@ class DtrExport {
       ),
     );
 
-    final undertimeDeductMin = policy.deductUndertime
-        ? totalRawUndertimeMin
-        : 0;
-    final lateDeductMin = policy.deductLate ? totalLateMin : 0;
-    final totalDeductMin = undertimeDeductMin + lateDeductMin;
-    final (eq, adj) = _computeEquivalentDay(
-      minutes: totalDeductMin,
-      workHoursPerDay: policy.workHoursPerDay,
-      useEquivalentDayConversion: policy.useEquivalentDayConversion,
-      deductionMultiplier: policy.deductionMultiplier,
-    );
+    final eq = _round3(equivalentDayTotal);
 
     return (
       rows,
       _ExportTotals(
         totalLateMinutes: totalLateMin,
         totalUndertimeMinutes: totalRawUndertimeMin,
-        totalDeductionMinutes: totalDeductMin,
+        totalDeductionMinutes: totalDeductionMin,
         equivalentDay: eq,
-        adjustedEquivalentDay: adj,
       ),
     );
   }
@@ -1238,7 +1328,6 @@ class DtrExport {
         pw.SizedBox(height: 9),
         _buildFormFooter(
           totals,
-          policy,
           signatories: signatories,
           noteLines: noteLines,
         ),
@@ -1263,11 +1352,14 @@ class DtrExport {
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
+    List<DtrAssignmentSegment> assignmentSegments = const [],
     DtrExportSignatories? signatories,
   }) async {
-    final policy = await _loadDefaultAttendancePolicy();
+    const policy = _ExportAttendancePolicy.defaults;
     final exportSignatories = signatories ?? await resolveSignatories();
-    final noteLines = <String>[];
+    final noteLines = <String>[
+      ..._buildAssignmentNoteLines(assignmentSegments, start, end),
+    ];
     for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
@@ -1279,8 +1371,7 @@ class DtrExport {
       }
     }
     var totalUndertimeMin = 0;
-    var totalRawUndertimeMin = 0;
-    var totalLateMin = 0;
+    var equivalentDayTotal = 0.0;
     final excel = Excel.createExcel();
     final defaultName = excel.getDefaultSheet() ?? 'Sheet1';
     excel.rename(defaultName, 'DTR');
@@ -1466,32 +1557,43 @@ class DtrExport {
     for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
-      final isNonWorking = !shiftWd.contains(dt.weekday);
-      final inAssignment = _isInAssignmentWindow(
-        dt,
-        assignmentEffectiveFrom,
-        assignmentEffectiveTo,
+      final assignment = _assignmentSegmentForDate(dt, assignmentSegments);
+      final isScheduled = _isScheduledForAssignment(
+        date: dt,
+        assignmentSegments: assignmentSegments,
+        fallbackWorkingDays: shiftWd,
+        fallbackEffectiveFrom: assignmentEffectiveFrom,
+        fallbackEffectiveTo: assignmentEffectiveTo,
       );
       final isNotElapsed = dt.isAfter(statsEndExcel);
-      final isNonScheduled = isNonWorking || !inAssignment || isNotElapsed;
+      final isNonScheduled = !isScheduled || isNotElapsed;
+      final effectiveWorkHours =
+          assignment?.scheduledWorkHoursPerDay ??
+          scheduledWorkHoursPerDay ??
+          policy.workHoursPerDay;
       final (uh, um) = _computeUndertime(
         rec,
         dt,
         isNonScheduled,
-        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        effectiveWorkHours,
         rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
       final (rawUh, rawUm) = _computeUndertime(
         rec,
         dt,
         isNonScheduled,
-        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        effectiveWorkHours,
         false,
       );
       if (!isNonScheduled) {
         totalUndertimeMin += uh * 60 + um;
-        totalRawUndertimeMin += rawUh * 60 + rawUm;
-        totalLateMin += rec?.lateMinutes ?? 0;
+        final deduction = _dailyDeduction(
+          record: rec,
+          fallbackUndertimeMinutes: rawUh * 60 + rawUm,
+          fallbackWorkHours: effectiveWorkHours,
+          fallbackPolicy: policy,
+        );
+        equivalentDayTotal += deduction.equivalentDay;
       }
 
       final remark = _getRowRemark(rec, dt, isNonScheduled);
@@ -1528,7 +1630,7 @@ class DtrExport {
             : (displayVal == 'ABSENT' ? 'ABSENT' : '');
         (amInStr, amOutStr, pmInStr, pmOutStr) = _statusPunchCells(
           statusText,
-          punchMode,
+          assignment?.punchMode ?? punchMode,
         );
       }
 
@@ -1602,18 +1704,7 @@ class DtrExport {
     );
     row += 2;
 
-    final undertimeDeductMin = policy.deductUndertime
-        ? totalRawUndertimeMin
-        : 0;
-    final lateDeductMin = policy.deductLate ? totalLateMin : 0;
-    final totalDeductMin = undertimeDeductMin + lateDeductMin;
-    final (equivalentDay, adjustedEquivalentDay) = _computeEquivalentDay(
-      minutes: totalDeductMin,
-      workHoursPerDay: policy.workHoursPerDay,
-      useEquivalentDayConversion: policy.useEquivalentDayConversion,
-      deductionMultiplier: policy.deductionMultiplier,
-    );
-    final hasMultiplier = (policy.deductionMultiplier - 1.0).abs() > 0.0001;
+    final equivalentDay = _round3(equivalentDayTotal);
     final footerCenterStyle = CellStyle(
       fontSize: 9,
       horizontalAlign: HorizontalAlign.Center,
@@ -1622,8 +1713,7 @@ class DtrExport {
       0,
       row,
       TextCellValue(
-        'Equivalent Day (deduction): ${equivalentDay.toStringAsFixed(3)}'
-        '${hasMultiplier ? '  |  Adjusted: ${adjustedEquivalentDay.toStringAsFixed(3)}' : ''}',
+        'Equivalent Day (deduction): ${equivalentDay.toStringAsFixed(3)}',
       ),
       footerCenterStyle,
     );
@@ -1744,11 +1834,14 @@ class DtrExport {
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
+    List<DtrAssignmentSegment> assignmentSegments = const [],
     DtrExportSignatories? signatories,
   }) async {
-    final policy = await _loadDefaultAttendancePolicy();
+    const policy = _ExportAttendancePolicy.defaults;
     final exportSignatories = signatories ?? await resolveSignatories();
-    final noteLines = <String>[];
+    final noteLines = <String>[
+      ..._buildAssignmentNoteLines(assignmentSegments, start, end),
+    ];
     for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
@@ -1760,8 +1853,7 @@ class DtrExport {
       }
     }
     var totalUndertimeMin = 0;
-    var totalRawUndertimeMin = 0;
-    var totalLateMin = 0;
+    var equivalentDayTotal = 0.0;
     final title = reportTitle ?? 'DAILY TIME RECORD';
     final oneCopy = StringBuffer();
     oneCopy.writeln('<h2>$title</h2>');
@@ -1810,32 +1902,43 @@ class DtrExport {
     for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
-      final isNonWorking = !shiftWd.contains(dt.weekday);
-      final inAssignment = _isInAssignmentWindow(
-        dt,
-        assignmentEffectiveFrom,
-        assignmentEffectiveTo,
+      final assignment = _assignmentSegmentForDate(dt, assignmentSegments);
+      final isScheduled = _isScheduledForAssignment(
+        date: dt,
+        assignmentSegments: assignmentSegments,
+        fallbackWorkingDays: shiftWd,
+        fallbackEffectiveFrom: assignmentEffectiveFrom,
+        fallbackEffectiveTo: assignmentEffectiveTo,
       );
       final isNotElapsed = dt.isAfter(statsEndWordExport);
-      final isNonScheduled = isNonWorking || !inAssignment || isNotElapsed;
+      final isNonScheduled = !isScheduled || isNotElapsed;
+      final effectiveWorkHours =
+          assignment?.scheduledWorkHoursPerDay ??
+          scheduledWorkHoursPerDay ??
+          policy.workHoursPerDay;
       final (uh, um) = _computeUndertime(
         rec,
         dt,
         isNonScheduled,
-        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        effectiveWorkHours,
         rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
       final (rawUh, rawUm) = _computeUndertime(
         rec,
         dt,
         isNonScheduled,
-        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        effectiveWorkHours,
         false,
       );
       if (!isNonScheduled) {
         totalUndertimeMin += uh * 60 + um;
-        totalRawUndertimeMin += rawUh * 60 + rawUm;
-        totalLateMin += rec?.lateMinutes ?? 0;
+        final deduction = _dailyDeduction(
+          record: rec,
+          fallbackUndertimeMinutes: rawUh * 60 + rawUm,
+          fallbackWorkHours: effectiveWorkHours,
+          fallbackPolicy: policy,
+        );
+        equivalentDayTotal += deduction.equivalentDay;
       }
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
@@ -1869,7 +1972,10 @@ class DtrExport {
         statusText = remark.isNotEmpty
             ? remark
             : (displayVal == 'ABSENT' ? 'ABSENT' : '');
-        (amIn, amOut, pmIn, pmOut) = _statusPunchCells(statusText, punchMode);
+        (amIn, amOut, pmIn, pmOut) = _statusPunchCells(
+          statusText,
+          assignment?.punchMode ?? punchMode,
+        );
       }
       final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
       final statusColorHex = _excelColorHexForStatus(
@@ -1893,23 +1999,12 @@ class DtrExport {
     );
     oneCopy.writeln('</tbody></table>');
 
-    final undertimeDeductMin = policy.deductUndertime
-        ? totalRawUndertimeMin
-        : 0;
-    final lateDeductMin = policy.deductLate ? totalLateMin : 0;
-    final totalDeductMin = undertimeDeductMin + lateDeductMin;
-    final (equivalentDay, adjustedEquivalentDay) = _computeEquivalentDay(
-      minutes: totalDeductMin,
-      workHoursPerDay: policy.workHoursPerDay,
-      useEquivalentDayConversion: policy.useEquivalentDayConversion,
-      deductionMultiplier: policy.deductionMultiplier,
-    );
-    final hasMultiplier = (policy.deductionMultiplier - 1.0).abs() > 0.0001;
+    final equivalentDay = _round3(equivalentDayTotal);
     oneCopy.writeln(
       '<div style="text-align:center;font-size:10pt;margin-top:12px;line-height:1.4;">',
     );
     oneCopy.writeln(
-      '<p style="text-align:center;font-size:10pt;margin:4px 0;">Equivalent Day (deduction): ${equivalentDay.toStringAsFixed(3)}${hasMultiplier ? '  |  Adjusted: ${adjustedEquivalentDay.toStringAsFixed(3)}' : ''}</p>',
+      '<p style="text-align:center;font-size:10pt;margin:4px 0;">Equivalent Day (deduction): ${equivalentDay.toStringAsFixed(3)}</p>',
     );
     oneCopy.writeln(
       '<p style="text-align:center;font-size:10pt;margin:4px 0;">I certify on my honor that the above is a true and correct report of the hours of work performed, record of which was made daily at the time of arrival and departure from office.</p>',
@@ -1993,11 +2088,14 @@ class DtrExport {
     List<int>? workingDays,
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
+    List<DtrAssignmentSegment> assignmentSegments = const [],
     DtrExportSignatories signatories = DtrExportSignatories.empty,
   }) {
     final policy = _ExportAttendancePolicy.defaults;
     final effectiveStart = start ?? DateTime(year, month, 1);
-    final noteLines = <String>[];
+    final noteLines = <String>[
+      ..._buildAssignmentNoteLines(assignmentSegments, effectiveStart, end),
+    ];
     for (var d = effectiveStart.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
@@ -2009,8 +2107,7 @@ class DtrExport {
       }
     }
     var totalUndertimeMin = 0;
-    var totalRawUndertimeMin = 0;
-    var totalLateMin = 0;
+    var equivalentDayTotal = 0.0;
     final title = reportTitle ?? 'DAILY TIME RECORD';
     final oneCopy = StringBuffer();
     oneCopy.writeln('<h2>$title</h2>');
@@ -2059,32 +2156,43 @@ class DtrExport {
     for (var d = effectiveStart.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
-      final isNonWorking = !shiftWd.contains(dt.weekday);
-      final inAssignment = _isInAssignmentWindow(
-        dt,
-        assignmentEffectiveFrom,
-        assignmentEffectiveTo,
+      final assignment = _assignmentSegmentForDate(dt, assignmentSegments);
+      final isScheduled = _isScheduledForAssignment(
+        date: dt,
+        assignmentSegments: assignmentSegments,
+        fallbackWorkingDays: shiftWd,
+        fallbackEffectiveFrom: assignmentEffectiveFrom,
+        fallbackEffectiveTo: assignmentEffectiveTo,
       );
       final isNotElapsed = dt.isAfter(statsEndWordExport);
-      final isNonScheduled = isNonWorking || !inAssignment || isNotElapsed;
+      final isNonScheduled = !isScheduled || isNotElapsed;
+      final effectiveWorkHours =
+          assignment?.scheduledWorkHoursPerDay ??
+          scheduledWorkHoursPerDay ??
+          policy.workHoursPerDay;
       final (uh, um) = _computeUndertime(
         rec,
         dt,
         isNonScheduled,
-        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        effectiveWorkHours,
         rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
       final (rawUh, rawUm) = _computeUndertime(
         rec,
         dt,
         isNonScheduled,
-        scheduledWorkHoursPerDay ?? policy.workHoursPerDay,
+        effectiveWorkHours,
         false,
       );
       if (!isNonScheduled) {
         totalUndertimeMin += uh * 60 + um;
-        totalRawUndertimeMin += rawUh * 60 + rawUm;
-        totalLateMin += rec?.lateMinutes ?? 0;
+        final deduction = _dailyDeduction(
+          record: rec,
+          fallbackUndertimeMinutes: rawUh * 60 + rawUm,
+          fallbackWorkHours: effectiveWorkHours,
+          fallbackPolicy: policy,
+        );
+        equivalentDayTotal += deduction.equivalentDay;
       }
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
@@ -2118,7 +2226,10 @@ class DtrExport {
         statusText = remark.isNotEmpty
             ? remark
             : (displayVal == 'ABSENT' ? 'ABSENT' : '');
-        (amIn, amOut, pmIn, pmOut) = _statusPunchCells(statusText, punchMode);
+        (amIn, amOut, pmIn, pmOut) = _statusPunchCells(
+          statusText,
+          assignment?.punchMode ?? punchMode,
+        );
       }
       final isHoliday = rec?.status == 'holiday' || rec?.holidayId != null;
       final statusColorHex = _excelColorHexForStatus(
@@ -2142,23 +2253,12 @@ class DtrExport {
     );
     oneCopy.writeln('</tbody></table>');
 
-    final undertimeDeductMin = policy.deductUndertime
-        ? totalRawUndertimeMin
-        : 0;
-    final lateDeductMin = policy.deductLate ? totalLateMin : 0;
-    final totalDeductMin = undertimeDeductMin + lateDeductMin;
-    final (equivalentDay, adjustedEquivalentDay) = _computeEquivalentDay(
-      minutes: totalDeductMin,
-      workHoursPerDay: policy.workHoursPerDay,
-      useEquivalentDayConversion: policy.useEquivalentDayConversion,
-      deductionMultiplier: policy.deductionMultiplier,
-    );
-    final hasMultiplier = (policy.deductionMultiplier - 1.0).abs() > 0.0001;
+    final equivalentDay = _round3(equivalentDayTotal);
     oneCopy.writeln(
       '<div style="text-align:center;font-size:10pt;margin-top:12px;line-height:1.4;">',
     );
     oneCopy.writeln(
-      '<p style="text-align:center;font-size:10pt;margin:4px 0;">Equivalent Day (deduction): ${equivalentDay.toStringAsFixed(3)}${hasMultiplier ? '  |  Adjusted: ${adjustedEquivalentDay.toStringAsFixed(3)}' : ''}</p>',
+      '<p style="text-align:center;font-size:10pt;margin:4px 0;">Equivalent Day (deduction): ${equivalentDay.toStringAsFixed(3)}</p>',
     );
     oneCopy.writeln(
       '<p style="text-align:center;font-size:10pt;margin:4px 0;">I certify on my honor that the above is a true and correct report of the hours of work performed, record of which was made daily at the time of arrival and departure from office.</p>',

@@ -3,6 +3,66 @@ import 'package:dio/dio.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 
+class AttendancePolicySnapshot {
+  const AttendancePolicySnapshot({
+    this.id,
+    required this.workHoursPerDay,
+    required this.useEquivalentDayConversion,
+    required this.deductLate,
+    required this.deductUndertime,
+    required this.combineLateAndUndertime,
+    required this.deductionMultiplier,
+  });
+
+  final String? id;
+  final double workHoursPerDay;
+  final bool useEquivalentDayConversion;
+  final bool deductLate;
+  final bool deductUndertime;
+  final bool combineLateAndUndertime;
+  final double deductionMultiplier;
+
+  factory AttendancePolicySnapshot.fromJson(Map<String, dynamic> json) {
+    return AttendancePolicySnapshot(
+      id: json['id']?.toString(),
+      workHoursPerDay: TimeRecord._parseDouble(json['work_hours_per_day']) ?? 8,
+      useEquivalentDayConversion:
+          json['use_equivalent_day_conversion'] != false,
+      deductLate: json['deduct_late'] == true,
+      deductUndertime: json['deduct_undertime'] != false,
+      combineLateAndUndertime: json['combine_late_and_undertime'] == true,
+      deductionMultiplier:
+          TimeRecord._parseDouble(json['deduction_multiplier']) ?? 1,
+    );
+  }
+}
+
+class AttendanceReportDeduction {
+  const AttendanceReportDeduction({
+    required this.lateMinutes,
+    required this.undertimeMinutes,
+    required this.absenceMinutes,
+    required this.totalMinutes,
+    required this.equivalentDay,
+  });
+
+  final int lateMinutes;
+  final int undertimeMinutes;
+  final int absenceMinutes;
+  final int totalMinutes;
+  final double equivalentDay;
+
+  factory AttendanceReportDeduction.fromJson(Map<String, dynamic> json) {
+    return AttendanceReportDeduction(
+      lateMinutes: TimeRecord._parseInt(json['late_minutes']) ?? 0,
+      undertimeMinutes: TimeRecord._parseInt(json['undertime_minutes']) ?? 0,
+      absenceMinutes: TimeRecord._parseInt(json['absence_minutes']) ?? 0,
+      totalMinutes: TimeRecord._parseInt(json['total_minutes']) ?? 0,
+      equivalentDay: TimeRecord._parseDouble(json['equivalent_day']) ?? 0,
+    );
+  }
+}
+
 /// One DTR (Daily Time Record) entry: AM/PM time-in/out for a user on a date.
 /// timeIn = AM in, breakOut = AM out (lunch), breakIn = PM in, timeOut = PM out (end of day).
 class TimeRecord {
@@ -41,6 +101,8 @@ class TimeRecord {
     this.locatorSlipSegments,
     this.shiftPunchMode = 'auto',
     this.combineLateAndUndertime = false,
+    this.attendancePolicy,
+    this.reportDeduction,
   });
 
   final String? id;
@@ -113,6 +175,12 @@ class TimeRecord {
   /// When true, official DTR exports display late minutes in the undertime column.
   /// Stored and on-screen late/undertime values remain separate.
   final bool combineLateAndUndertime;
+
+  /// Effective backend-resolved policy for this employee and attendance date.
+  final AttendancePolicySnapshot? attendancePolicy;
+
+  /// Official per-date report contribution calculated by the backend.
+  final AttendanceReportDeduction? reportDeduction;
 
   LocatorRequestType get locatorRequestType =>
       LocatorRequestType.fromCode(locatorSlipRequestType);
@@ -207,6 +275,16 @@ class TimeRecord {
           : null,
       shiftPunchMode: json['shift_punch_mode']?.toString() ?? 'auto',
       combineLateAndUndertime: json['combine_late_and_undertime'] == true,
+      attendancePolicy: json['attendance_policy'] is Map
+          ? AttendancePolicySnapshot.fromJson(
+              Map<String, dynamic>.from(json['attendance_policy'] as Map),
+            )
+          : null,
+      reportDeduction: json['report_deduction'] is Map
+          ? AttendanceReportDeduction.fromJson(
+              Map<String, dynamic>.from(json['report_deduction'] as Map),
+            )
+          : null,
     );
   }
 
@@ -291,6 +369,8 @@ class TimeRecord {
     List<String>? locatorSlipSegments,
     String? shiftPunchMode,
     bool? combineLateAndUndertime,
+    AttendancePolicySnapshot? attendancePolicy,
+    AttendanceReportDeduction? reportDeduction,
   }) {
     return TimeRecord(
       id: id ?? this.id,
@@ -332,6 +412,8 @@ class TimeRecord {
       shiftPunchMode: shiftPunchMode ?? this.shiftPunchMode,
       combineLateAndUndertime:
           combineLateAndUndertime ?? this.combineLateAndUndertime,
+      attendancePolicy: attendancePolicy ?? this.attendancePolicy,
+      reportDeduction: reportDeduction ?? this.reportDeduction,
     );
   }
 }
