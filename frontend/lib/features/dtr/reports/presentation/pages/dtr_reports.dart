@@ -9,6 +9,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
@@ -57,7 +58,10 @@ class _DtrReportsState extends State<DtrReports> {
   String? _selectedEmployeeId;
   String? _selectedDepartmentId;
   final Set<String> _selectedEmployeeIds = <String>{};
+  final DtrReportRequestGuard _requestGuard = DtrReportRequestGuard();
+  List<EmployeeOption> _reportEmployeeOptions = const [];
   List<TimeRecord> _employeeRecords = [];
+  bool _reportLoading = false;
   bool _showMinutesFormat = true;
   bool _bulkExportBusy = false;
   bool _multiSelectMode = false;
@@ -144,6 +148,7 @@ class _DtrReportsState extends State<DtrReports> {
 
   @override
   void dispose() {
+    _requestGuard.invalidate();
     _searchController.dispose();
     super.dispose();
   }
@@ -162,11 +167,64 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  List<EmployeeOption> _reportEmployees(DtrProvider dtr) {
+  List<EmployeeOption> _reportEmployees() {
     final employee = _selfServiceEmployee();
     return widget.selfService
         ? [if (employee != null) employee]
-        : dtr.employees;
+        : _reportEmployeeOptions;
+  }
+
+  Future<List<EmployeeOption>> _fetchReportEmployees({
+    required String? departmentId,
+    required DateTime startDate,
+    required DateTime endDate,
+  }) async {
+    String dateKey(DateTime value) =>
+        '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';
+
+    final params = <String, dynamic>{
+      'status': 'Active',
+      'role': 'User',
+      'start_date': dateKey(startDate),
+      'end_date': dateKey(endDate),
+    };
+    if (departmentId != null && departmentId.trim().isNotEmpty) {
+      params['department_id'] = departmentId.trim();
+    }
+    final response = await ApiClient.instance.get<List<dynamic>>(
+      '/api/employees',
+      queryParameters: params,
+    );
+    return (response.data ?? [])
+        .map((row) {
+          final employee = Map<String, dynamic>.from(row as Map);
+          final employeeNumber = employee['employee_number'];
+          return EmployeeOption(
+            id: employee['id']?.toString() ?? '',
+            fullName: employee['full_name']?.toString() ?? 'Unknown',
+            employeeNumber: employeeNumber is int
+                ? employeeNumber
+                : int.tryParse(employeeNumber?.toString() ?? ''),
+            departmentName: employee['current_department_name']?.toString(),
+            shiftPunchMode:
+                employee['current_shift_punch_mode']?.toString() ?? 'auto',
+          );
+        })
+        .where((employee) => employee.id.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  bool _acceptsRequest(DtrReportRequestToken token) {
+    return mounted &&
+        _requestGuard.accepts(
+          token,
+          employeeId: _selectedEmployeeId,
+          departmentId: _selectedDepartmentId,
+          year: _selectedYear,
+          month: _selectedMonth,
+        );
   }
 
   Future<void> _load() async {
@@ -177,65 +235,136 @@ class _DtrReportsState extends State<DtrReports> {
       setState(() {
         _selectedDepartmentId = null;
         _selectedEmployeeId = employee?.id;
+        _reportEmployeeOptions = [if (employee != null) employee];
         _selectedEmployeeIds.clear();
         _multiSelectMode = false;
-        if (employee == null) _employeeRecords = [];
+        if (employee == null) {
+          _employeeRecords = [];
+          _assignmentTimeline = const [];
+          _reportLoading = false;
+        }
       });
       if (employee != null) await _loadEmployeeRecords();
       return;
     }
     final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
     final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
-    await Future.wait([
-      dtr.loadEmployees(
-        departmentId: _selectedDepartmentId,
+    final token = _requestGuard.begin(
+      employeeId: _selectedEmployeeId,
+      departmentId: _selectedDepartmentId,
+      year: _selectedYear,
+      month: _selectedMonth,
+    );
+    setState(() {
+      _reportLoading = true;
+      _reportEmployeeOptions = const [];
+      _employeeRecords = [];
+      _assignmentTimeline = const [];
+    });
+    try {
+      final employeesFuture = _fetchReportEmployees(
+        departmentId: token.departmentId,
         startDate: monthStart,
         endDate: monthEnd,
-      ),
-      dtr.loadDepartments(),
-    ]);
-    if (!mounted) return;
-    if (dtr.employees.isNotEmpty) {
-      final availableIds = dtr.employees.map((e) => e.id).toSet();
-      final employeesByDisplayedOrder = List<EmployeeOption>.from(dtr.employees)
-        ..sort(_compareEmployeesByNumber);
+      );
+      final departmentsFuture = dtr.loadDepartments();
+      final employees = await employeesFuture;
+      await departmentsFuture;
+      if (!_acceptsRequest(token)) return;
+      if (employees.isNotEmpty) {
+        final availableIds = employees.map((e) => e.id).toSet();
+        final employeesByDisplayedOrder = List<EmployeeOption>.from(employees)
+          ..sort(_compareEmployeesByNumber);
+        setState(() {
+          _reportEmployeeOptions = List<EmployeeOption>.from(employees);
+          _selectedEmployeeIds.removeWhere((id) => !availableIds.contains(id));
+          if (_selectedEmployeeId == null ||
+              !availableIds.contains(_selectedEmployeeId)) {
+            _selectedEmployeeId = employeesByDisplayedOrder.first.id;
+          }
+        });
+        await _loadEmployeeRecords();
+      } else {
+        setState(() {
+          _reportEmployeeOptions = const [];
+          _selectedEmployeeId = null;
+          _selectedEmployeeIds.clear();
+          _multiSelectMode = false;
+          _employeeRecords = [];
+          _assignmentTimeline = const [];
+          _reportLoading = false;
+        });
+      }
+    } catch (_) {
+      if (!_acceptsRequest(token)) return;
       setState(() {
-        _selectedEmployeeIds.removeWhere((id) => !availableIds.contains(id));
-        if (_selectedEmployeeId == null ||
-            !availableIds.contains(_selectedEmployeeId)) {
-          _selectedEmployeeId = employeesByDisplayedOrder.first.id;
-        }
-      });
-      _loadEmployeeRecords();
-    } else {
-      setState(() {
+        _reportEmployeeOptions = const [];
         _selectedEmployeeId = null;
-        _selectedEmployeeIds.clear();
-        _multiSelectMode = false;
         _employeeRecords = [];
+        _assignmentTimeline = const [];
+        _reportLoading = false;
       });
     }
   }
 
   Future<void> _loadEmployeeRecords() async {
-    if (_selectedEmployeeId == null) return;
+    final employeeId = _selectedEmployeeId;
+    if (employeeId == null) {
+      _requestGuard.invalidate();
+      if (mounted) {
+        setState(() {
+          _employeeRecords = [];
+          _assignmentTimeline = const [];
+          _reportLoading = false;
+        });
+      }
+      return;
+    }
     _clampRangeToSelectedMonth();
-    final start = DateTime(_selectedYear, _selectedMonth, 1);
-    final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
-    final dtr = context.read<DtrProvider>();
-    await Future.wait([
-      dtr.loadTimeRecordsForAdmin(
+    final year = _selectedYear;
+    final month = _selectedMonth;
+    final start = DateTime(year, month, 1);
+    final end = DateTime(year, month + 1, 0);
+    final token = _requestGuard.begin(
+      employeeId: employeeId,
+      departmentId: _selectedDepartmentId,
+      year: year,
+      month: month,
+    );
+    setState(() {
+      _reportLoading = true;
+      _employeeRecords = [];
+      _assignmentTimeline = const [];
+    });
+    try {
+      final recordsFuture = TimeRecordRepo.instance.listForAdmin(
         startDate: start,
         endDate: end,
-        userId: _selectedEmployeeId,
+        userId: employeeId,
         limit: 100,
         recompute: true,
-        forceRefresh: true,
-      ),
-      _loadAssignmentTimeline(),
-    ]);
-    if (!mounted) return;
-    setState(() => _employeeRecords = List.from(dtr.timeRecords));
+      );
+      final assignmentFuture = _fetchAssignmentTimelineForEmployee(
+        employeeId,
+        year: year,
+        month: month,
+      );
+      final records = await recordsFuture;
+      final timeline = await assignmentFuture;
+      if (!_acceptsRequest(token)) return;
+      setState(() {
+        _employeeRecords = List<TimeRecord>.from(records);
+        _assignmentTimeline = timeline;
+        _reportLoading = false;
+      });
+    } catch (_) {
+      if (!_acceptsRequest(token)) return;
+      setState(() {
+        _employeeRecords = [];
+        _assignmentTimeline = const [];
+        _reportLoading = false;
+      });
+    }
   }
 
   int _daysInSelectedMonth() {
@@ -294,10 +423,14 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   Future<List<_DtrAssignmentInfo>> _fetchAssignmentTimelineForEmployee(
-    String employeeId,
-  ) async {
-    final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
-    final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
+    String employeeId, {
+    int? year,
+    int? month,
+  }) async {
+    final effectiveYear = year ?? _selectedYear;
+    final effectiveMonth = month ?? _selectedMonth;
+    final monthStart = DateTime(effectiveYear, effectiveMonth, 1);
+    final monthEnd = DateTime(effectiveYear, effectiveMonth + 1, 0);
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/assignments',
@@ -372,15 +505,6 @@ class _DtrReportsState extends State<DtrReports> {
     } catch (_) {
       return const [];
     }
-  }
-
-  /// Load every assignment overlapping the selected report month.
-  Future<void> _loadAssignmentTimeline() async {
-    final employeeId = _selectedEmployeeId;
-    if (employeeId == null) return;
-    final timeline = await _fetchAssignmentTimelineForEmployee(employeeId);
-    if (!mounted) return;
-    setState(() => _assignmentTimeline = timeline);
   }
 
   _DtrAssignmentInfo? _assignmentForDate(
@@ -985,9 +1109,9 @@ class _DtrReportsState extends State<DtrReports> {
     });
   }
 
-  List<EmployeeOption> _selectedEmployeesForBulk(DtrProvider dtr) {
+  List<EmployeeOption> _selectedEmployeesForBulk() {
     if (widget.selfService) return const <EmployeeOption>[];
-    final byId = {for (final e in dtr.employees) e.id: e};
+    final byId = {for (final e in _reportEmployeeOptions) e.id: e};
     return _selectedEmployeeIds
         .map((id) => byId[id])
         .whereType<EmployeeOption>()
@@ -1099,11 +1223,10 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  Future<Uint8List> _buildSelectedDtrPdf(
-    DtrProvider dtr, {
+  Future<Uint8List> _buildSelectedDtrPdf({
     PdfPageFormat pageFormat = PdfPageFormat.legal,
   }) async {
-    final selected = _selectedEmployeesForBulk(dtr);
+    final selected = _selectedEmployeesForBulk();
     if (selected.length < 2) {
       throw StateError('Select at least two employees first.');
     }
@@ -1122,9 +1245,9 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  Future<void> _printSelectedDtrs(BuildContext context, DtrProvider dtr) async {
+  Future<void> _printSelectedDtrs(BuildContext context) async {
     if (_bulkExportBusy) return;
-    final selectedCount = _selectedEmployeesForBulk(dtr).length;
+    final selectedCount = _selectedEmployeesForBulk().length;
     if (selectedCount < 2) {
       _showReportSnack('Select at least two employees to bulk print.');
       return;
@@ -1135,7 +1258,7 @@ class _DtrReportsState extends State<DtrReports> {
     Uint8List? bytes;
     try {
       _showReportSnack('Preparing $selectedCount selected DTRs...');
-      bytes = await _buildSelectedDtrPdf(dtr, pageFormat: pageFormat);
+      bytes = await _buildSelectedDtrPdf(pageFormat: pageFormat);
       if (!context.mounted) return;
       await Printing.layoutPdf(
         onLayout: (_) async => bytes!,
@@ -1160,9 +1283,9 @@ class _DtrReportsState extends State<DtrReports> {
     }
   }
 
-  Future<void> _exportSelectedDtrs(DtrProvider dtr) async {
+  Future<void> _exportSelectedDtrs() async {
     if (_bulkExportBusy) return;
-    final selectedCount = _selectedEmployeesForBulk(dtr).length;
+    final selectedCount = _selectedEmployeesForBulk().length;
     if (selectedCount < 2) {
       _showReportSnack('Select at least two employees to export.');
       return;
@@ -1170,7 +1293,7 @@ class _DtrReportsState extends State<DtrReports> {
     setState(() => _bulkExportBusy = true);
     try {
       _showReportSnack('Exporting $selectedCount selected DTRs...');
-      final bytes = await _buildSelectedDtrPdf(dtr);
+      final bytes = await _buildSelectedDtrPdf();
       await shareOrDownloadPdf(
         bytes,
         'DTR_Selected_${_months[_selectedMonth - 1]}_$_selectedYear.pdf',
@@ -1185,9 +1308,9 @@ class _DtrReportsState extends State<DtrReports> {
 
   @override
   Widget build(BuildContext context) {
-    final dtr = context.watch<DtrProvider>();
+    context.watch<DtrProvider>();
     final search = _searchController.text.toLowerCase();
-    final reportEmployees = _reportEmployees(dtr);
+    final reportEmployees = _reportEmployees();
     final employees =
         reportEmployees
             .where(
@@ -1370,7 +1493,6 @@ class _DtrReportsState extends State<DtrReports> {
                               totalUndertimeMinutes:
                                   displayTotalUndertimeMinutes,
                               hasRecords: hasRecords,
-                              dtr: dtr,
                             )
                           : isCompact
                           ? _buildCompactLayout(
@@ -1389,7 +1511,6 @@ class _DtrReportsState extends State<DtrReports> {
                               totalUndertimeMinutes:
                                   displayTotalUndertimeMinutes,
                               hasRecords: hasRecords,
-                              dtr: dtr,
                             )
                           : SizedBox(
                               height: 520,
@@ -1418,7 +1539,6 @@ class _DtrReportsState extends State<DtrReports> {
                                                 recordsByDate:
                                                     rangedRecordsByDate,
                                                 sortedDates: sortedDates,
-                                                dtr: dtr,
                                                 availableWidth:
                                                     tableAvailableWidth,
                                               ),
@@ -1463,8 +1583,7 @@ class _DtrReportsState extends State<DtrReports> {
   Widget _buildFilters(BuildContext context, bool isMobile) {
     final dark = AppTheme.dashIsDark(context);
     final dayItems = List.generate(_daysInSelectedMonth(), (i) => i + 1);
-    final dtr = context.read<DtrProvider>();
-    final selectedCount = _selectedEmployeesForBulk(dtr).length;
+    final selectedCount = _selectedEmployeesForBulk().length;
     return Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -1816,7 +1935,7 @@ class _DtrReportsState extends State<DtrReports> {
           FilledButton.icon(
             onPressed: _bulkExportBusy
                 ? null
-                : () => _printSelectedDtrs(context, dtr),
+                : () => _printSelectedDtrs(context),
             icon: _bulkExportBusy
                 ? const SizedBox(
                     width: 16,
@@ -1835,7 +1954,7 @@ class _DtrReportsState extends State<DtrReports> {
             ),
           ),
           OutlinedButton.icon(
-            onPressed: _bulkExportBusy ? null : () => _exportSelectedDtrs(dtr),
+            onPressed: _bulkExportBusy ? null : _exportSelectedDtrs,
             icon: const Icon(Icons.file_download_rounded, size: 18),
             label: const Text('Export selected'),
             style: OutlinedButton.styleFrom(
@@ -1866,7 +1985,6 @@ class _DtrReportsState extends State<DtrReports> {
     required int totalLateMinutes,
     required int totalUndertimeMinutes,
     required bool hasRecords,
-    required DtrProvider dtr,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1923,7 +2041,6 @@ class _DtrReportsState extends State<DtrReports> {
             end: end,
             recordsByDate: recordsByDate,
             sortedDates: sortedDates,
-            dtr: dtr,
             compactColumns: true,
           ),
         ),
@@ -2152,7 +2269,6 @@ class _DtrReportsState extends State<DtrReports> {
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
     required List<DateTime> sortedDates,
-    required DtrProvider dtr,
     bool compactColumns = false,
     double? availableWidth,
   }) {
@@ -2244,7 +2360,7 @@ class _DtrReportsState extends State<DtrReports> {
                 ),
               ),
               Expanded(
-                child: dtr.loading
+                child: _reportLoading
                     ? const Center(child: CircularProgressIndicator())
                     : sortedDates.isEmpty
                     ? Center(
@@ -2788,7 +2904,6 @@ class _DtrReportsState extends State<DtrReports> {
     required int totalLateMinutes,
     required int totalUndertimeMinutes,
     required bool hasRecords,
-    required DtrProvider dtr,
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -2865,7 +2980,6 @@ class _DtrReportsState extends State<DtrReports> {
                 end: end,
                 recordsByDate: recordsByDate,
                 sortedDates: sortedDates,
-                dtr: dtr,
                 availableWidth: availableWidth,
               ),
             ),
