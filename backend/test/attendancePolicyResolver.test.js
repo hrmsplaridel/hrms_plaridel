@@ -4,10 +4,74 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  calculateAttendanceReportDeduction,
   calculateAttendancePolicyPenalties,
   loadAttendancePolicyContext,
   resolveAttendancePolicy,
 } = require('../src/services/attendancePolicyResolver');
+
+test('report deduction uses the effective policy denominator and switches', () => {
+  const oneHourPolicy = {
+    workHoursPerDay: 1,
+    useEquivalentDayConversion: true,
+    deductLate: true,
+    deductUndertime: true,
+    absentEqualsFullDayDeduction: true,
+    deductionMultiplier: 1,
+  };
+  const defaultPolicy = {
+    ...oneHourPolicy,
+    workHoursPerDay: 8,
+    deductLate: false,
+  };
+
+  assert.deepEqual(
+    calculateAttendanceReportDeduction({
+      policy: oneHourPolicy,
+      lateMinutes: 30,
+      undertimeMinutes: 0,
+      status: 'late',
+      expectedWorkMinutes: 60,
+    }),
+    {
+      late_minutes: 30,
+      undertime_minutes: 0,
+      absence_minutes: 0,
+      total_minutes: 30,
+      equivalent_day: 0.5,
+    }
+  );
+  assert.equal(
+    calculateAttendanceReportDeduction({
+      policy: defaultPolicy,
+      lateMinutes: 30,
+      undertimeMinutes: 0,
+      status: 'late',
+      expectedWorkMinutes: 480,
+    }).equivalent_day,
+    0
+  );
+});
+
+test('report deduction does not apply an already-processed multiplier twice', () => {
+  const deduction = calculateAttendanceReportDeduction({
+    policy: {
+      workHoursPerDay: 8,
+      useEquivalentDayConversion: true,
+      deductLate: true,
+      deductUndertime: true,
+      absentEqualsFullDayDeduction: true,
+      deductionMultiplier: 2,
+    },
+    lateMinutes: 120,
+    undertimeMinutes: 0,
+    status: 'late',
+    expectedWorkMinutes: 480,
+  });
+
+  assert.equal(deduction.total_minutes, 120);
+  assert.equal(deduction.equivalent_day, 0.25);
+});
 
 test('attendance penalties preserve late and undertime as separate source buckets', () => {
   const policy = {

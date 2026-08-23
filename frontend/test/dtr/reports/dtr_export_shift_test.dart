@@ -127,4 +127,53 @@ void main() {
       ),
     );
   });
+
+  test('export sums authoritative per-date policy deductions', () {
+    final first = DateTime(2026, 8, 3);
+    final second = DateTime(2026, 8, 4);
+    final records = {
+      first: TimeRecord(
+        userId: 'employee-1',
+        recordDate: first,
+        lateMinutes: 60,
+        undertimeMinutes: 0,
+        status: 'late',
+        reportDeduction: const AttendanceReportDeduction(
+          lateMinutes: 60,
+          undertimeMinutes: 0,
+          absenceMinutes: 0,
+          totalMinutes: 60,
+          equivalentDay: 0.125,
+        ),
+      ),
+      second: TimeRecord(
+        userId: 'employee-1',
+        recordDate: second,
+        lateMinutes: 60,
+        undertimeMinutes: 0,
+        status: 'late',
+        reportDeduction: const AttendanceReportDeduction(
+          lateMinutes: 60,
+          undertimeMinutes: 0,
+          absenceMinutes: 0,
+          totalMinutes: 60,
+          equivalentDay: 1,
+        ),
+      ),
+    };
+
+    final html = DtrExport.generateWordHtmlSync(
+      employeeName: 'Policy Change Employee',
+      year: 2026,
+      month: 8,
+      start: first,
+      end: second,
+      recordsByDate: records,
+      scheduledWorkHoursPerDay: 8,
+      workingDays: const [DateTime.monday, DateTime.tuesday],
+      assignmentEffectiveFrom: first,
+    );
+
+    expect(html, contains('Equivalent Day (deduction): 1.125'));
+  });
 }
