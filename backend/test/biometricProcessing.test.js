@@ -131,6 +131,139 @@ test('after-shift guard does not reject overnight shifts', () => {
   }
 });
 
+test('completed system summary changes when a corrected final punch arrives', () => {
+  const { service, restore } = loadBiometricProcessing();
+  try {
+    const existing = {
+      time_in: '2026-08-14T00:00:00.000Z',
+      break_out: '2026-08-14T04:00:00.000Z',
+      break_in: '2026-08-14T05:00:00.000Z',
+      time_out: '2026-08-14T09:00:00.000Z',
+      status: 'present',
+      total_hours: '8.00',
+      late_minutes: 0,
+      undertime_minutes: 0,
+    };
+
+    assert.equal(
+      service.hasBiometricSummaryChanged(existing, {
+        timeIn: existing.time_in,
+        breakOut: existing.break_out,
+        breakIn: existing.break_in,
+        timeOut: existing.time_out,
+        status: 'present',
+        totalHours: 8,
+        lateMinutes: 0,
+        undertimeMinutes: 0,
+      }),
+      false,
+    );
+
+    assert.equal(
+      service.hasBiometricSummaryChanged(existing, {
+        timeIn: existing.time_in,
+        breakOut: existing.break_out,
+        breakIn: existing.break_in,
+        timeOut: '2026-08-14T09:30:00.000Z',
+        status: 'present',
+        totalHours: 8.5,
+        lateMinutes: 0,
+        undertimeMinutes: 0,
+      }),
+      true,
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('processing rebuilds a completed system row from a later biometric punch', async () => {
+  const employeeId = '85082d28-c26c-441d-a215-67851a5b8721';
+  let updateParams = null;
+  const punches = [
+    '2026-08-14T00:00:00.000Z',
+    '2026-08-14T04:00:00.000Z',
+    '2026-08-14T05:00:00.000Z',
+    '2026-08-14T09:30:00.000Z',
+  ];
+  const { service, restore } = loadBiometricProcessing(async (sql, params) => {
+    const text = String(sql);
+    if (/ALTER TABLE shifts/i.test(text)) return { rows: [], rowCount: 0 };
+    if (/FROM biometric_attendance_logs/i.test(text)) {
+      return {
+        rows: [{
+          user_id: employeeId,
+          attendance_date: '2026-08-14',
+          punches,
+        }],
+      };
+    }
+    if (/FROM dtr_daily_summary_deletions/i.test(text)) {
+      return { rows: [] };
+    }
+    if (/FROM assignments a/i.test(text)) {
+      return {
+        rows: [{
+          shift_start: '08:00:00',
+          shift_end: '17:00:00',
+          shift_break_end: '13:00:00',
+          punch_mode: 'full_day',
+          grace_period_minutes: 0,
+        }],
+      };
+    }
+    if (/FROM holidays/i.test(text) || /FROM leave_requests/i.test(text)) {
+      return { rows: [] };
+    }
+    if (/FROM policy_assignments/i.test(text)) {
+      return {
+        rows: [{
+          id: 'policy-1',
+          work_hours_per_day: '8',
+          deduct_late: true,
+          deduct_undertime: true,
+          deduction_multiplier: '1',
+        }],
+      };
+    }
+    if (/SELECT id, source, time_in, break_out/i.test(text)) {
+      return {
+        rows: [{
+          id: 'summary-1',
+          source: 'system',
+          time_in: punches[0],
+          break_out: punches[1],
+          break_in: punches[2],
+          time_out: '2026-08-14T09:00:00.000Z',
+          status: 'present',
+          total_hours: '8.00',
+          late_minutes: 0,
+          undertime_minutes: 0,
+        }],
+      };
+    }
+    if (/UPDATE dtr_daily_summary SET/i.test(text)) {
+      updateParams = params;
+      return { rows: [{ id: 'summary-1' }], rowCount: 1 };
+    }
+    throw new Error(`Unexpected biometric rebuild query: ${text}`);
+  });
+
+  try {
+    const result = await service.processBiometricLogsToSummary(
+      [employeeId],
+      '2026-08-14',
+      '2026-08-14',
+    );
+
+    assert.deepEqual(result, { inserted: 0, updated: 1 });
+    assert.ok(updateParams);
+    assert.equal(new Date(updateParams[5]).toISOString(), punches[3]);
+  } finally {
+    restore();
+  }
+});
+
 test('deleted processed DTR date is not recreated from preserved biometric punches', async () => {
   const employeeId = '5b9fe943-4700-4ff6-a84e-66ef793ecfc4';
   const queries = [];
