@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { resolveAssignmentEmployeeAccess } = require('../services/assignmentAccess');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -37,12 +38,12 @@ function effectiveToBeforeFrom(ef, et) {
 // GET /api/assignments?employee_id=uuid - list assignments for employee (Schema v2: effective_from/to, override times)
 router.get('/', protect, async (req, res) => {
   try {
-    const employeeId = req.query.employee_id;
-    const status = req.query.status || 'Active';
-
-    if (!employeeId) {
-      return res.status(400).json({ error: 'employee_id is required' });
+    const access = resolveAssignmentEmployeeAccess(req.user, req.query.employee_id);
+    if (!access.allowed) {
+      return res.status(access.statusCode).json({ error: access.error });
     }
+    const employeeId = access.employeeId;
+    const status = req.query.status || 'Active';
 
     let statusWhere = '';
     if (status === 'Active') statusWhere = 'AND (a.is_active IS NULL OR a.is_active = true)';
