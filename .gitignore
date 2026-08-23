@@ -55,6 +55,7 @@ firebase-debug.log
 # Private infrastructure and deployment documentation
 docs/private/
 docs/weekly_progress/
+/bugs/
 
 # IntelliJ related
 *.iml

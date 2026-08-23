@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
+import 'package:hrms_plaridel/providers/auth_provider.dart';
 
 enum _DtrExportFormat { pdf, word, excel }
 
@@ -33,7 +34,11 @@ const List<String> _months = [
 /// Tardiness Report: employee list, DTR table, and summary card.
 /// Matches reference design: search, month/year filters, two-column layout.
 class DtrReports extends StatefulWidget {
-  const DtrReports({super.key});
+  const DtrReports({super.key, this.selfService = false});
+
+  /// Restricts the report to the authenticated employee and hides management
+  /// filters and bulk actions.
+  final bool selfService;
 
   @override
   State<DtrReports> createState() => _DtrReportsState();
@@ -81,8 +86,42 @@ class _DtrReportsState extends State<DtrReports> {
     super.dispose();
   }
 
+  EmployeeOption? _selfServiceEmployee() {
+    if (!widget.selfService) return null;
+    final auth = context.read<AuthProvider>();
+    final user = auth.user;
+    if (user == null || user.id.trim().isEmpty) return null;
+    final fullName = (user.fullName ?? '').trim();
+    return EmployeeOption(
+      id: user.id,
+      fullName: fullName.isNotEmpty ? fullName : auth.displayName,
+      employeeNumber: user.employeeNumber,
+      departmentName: user.departmentName,
+    );
+  }
+
+  List<EmployeeOption> _reportEmployees(DtrProvider dtr) {
+    final employee = _selfServiceEmployee();
+    return widget.selfService
+        ? [if (employee != null) employee]
+        : dtr.employees;
+  }
+
   Future<void> _load() async {
     final dtr = context.read<DtrProvider>();
+    if (widget.selfService) {
+      final employee = _selfServiceEmployee();
+      if (!mounted) return;
+      setState(() {
+        _selectedDepartmentId = null;
+        _selectedEmployeeId = employee?.id;
+        _selectedEmployeeIds.clear();
+        _multiSelectMode = false;
+        if (employee == null) _employeeRecords = [];
+      });
+      if (employee != null) await _loadEmployeeRecords();
+      return;
+    }
     final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
     final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
     await Future.wait([
@@ -837,6 +876,7 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   void _toggleMultiSelectMode() {
+    if (widget.selfService) return;
     setState(() {
       _multiSelectMode = !_multiSelectMode;
       if (!_multiSelectMode) _selectedEmployeeIds.clear();
@@ -863,6 +903,7 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   List<EmployeeOption> _selectedEmployeesForBulk(DtrProvider dtr) {
+    if (widget.selfService) return const <EmployeeOption>[];
     final byId = {for (final e in dtr.employees) e.id: e};
     return _selectedEmployeeIds
         .map((id) => byId[id])
@@ -1036,8 +1077,9 @@ class _DtrReportsState extends State<DtrReports> {
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
     final search = _searchController.text.toLowerCase();
+    final reportEmployees = _reportEmployees(dtr);
     final employees =
-        dtr.employees
+        reportEmployees
             .where(
               (e) =>
                   search.isEmpty ||
@@ -1052,7 +1094,7 @@ class _DtrReportsState extends State<DtrReports> {
     final selectedEmp = selectedList.isNotEmpty ? selectedList.first : null;
     String selectedName = selectedEmp?.fullName ?? 'Select an employee';
     if (selectedName == 'Select an employee' && _selectedEmployeeId != null) {
-      final byId = dtr.employees
+      final byId = reportEmployees
           .where((e) => e.id == _selectedEmployeeId)
           .toList();
       if (byId.isNotEmpty) selectedName = byId.first.fullName;
@@ -1177,7 +1219,9 @@ class _DtrReportsState extends State<DtrReports> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Tardiness Report',
+                        widget.selfService
+                            ? 'My DTR Report'
+                            : 'Tardiness Report',
                         style: TextStyle(
                           color: AppTheme.dashTextPrimaryOf(context),
                           fontSize: isMobile ? 20 : 24,
@@ -1186,7 +1230,9 @@ class _DtrReportsState extends State<DtrReports> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Review employee late arrivals and undertime by date range, department, and employee.',
+                        widget.selfService
+                            ? 'Review and export your attendance by date range.'
+                            : 'Review employee late arrivals and undertime by date range, department, and employee.',
                         style: TextStyle(
                           color: AppTheme.dashTextSecondaryOf(context),
                           fontSize: 14,
@@ -1240,8 +1286,10 @@ class _DtrReportsState extends State<DtrReports> {
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  _buildEmployeeList(context, employees),
-                                  const SizedBox(width: 16),
+                                  if (!widget.selfService) ...[
+                                    _buildEmployeeList(context, employees),
+                                    const SizedBox(width: 16),
+                                  ],
                                   Expanded(
                                     child: LayoutBuilder(
                                       builder: (context, layoutConstraints) {
@@ -1312,56 +1360,58 @@ class _DtrReportsState extends State<DtrReports> {
       runSpacing: 12,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        SizedBox(
-          width: isMobile ? double.infinity : 280,
-          child: TextField(
-            controller: _searchController,
-            onChanged: (_) => setState(() {}),
-            style: AppTheme.dashFieldTextStyle(context),
-            decoration: AppTheme.dashInputDecoration(
-              context,
-              hintText: 'Search name or ID...',
-              prefixIcon: const Icon(Icons.search_rounded, size: 20),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
+        if (!widget.selfService)
+          SizedBox(
+            width: isMobile ? double.infinity : 280,
+            child: TextField(
+              controller: _searchController,
+              onChanged: (_) => setState(() {}),
+              style: AppTheme.dashFieldTextStyle(context),
+              decoration: AppTheme.dashInputDecoration(
+                context,
+                hintText: 'Search name or ID...',
+                prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                radius: 8,
               ),
-              radius: 8,
             ),
           ),
-        ),
         if (!isMobile) ...[
-          DropdownButton<String?>(
-            value: _selectedDepartmentId,
-            dropdownColor: AppTheme.dashPanelOf(context),
-            style: AppTheme.dashFieldTextStyle(context),
-            hint: Text(
-              'All departments',
-              style: AppTheme.dashFieldHintStyle(context),
-            ),
-            items: [
-              DropdownMenuItem<String?>(
-                value: null,
-                child: Text(
-                  'All departments',
-                  style: AppTheme.dashFieldTextStyle(context),
-                ),
+          if (!widget.selfService)
+            DropdownButton<String?>(
+              value: _selectedDepartmentId,
+              dropdownColor: AppTheme.dashPanelOf(context),
+              style: AppTheme.dashFieldTextStyle(context),
+              hint: Text(
+                'All departments',
+                style: AppTheme.dashFieldHintStyle(context),
               ),
-              ...context.read<DtrProvider>().departments.map(
-                (d) => DropdownMenuItem<String?>(
-                  value: d.id,
+              items: [
+                DropdownMenuItem<String?>(
+                  value: null,
                   child: Text(
-                    d.name,
+                    'All departments',
                     style: AppTheme.dashFieldTextStyle(context),
                   ),
                 ),
-              ),
-            ],
-            onChanged: (v) {
-              setState(() => _selectedDepartmentId = v);
-              _load();
-            },
-          ),
+                ...context.read<DtrProvider>().departments.map(
+                  (d) => DropdownMenuItem<String?>(
+                    value: d.id,
+                    child: Text(
+                      d.name,
+                      style: AppTheme.dashFieldTextStyle(context),
+                    ),
+                  ),
+                ),
+              ],
+              onChanged: (v) {
+                setState(() => _selectedDepartmentId = v);
+                _load();
+              },
+            ),
           DropdownButton<int>(
             value: _selectedMonth,
             dropdownColor: AppTheme.dashPanelOf(context),
@@ -1444,50 +1494,52 @@ class _DtrReportsState extends State<DtrReports> {
             },
           ),
         ] else ...[
-          SizedBox(
-            width: 140,
-            child: DropdownButtonFormField<String?>(
-              initialValue: _selectedDepartmentId,
-              dropdownColor: AppTheme.dashPanelOf(context),
-              style: AppTheme.dashFieldTextStyle(context),
-              decoration: AppTheme.dashInputDecoration(
-                context,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                radius: 8,
-              ),
-              hint: Text(
-                'All departments',
-                style: AppTheme.dashFieldHintStyle(context),
-              ),
-              items: [
-                DropdownMenuItem<String?>(
-                  value: null,
-                  child: Text(
-                    'All departments',
-                    style: AppTheme.dashFieldTextStyle(context),
+          if (!widget.selfService) ...[
+            SizedBox(
+              width: 140,
+              child: DropdownButtonFormField<String?>(
+                initialValue: _selectedDepartmentId,
+                dropdownColor: AppTheme.dashPanelOf(context),
+                style: AppTheme.dashFieldTextStyle(context),
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
                   ),
+                  radius: 8,
                 ),
-                ...context.read<DtrProvider>().departments.map(
-                  (d) => DropdownMenuItem<String?>(
-                    value: d.id,
+                hint: Text(
+                  'All departments',
+                  style: AppTheme.dashFieldHintStyle(context),
+                ),
+                items: [
+                  DropdownMenuItem<String?>(
+                    value: null,
                     child: Text(
-                      d.name,
-                      overflow: TextOverflow.ellipsis,
+                      'All departments',
                       style: AppTheme.dashFieldTextStyle(context),
                     ),
                   ),
-                ),
-              ],
-              onChanged: (v) {
-                setState(() => _selectedDepartmentId = v);
-                _load();
-              },
+                  ...context.read<DtrProvider>().departments.map(
+                    (d) => DropdownMenuItem<String?>(
+                      value: d.id,
+                      child: Text(
+                        d.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTheme.dashFieldTextStyle(context),
+                      ),
+                    ),
+                  ),
+                ],
+                onChanged: (v) {
+                  setState(() => _selectedDepartmentId = v);
+                  _load();
+                },
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
+            const SizedBox(width: 8),
+          ],
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1709,49 +1761,51 @@ class _DtrReportsState extends State<DtrReports> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: AppTheme.dashPanelOf(context),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppTheme.dashHairlineOf(context)),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _selectedEmployeeId,
-              isExpanded: true,
-              dropdownColor: AppTheme.dashPanelOf(context),
-              style: AppTheme.dashFieldTextStyle(context),
-              hint: Text(
-                'Select employee',
-                style: AppTheme.dashFieldHintStyle(context),
-              ),
-              items: employees
-                  .map(
-                    (e) => DropdownMenuItem<String>(
-                      value: e.id.toString(),
-                      child: Text(
-                        e.fullName,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTheme.dashFieldTextStyle(context),
+        if (!widget.selfService) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppTheme.dashPanelOf(context),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _selectedEmployeeId,
+                isExpanded: true,
+                dropdownColor: AppTheme.dashPanelOf(context),
+                style: AppTheme.dashFieldTextStyle(context),
+                hint: Text(
+                  'Select employee',
+                  style: AppTheme.dashFieldHintStyle(context),
+                ),
+                items: employees
+                    .map(
+                      (e) => DropdownMenuItem<String>(
+                        value: e.id.toString(),
+                        child: Text(
+                          e.fullName,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.dashFieldTextStyle(context),
+                        ),
                       ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) {
-                  setState(() => _selectedEmployeeId = v);
-                  _loadEmployeeRecords();
-                }
-              },
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) {
+                    setState(() => _selectedEmployeeId = v);
+                    _loadEmployeeRecords();
+                  }
+                },
+              ),
             ),
           ),
-        ),
-        if (_multiSelectMode) ...[
+          if (_multiSelectMode) ...[
+            const SizedBox(height: 16),
+            _buildEmployeeSelectionToolbar(context, employees, compact: true),
+          ],
           const SizedBox(height: 16),
-          _buildEmployeeSelectionToolbar(context, employees, compact: true),
         ],
-        const SizedBox(height: 16),
         SizedBox(
           height: 320,
           child: _buildDtrTable(
@@ -2643,30 +2697,53 @@ class _DtrReportsState extends State<DtrReports> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: _buildEmployeeListCompact(context, employees),
-                  ),
-                  const SizedBox(width: 16),
-                  SizedBox(
-                    width: summaryPanelWidth,
-                    child: _buildSummaryCard(
-                      selectedName: selectedName,
-                      workingDays: workingDays,
-                      lateCount: lateCount,
-                      absentCount: absentCount,
-                      tardyCount: tardyCount,
-                      tardinessPct: tardinessPct,
-                      totalLateMinutes: totalLateMinutes,
-                      totalUndertimeMinutes: totalUndertimeMinutes,
-                      hasRecords: hasRecords,
-                      fullWidth: true,
-                      isResponsive: true,
-                      dense: true,
-                      recordsByDate: recordsByDate,
-                      start: start,
-                      end: end,
+                  if (!widget.selfService) ...[
+                    Expanded(
+                      child: _buildEmployeeListCompact(context, employees),
                     ),
-                  ),
+                    const SizedBox(width: 16),
+                  ],
+                  if (widget.selfService)
+                    Expanded(
+                      child: _buildSummaryCard(
+                        selectedName: selectedName,
+                        workingDays: workingDays,
+                        lateCount: lateCount,
+                        absentCount: absentCount,
+                        tardyCount: tardyCount,
+                        tardinessPct: tardinessPct,
+                        totalLateMinutes: totalLateMinutes,
+                        totalUndertimeMinutes: totalUndertimeMinutes,
+                        hasRecords: hasRecords,
+                        fullWidth: true,
+                        isResponsive: true,
+                        dense: true,
+                        recordsByDate: recordsByDate,
+                        start: start,
+                        end: end,
+                      ),
+                    )
+                  else
+                    SizedBox(
+                      width: summaryPanelWidth,
+                      child: _buildSummaryCard(
+                        selectedName: selectedName,
+                        workingDays: workingDays,
+                        lateCount: lateCount,
+                        absentCount: absentCount,
+                        tardyCount: tardyCount,
+                        tardinessPct: tardinessPct,
+                        totalLateMinutes: totalLateMinutes,
+                        totalUndertimeMinutes: totalUndertimeMinutes,
+                        hasRecords: hasRecords,
+                        fullWidth: true,
+                        isResponsive: true,
+                        dense: true,
+                        recordsByDate: recordsByDate,
+                        start: start,
+                        end: end,
+                      ),
+                    ),
                 ],
               ),
             ),
