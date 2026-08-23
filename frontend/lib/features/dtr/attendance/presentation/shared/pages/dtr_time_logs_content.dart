@@ -1779,6 +1779,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     var shiftLoading = false;
     EmployeeShiftForDate? selectedShift;
     String? shiftLookupError;
+    var submitting = false;
+    String? submissionError;
 
     void retainExpectedPunches(EmployeeShiftForDate shift) {
       if (!shift.expectedPunches.contains('time_in')) timeIn = null;
@@ -1930,6 +1932,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                 }
               }
               final canSubmit =
+                  !submitting &&
                   !employeesLoading &&
                   !shiftLoading &&
                   selectedShift != null &&
@@ -2251,6 +2254,16 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               ),
                               const SizedBox(height: 12),
                             ],
+                            if (submissionError != null) ...[
+                              Text(
+                                submissionError!,
+                                style: TextStyle(
+                                  color: Colors.red.shade700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                             if (!isPmOnly) ...[
                               Text(
                                 isSingleSession ? 'Work Session' : 'Morning',
@@ -2372,16 +2385,114 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
+                            onPressed: submitting
+                                ? null
+                                : () => Navigator.pop(ctx, false),
                             child: const Text('Cancel'),
                           ),
                           const SizedBox(width: 8),
                           FilledButton(
                             onPressed: !canSubmit
                                 ? null
-                                : () {
-                                    userId = employeeDropdownValue;
-                                    Navigator.pop(ctx, true);
+                                : () async {
+                                    final uid = employeeDropdownValue;
+                                    final shift = selectedShift;
+                                    if (shift == null) return;
+
+                                    setState(() {
+                                      submitting = true;
+                                      submissionError = null;
+                                    });
+
+                                    final selectedPunchMode = shift.punchMode;
+                                    final addIsAmOnly =
+                                        selectedPunchMode == 'am_only';
+                                    final addIsPmOnly =
+                                        selectedPunchMode == 'pm_only';
+                                    final addIsSingleSession =
+                                        selectedPunchMode == 'single_session';
+                                    final date = DateTime(
+                                      recordDate.year,
+                                      recordDate.month,
+                                      recordDate.day,
+                                    );
+                                    DateTime? tin;
+                                    DateTime? bo;
+                                    DateTime? bi;
+                                    DateTime? tout;
+                                    if (!addIsPmOnly && timeIn != null) {
+                                      tin = _manualPunchTimestamp(
+                                        attendanceDate: date,
+                                        time: timeIn!,
+                                        shift: shift,
+                                      );
+                                    }
+                                    if (!addIsPmOnly &&
+                                        !addIsSingleSession &&
+                                        breakOut != null) {
+                                      bo = _manualPunchTimestamp(
+                                        attendanceDate: date,
+                                        time: breakOut!,
+                                        shift: shift,
+                                        mayFallOnNextDay: true,
+                                      );
+                                    }
+                                    if (!addIsAmOnly &&
+                                        !addIsSingleSession &&
+                                        breakIn != null) {
+                                      bi = _manualPunchTimestamp(
+                                        attendanceDate: date,
+                                        time: breakIn!,
+                                        shift: shift,
+                                        mayFallOnNextDay: true,
+                                      );
+                                    }
+                                    if (!addIsAmOnly && timeOut != null) {
+                                      tout = _manualPunchTimestamp(
+                                        attendanceDate: date,
+                                        time: timeOut!,
+                                        shift: shift,
+                                        mayFallOnNextDay: true,
+                                      );
+                                    }
+                                    double? hours;
+                                    if (tin != null &&
+                                        bo != null &&
+                                        bi != null &&
+                                        tout != null) {
+                                      hours =
+                                          (bo.difference(tin).inMinutes +
+                                              tout.difference(bi).inMinutes) /
+                                          60.0;
+                                    } else if (tin != null && tout != null) {
+                                      hours =
+                                          tout.difference(tin).inMinutes / 60.0;
+                                    }
+                                    final record = TimeRecord(
+                                      userId: uid,
+                                      recordDate: date,
+                                      timeIn: tin,
+                                      breakOut: bo,
+                                      breakIn: bi,
+                                      timeOut: tout,
+                                      totalHours: hours,
+                                      status: 'present',
+                                      shiftPunchMode: selectedPunchMode,
+                                    );
+                                    final saved = await dtr.addManualEntry(
+                                      record,
+                                    );
+                                    if (!ctx.mounted) return;
+                                    if (saved) {
+                                      Navigator.pop(ctx, true);
+                                      return;
+                                    }
+                                    setState(() {
+                                      submitting = false;
+                                      submissionError =
+                                          dtr.error ??
+                                          'Unable to add this time entry.';
+                                    });
                                   },
                             style: FilledButton.styleFrom(
                               backgroundColor: AppTheme.primaryNavy,
@@ -2394,7 +2505,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                 borderRadius: BorderRadius.circular(10),
                               ),
                             ),
-                            child: const Text('Add entry'),
+                            child: submitting
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppTheme.white,
+                                    ),
+                                  )
+                                : const Text('Add entry'),
                           ),
                         ],
                       ),
@@ -2423,73 +2542,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       }
     }
 
-    final uid = userId;
-    if (updated == true && uid != null && uid.isNotEmpty) {
-      final selectedPunchMode = selectedShift?.punchMode;
-      final addIsAmOnly = selectedPunchMode == 'am_only';
-      final addIsPmOnly = selectedPunchMode == 'pm_only';
-      final addIsSingleSession = selectedPunchMode == 'single_session';
-      final date = DateTime(recordDate.year, recordDate.month, recordDate.day);
-      DateTime? tin;
-      DateTime? bo;
-      DateTime? bi;
-      DateTime? tout;
-      if (!addIsPmOnly && timeIn != null) {
-        tin = _manualPunchTimestamp(
-          attendanceDate: date,
-          time: timeIn!,
-          shift: selectedShift,
-        );
-      }
-      if (!addIsPmOnly && !addIsSingleSession && breakOut != null) {
-        bo = _manualPunchTimestamp(
-          attendanceDate: date,
-          time: breakOut!,
-          shift: selectedShift,
-          mayFallOnNextDay: true,
-        );
-      }
-      if (!addIsAmOnly && !addIsSingleSession && breakIn != null) {
-        bi = _manualPunchTimestamp(
-          attendanceDate: date,
-          time: breakIn!,
-          shift: selectedShift,
-          mayFallOnNextDay: true,
-        );
-      }
-      if (!addIsAmOnly && timeOut != null) {
-        tout = _manualPunchTimestamp(
-          attendanceDate: date,
-          time: timeOut!,
-          shift: selectedShift,
-          mayFallOnNextDay: true,
-        );
-      }
-      double? hours;
-      if (tin != null && bo != null && bi != null && tout != null) {
-        hours =
-            (bo.difference(tin).inMinutes + tout.difference(bi).inMinutes) /
-            60.0;
-      } else if (tin != null && tout != null) {
-        hours = tout.difference(tin).inMinutes / 60.0;
-      }
-      final record = TimeRecord(
-        userId: uid,
-        recordDate: date,
-        timeIn: tin,
-        breakOut: bo,
-        breakIn: bi,
-        timeOut: tout,
-        totalHours: hours,
-        status: 'present',
-        shiftPunchMode: selectedPunchMode ?? 'auto',
-      );
-      await dtr.addManualEntry(record);
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Time entry added.')));
-      }
+    if (updated == true && mounted) {
+      _showTimeLogSnack('Time entry added.', isSuccess: true);
     }
   }
 
@@ -2546,6 +2600,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     final isPmOnly = punchMode == 'pm_only';
     final isSingleSession = punchMode == 'single_session';
     final isOvernight = _isOvernightShift(editShift);
+    var submitting = false;
+    String? submissionError;
 
     if (!mounted) return;
     final updated = await openResponsiveRightSidePanel<bool>(
@@ -2630,6 +2686,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               }
             }
 
+            final hasAnyTime =
+                timeIn != null ||
+                breakOut != null ||
+                breakIn != null ||
+                timeOut != null;
+            validationMessage ??= hasAnyTime
+                ? null
+                : 'Enter at least one punch. To remove the record, use Delete from its actions menu.';
+
             var workedMinutes = 0;
             if (validationMessage == null) {
               if (isAmOnly) {
@@ -2685,7 +2750,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               }
             }
 
-            final canSave = validationMessage == null;
+            final canSave = !submitting && validationMessage == null;
             return Material(
               color: AppTheme.dashPanelOf(ctx),
               child: Column(
@@ -2742,7 +2807,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ),
                         IconButton(
                           tooltip: 'Close',
-                          onPressed: () => Navigator.pop(ctx, false),
+                          onPressed: submitting
+                              ? null
+                              : () => Navigator.pop(ctx, false),
                           icon: const Icon(Icons.close_rounded),
                         ),
                       ],
@@ -2831,6 +2898,39 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: Colors.orange.shade900,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          if (submissionError != null) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Colors.red.withValues(alpha: 0.25),
+                                ),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.error_outline_rounded,
+                                    size: 20,
+                                    color: Colors.red.shade700,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      submissionError!,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.red.shade700,
                                       ),
                                     ),
                                   ),
@@ -2978,23 +3078,153 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                     child: Row(
                       children: [
                         TextButton(
-                          onPressed: () => setState(() {
-                            timeIn = originalTimeIn;
-                            breakOut = originalBreakOut;
-                            breakIn = originalBreakIn;
-                            timeOut = originalTimeOut;
-                          }),
+                          onPressed: submitting
+                              ? null
+                              : () => setState(() {
+                                  timeIn = originalTimeIn;
+                                  breakOut = originalBreakOut;
+                                  breakIn = originalBreakIn;
+                                  timeOut = originalTimeOut;
+                                  submissionError = null;
+                                }),
                           child: const Text('Reset'),
                         ),
                         const Spacer(),
                         TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
+                          onPressed: submitting
+                              ? null
+                              : () => Navigator.pop(ctx, false),
                           child: const Text('Cancel'),
                         ),
                         const SizedBox(width: 8),
                         FilledButton.icon(
                           onPressed: canSave
-                              ? () => Navigator.pop(ctx, true)
+                              ? () async {
+                                  setState(() {
+                                    submitting = true;
+                                    submissionError = null;
+                                  });
+
+                                  final date = DateTime(
+                                    recordDate.year,
+                                    recordDate.month,
+                                    recordDate.day,
+                                  );
+                                  DateTime? tin;
+                                  DateTime? bo;
+                                  DateTime? bi;
+                                  DateTime? tout;
+                                  if (!isPmOnly && timeIn != null) {
+                                    tin = _manualPunchTimestamp(
+                                      attendanceDate: date,
+                                      time: timeIn!,
+                                      shift: editShift,
+                                    );
+                                  }
+                                  if (!isPmOnly &&
+                                      !isSingleSession &&
+                                      breakOut != null) {
+                                    bo = _manualPunchTimestamp(
+                                      attendanceDate: date,
+                                      time: breakOut!,
+                                      shift: editShift,
+                                      mayFallOnNextDay: true,
+                                    );
+                                  }
+                                  if (!isAmOnly &&
+                                      !isSingleSession &&
+                                      breakIn != null) {
+                                    bi = _manualPunchTimestamp(
+                                      attendanceDate: date,
+                                      time: breakIn!,
+                                      shift: editShift,
+                                      mayFallOnNextDay: true,
+                                    );
+                                  }
+                                  if (!isAmOnly && timeOut != null) {
+                                    tout = _manualPunchTimestamp(
+                                      attendanceDate: date,
+                                      time: timeOut!,
+                                      shift: editShift,
+                                      mayFallOnNextDay: true,
+                                    );
+                                  }
+                                  double? hours;
+                                  if (tin != null &&
+                                      bo != null &&
+                                      bi != null &&
+                                      tout != null) {
+                                    hours =
+                                        (bo.difference(tin).inMinutes +
+                                            tout.difference(bi).inMinutes) /
+                                        60.0;
+                                  } else if (tin != null && tout != null) {
+                                    hours =
+                                        tout.difference(tin).inMinutes / 60.0;
+                                  } else if (tin != null && bo != null) {
+                                    hours = bo.difference(tin).inMinutes / 60.0;
+                                  } else if (bi != null && tout != null) {
+                                    hours =
+                                        tout.difference(bi).inMinutes / 60.0;
+                                  }
+                                  final updatedRecord = TimeRecord(
+                                    id: r.id,
+                                    userId: r.userId,
+                                    recordDate: date,
+                                    timeIn: tin,
+                                    breakOut: bo,
+                                    breakIn: bi,
+                                    timeOut: tout,
+                                    totalHours: hours,
+                                    lateMinutes: r.lateMinutes,
+                                    undertimeMinutes: r.undertimeMinutes,
+                                    status: r.status,
+                                    pmStatus: r.pmStatus,
+                                    remarks: r.remarks,
+                                    holidayId: r.holidayId,
+                                    leaveRequestId: r.leaveRequestId,
+                                    leaveCoverageId: r.leaveCoverageId,
+                                    isLeaveCovered: r.isLeaveCovered,
+                                    createdAt: r.createdAt,
+                                    updatedAt: r.updatedAt,
+                                    employeeName: r.employeeName,
+                                    holidayName: r.holidayName,
+                                    coverage: r.coverage,
+                                    attendanceRemark: r.attendanceRemark,
+                                    leaveTypeName: r.leaveTypeName,
+                                    source: r.source,
+                                    locatorSlipId: r.locatorSlipId,
+                                    locatorSlipRequestType:
+                                        r.locatorSlipRequestType,
+                                    locatorSlipRequestTypeLabel:
+                                        r.locatorSlipRequestTypeLabel,
+                                    locatorSlipDtrSlotLabel:
+                                        r.locatorSlipDtrSlotLabel,
+                                    locatorSlipDtrPrintLabel:
+                                        r.locatorSlipDtrPrintLabel,
+                                    locatorSlipCoverageMode:
+                                        r.locatorSlipCoverageMode,
+                                    locatorSlipSegments: r.locatorSlipSegments,
+                                  );
+                                  final saved = r.id != null
+                                      ? await dtr.updateEntry(
+                                          updatedRecord,
+                                          editUnderlyingAttendance:
+                                              r.isLeaveCovered,
+                                        )
+                                      : await dtr.addManualEntry(updatedRecord);
+                                  if (!ctx.mounted) return;
+                                  if (saved) {
+                                    Navigator.pop(ctx, true);
+                                    return;
+                                  }
+                                  setState(() {
+                                    submitting = false;
+                                    submissionError =
+                                        dtr.error ??
+                                        'Unable to update this time entry.';
+                                  });
+                                }
                               : null,
                           style: FilledButton.styleFrom(
                             backgroundColor: AppTheme.primaryNavy,
@@ -3007,8 +3237,18 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          icon: const Icon(Icons.save_rounded, size: 18),
-                          label: const Text('Save changes'),
+                          icon: submitting
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppTheme.white,
+                                  ),
+                                )
+                              : const Icon(Icons.save_rounded, size: 18),
+                          label: Text(
+                            submitting ? 'Saving...' : 'Save changes',
+                          ),
                         ),
                       ],
                     ),
@@ -3021,110 +3261,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       },
     );
 
-    if (updated == true) {
-      final date = DateTime(recordDate.year, recordDate.month, recordDate.day);
-      DateTime? tin;
-      DateTime? bo;
-      DateTime? bi;
-      DateTime? tout;
-      // Only build fields relevant to the shift's punch mode.
-      if (!isPmOnly && timeIn != null) {
-        tin = _manualPunchTimestamp(
-          attendanceDate: date,
-          time: timeIn!,
-          shift: editShift,
-        );
-      }
-      if (!isPmOnly && !isSingleSession && breakOut != null) {
-        bo = _manualPunchTimestamp(
-          attendanceDate: date,
-          time: breakOut!,
-          shift: editShift,
-          mayFallOnNextDay: true,
-        );
-      }
-      if (!isAmOnly && !isSingleSession && breakIn != null) {
-        bi = _manualPunchTimestamp(
-          attendanceDate: date,
-          time: breakIn!,
-          shift: editShift,
-          mayFallOnNextDay: true,
-        );
-      }
-      if (!isAmOnly && timeOut != null) {
-        tout = _manualPunchTimestamp(
-          attendanceDate: date,
-          time: timeOut!,
-          shift: editShift,
-          mayFallOnNextDay: true,
-        );
-      }
-      double? hours;
-      if (tin != null && bo != null && bi != null && tout != null) {
-        hours =
-            (bo.difference(tin).inMinutes + tout.difference(bi).inMinutes) /
-            60.0;
-      } else if (tin != null && tout != null) {
-        hours = tout.difference(tin).inMinutes / 60.0;
-      } else if (tin != null && bo != null) {
-        hours = bo.difference(tin).inMinutes / 60.0;
-      } else if (bi != null && tout != null) {
-        hours = tout.difference(bi).inMinutes / 60.0;
-      }
-      final hasAnyTime =
-          tin != null || bo != null || bi != null || tout != null;
-      if (r.id != null && !hasAnyTime) {
-        _showTimeLogSnack(
-          'Enter at least one punch. To remove the record, use Delete from its actions menu.',
-        );
-        return;
-      }
-      final updatedRec = TimeRecord(
-        id: r.id,
-        userId: r.userId,
-        recordDate: date,
-        timeIn: tin,
-        breakOut: bo,
-        breakIn: bi,
-        timeOut: tout,
-        totalHours: hours,
-        lateMinutes: r.lateMinutes,
-        undertimeMinutes: r.undertimeMinutes,
-        status: r.status,
-        pmStatus: r.pmStatus,
-        remarks: r.remarks,
-        holidayId: r.holidayId,
-        leaveRequestId: r.leaveRequestId,
-        leaveCoverageId: r.leaveCoverageId,
-        isLeaveCovered: r.isLeaveCovered,
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
-        employeeName: r.employeeName,
-        holidayName: r.holidayName,
-        coverage: r.coverage,
-        attendanceRemark: r.attendanceRemark,
-        leaveTypeName: r.leaveTypeName,
-        source: r.source,
-        locatorSlipId: r.locatorSlipId,
-        locatorSlipRequestType: r.locatorSlipRequestType,
-        locatorSlipRequestTypeLabel: r.locatorSlipRequestTypeLabel,
-        locatorSlipDtrSlotLabel: r.locatorSlipDtrSlotLabel,
-        locatorSlipDtrPrintLabel: r.locatorSlipDtrPrintLabel,
-        locatorSlipCoverageMode: r.locatorSlipCoverageMode,
-        locatorSlipSegments: r.locatorSlipSegments,
-      );
-      final saved = r.id != null
-          ? await dtr.updateEntry(
-              updatedRec,
-              editUnderlyingAttendance: r.isLeaveCovered,
-            )
-          : await dtr.addManualEntry(updatedRec);
-      if (!mounted) return;
-      if (!saved) {
-        _showTimeLogSnack(dtr.error ?? 'Unable to update this time entry.');
-      } else {
-        _showTimeLogSnack('Time entry updated.', isSuccess: true);
-      }
+    if (updated == true && mounted) {
+      _showTimeLogSnack('Time entry updated.', isSuccess: true);
     }
   }
 
