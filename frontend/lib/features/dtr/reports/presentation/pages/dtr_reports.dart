@@ -62,17 +62,79 @@ class _DtrReportsState extends State<DtrReports> {
   bool _bulkExportBusy = false;
   bool _multiSelectMode = false;
 
-  /// Shift working days (ISO 1=Mon..7=Sun) for selected employee in report month. Null = use Mon–Fri.
-  List<int>? _shiftWorkingDays;
+  /// Historical assignments overlapping the report month, ordered oldest first.
+  List<_DtrAssignmentInfo> _assignmentTimeline = const [];
 
-  /// Official hours string from assigned shift, e.g. "8:00AM-12:00PM 01:00PM-5:00PM".
-  String? _shiftOfficialHours;
-  double? _shiftWorkHoursPerDay;
-  String? _shiftPunchMode;
+  List<_DtrAssignmentInfo> get _assignmentsInSelectedRange =>
+      _assignmentsOverlappingRange(
+        _assignmentTimeline,
+        _rangeStartDate(),
+        _rangeEndDate(),
+      );
 
-  /// Active assignment window (calendar dates) for the selected employee; drives export + summary.
-  DateTime? _assignmentEffectiveFrom;
-  DateTime? _assignmentEffectiveTo;
+  _DtrAssignmentInfo? get _latestAssignment =>
+      _assignmentsInSelectedRange.isEmpty
+      ? null
+      : _assignmentsInSelectedRange.last;
+
+  List<int>? get _shiftWorkingDays => _assignmentsInSelectedRange.length == 1
+      ? _latestAssignment?.workingDays
+      : null;
+  String? get _shiftOfficialHours => _assignmentHeaderValue(
+    _assignmentsInSelectedRange.map((assignment) => assignment.officialHours),
+    multipleLabel: 'Multiple schedules (see notes)',
+  );
+  String? get _reportDepartment => _assignmentHeaderValue(
+    _assignmentsInSelectedRange.map((assignment) => assignment.department),
+    multipleLabel: 'Multiple departments (see notes)',
+  );
+  String? get _reportPosition => _assignmentHeaderValue(
+    _assignmentsInSelectedRange.map((assignment) => assignment.position),
+    multipleLabel: 'Multiple positions (see notes)',
+  );
+  double? get _shiftWorkHoursPerDay => _assignmentsInSelectedRange.length == 1
+      ? _latestAssignment?.workHoursPerDay
+      : null;
+  String? get _shiftPunchMode => _assignmentsInSelectedRange.length == 1
+      ? _latestAssignment?.punchMode
+      : null;
+  DateTime? get _assignmentEffectiveFrom => _assignmentsInSelectedRange.isEmpty
+      ? null
+      : _assignmentsInSelectedRange.first.effectiveFrom;
+  DateTime? get _assignmentEffectiveTo => _assignmentsInSelectedRange.isEmpty
+      ? null
+      : _assignmentsInSelectedRange.last.effectiveTo;
+
+  List<DtrAssignmentSegment> get _exportAssignmentSegments =>
+      _assignmentsInSelectedRange
+          .map(
+            (assignment) => DtrAssignmentSegment(
+              effectiveFrom: assignment.effectiveFrom,
+              effectiveTo: assignment.effectiveTo,
+              department: assignment.department,
+              position: assignment.position,
+              officialHours: assignment.officialHours,
+              scheduledWorkHoursPerDay: assignment.workHoursPerDay,
+              punchMode: assignment.punchMode,
+              workingDays: assignment.workingDays,
+            ),
+          )
+          .toList(growable: false);
+
+  List<_DtrAssignmentInfo> _assignmentsOverlappingRange(
+    List<_DtrAssignmentInfo> timeline,
+    DateTime start,
+    DateTime end,
+  ) {
+    return timeline
+        .where((assignment) {
+          final from = assignment.effectiveFrom;
+          final to = assignment.effectiveTo;
+          return (from == null || !from.isAfter(end)) &&
+              (to == null || !to.isBefore(start));
+        })
+        .toList(growable: false);
+  }
 
   @override
   void initState() {
@@ -170,7 +232,7 @@ class _DtrReportsState extends State<DtrReports> {
         recompute: true,
         forceRefresh: true,
       ),
-      _loadShiftWorkingDays(),
+      _loadAssignmentTimeline(),
     ]);
     if (!mounted) return;
     setState(() => _employeeRecords = List.from(dtr.timeRecords));
@@ -231,7 +293,7 @@ class _DtrReportsState extends State<DtrReports> {
     return '${toAmPm(start)}-${toAmPm(end)}';
   }
 
-  Future<_DtrAssignmentInfo> _fetchAssignmentInfoForEmployee(
+  Future<List<_DtrAssignmentInfo>> _fetchAssignmentTimelineForEmployee(
     String employeeId,
   ) async {
     final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
@@ -242,6 +304,7 @@ class _DtrReportsState extends State<DtrReports> {
         queryParameters: {'employee_id': employeeId, 'status': 'All'},
       );
       final list = res.data ?? [];
+      final assignments = <_DtrAssignmentInfo>[];
       for (final a in list) {
         final m = a as Map<String, dynamic>;
         final from = m['effective_from'] != null
@@ -280,82 +343,82 @@ class _DtrReportsState extends State<DtrReports> {
           endMinutes: endMinutes,
           breakEndMinutes: breakEndMinutes,
         );
-        return _DtrAssignmentInfo(
-          workingDays: (days != null && days.isNotEmpty) ? days : null,
-          officialHours: officialHours,
-          workHoursPerDay: _reportShiftWorkHours(
-            startMinutes: startMinutes,
-            endMinutes: endMinutes,
-            breakEndMinutes: breakEndMinutes,
+        assignments.add(
+          _DtrAssignmentInfo(
+            workingDays: (days != null && days.isNotEmpty) ? days : null,
+            officialHours: officialHours,
+            workHoursPerDay: _reportShiftWorkHours(
+              startMinutes: startMinutes,
+              endMinutes: endMinutes,
+              breakEndMinutes: breakEndMinutes,
+              punchMode: punchMode,
+            ),
             punchMode: punchMode,
+            effectiveFrom: DateTime(from.year, from.month, from.day),
+            effectiveTo: to != null
+                ? DateTime(to.year, to.month, to.day)
+                : null,
+            department: m['department_name']?.toString().trim(),
+            position: m['position_name']?.toString().trim(),
           ),
-          punchMode: punchMode,
-          effectiveFrom: DateTime(from.year, from.month, from.day),
-          effectiveTo: to != null ? DateTime(to.year, to.month, to.day) : null,
-          department: m['department_name']?.toString().trim(),
-          position: m['position_name']?.toString().trim(),
         );
       }
+      assignments.sort((a, b) {
+        final aFrom = a.effectiveFrom ?? DateTime(1900);
+        final bFrom = b.effectiveFrom ?? DateTime(1900);
+        return aFrom.compareTo(bFrom);
+      });
+      return assignments;
     } catch (_) {
-      return const _DtrAssignmentInfo();
+      return const [];
     }
-    return const _DtrAssignmentInfo();
   }
 
-  /// Fetch assignment for selected employee and set _shiftWorkingDays for report month.
-  Future<void> _loadShiftWorkingDays() async {
+  /// Load every assignment overlapping the selected report month.
+  Future<void> _loadAssignmentTimeline() async {
     final employeeId = _selectedEmployeeId;
     if (employeeId == null) return;
-    final info = await _fetchAssignmentInfoForEmployee(employeeId);
+    final timeline = await _fetchAssignmentTimelineForEmployee(employeeId);
     if (!mounted) return;
-    setState(() {
-      _shiftWorkingDays = info.workingDays;
-      _shiftOfficialHours = info.officialHours;
-      _shiftWorkHoursPerDay = info.workHoursPerDay;
-      _shiftPunchMode = info.punchMode;
-      _assignmentEffectiveFrom = info.effectiveFrom;
-      _assignmentEffectiveTo = info.effectiveTo;
-    });
+    setState(() => _assignmentTimeline = timeline);
   }
 
-  _DtrAssignmentInfo _currentAssignmentInfo() {
-    return _DtrAssignmentInfo(
-      workingDays: _shiftWorkingDays,
-      officialHours: _shiftOfficialHours,
-      workHoursPerDay: _shiftWorkHoursPerDay,
-      punchMode: _shiftPunchMode,
-      effectiveFrom: _assignmentEffectiveFrom,
-      effectiveTo: _assignmentEffectiveTo,
-    );
+  _DtrAssignmentInfo? _assignmentForDate(
+    DateTime date, [
+    List<_DtrAssignmentInfo>? timeline,
+  ]) {
+    final assignments = timeline ?? _assignmentTimeline;
+    for (final assignment in assignments.reversed) {
+      final from = assignment.effectiveFrom;
+      final to = assignment.effectiveTo;
+      if (from != null && date.isBefore(from)) continue;
+      if (to != null && date.isAfter(to)) continue;
+      return assignment;
+    }
+    return null;
   }
 
-  /// Shift weekday and within assignment effective dates when loaded.
-  bool _isScheduledWorkDayFor(DateTime dt, _DtrAssignmentInfo assignment) {
+  bool _isScheduledWorkDayFor(DateTime dt, List<_DtrAssignmentInfo> timeline) {
+    final assignment = _assignmentForDate(dt, timeline);
+    if (assignment == null) return false;
     final shiftWd =
         assignment.workingDays != null && assignment.workingDays!.isNotEmpty
         ? assignment.workingDays!.toSet()
         : {1, 2, 3, 4, 5};
-    if (!shiftWd.contains(dt.weekday)) return false;
-    if (assignment.effectiveFrom != null) {
-      if (dt.isBefore(assignment.effectiveFrom!)) return false;
-    }
-    if (assignment.effectiveTo != null) {
-      if (dt.isAfter(assignment.effectiveTo!)) return false;
-    }
-    return true;
+    return shiftWd.contains(dt.weekday);
   }
 
   bool _isScheduledWorkDay(DateTime dt) {
-    return _isScheduledWorkDayFor(dt, _currentAssignmentInfo());
+    return _isScheduledWorkDayFor(dt, _assignmentTimeline);
   }
 
   /// Holiday rows from the API are omitted when they are not meaningful for tardiness:
   /// no assignment overlapping the month, or the date is not a scheduled work day for this employee.
   Map<DateTime, TimeRecord> _filterRecordsForTardinessReportFor(
     Map<DateTime, TimeRecord> raw,
-    _DtrAssignmentInfo assignment,
+    List<_DtrAssignmentInfo> timeline,
   ) {
-    final hasAssignment = assignment.effectiveFrom != null;
+    final hasAssignment = timeline.isNotEmpty;
     final out = <DateTime, TimeRecord>{};
     for (final e in raw.entries) {
       final dt = e.key;
@@ -363,7 +426,7 @@ class _DtrReportsState extends State<DtrReports> {
       final isHoliday = r.status == 'holiday' || (r.holidayId != null);
       if (isHoliday) {
         if (!hasAssignment) continue;
-        if (!_isScheduledWorkDayFor(dt, assignment)) continue;
+        if (!_isScheduledWorkDayFor(dt, timeline)) continue;
       }
       out[dt] = r;
     }
@@ -373,7 +436,7 @@ class _DtrReportsState extends State<DtrReports> {
   Map<DateTime, TimeRecord> _filterRecordsForTardinessReport(
     Map<DateTime, TimeRecord> raw,
   ) {
-    return _filterRecordsForTardinessReportFor(raw, _currentAssignmentInfo());
+    return _filterRecordsForTardinessReportFor(raw, _assignmentTimeline);
   }
 
   /// Last date in the selected month included in tardiness/absent/late stats. Days after this
@@ -559,12 +622,15 @@ class _DtrReportsState extends State<DtrReports> {
             start: start,
             end: end,
             recordsByDate: recordsByDate,
+            department: _reportDepartment,
+            position: _reportPosition,
             officialHours: _shiftOfficialHours,
             scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
             punchMode: _shiftPunchMode,
             workingDays: _shiftWorkingDays,
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
+            assignmentSegments: _exportAssignmentSegments,
           );
           if (!context.mounted) return;
           await shareOrDownloadPdf(bytes, '$baseName.pdf');
@@ -577,12 +643,15 @@ class _DtrReportsState extends State<DtrReports> {
             start: start,
             end: end,
             recordsByDate: recordsByDate,
+            department: _reportDepartment,
+            position: _reportPosition,
             officialHours: _shiftOfficialHours,
             scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
             punchMode: _shiftPunchMode,
             workingDays: _shiftWorkingDays,
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
+            assignmentSegments: _exportAssignmentSegments,
           );
           if (!context.mounted) return;
           await shareOrDownloadFile(
@@ -599,12 +668,15 @@ class _DtrReportsState extends State<DtrReports> {
             start: start,
             end: end,
             recordsByDate: recordsByDate,
+            department: _reportDepartment,
+            position: _reportPosition,
             officialHours: _shiftOfficialHours,
             scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
             punchMode: _shiftPunchMode,
             workingDays: _shiftWorkingDays,
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
+            assignmentSegments: _exportAssignmentSegments,
           );
           final bytes = Uint8List.fromList(utf8.encode(html));
           if (!context.mounted) return;
@@ -780,14 +852,15 @@ class _DtrReportsState extends State<DtrReports> {
           start: start,
           end: end,
           recordsByDate: recordsByDate,
-          department: department,
-          position: position,
+          department: department ?? _reportDepartment,
+          position: position ?? _reportPosition,
           officialHours: _shiftOfficialHours,
           scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
           punchMode: _shiftPunchMode,
           workingDays: _shiftWorkingDays,
           assignmentEffectiveFrom: _assignmentEffectiveFrom,
           assignmentEffectiveTo: _assignmentEffectiveTo,
+          assignmentSegments: _exportAssignmentSegments,
           pageFormat: pageFormat,
         ),
         name: baseName,
@@ -808,14 +881,15 @@ class _DtrReportsState extends State<DtrReports> {
           end: end,
           recordsByDate: recordsByDate,
           reportTitle: 'Daily Time Record Report',
-          department: department,
-          position: position,
+          department: department ?? _reportDepartment,
+          position: position ?? _reportPosition,
           officialHours: _shiftOfficialHours,
           scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
           punchMode: _shiftPunchMode,
           workingDays: _shiftWorkingDays,
           assignmentEffectiveFrom: _assignmentEffectiveFrom,
           assignmentEffectiveTo: _assignmentEffectiveTo,
+          assignmentSegments: _exportAssignmentSegments,
           pageFormat: pageFormat,
         );
         await shareOrDownloadPdf(bytes, '$baseName.pdf');
@@ -842,6 +916,15 @@ class _DtrReportsState extends State<DtrReports> {
   String? _nonEmpty(String? value) {
     final trimmed = value?.trim();
     return trimmed == null || trimmed.isEmpty ? null : trimmed;
+  }
+
+  String? _assignmentHeaderValue(
+    Iterable<String?> values, {
+    required String multipleLabel,
+  }) {
+    final distinct = values.map(_nonEmpty).whereType<String>().toSet();
+    if (distinct.isEmpty) return null;
+    return distinct.length == 1 ? distinct.first : multipleLabel;
   }
 
   void _showReportSnack(String message, {Color? backgroundColor}) {
@@ -954,7 +1037,16 @@ class _DtrReportsState extends State<DtrReports> {
       limit: 500,
       recompute: true,
     );
-    final assignment = await _fetchAssignmentInfoForEmployee(employee.id);
+    final assignmentTimeline = await _fetchAssignmentTimelineForEmployee(
+      employee.id,
+    );
+    final start = _rangeStartDate();
+    final end = _rangeEndDate();
+    final reportAssignments = _assignmentsOverlappingRange(
+      assignmentTimeline,
+      start,
+      end,
+    );
     final rawRecordsByDate = <DateTime, TimeRecord>{};
     for (final r in records) {
       rawRecordsByDate[DateTime(
@@ -966,10 +1058,8 @@ class _DtrReportsState extends State<DtrReports> {
     }
     final filteredRecords = _filterRecordsForTardinessReportFor(
       rawRecordsByDate,
-      assignment,
+      assignmentTimeline,
     );
-    final start = _rangeStartDate();
-    final end = _rangeEndDate();
     final rangedRecords = Map<DateTime, TimeRecord>.fromEntries(
       filteredRecords.entries.where(
         (e) => !e.key.isBefore(start) && !e.key.isAfter(end),
@@ -978,14 +1068,34 @@ class _DtrReportsState extends State<DtrReports> {
     return DtrExportItem(
       employeeName: employee.fullName,
       recordsByDate: rangedRecords,
-      department: _nonEmpty(assignment.department) ?? employee.departmentName,
-      position: _nonEmpty(assignment.position),
-      officialHours: assignment.officialHours,
-      scheduledWorkHoursPerDay: assignment.workHoursPerDay,
-      punchMode: assignment.punchMode,
-      workingDays: assignment.workingDays,
-      assignmentEffectiveFrom: assignment.effectiveFrom,
-      assignmentEffectiveTo: assignment.effectiveTo,
+      department:
+          _assignmentHeaderValue(
+            reportAssignments.map((a) => a.department),
+            multipleLabel: 'Multiple departments (see notes)',
+          ) ??
+          employee.departmentName,
+      position: _assignmentHeaderValue(
+        reportAssignments.map((a) => a.position),
+        multipleLabel: 'Multiple positions (see notes)',
+      ),
+      officialHours: _assignmentHeaderValue(
+        reportAssignments.map((a) => a.officialHours),
+        multipleLabel: 'Multiple schedules (see notes)',
+      ),
+      assignmentSegments: reportAssignments
+          .map(
+            (assignment) => DtrAssignmentSegment(
+              effectiveFrom: assignment.effectiveFrom,
+              effectiveTo: assignment.effectiveTo,
+              department: assignment.department,
+              position: assignment.position,
+              officialHours: assignment.officialHours,
+              scheduledWorkHoursPerDay: assignment.workHoursPerDay,
+              punchMode: assignment.punchMode,
+              workingDays: assignment.workingDays,
+            ),
+          )
+          .toList(growable: false),
     );
   }
 
