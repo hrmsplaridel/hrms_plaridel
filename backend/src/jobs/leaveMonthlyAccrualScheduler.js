@@ -18,6 +18,11 @@ const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
 const {
   runMonthlyAttendanceDeductions,
 } = require('../services/leaveAttendanceDeduction');
+const {
+  DEFAULT_QUEUE_LIMIT,
+  listPendingReconciliationMonths,
+  recordReconciliationFailure,
+} = require('../services/dtrMonthEndReconciliation');
 const { broadcastAppEvent } = require('../websockets/appEvents');
 
 /** Stable key for pg_try_advisory_lock (must not collide with other app locks). */
@@ -187,6 +192,18 @@ async function runScheduledCompletedMonthEnd(
     accrualRunner = runLeaveMonthlyAccrual,
     attendanceRunner = runMonthlyAttendanceDeductions,
     resultBroadcaster = broadcastMonthlyAccrualResult,
+    queueLoader = listPendingReconciliationMonths,
+    queueFailureRecorder = recordReconciliationFailure,
+    queuedMonthLimit = Math.max(
+      1,
+      Math.min(
+        120,
+        parseInt(
+          process.env.LEAVE_DTR_RECONCILIATION_MAX_MONTHS || DEFAULT_QUEUE_LIMIT,
+          10
+        ) || DEFAULT_QUEUE_LIMIT
+      )
+    ),
   } = {}
 ) {
   const startedAt = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
@@ -233,6 +250,63 @@ async function runScheduledCompletedMonthEnd(
         `[leaveMonthlyAccrual][cron][${runKind}] broadcast leave_updated monthly_accrual clients=${sent}`,
       );
     }
+
+    const queuedReconciliations = [];
+    const queuedMonths = await queueLoader(pool, {
+      excludeServiceMonth: `${ym}-01`,
+      limit: queuedMonthLimit,
+    });
+    for (const queued of queuedMonths) {
+      const targetMonth = queued.targetMonth || String(queued.serviceMonth).slice(0, 7);
+      try {
+        const queuedAttendance = await attendanceRunner(pool, {
+          dryRun: false,
+          targetMonth,
+        });
+        const queuedResult = {
+          targetYearMonth: targetMonth,
+          dryRun: false,
+          rowsUpdated: 0,
+          rowsSkipped: 0,
+          missingBalanceRowsCreated: 0,
+          leaveTypes: [],
+          details: [],
+          attendanceDeductions: queuedAttendance,
+          runKind: 'queued_reconciliation',
+        };
+        resultBroadcaster(queuedResult);
+        queuedReconciliations.push({
+          targetYearMonth: targetMonth,
+          employeeCount: queued.employeeCount || 0,
+          status: 'reconciled',
+          rowsUpdated: queuedAttendance.rowsUpdated || 0,
+        });
+      } catch (error) {
+        try {
+          await queueFailureRecorder(pool, {
+            serviceMonth: queued.serviceMonth,
+            cutoff: queued.cutoff,
+            error,
+          });
+        } catch (recordError) {
+          console.error(
+            `[leaveMonthlyAccrual][cron][${runKind}] failed to record queued reconciliation error month=${targetMonth}`,
+            recordError && recordError.stack ? recordError.stack : recordError
+          );
+        }
+        queuedReconciliations.push({
+          targetYearMonth: targetMonth,
+          employeeCount: queued.employeeCount || 0,
+          status: 'failed',
+          error: error?.message || String(error),
+        });
+        console.error(
+          `[leaveMonthlyAccrual][cron][${runKind}] queued reconciliation failed month=${targetMonth}`,
+          error && error.stack ? error.stack : error
+        );
+      }
+    }
+    completedResult.queuedReconciliations = queuedReconciliations;
   });
 
   if (lockResult && !lockResult.ran) {

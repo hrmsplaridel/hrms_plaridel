@@ -26,6 +26,10 @@ const {
   parseTargetMonth,
   round3,
 } = require('./leaveMonthlyAccrual');
+const {
+  ensureDtrMonthEndReconciliationTable,
+  resolveReconciliationMonth,
+} = require('./dtrMonthEndReconciliation');
 
 const VACATION_LEAVE = 'vacationLeave';
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
@@ -767,7 +771,9 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
   const targetYearMonth = toDateStr(targetMonth).slice(0, 7);
   const serviceMonth = toDateStr(targetMonth);
   await ensureLeaveAttendanceDeductionTable(pgPool);
+  await ensureDtrMonthEndReconciliationTable(pgPool);
   initLeaveBalanceLedger(pgPool);
+  const reconciliationCutoff = new Date();
 
   const client = await pgPool.connect();
   let rowsUpdated = 0;
@@ -776,6 +782,7 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
   let totalDeductedDays = 0;
   let totalWithoutPayDays = 0;
   let locatorReconciliationsCleared = 0;
+  let dtrReconciliationsCleared = 0;
   const details = [];
 
   try {
@@ -962,6 +969,10 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
         [serviceMonth]
       );
       locatorReconciliationsCleared = reconciledLocators.rowCount || 0;
+      dtrReconciliationsCleared = await resolveReconciliationMonth(client, {
+        serviceMonth,
+        cutoff: reconciliationCutoff,
+      });
       await client.query('COMMIT');
     }
 
@@ -974,6 +985,7 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
       totalDeductedDays,
       totalWithoutPayDays,
       locatorReconciliationsCleared,
+      dtrReconciliationsCleared,
       details,
     };
   } catch (error) {

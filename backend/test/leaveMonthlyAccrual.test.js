@@ -299,6 +299,7 @@ test('both scheduled runs execute accrual before DTR for the previous month', as
           details: [],
         };
       },
+      queueLoader: async () => [],
       resultBroadcaster: (result) => {
         calls.push(`broadcast:${result.runKind}`);
         return 0;
@@ -315,6 +316,65 @@ test('both scheduled runs execute accrual before DTR for the previous month', as
       'release',
     ]);
   }
+});
+
+test('scheduler reconciles queued older DTR months after the regular month', async () => {
+  const calls = [];
+  const client = {
+    query: async (sql) => {
+      if (sql.includes('pg_try_advisory_lock')) return { rows: [{ got: true }] };
+      if (sql.includes('pg_advisory_unlock')) {
+        return { rows: [{ pg_advisory_unlock: true }] };
+      }
+      throw new Error(`Unexpected scheduler SQL: ${sql}`);
+    },
+    release: () => calls.push('release'),
+  };
+  const pool = { connect: async () => client };
+
+  const result = await runScheduledCompletedMonthEnd(pool, {
+    now: new Date('2026-09-01T00:00:00.000Z'),
+    accrualRunner: async (_pool, options) => ({
+      targetYearMonth: options.targetMonth,
+      rowsUpdated: 0,
+      rowsSkipped: 0,
+      dryRun: false,
+      leaveTypes: [],
+      details: [],
+    }),
+    attendanceRunner: async (_pool, options) => {
+      calls.push(`attendance:${options.targetMonth}`);
+      return {
+        rowsUpdated: options.targetMonth === '2026-07' ? 1 : 0,
+        totalDeductedDays: 0,
+        totalWithoutPayDays: 0,
+        details: [],
+      };
+    },
+    queueLoader: async (_pool, options) => {
+      calls.push(`queue:${options.excludeServiceMonth}`);
+      return [{
+        serviceMonth: '2026-07-01',
+        targetMonth: '2026-07',
+        employeeCount: 1,
+        cutoff: new Date('2026-08-20T00:00:00.000Z'),
+      }];
+    },
+    resultBroadcaster: () => 0,
+  });
+
+  assert.deepEqual(calls, [
+    'attendance:2026-08',
+    'queue:2026-08-01',
+    'attendance:2026-07',
+    'release',
+  ]);
+  assert.deepEqual(result.result.queuedReconciliations, [{
+    targetYearMonth: '2026-07',
+    employeeCount: 1,
+    status: 'reconciled',
+    rowsUpdated: 1,
+  }]);
 });
 
 test('reconciliation previews only the hire-date accrual difference', async () => {

@@ -73,6 +73,7 @@ function createPostingPool() {
     ledgerRows: 0,
     ledgerActions: [],
     locatorReconciliationClears: 0,
+    dtrReconciliationClears: 0,
   };
 
   const client = {
@@ -132,6 +133,10 @@ function createPostingPool() {
       }
       if (text.includes('UPDATE locator_slips')) {
         state.locatorReconciliationClears += 1;
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes('UPDATE dtr_month_end_reconciliation_queue')) {
+        state.dtrReconciliationClears += 1;
         return { rows: [], rowCount: 1 };
       }
       if (text.includes('INSERT INTO leave_balance_ledger')) {
@@ -464,7 +469,9 @@ test('month-end DTR posting is idempotent on rerun', async () => {
   assert.equal(state.used, 0.25);
   assert.equal(state.ledgerRows, 1);
   assert.equal(first.locatorReconciliationsCleared, 1);
+  assert.equal(first.dtrReconciliationsCleared, 1);
   assert.equal(state.locatorReconciliationClears, 2);
+  assert.equal(state.dtrReconciliationClears, 2);
 });
 
 test('corrected month-end DTR creates a correction ledger movement', async () => {
