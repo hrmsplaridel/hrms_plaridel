@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
@@ -84,6 +85,8 @@ class _DtrReportsState extends State<DtrReports> {
   bool _reportLoading = false;
   bool _showMinutesFormat = true;
   bool _bulkExportBusy = false;
+  int _bulkExportPrepared = 0;
+  int _bulkExportTotal = 0;
   bool _multiSelectMode = false;
   DtrReportDataState _employeesState = DtrReportDataState.idle;
   DtrReportDataState _recordsState = DtrReportDataState.idle;
@@ -623,13 +626,24 @@ class _DtrReportsState extends State<DtrReports> {
   }) async {
     final effectiveYear = year ?? _selectedYear;
     final effectiveMonth = month ?? _selectedMonth;
-    final monthStart = DateTime(effectiveYear, effectiveMonth, 1);
-    final monthEnd = DateTime(effectiveYear, effectiveMonth + 1, 0);
     final res = await ApiClient.instance.get<List<dynamic>>(
       '/api/assignments',
       queryParameters: {'employee_id': employeeId, 'status': 'All'},
     );
-    final list = res.data ?? [];
+    return _parseAssignmentTimeline(
+      res.data ?? const [],
+      year: effectiveYear,
+      month: effectiveMonth,
+    );
+  }
+
+  List<_DtrAssignmentInfo> _parseAssignmentTimeline(
+    List<dynamic> list, {
+    required int year,
+    required int month,
+  }) {
+    final monthStart = DateTime(year, month, 1);
+    final monthEnd = DateTime(year, month + 1, 0);
     final assignments = <_DtrAssignmentInfo>[];
     for (final a in list) {
       final m = a as Map<String, dynamic>;
@@ -1432,20 +1446,12 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
-  Future<DtrExportItem> _prepareDtrExportItem(EmployeeOption employee) async {
-    final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
-    final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
-    final recordsPage = await TimeRecordRepo.instance.listPageForAdmin(
-      startDate: monthStart,
-      endDate: monthEnd,
-      userId: employee.id,
-      limit: 500,
-      recompute: true,
-    );
+  DtrExportItem _buildDtrExportItem({
+    required EmployeeOption employee,
+    required TimeRecordPage recordsPage,
+    required List<_DtrAssignmentInfo> assignmentTimeline,
+  }) {
     final records = recordsPage.items;
-    final assignmentTimeline = await _fetchAssignmentTimelineForEmployee(
-      employee.id,
-    );
     final selectedAssignments = _assignmentsOverlappingRange(
       assignmentTimeline,
       _rangeStartDate(),
@@ -1537,9 +1543,52 @@ class _DtrReportsState extends State<DtrReports> {
     if (selected.length < 2) {
       throw StateError('Select at least two employees first.');
     }
+    const batchSize = 100;
     final items = <DtrExportItem>[];
-    for (final employee in selected) {
-      items.add(await _prepareDtrExportItem(employee));
+    final failures = <String>[];
+    if (mounted) {
+      setState(() {
+        _bulkExportPrepared = 0;
+        _bulkExportTotal = selected.length;
+      });
+    }
+    for (var offset = 0; offset < selected.length; offset += batchSize) {
+      final end = (offset + batchSize).clamp(0, selected.length).toInt();
+      final batchEmployees = selected.sublist(offset, end);
+      final batch = await _fetchBulkDtrReportBatch(batchEmployees);
+      for (final employee in batchEmployees) {
+        final employeeFailure = batch.errors[employee.id];
+        final reportData = batch.employees[employee.id];
+        if (employeeFailure != null || reportData == null) {
+          failures.add(
+            '${employee.fullName}: '
+            '${employeeFailure ?? 'No report data was returned'}',
+          );
+          continue;
+        }
+        try {
+          items.add(
+            _buildDtrExportItem(
+              employee: employee,
+              recordsPage: reportData.recordsPage,
+              assignmentTimeline: reportData.assignmentTimeline,
+            ),
+          );
+        } catch (error) {
+          failures.add('${employee.fullName}: $error');
+        }
+      }
+      if (mounted) {
+        setState(() => _bulkExportPrepared = end);
+      }
+    }
+    if (failures.isNotEmpty) {
+      final visible = failures.take(5).join('; ');
+      final remaining = failures.length - 5;
+      throw StateError(
+        'Could not prepare ${failures.length} selected DTR(s): $visible'
+        '${remaining > 0 ? '; and $remaining more' : ''}',
+      );
     }
     return DtrExport.generateBulkPdf(
       items: items,
@@ -1551,6 +1600,67 @@ class _DtrReportsState extends State<DtrReports> {
       signatories: _reportSignatories!,
       pageFormat: pageFormat,
     );
+  }
+
+  Future<_DtrBulkReportBatch> _fetchBulkDtrReportBatch(
+    List<EmployeeOption> employees,
+  ) async {
+    String dateKey(DateTime value) =>
+        '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';
+
+    final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
+    final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
+    final response = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/dtr-daily-summary/bulk-report',
+      data: {
+        'employee_ids': employees.map((employee) => employee.id).toList(),
+        'start_date': dateKey(monthStart),
+        'end_date': dateKey(monthEnd),
+      },
+      options: Options(receiveTimeout: const Duration(minutes: 2)),
+    );
+    final payload = response.data ?? const <String, dynamic>{};
+    final employeeReports = <String, _DtrBulkEmployeeReport>{};
+    final failures = <String, String>{};
+
+    for (final raw in (payload['employees'] as List? ?? const [])) {
+      final row = Map<String, dynamic>.from(raw as Map);
+      final employeeId = row['employee_id']?.toString() ?? '';
+      if (employeeId.isEmpty) continue;
+      final records = (row['records'] as List? ?? const [])
+          .map(
+            (record) =>
+                TimeRecord.fromJson(Map<String, dynamic>.from(record as Map)),
+          )
+          .toList(growable: false);
+      final reportableThrough = DateTime.tryParse(
+        row['reportable_through']?.toString() ?? '',
+      );
+      employeeReports[employeeId] = _DtrBulkEmployeeReport(
+        recordsPage: TimeRecordPage(
+          items: records,
+          total: records.length,
+          limit: records.length,
+          offset: 0,
+          reportableThrough: reportableThrough,
+        ),
+        assignmentTimeline: _parseAssignmentTimeline(
+          row['assignments'] as List? ?? const [],
+          year: _selectedYear,
+          month: _selectedMonth,
+        ),
+      );
+    }
+    for (final raw in (payload['errors'] as List? ?? const [])) {
+      final row = Map<String, dynamic>.from(raw as Map);
+      final employeeId = row['employee_id']?.toString() ?? '';
+      if (employeeId.isEmpty) continue;
+      failures[employeeId] =
+          row['error']?.toString() ?? 'The report could not be prepared';
+    }
+    return _DtrBulkReportBatch(employees: employeeReports, errors: failures);
   }
 
   Future<void> _printSelectedDtrs(BuildContext context) async {
@@ -1588,7 +1698,13 @@ class _DtrReportsState extends State<DtrReports> {
         _showReportSnack('Bulk print failed: $e', backgroundColor: Colors.red);
       }
     } finally {
-      if (mounted) setState(() => _bulkExportBusy = false);
+      if (mounted) {
+        setState(() {
+          _bulkExportBusy = false;
+          _bulkExportPrepared = 0;
+          _bulkExportTotal = 0;
+        });
+      }
     }
   }
 
@@ -1612,7 +1728,13 @@ class _DtrReportsState extends State<DtrReports> {
     } catch (e) {
       _showReportSnack('Bulk export failed: $e', backgroundColor: Colors.red);
     } finally {
-      if (mounted) setState(() => _bulkExportBusy = false);
+      if (mounted) {
+        setState(() {
+          _bulkExportBusy = false;
+          _bulkExportPrepared = 0;
+          _bulkExportTotal = 0;
+        });
+      }
     }
   }
 
@@ -2239,7 +2361,9 @@ class _DtrReportsState extends State<DtrReports> {
         ),
         if (selectedCount > 1) ...[
           Text(
-            '$selectedCount selected',
+            _bulkExportBusy && _bulkExportTotal > 0
+                ? '$_bulkExportPrepared/$_bulkExportTotal prepared'
+                : '$selectedCount selected',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
@@ -2410,7 +2534,9 @@ class _DtrReportsState extends State<DtrReports> {
         children: [
           Expanded(
             child: Text(
-              selectedCount == 0 ? '' : '$selectedCount selected',
+              _bulkExportBusy && _bulkExportTotal > 0
+                  ? '$_bulkExportPrepared/$_bulkExportTotal prepared'
+                  : (selectedCount == 0 ? '' : '$selectedCount selected'),
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
@@ -3500,6 +3626,23 @@ double? _reportShiftWorkHours({
     spanMinutes = (spanMinutes - lunchMinutes).clamp(0, 24 * 60).toInt();
   }
   return spanMinutes / 60;
+}
+
+class _DtrBulkEmployeeReport {
+  const _DtrBulkEmployeeReport({
+    required this.recordsPage,
+    required this.assignmentTimeline,
+  });
+
+  final TimeRecordPage recordsPage;
+  final List<_DtrAssignmentInfo> assignmentTimeline;
+}
+
+class _DtrBulkReportBatch {
+  const _DtrBulkReportBatch({required this.employees, required this.errors});
+
+  final Map<String, _DtrBulkEmployeeReport> employees;
+  final Map<String, String> errors;
 }
 
 class _DtrAssignmentInfo {
