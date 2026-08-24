@@ -239,6 +239,8 @@ class EmployeeOption {
     this.employeeNumber,
     this.departmentName,
     this.shiftPunchMode = 'auto',
+    this.isActive = true,
+    this.employmentStatus,
   });
   final String id;
   final String fullName;
@@ -252,6 +254,24 @@ class EmployeeOption {
   /// Punch mode of the employee's current assigned shift.
   /// Values: auto, full_day, am_only, pm_only, single_session.
   final String shiftPunchMode;
+
+  /// Current account status. Historical report lists may include inactive staff.
+  final bool isActive;
+  final String? employmentStatus;
+
+  String get currentStatusLabel {
+    if (isActive) return 'Active';
+    final value = employmentStatus?.trim() ?? '';
+    if (value.isEmpty || value.toLowerCase() == 'active') return 'Inactive';
+    return value
+        .split(RegExp(r'[\s_-]+'))
+        .where((part) => part.isNotEmpty)
+        .map(
+          (part) =>
+              '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+        )
+        .join(' ');
+  }
 
   /// Display as EMP-001, EMP-002, etc., or "—" if null.
   String get displayEmployeeNo => employeeNumber != null
@@ -1058,6 +1078,8 @@ class DtrProvider extends ChangeNotifier {
               : (empNum != null ? int.tryParse(empNum.toString()) : null),
           departmentName: m['current_department_name']?.toString(),
           shiftPunchMode: m['current_shift_punch_mode']?.toString() ?? 'auto',
+          isActive: m['is_active'] != false,
+          employmentStatus: m['employment_status']?.toString(),
         );
       }).toList();
       _employeesCache[cacheKey] = _DtrCacheEntry<List<EmployeeOption>>(

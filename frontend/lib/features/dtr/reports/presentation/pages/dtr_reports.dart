@@ -242,7 +242,7 @@ class _DtrReportsState extends State<DtrReports> {
         '${value.day.toString().padLeft(2, '0')}';
 
     final params = <String, dynamic>{
-      'status': 'Active',
+      'status': 'All',
       'role': 'User',
       'start_date': dateKey(startDate),
       'end_date': dateKey(endDate),
@@ -267,6 +267,8 @@ class _DtrReportsState extends State<DtrReports> {
             departmentName: employee['current_department_name']?.toString(),
             shiftPunchMode:
                 employee['current_shift_punch_mode']?.toString() ?? 'auto',
+            isActive: employee['is_active'] != false,
+            employmentStatus: employee['employment_status']?.toString(),
           );
         })
         .where((employee) => employee.id.isNotEmpty)
@@ -2326,7 +2328,9 @@ class _DtrReportsState extends State<DtrReports> {
                       (e) => DropdownMenuItem<String>(
                         value: e.id.toString(),
                         child: Text(
-                          e.fullName,
+                          e.isActive
+                              ? e.fullName
+                              : '${e.fullName} (${e.currentStatusLabel})',
                           overflow: TextOverflow.ellipsis,
                           style: AppTheme.dashFieldTextStyle(context),
                         ),
@@ -2558,7 +2562,9 @@ class _DtrReportsState extends State<DtrReports> {
                         ),
                         Expanded(
                           child: Text(
-                            e.fullName,
+                            e.isActive
+                                ? e.fullName
+                                : '${e.fullName} (${e.currentStatusLabel})',
                             style: TextStyle(
                               fontSize: 13,
                               color: AppTheme.dashTextPrimaryOf(ctx),
@@ -3415,7 +3421,9 @@ class _DtrReportsState extends State<DtrReports> {
                         ),
                         Expanded(
                           child: Text(
-                            e.fullName,
+                            e.isActive
+                                ? e.fullName
+                                : '${e.fullName} (${e.currentStatusLabel})',
                             style: TextStyle(
                               fontSize: 13,
                               color: AppTheme.dashTextPrimaryOf(ctx),
