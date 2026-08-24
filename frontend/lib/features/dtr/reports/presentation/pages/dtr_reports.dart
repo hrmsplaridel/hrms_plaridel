@@ -9,6 +9,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_readiness.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
@@ -16,6 +17,23 @@ import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/atten
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 
 enum _DtrExportFormat { pdf, word, excel }
+
+class _ReportLoadResult<T> {
+  const _ReportLoadResult.success(this.value) : error = null;
+  const _ReportLoadResult.failure(this.error) : value = null;
+
+  final T? value;
+  final Object? error;
+  bool get succeeded => error == null;
+}
+
+Future<_ReportLoadResult<T>> _captureReportLoad<T>(Future<T> future) async {
+  try {
+    return _ReportLoadResult<T>.success(await future);
+  } catch (error) {
+    return _ReportLoadResult<T>.failure(error);
+  }
+}
 
 const List<String> _months = [
   'January',
@@ -61,10 +79,47 @@ class _DtrReportsState extends State<DtrReports> {
   final DtrReportRequestGuard _requestGuard = DtrReportRequestGuard();
   List<EmployeeOption> _reportEmployeeOptions = const [];
   List<TimeRecord> _employeeRecords = [];
+  DtrExportSignatories? _reportSignatories;
   bool _reportLoading = false;
   bool _showMinutesFormat = true;
   bool _bulkExportBusy = false;
   bool _multiSelectMode = false;
+  DtrReportDataState _employeesState = DtrReportDataState.idle;
+  DtrReportDataState _recordsState = DtrReportDataState.idle;
+  DtrReportDataState _assignmentsState = DtrReportDataState.idle;
+  DtrReportDataState _policyState = DtrReportDataState.idle;
+  DtrReportDataState _signatoriesState = DtrReportDataState.idle;
+
+  DtrReportReadiness get _reportReadiness {
+    final selectedAssignments = _assignmentsInSelectedRange;
+    final assignmentsState =
+        _assignmentsState == DtrReportDataState.ready &&
+            (selectedAssignments.isEmpty ||
+                !_hasCompleteAssignmentData(selectedAssignments))
+        ? DtrReportDataState.missing
+        : _assignmentsState;
+    final policyState =
+        _recordsState == DtrReportDataState.ready &&
+            assignmentsState == DtrReportDataState.ready
+        ? _hasVerifiedPolicyCoverage(
+                records: _employeeRecords,
+                timeline: _assignmentTimeline,
+                year: _selectedYear,
+                month: _selectedMonth,
+                startDay: _rangeStartDay,
+                endDay: _rangeEndDay,
+              )
+              ? DtrReportDataState.ready
+              : DtrReportDataState.missing
+        : _policyState;
+    return DtrReportReadiness(
+      employees: _employeesState,
+      records: _recordsState,
+      assignments: assignmentsState,
+      policy: policyState,
+      signatories: _signatoriesState,
+    );
+  }
 
   /// Historical assignments overlapping the report month, ordered oldest first.
   List<_DtrAssignmentInfo> _assignmentTimeline = const [];
@@ -236,11 +291,19 @@ class _DtrReportsState extends State<DtrReports> {
         _selectedDepartmentId = null;
         _selectedEmployeeId = employee?.id;
         _reportEmployeeOptions = [if (employee != null) employee];
+        _employeesState = employee == null
+            ? DtrReportDataState.missing
+            : DtrReportDataState.ready;
         _selectedEmployeeIds.clear();
         _multiSelectMode = false;
         if (employee == null) {
           _employeeRecords = [];
           _assignmentTimeline = const [];
+          _reportSignatories = null;
+          _recordsState = DtrReportDataState.idle;
+          _assignmentsState = DtrReportDataState.idle;
+          _policyState = DtrReportDataState.idle;
+          _signatoriesState = DtrReportDataState.idle;
           _reportLoading = false;
         }
       });
@@ -260,6 +323,12 @@ class _DtrReportsState extends State<DtrReports> {
       _reportEmployeeOptions = const [];
       _employeeRecords = [];
       _assignmentTimeline = const [];
+      _reportSignatories = null;
+      _employeesState = DtrReportDataState.loading;
+      _recordsState = DtrReportDataState.idle;
+      _assignmentsState = DtrReportDataState.idle;
+      _policyState = DtrReportDataState.idle;
+      _signatoriesState = DtrReportDataState.idle;
     });
     try {
       final employeesFuture = _fetchReportEmployees(
@@ -277,6 +346,7 @@ class _DtrReportsState extends State<DtrReports> {
           ..sort(_compareEmployeesByNumber);
         setState(() {
           _reportEmployeeOptions = List<EmployeeOption>.from(employees);
+          _employeesState = DtrReportDataState.ready;
           _selectedEmployeeIds.removeWhere((id) => !availableIds.contains(id));
           if (_selectedEmployeeId == null ||
               !availableIds.contains(_selectedEmployeeId)) {
@@ -292,6 +362,12 @@ class _DtrReportsState extends State<DtrReports> {
           _multiSelectMode = false;
           _employeeRecords = [];
           _assignmentTimeline = const [];
+          _reportSignatories = null;
+          _employeesState = DtrReportDataState.missing;
+          _recordsState = DtrReportDataState.idle;
+          _assignmentsState = DtrReportDataState.idle;
+          _policyState = DtrReportDataState.idle;
+          _signatoriesState = DtrReportDataState.idle;
           _reportLoading = false;
         });
       }
@@ -302,6 +378,12 @@ class _DtrReportsState extends State<DtrReports> {
         _selectedEmployeeId = null;
         _employeeRecords = [];
         _assignmentTimeline = const [];
+        _reportSignatories = null;
+        _employeesState = DtrReportDataState.failed;
+        _recordsState = DtrReportDataState.idle;
+        _assignmentsState = DtrReportDataState.idle;
+        _policyState = DtrReportDataState.idle;
+        _signatoriesState = DtrReportDataState.idle;
         _reportLoading = false;
       });
     }
@@ -315,6 +397,11 @@ class _DtrReportsState extends State<DtrReports> {
         setState(() {
           _employeeRecords = [];
           _assignmentTimeline = const [];
+          _reportSignatories = null;
+          _recordsState = DtrReportDataState.idle;
+          _assignmentsState = DtrReportDataState.idle;
+          _policyState = DtrReportDataState.idle;
+          _signatoriesState = DtrReportDataState.idle;
           _reportLoading = false;
         });
       }
@@ -335,36 +422,123 @@ class _DtrReportsState extends State<DtrReports> {
       _reportLoading = true;
       _employeeRecords = [];
       _assignmentTimeline = const [];
+      _reportSignatories = null;
+      _recordsState = DtrReportDataState.loading;
+      _assignmentsState = DtrReportDataState.loading;
+      _policyState = DtrReportDataState.loading;
+      _signatoriesState = DtrReportDataState.loading;
     });
-    try {
-      final recordsFuture = TimeRecordRepo.instance.listForAdmin(
+    final recordsFuture = _captureReportLoad(
+      TimeRecordRepo.instance.listForAdmin(
         startDate: start,
         endDate: end,
         userId: employeeId,
         limit: 100,
         recompute: true,
-      );
-      final assignmentFuture = _fetchAssignmentTimelineForEmployee(
-        employeeId,
-        year: year,
-        month: month,
-      );
-      final records = await recordsFuture;
-      final timeline = await assignmentFuture;
-      if (!_acceptsRequest(token)) return;
-      setState(() {
-        _employeeRecords = List<TimeRecord>.from(records);
-        _assignmentTimeline = timeline;
-        _reportLoading = false;
-      });
-    } catch (_) {
-      if (!_acceptsRequest(token)) return;
-      setState(() {
-        _employeeRecords = [];
-        _assignmentTimeline = const [];
-        _reportLoading = false;
-      });
+      ),
+    );
+    final assignmentFuture = _captureReportLoad(
+      _fetchAssignmentTimelineForEmployee(employeeId, year: year, month: month),
+    );
+    final signatoriesFuture = _captureReportLoad(
+      DtrExport.resolveSignatories(requireVerifiedSource: true),
+    );
+    final recordsResult = await recordsFuture;
+    final assignmentResult = await assignmentFuture;
+    final signatoriesResult = await signatoriesFuture;
+    if (!_acceptsRequest(token)) return;
+
+    final records = recordsResult.value ?? const <TimeRecord>[];
+    final timeline = assignmentResult.value ?? const <_DtrAssignmentInfo>[];
+    final assignmentsState = !assignmentResult.succeeded
+        ? DtrReportDataState.failed
+        : timeline.isEmpty
+        ? DtrReportDataState.missing
+        : DtrReportDataState.ready;
+    final policyState =
+        !recordsResult.succeeded || assignmentsState != DtrReportDataState.ready
+        ? DtrReportDataState.idle
+        : _hasVerifiedPolicyCoverage(
+            records: records,
+            timeline: timeline,
+            year: year,
+            month: month,
+          )
+        ? DtrReportDataState.ready
+        : DtrReportDataState.missing;
+
+    setState(() {
+      _employeeRecords = List<TimeRecord>.from(records);
+      _assignmentTimeline = timeline;
+      _reportSignatories = signatoriesResult.value;
+      _recordsState = recordsResult.succeeded
+          ? DtrReportDataState.ready
+          : DtrReportDataState.failed;
+      _assignmentsState = assignmentsState;
+      _policyState = policyState;
+      _signatoriesState = !signatoriesResult.succeeded
+          ? DtrReportDataState.failed
+          : signatoriesResult.value?.isConfigured == true
+          ? DtrReportDataState.ready
+          : DtrReportDataState.missing;
+      _reportLoading = false;
+    });
+  }
+
+  bool _hasVerifiedPolicyCoverage({
+    required List<TimeRecord> records,
+    required List<_DtrAssignmentInfo> timeline,
+    required int year,
+    required int month,
+    int startDay = 1,
+    int? endDay,
+  }) {
+    final recordsByDate = <DateTime, TimeRecord>{
+      for (final record in records)
+        DateTime(
+          record.recordDate.year,
+          record.recordDate.month,
+          record.recordDate.day,
+        ): record,
+    };
+    final lastDay = DateTime(year, month + 1, 0).day;
+    final reportStart = DateTime(
+      year,
+      month,
+      startDay.clamp(1, lastDay).toInt(),
+    );
+    final reportEnd = DateTime(
+      year,
+      month,
+      (endDay ?? lastDay).clamp(reportStart.day, lastDay).toInt(),
+    );
+    final today = DateTime.now();
+    final validationEnd = reportEnd.isAfter(today)
+        ? DateTime(today.year, today.month, today.day)
+        : reportEnd;
+    if (validationEnd.isBefore(reportStart)) return true;
+
+    for (var day = reportStart.day; day <= validationEnd.day; day++) {
+      final date = DateTime(year, month, day);
+      final assignment = _assignmentForDate(date, timeline);
+      if (assignment == null) continue;
+      final workingDays = assignment.workingDays?.toSet() ?? {1, 2, 3, 4, 5};
+      if (!workingDays.contains(date.weekday)) continue;
+      final record = recordsByDate[date];
+      if (record?.attendancePolicy == null || record?.reportDeduction == null) {
+        return false;
+      }
     }
+    return true;
+  }
+
+  bool _hasCompleteAssignmentData(List<_DtrAssignmentInfo> assignments) {
+    return assignments.every(
+      (assignment) =>
+          assignment.officialHours?.trim().isNotEmpty == true &&
+          (assignment.workHoursPerDay ?? 0) > 0 &&
+          assignment.workingDays?.isNotEmpty == true,
+    );
   }
 
   int _daysInSelectedMonth() {
@@ -431,80 +605,74 @@ class _DtrReportsState extends State<DtrReports> {
     final effectiveMonth = month ?? _selectedMonth;
     final monthStart = DateTime(effectiveYear, effectiveMonth, 1);
     final monthEnd = DateTime(effectiveYear, effectiveMonth + 1, 0);
-    try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/assignments',
-        queryParameters: {'employee_id': employeeId, 'status': 'All'},
-      );
-      final list = res.data ?? [];
-      final assignments = <_DtrAssignmentInfo>[];
-      for (final a in list) {
-        final m = a as Map<String, dynamic>;
-        final from = m['effective_from'] != null
-            ? DateTime.tryParse(m['effective_from'].toString())
-            : null;
-        final to =
-            m['effective_to'] != null &&
-                m['effective_to'].toString().trim().isNotEmpty
-            ? DateTime.tryParse(m['effective_to'].toString())
-            : null;
-        if (from == null) continue;
-        if (from.isAfter(monthEnd)) continue;
-        if (to != null && to.isBefore(monthStart)) continue;
-        final wd = m['working_days'];
-        List<int>? days;
-        if (wd is List) {
-          days = wd
-              .map((x) => x is int ? x : int.tryParse(x.toString()))
-              .whereType<int>()
-              .where((x) => x >= 1 && x <= 7)
-              .toList();
-        }
-        String? officialHours;
-        final st = m['start_time'];
-        final et = m['end_time'];
-        final be = m['break_end'];
-        if (st != null && et != null) {
-          officialHours = _formatOfficialHours(st.toString(), et.toString());
-        }
-        final startMinutes = _parseShiftClockMinutes(st);
-        final endMinutes = _parseShiftClockMinutes(et);
-        final breakEndMinutes = _parseShiftClockMinutes(be);
-        final punchMode = _resolveReportPunchMode(
-          m['punch_mode']?.toString(),
-          startMinutes: startMinutes,
-          endMinutes: endMinutes,
-          breakEndMinutes: breakEndMinutes,
-        );
-        assignments.add(
-          _DtrAssignmentInfo(
-            workingDays: (days != null && days.isNotEmpty) ? days : null,
-            officialHours: officialHours,
-            workHoursPerDay: _reportShiftWorkHours(
-              startMinutes: startMinutes,
-              endMinutes: endMinutes,
-              breakEndMinutes: breakEndMinutes,
-              punchMode: punchMode,
-            ),
-            punchMode: punchMode,
-            effectiveFrom: DateTime(from.year, from.month, from.day),
-            effectiveTo: to != null
-                ? DateTime(to.year, to.month, to.day)
-                : null,
-            department: m['department_name']?.toString().trim(),
-            position: m['position_name']?.toString().trim(),
-          ),
-        );
+    final res = await ApiClient.instance.get<List<dynamic>>(
+      '/api/assignments',
+      queryParameters: {'employee_id': employeeId, 'status': 'All'},
+    );
+    final list = res.data ?? [];
+    final assignments = <_DtrAssignmentInfo>[];
+    for (final a in list) {
+      final m = a as Map<String, dynamic>;
+      final from = m['effective_from'] != null
+          ? DateTime.tryParse(m['effective_from'].toString())
+          : null;
+      final to =
+          m['effective_to'] != null &&
+              m['effective_to'].toString().trim().isNotEmpty
+          ? DateTime.tryParse(m['effective_to'].toString())
+          : null;
+      if (from == null) continue;
+      if (from.isAfter(monthEnd)) continue;
+      if (to != null && to.isBefore(monthStart)) continue;
+      final wd = m['working_days'];
+      List<int>? days;
+      if (wd is List) {
+        days = wd
+            .map((x) => x is int ? x : int.tryParse(x.toString()))
+            .whereType<int>()
+            .where((x) => x >= 1 && x <= 7)
+            .toList();
       }
-      assignments.sort((a, b) {
-        final aFrom = a.effectiveFrom ?? DateTime(1900);
-        final bFrom = b.effectiveFrom ?? DateTime(1900);
-        return aFrom.compareTo(bFrom);
-      });
-      return assignments;
-    } catch (_) {
-      return const [];
+      String? officialHours;
+      final st = m['start_time'];
+      final et = m['end_time'];
+      final be = m['break_end'];
+      if (st != null && et != null) {
+        officialHours = _formatOfficialHours(st.toString(), et.toString());
+      }
+      final startMinutes = _parseShiftClockMinutes(st);
+      final endMinutes = _parseShiftClockMinutes(et);
+      final breakEndMinutes = _parseShiftClockMinutes(be);
+      final punchMode = _resolveReportPunchMode(
+        m['punch_mode']?.toString(),
+        startMinutes: startMinutes,
+        endMinutes: endMinutes,
+        breakEndMinutes: breakEndMinutes,
+      );
+      assignments.add(
+        _DtrAssignmentInfo(
+          workingDays: (days != null && days.isNotEmpty) ? days : null,
+          officialHours: officialHours,
+          workHoursPerDay: _reportShiftWorkHours(
+            startMinutes: startMinutes,
+            endMinutes: endMinutes,
+            breakEndMinutes: breakEndMinutes,
+            punchMode: punchMode,
+          ),
+          punchMode: punchMode,
+          effectiveFrom: DateTime(from.year, from.month, from.day),
+          effectiveTo: to != null ? DateTime(to.year, to.month, to.day) : null,
+          department: m['department_name']?.toString().trim(),
+          position: m['position_name']?.toString().trim(),
+        ),
+      );
     }
+    assignments.sort((a, b) {
+      final aFrom = a.effectiveFrom ?? DateTime(1900);
+      final bFrom = b.effectiveFrom ?? DateTime(1900);
+      return aFrom.compareTo(bFrom);
+    });
+    return assignments;
   }
 
   _DtrAssignmentInfo? _assignmentForDate(
@@ -730,6 +898,8 @@ class _DtrReportsState extends State<DtrReports> {
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
   }) async {
+    if (!_guardOfficialReportAction()) return;
+    final signatories = _reportSignatories!;
     final baseName =
         'DTR_${selectedName.replaceAll(' ', '_')}_${_months[_selectedMonth - 1]}_$_selectedYear';
     try {
@@ -755,6 +925,7 @@ class _DtrReportsState extends State<DtrReports> {
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
             assignmentSegments: _exportAssignmentSegments,
+            signatories: signatories,
           );
           if (!context.mounted) return;
           await shareOrDownloadPdf(bytes, '$baseName.pdf');
@@ -776,6 +947,7 @@ class _DtrReportsState extends State<DtrReports> {
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
             assignmentSegments: _exportAssignmentSegments,
+            signatories: signatories,
           );
           if (!context.mounted) return;
           await shareOrDownloadFile(
@@ -801,6 +973,7 @@ class _DtrReportsState extends State<DtrReports> {
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
             assignmentSegments: _exportAssignmentSegments,
+            signatories: signatories,
           );
           final bytes = Uint8List.fromList(utf8.encode(html));
           if (!context.mounted) return;
@@ -959,6 +1132,8 @@ class _DtrReportsState extends State<DtrReports> {
     String? department,
     String? position,
   }) async {
+    if (!_guardOfficialReportAction()) return;
+    final signatories = _reportSignatories!;
     final pageFormat = await _chooseDtrPaperSize(context);
     if (pageFormat == null || !context.mounted) return;
     final baseName =
@@ -985,6 +1160,7 @@ class _DtrReportsState extends State<DtrReports> {
           assignmentEffectiveFrom: _assignmentEffectiveFrom,
           assignmentEffectiveTo: _assignmentEffectiveTo,
           assignmentSegments: _exportAssignmentSegments,
+          signatories: signatories,
           pageFormat: pageFormat,
         ),
         name: baseName,
@@ -1014,6 +1190,7 @@ class _DtrReportsState extends State<DtrReports> {
           assignmentEffectiveFrom: _assignmentEffectiveFrom,
           assignmentEffectiveTo: _assignmentEffectiveTo,
           assignmentSegments: _exportAssignmentSegments,
+          signatories: signatories,
           pageFormat: pageFormat,
         );
         await shareOrDownloadPdf(bytes, '$baseName.pdf');
@@ -1057,6 +1234,89 @@ class _DtrReportsState extends State<DtrReports> {
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(content: Text(message), backgroundColor: backgroundColor),
+    );
+  }
+
+  bool get _officialActionsEnabled =>
+      _reportReadiness.canGenerateOfficialReport &&
+      _reportSignatories != null &&
+      !_reportLoading;
+
+  bool _guardOfficialReportAction() {
+    if (_officialActionsEnabled) return true;
+    final issues = _reportReadiness.blockingIssues;
+    final message = _reportReadiness.isLoading || _reportLoading
+        ? 'Official report data is still being verified.'
+        : issues.isNotEmpty
+        ? issues.first
+        : 'Official report data is not ready. Retry loading the report.';
+    _showReportSnack(message, backgroundColor: Colors.red.shade700);
+    return false;
+  }
+
+  Widget _buildReadinessBanner(BuildContext context) {
+    final issues = _reportReadiness.blockingIssues;
+    if (issues.isEmpty) return const SizedBox.shrink();
+    final dark = AppTheme.dashIsDark(context);
+    final borderColor = Colors.orange.withValues(alpha: dark ? 0.75 : 0.55);
+    final backgroundColor = Colors.orange.withValues(alpha: dark ? 0.12 : 0.08);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        alignment: WrapAlignment.spaceBetween,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Official report unavailable',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.dashTextPrimaryOf(context),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      for (final issue in issues)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Text(
+                            issue,
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(context),
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: _reportLoading ? null : _load,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1164,6 +1424,29 @@ class _DtrReportsState extends State<DtrReports> {
     final assignmentTimeline = await _fetchAssignmentTimelineForEmployee(
       employee.id,
     );
+    final selectedAssignments = _assignmentsOverlappingRange(
+      assignmentTimeline,
+      _rangeStartDate(),
+      _rangeEndDate(),
+    );
+    if (selectedAssignments.isEmpty ||
+        !_hasCompleteAssignmentData(selectedAssignments)) {
+      throw StateError(
+        'No assignment and shift covers ${employee.fullName} for the selected month.',
+      );
+    }
+    if (!_hasVerifiedPolicyCoverage(
+      records: records,
+      timeline: assignmentTimeline,
+      year: _selectedYear,
+      month: _selectedMonth,
+      startDay: _rangeStartDay,
+      endDay: _rangeEndDay,
+    )) {
+      throw StateError(
+        'Attendance policy data could not be verified for ${employee.fullName}.',
+      );
+    }
     final start = _rangeStartDate();
     final end = _rangeEndDate();
     final reportAssignments = _assignmentsOverlappingRange(
@@ -1241,12 +1524,14 @@ class _DtrReportsState extends State<DtrReports> {
       start: _rangeStartDate(),
       end: _rangeEndDate(),
       reportTitle: 'Daily Time Record Report',
+      signatories: _reportSignatories!,
       pageFormat: pageFormat,
     );
   }
 
   Future<void> _printSelectedDtrs(BuildContext context) async {
     if (_bulkExportBusy) return;
+    if (!_guardOfficialReportAction()) return;
     final selectedCount = _selectedEmployeesForBulk().length;
     if (selectedCount < 2) {
       _showReportSnack('Select at least two employees to bulk print.');
@@ -1285,6 +1570,7 @@ class _DtrReportsState extends State<DtrReports> {
 
   Future<void> _exportSelectedDtrs() async {
     if (_bulkExportBusy) return;
+    if (!_guardOfficialReportAction()) return;
     final selectedCount = _selectedEmployeesForBulk().length;
     if (selectedCount < 2) {
       _showReportSnack('Select at least two employees to export.');
@@ -1474,6 +1760,10 @@ class _DtrReportsState extends State<DtrReports> {
                       ),
                       const SizedBox(height: 16),
                       _buildFilters(context, isMobile),
+                      if (_reportReadiness.blockingIssues.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        _buildReadinessBanner(context),
+                      ],
                       const SizedBox(height: 24),
                       isMobile
                           ? _buildMobileLayout(
@@ -1933,7 +2223,7 @@ class _DtrReportsState extends State<DtrReports> {
             ),
           ),
           FilledButton.icon(
-            onPressed: _bulkExportBusy
+            onPressed: _bulkExportBusy || !_officialActionsEnabled
                 ? null
                 : () => _printSelectedDtrs(context),
             icon: _bulkExportBusy
@@ -1954,7 +2244,9 @@ class _DtrReportsState extends State<DtrReports> {
             ),
           ),
           OutlinedButton.icon(
-            onPressed: _bulkExportBusy ? null : _exportSelectedDtrs,
+            onPressed: _bulkExportBusy || !_officialActionsEnabled
+                ? null
+                : _exportSelectedDtrs,
             icon: const Icon(Icons.file_download_rounded, size: 18),
             label: const Text('Export selected'),
             style: OutlinedButton.styleFrom(
@@ -2740,13 +3032,15 @@ class _DtrReportsState extends State<DtrReports> {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: () => _printDtrReport(
-                  context,
-                  selectedName: selectedName,
-                  start: start,
-                  end: end,
-                  recordsByDate: recordsByDate,
-                ),
+                onPressed: _officialActionsEnabled
+                    ? () => _printDtrReport(
+                        context,
+                        selectedName: selectedName,
+                        start: start,
+                        end: end,
+                        recordsByDate: recordsByDate,
+                      )
+                    : null,
                 icon: const Icon(Icons.print_rounded, size: 18),
                 label: const Text('PRINT CURRENT'),
                 style: FilledButton.styleFrom(
@@ -2772,101 +3066,103 @@ class _DtrReportsState extends State<DtrReports> {
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(
-                onPressed: () {
-                  showModalBottomSheet<void>(
-                    context: context,
-                    backgroundColor: AppTheme.dashPanelOf(context),
-                    builder: (ctx) => SafeArea(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              'Export DTR as',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.dashTextPrimaryOf(ctx),
+                onPressed: _officialActionsEnabled
+                    ? () {
+                        showModalBottomSheet<void>(
+                          context: context,
+                          backgroundColor: AppTheme.dashPanelOf(context),
+                          builder: (ctx) => SafeArea(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Text(
+                                    'Export DTR as',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.dashTextPrimaryOf(ctx),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  ListTile(
+                                    leading: const Icon(
+                                      Icons.picture_as_pdf,
+                                      color: Colors.red,
+                                    ),
+                                    title: Text(
+                                      'PDF',
+                                      style: TextStyle(
+                                        color: AppTheme.dashTextPrimaryOf(ctx),
+                                      ),
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      _generateDtr(
+                                        context,
+                                        _DtrExportFormat.pdf,
+                                        selectedName: selectedName,
+                                        start: start,
+                                        end: end,
+                                        recordsByDate: recordsByDate,
+                                      );
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(
+                                      Icons.description,
+                                      color: Colors.blue,
+                                    ),
+                                    title: Text(
+                                      'Word (.doc)',
+                                      style: TextStyle(
+                                        color: AppTheme.dashTextPrimaryOf(ctx),
+                                      ),
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      _generateDtr(
+                                        context,
+                                        _DtrExportFormat.word,
+                                        selectedName: selectedName,
+                                        start: start,
+                                        end: end,
+                                        recordsByDate: recordsByDate,
+                                      );
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(
+                                      Icons.table_chart,
+                                      color: Colors.green,
+                                    ),
+                                    title: Text(
+                                      'Excel (.xlsx)',
+                                      style: TextStyle(
+                                        color: AppTheme.dashTextPrimaryOf(ctx),
+                                      ),
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      _generateDtr(
+                                        context,
+                                        _DtrExportFormat.excel,
+                                        selectedName: selectedName,
+                                        start: start,
+                                        end: end,
+                                        recordsByDate: recordsByDate,
+                                      );
+                                    },
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 16),
-                            ListTile(
-                              leading: const Icon(
-                                Icons.picture_as_pdf,
-                                color: Colors.red,
-                              ),
-                              title: Text(
-                                'PDF',
-                                style: TextStyle(
-                                  color: AppTheme.dashTextPrimaryOf(ctx),
-                                ),
-                              ),
-                              onTap: () {
-                                Navigator.pop(ctx);
-                                _generateDtr(
-                                  context,
-                                  _DtrExportFormat.pdf,
-                                  selectedName: selectedName,
-                                  start: start,
-                                  end: end,
-                                  recordsByDate: recordsByDate,
-                                );
-                              },
-                            ),
-                            ListTile(
-                              leading: const Icon(
-                                Icons.description,
-                                color: Colors.blue,
-                              ),
-                              title: Text(
-                                'Word (.doc)',
-                                style: TextStyle(
-                                  color: AppTheme.dashTextPrimaryOf(ctx),
-                                ),
-                              ),
-                              onTap: () {
-                                Navigator.pop(ctx);
-                                _generateDtr(
-                                  context,
-                                  _DtrExportFormat.word,
-                                  selectedName: selectedName,
-                                  start: start,
-                                  end: end,
-                                  recordsByDate: recordsByDate,
-                                );
-                              },
-                            ),
-                            ListTile(
-                              leading: const Icon(
-                                Icons.table_chart,
-                                color: Colors.green,
-                              ),
-                              title: Text(
-                                'Excel (.xlsx)',
-                                style: TextStyle(
-                                  color: AppTheme.dashTextPrimaryOf(ctx),
-                                ),
-                              ),
-                              onTap: () {
-                                Navigator.pop(ctx);
-                                _generateDtr(
-                                  context,
-                                  _DtrExportFormat.excel,
-                                  selectedName: selectedName,
-                                  start: start,
-                                  end: end,
-                                  recordsByDate: recordsByDate,
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
+                          ),
+                        );
+                      }
+                    : null,
                 style: OutlinedButton.styleFrom(
                   backgroundColor: dark
                       ? Colors.green.shade900.withValues(alpha: 0.4)

@@ -108,6 +108,10 @@ class DtrExportSignatories {
   final DtrExportSignatory meedoManager;
   final DtrExportSignatory hrOfficer;
 
+  bool get isConfigured =>
+      meedoManager.employeeName?.trim().isNotEmpty == true &&
+      hrOfficer.employeeName?.trim().isNotEmpty == true;
+
   static const empty = DtrExportSignatories(
     meedoManager: DtrExportSignatory(positionTitle: _meedoManagerPositionTitle),
     hrOfficer: DtrExportSignatory(positionTitle: _hrOfficerPositionTitle),
@@ -168,7 +172,9 @@ class DtrAssignmentSegment {
 class DtrExport {
   DtrExport._();
 
-  static Future<DtrExportSignatories> resolveSignatories() async {
+  static Future<DtrExportSignatories> resolveSignatories({
+    bool requireVerifiedSource = false,
+  }) async {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employees',
@@ -177,10 +183,16 @@ class DtrExport {
       final rows = res.data ?? const <dynamic>[];
       final meedoManagerName =
           _findEmployeeNameByExactPosition(rows, _meedoManagerPositionTitle) ??
-          await _findOtherPositionEmployeeName(_meedoManagerPositionTitle);
+          await _findOtherPositionEmployeeName(
+            _meedoManagerPositionTitle,
+            requireVerifiedSource: requireVerifiedSource,
+          );
       final hrOfficerName =
           _findEmployeeNameByExactPosition(rows, _hrOfficerPositionTitle) ??
-          await _findOtherPositionEmployeeName(_hrOfficerPositionTitle);
+          await _findOtherPositionEmployeeName(
+            _hrOfficerPositionTitle,
+            requireVerifiedSource: requireVerifiedSource,
+          );
       return DtrExportSignatories(
         meedoManager: DtrExportSignatory(
           positionTitle: _meedoManagerPositionTitle,
@@ -192,6 +204,7 @@ class DtrExport {
         ),
       );
     } catch (_) {
+      if (requireVerifiedSource) rethrow;
       return DtrExportSignatories.empty;
     }
   }
@@ -215,8 +228,9 @@ class DtrExport {
   }
 
   static Future<String?> _findOtherPositionEmployeeName(
-    String positionTitle,
-  ) async {
+    String positionTitle, {
+    bool requireVerifiedSource = false,
+  }) async {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employee-other-positions',
@@ -234,6 +248,7 @@ class DtrExport {
         if (name != null && name.isNotEmpty) return name;
       }
     } catch (_) {
+      if (requireVerifiedSource) rethrow;
       // Keep DTR export usable even if optional Other Positions lookup fails.
     }
     return null;
