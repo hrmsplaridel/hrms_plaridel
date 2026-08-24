@@ -512,11 +512,31 @@ class DtrExport {
     bool combineLateAndUndertime,
   ) {
     if (isWeekendOrNonWorking) return (0, 0);
-    if (r != null && r.status == 'holiday') return (0, 0);
+    final holidayCoverage = r?.coverage?.trim().toLowerCase();
+    final isWholeDayHoliday =
+        r != null &&
+        r.status == 'holiday' &&
+        (holidayCoverage == null ||
+            holidayCoverage.isEmpty ||
+            holidayCoverage == 'whole_day');
+    if (isWholeDayHoliday) return (0, 0);
     if (r != null && (r.status == 'on_leave' || r.leaveRequestId != null)) {
       return (0, 0);
     }
     final wh = workHoursPerDay > 0 ? workHoursPerDay : 8.0;
+
+    // Partial-day holidays keep the backend-computed penalty for the session
+    // that remains scheduled, even when no physical punches exist.
+    final isPartialHoliday =
+        r != null &&
+        r.status == 'holiday' &&
+        (holidayCoverage == 'am_only' || holidayCoverage == 'pm_only');
+    if (isPartialHoliday && r.undertimeMinutes != null) {
+      final displayedMinutes =
+          r.undertimeMinutes! +
+          (combineLateAndUndertime ? (r.lateMinutes ?? 0) : 0);
+      return (displayedMinutes ~/ 60, displayedMinutes % 60);
+    }
 
     // Absent: no punch at all (no timeIn and no breakIn).
     if (r == null || (r.timeIn == null && r.breakIn == null)) {

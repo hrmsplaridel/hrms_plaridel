@@ -176,4 +176,40 @@ void main() {
 
     expect(html, contains('Equivalent Day (deduction): 1.125'));
   });
+
+  test('partial-day holiday prints and deducts only the required session', () {
+    final date = DateTime(2026, 8, 12);
+    final record = TimeRecord(
+      userId: 'employee-1',
+      recordDate: date,
+      lateMinutes: 0,
+      undertimeMinutes: 240,
+      status: 'holiday',
+      holidayId: 'holiday-1',
+      holidayName: 'AM Suspension',
+      coverage: 'am_only',
+      reportDeduction: const AttendanceReportDeduction(
+        lateMinutes: 0,
+        undertimeMinutes: 240,
+        absenceMinutes: 0,
+        totalMinutes: 240,
+        equivalentDay: 0.5,
+      ),
+    );
+
+    final html = DtrExport.generateWordHtmlSync(
+      employeeName: 'Partial Holiday Employee',
+      year: date.year,
+      month: date.month,
+      start: date,
+      end: date,
+      recordsByDate: {date: record},
+      scheduledWorkHoursPerDay: 8,
+      workingDays: const [DateTime.wednesday],
+      assignmentEffectiveFrom: date,
+    );
+
+    expect(html, contains('<td class="right">4</td><td class="right">0</td>'));
+    expect(html, contains('Equivalent Day (deduction): 0.500'));
+  });
 }
