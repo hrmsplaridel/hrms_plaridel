@@ -33,6 +33,10 @@ const {
   resolveAttendancePolicy,
 } = require('../services/attendancePolicyResolver');
 const { validateDtrPunchDates } = require('../services/dtrPunchDateValidation');
+const {
+  addDaysToIsoDate,
+  isAttendanceDateFinalized,
+} = require('../services/dtrReportCutoff');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -329,9 +333,10 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
             a.effective_from, a.effective_to,
             s.start_time::text AS shift_start,
             s.end_time::text AS shift_end,
-            s.break_end::text AS shift_break_end,
-            s.punch_mode,
-            s.grace_period_minutes
+             s.break_end::text AS shift_break_end,
+             s.punch_mode,
+             s.working_days,
+             s.grace_period_minutes
      FROM assignments a
      LEFT JOIN shifts s ON a.shift_id = s.id
      WHERE a.employee_id = $1
@@ -358,6 +363,9 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
     graceMinutes,
     breakEndMinutes,
     punchMode: row.punch_mode || 'auto',
+    workingDays: Array.isArray(row.working_days)
+      ? row.working_days.map((value) => parseInt(value, 10)).filter(Number.isFinite)
+      : [],
   };
 }
 
@@ -828,6 +836,29 @@ function isoWeekdayFromDateStr(dateStr) {
   const d = new Date(`${dateStr}T00:00:00`);
   const js = d.getDay(); // 0=Sun..6=Sat
   return js === 0 ? 7 : js;
+}
+
+async function resolveReportableThrough({ employeeId, rangeEnd, holidayByDate }) {
+  const todayStr = todayInHrmsTimezone();
+  const nowMinutes = nowMinutesInHrmsTimezone();
+  let candidate = rangeEnd < todayStr ? rangeEnd : todayStr;
+
+  for (let checked = 0; checked < 3; checked += 1) {
+    const shiftInfo = await getAssignmentShiftForDate(employeeId, candidate);
+    if (
+      isAttendanceDateFinalized({
+        dateStr: candidate,
+        todayStr,
+        nowMinutes,
+        shiftInfo,
+        holidayInfo: holidayByDate.get(candidate) || null,
+      })
+    ) {
+      return candidate;
+    }
+    candidate = addDaysToIsoDate(candidate, -1);
+  }
+  return candidate;
 }
 
 /** True if holidays table has coverage column (work suspension migration applied). */
@@ -1559,12 +1590,23 @@ router.get('/', protect, async (req, res) => {
       : rows.filter((row) => String(row.user_id) === String(scopedEmployeeId));
     let payload = authorizedRows;
     if (hasDateRange) {
+      if (scopedEmployeeId && endStr) {
+        const reportableThrough = await resolveReportableThrough({
+          employeeId: scopedEmployeeId,
+          rangeEnd: endStr,
+          holidayByDate: activeHolidayByDate,
+        });
+        res.setHeader('X-Reportable-Through', reportableThrough);
+      }
       const off = Math.max(0, parseInt(offsetRaw, 10) || 0);
       const pageSize = Math.min(
         Math.max(1, parseInt(limitRaw, 10) || DEFAULT_DTR_PAGE_SIZE),
         MAX_DTR_PAGE_SIZE
       );
-      res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count, X-Limit, X-Offset');
+      res.setHeader(
+        'Access-Control-Expose-Headers',
+        'X-Total-Count, X-Limit, X-Offset, X-Reportable-Through'
+      );
       res.setHeader('X-Total-Count', String(authorizedRows.length));
       res.setHeader('X-Limit', String(pageSize));
       res.setHeader('X-Offset', String(off));
