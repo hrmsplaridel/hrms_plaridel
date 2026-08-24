@@ -233,6 +233,29 @@ function buildEmployeeListFromSql(req, options = {}) {
     conditions.push(`${tbl}.role = $${i++}`);
     params.push('employee');
   }
+  if (historicalRange?.startDate && historicalRange?.endDate) {
+    const startIdx = i++;
+    const endIdx = i++;
+    conditions.push(`(
+      EXISTS (
+        SELECT 1
+        FROM assignments historical_presence_assignment
+        WHERE historical_presence_assignment.employee_id = ${tbl}.id
+          AND historical_presence_assignment.effective_from <= $${endIdx}::date
+          AND (
+            historical_presence_assignment.effective_to IS NULL
+            OR historical_presence_assignment.effective_to >= $${startIdx}::date
+          )
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM dtr_daily_summary historical_presence_dtr
+        WHERE historical_presence_dtr.employee_id = ${tbl}.id
+          AND historical_presence_dtr.attendance_date BETWEEN $${startIdx}::date AND $${endIdx}::date
+      )
+    )`);
+    params.push(historicalRange.startDate, historicalRange.endDate);
+  }
   if (departmentId) {
     if (historicalRange?.startDate && historicalRange?.endDate) {
       const departmentIdx = i++;
@@ -357,7 +380,8 @@ function employeeRowsForRequester(rows, requester) {
 }
 
 // GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid, ?biometric_user_ids=id1,id2,id3)
-// Optional: ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD makes department membership historical for that range.
+// Optional: ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD limits employees to those
+// with an assignment or DTR record in the range and makes department membership historical.
 // Optional: ?biometric_device_id=<uuid> — admin only; restrict to employees whose biometric_user_id is enrolled on that ZKTeco (reads device live)
 // Optional: ?biometric_filter=set|has|missing|none — filter by whether biometric_user_id is set (set/has = non-empty; missing/none = empty)
 // Optional: ?q= search; ?sort= & ?order=asc|desc (sort whitelist: full_name, employee_number, role, email, department, position, employment_status, is_active)
