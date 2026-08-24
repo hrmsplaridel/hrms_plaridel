@@ -490,12 +490,14 @@ class TimeRecordPage {
     required this.total,
     required this.limit,
     required this.offset,
+    this.reportableThrough,
   });
 
   final List<TimeRecord> items;
   final int total;
   final int limit;
   final int offset;
+  final DateTime? reportableThrough;
 }
 
 /// Repository for DTR time records. Uses backend API (dtr_daily_summary); Supabase logic commented out.
@@ -565,11 +567,15 @@ class TimeRecordRepo {
       );
       final responseLimit = int.tryParse(res.headers.value('x-limit') ?? '');
       final responseOffset = int.tryParse(res.headers.value('x-offset') ?? '');
+      final reportableThrough = DateTime.tryParse(
+        res.headers.value('x-reportable-through') ?? '',
+      );
       return TimeRecordPage(
         items: items,
         total: responseTotal ?? items.length,
         limit: responseLimit ?? limit ?? items.length,
         offset: responseOffset ?? offset ?? 0,
+        reportableThrough: reportableThrough,
       );
     } on DioException catch (_) {
       rethrow;

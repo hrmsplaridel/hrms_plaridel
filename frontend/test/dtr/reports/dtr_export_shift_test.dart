@@ -212,4 +212,37 @@ void main() {
     expect(html, contains('<td class="right">4</td><td class="right">0</td>'));
     expect(html, contains('Equivalent Day (deduction): 0.500'));
   });
+
+  test('server reportable-through date controls current-day absence inference', () {
+    final date = DateTime(2026, 8, 24);
+    final beforeShiftEnd = DtrExport.generateWordHtmlSync(
+      employeeName: 'Current Employee',
+      year: date.year,
+      month: date.month,
+      start: date,
+      end: date,
+      recordsByDate: const {},
+      scheduledWorkHoursPerDay: 8,
+      workingDays: const [DateTime.monday],
+      assignmentEffectiveFrom: date,
+      reportableThrough: DateTime(2026, 8, 23),
+    );
+    final afterShiftEnd = DtrExport.generateWordHtmlSync(
+      employeeName: 'Current Employee',
+      year: date.year,
+      month: date.month,
+      start: date,
+      end: date,
+      recordsByDate: const {},
+      scheduledWorkHoursPerDay: 8,
+      workingDays: const [DateTime.monday],
+      assignmentEffectiveFrom: date,
+      reportableThrough: date,
+    );
+
+    expect(beforeShiftEnd, isNot(contains('ABSENT')));
+    expect(beforeShiftEnd, contains('Equivalent Day (deduction): 0.000'));
+    expect(afterShiftEnd, contains('ABSENT'));
+    expect(afterShiftEnd, contains('Equivalent Day (deduction): 1.000'));
+  });
 }

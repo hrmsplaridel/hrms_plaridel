@@ -79,6 +79,7 @@ class _DtrReportsState extends State<DtrReports> {
   final DtrReportRequestGuard _requestGuard = DtrReportRequestGuard();
   List<EmployeeOption> _reportEmployeeOptions = const [];
   List<TimeRecord> _employeeRecords = [];
+  DateTime? _reportableThrough;
   DtrExportSignatories? _reportSignatories;
   bool _reportLoading = false;
   bool _showMinutesFormat = true;
@@ -108,6 +109,7 @@ class _DtrReportsState extends State<DtrReports> {
                 month: _selectedMonth,
                 startDay: _rangeStartDay,
                 endDay: _rangeEndDay,
+                reportableThrough: _reportableThrough,
               )
               ? DtrReportDataState.ready
               : DtrReportDataState.missing
@@ -298,6 +300,7 @@ class _DtrReportsState extends State<DtrReports> {
         _multiSelectMode = false;
         if (employee == null) {
           _employeeRecords = [];
+          _reportableThrough = null;
           _assignmentTimeline = const [];
           _reportSignatories = null;
           _recordsState = DtrReportDataState.idle;
@@ -322,6 +325,7 @@ class _DtrReportsState extends State<DtrReports> {
       _reportLoading = true;
       _reportEmployeeOptions = const [];
       _employeeRecords = [];
+      _reportableThrough = null;
       _assignmentTimeline = const [];
       _reportSignatories = null;
       _employeesState = DtrReportDataState.loading;
@@ -361,6 +365,7 @@ class _DtrReportsState extends State<DtrReports> {
           _selectedEmployeeIds.clear();
           _multiSelectMode = false;
           _employeeRecords = [];
+          _reportableThrough = null;
           _assignmentTimeline = const [];
           _reportSignatories = null;
           _employeesState = DtrReportDataState.missing;
@@ -377,6 +382,7 @@ class _DtrReportsState extends State<DtrReports> {
         _reportEmployeeOptions = const [];
         _selectedEmployeeId = null;
         _employeeRecords = [];
+        _reportableThrough = null;
         _assignmentTimeline = const [];
         _reportSignatories = null;
         _employeesState = DtrReportDataState.failed;
@@ -396,6 +402,7 @@ class _DtrReportsState extends State<DtrReports> {
       if (mounted) {
         setState(() {
           _employeeRecords = [];
+          _reportableThrough = null;
           _assignmentTimeline = const [];
           _reportSignatories = null;
           _recordsState = DtrReportDataState.idle;
@@ -421,6 +428,7 @@ class _DtrReportsState extends State<DtrReports> {
     setState(() {
       _reportLoading = true;
       _employeeRecords = [];
+      _reportableThrough = null;
       _assignmentTimeline = const [];
       _reportSignatories = null;
       _recordsState = DtrReportDataState.loading;
@@ -429,7 +437,7 @@ class _DtrReportsState extends State<DtrReports> {
       _signatoriesState = DtrReportDataState.loading;
     });
     final recordsFuture = _captureReportLoad(
-      TimeRecordRepo.instance.listForAdmin(
+      TimeRecordRepo.instance.listPageForAdmin(
         startDate: start,
         endDate: end,
         userId: employeeId,
@@ -448,7 +456,8 @@ class _DtrReportsState extends State<DtrReports> {
     final signatoriesResult = await signatoriesFuture;
     if (!_acceptsRequest(token)) return;
 
-    final records = recordsResult.value ?? const <TimeRecord>[];
+    final recordsPage = recordsResult.value;
+    final records = recordsPage?.items ?? const <TimeRecord>[];
     final timeline = assignmentResult.value ?? const <_DtrAssignmentInfo>[];
     final assignmentsState = !assignmentResult.succeeded
         ? DtrReportDataState.failed
@@ -463,12 +472,14 @@ class _DtrReportsState extends State<DtrReports> {
             timeline: timeline,
             year: year,
             month: month,
+            reportableThrough: recordsPage?.reportableThrough,
           )
         ? DtrReportDataState.ready
         : DtrReportDataState.missing;
 
     setState(() {
       _employeeRecords = List<TimeRecord>.from(records);
+      _reportableThrough = recordsPage?.reportableThrough;
       _assignmentTimeline = timeline;
       _reportSignatories = signatoriesResult.value;
       _recordsState = recordsResult.succeeded
@@ -492,6 +503,7 @@ class _DtrReportsState extends State<DtrReports> {
     required int month,
     int startDay = 1,
     int? endDay,
+    DateTime? reportableThrough,
   }) {
     final recordsByDate = <DateTime, TimeRecord>{
       for (final record in records)
@@ -512,9 +524,15 @@ class _DtrReportsState extends State<DtrReports> {
       month,
       (endDay ?? lastDay).clamp(reportStart.day, lastDay).toInt(),
     );
-    final today = DateTime.now();
-    final validationEnd = reportEnd.isAfter(today)
-        ? DateTime(today.year, today.month, today.day)
+    final authoritativeEnd = reportableThrough == null
+        ? reportStart.subtract(const Duration(days: 1))
+        : DateTime(
+            reportableThrough.year,
+            reportableThrough.month,
+            reportableThrough.day,
+          );
+    final validationEnd = reportEnd.isAfter(authoritativeEnd)
+        ? authoritativeEnd
         : reportEnd;
     if (validationEnd.isBefore(reportStart)) return true;
 
@@ -731,32 +749,28 @@ class _DtrReportsState extends State<DtrReports> {
     return _filterRecordsForTardinessReportFor(raw, _assignmentTimeline);
   }
 
-  /// Last date in the selected month included in tardiness/absent/late stats. Days after this
-  /// cutoff are not treated as absent (no attendance record exists yet). We use *yesterday*
-  /// rather than today because the current day's shift may not have ended — the backend only
-  /// injects synthetic "Absent" rows after the shift is over. If the backend already sent a
-  /// record for today (employee clocked in, or post-shift absent), it still shows in the grid
-  /// because it exists in [recordsByDate]; this cutoff only governs the *client-side* fallback
-  /// when no record exists.
+  /// Last server-finalized date included in report statistics and missing-day inference.
   DateTime _tardinessStatsInclusiveEnd() {
     final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
     final lastDay = DateTime(_selectedYear, _selectedMonth + 1, 0).day;
     final reportEnd = _rangeEndDate();
     final monthEnd = DateTime(_selectedYear, _selectedMonth, lastDay);
-    final now = DateTime.now();
-    // Use yesterday: today's shift may still be in progress.
-    final yesterday = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    ).subtract(const Duration(days: 1));
-    if (monthEnd.isBefore(yesterday)) {
-      return reportEnd.isBefore(monthEnd) ? reportEnd : monthEnd;
-    }
-    if (yesterday.isBefore(monthStart)) {
+    final authoritativeEnd = _reportableThrough;
+    if (authoritativeEnd == null) {
       return monthStart.subtract(const Duration(days: 1));
     }
-    final capped = yesterday.isAfter(monthEnd) ? monthEnd : yesterday;
+    final finalized = DateTime(
+      authoritativeEnd.year,
+      authoritativeEnd.month,
+      authoritativeEnd.day,
+    );
+    if (monthEnd.isBefore(finalized)) {
+      return reportEnd.isBefore(monthEnd) ? reportEnd : monthEnd;
+    }
+    if (finalized.isBefore(monthStart)) {
+      return monthStart.subtract(const Duration(days: 1));
+    }
+    final capped = finalized.isAfter(monthEnd) ? monthEnd : finalized;
     return capped.isAfter(reportEnd) ? reportEnd : capped;
   }
 
@@ -925,6 +939,7 @@ class _DtrReportsState extends State<DtrReports> {
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
             assignmentSegments: _exportAssignmentSegments,
+            reportableThrough: _reportableThrough,
             signatories: signatories,
           );
           if (!context.mounted) return;
@@ -947,6 +962,7 @@ class _DtrReportsState extends State<DtrReports> {
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
             assignmentSegments: _exportAssignmentSegments,
+            reportableThrough: _reportableThrough,
             signatories: signatories,
           );
           if (!context.mounted) return;
@@ -973,6 +989,7 @@ class _DtrReportsState extends State<DtrReports> {
             assignmentEffectiveFrom: _assignmentEffectiveFrom,
             assignmentEffectiveTo: _assignmentEffectiveTo,
             assignmentSegments: _exportAssignmentSegments,
+            reportableThrough: _reportableThrough,
             signatories: signatories,
           );
           final bytes = Uint8List.fromList(utf8.encode(html));
@@ -1160,6 +1177,7 @@ class _DtrReportsState extends State<DtrReports> {
           assignmentEffectiveFrom: _assignmentEffectiveFrom,
           assignmentEffectiveTo: _assignmentEffectiveTo,
           assignmentSegments: _exportAssignmentSegments,
+          reportableThrough: _reportableThrough,
           signatories: signatories,
           pageFormat: pageFormat,
         ),
@@ -1190,6 +1208,7 @@ class _DtrReportsState extends State<DtrReports> {
           assignmentEffectiveFrom: _assignmentEffectiveFrom,
           assignmentEffectiveTo: _assignmentEffectiveTo,
           assignmentSegments: _exportAssignmentSegments,
+          reportableThrough: _reportableThrough,
           signatories: signatories,
           pageFormat: pageFormat,
         );
@@ -1414,13 +1433,14 @@ class _DtrReportsState extends State<DtrReports> {
   Future<DtrExportItem> _prepareDtrExportItem(EmployeeOption employee) async {
     final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
     final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
-    final records = await TimeRecordRepo.instance.listForAdmin(
+    final recordsPage = await TimeRecordRepo.instance.listPageForAdmin(
       startDate: monthStart,
       endDate: monthEnd,
       userId: employee.id,
       limit: 500,
       recompute: true,
     );
+    final records = recordsPage.items;
     final assignmentTimeline = await _fetchAssignmentTimelineForEmployee(
       employee.id,
     );
@@ -1442,6 +1462,7 @@ class _DtrReportsState extends State<DtrReports> {
       month: _selectedMonth,
       startDay: _rangeStartDay,
       endDay: _rangeEndDay,
+      reportableThrough: recordsPage.reportableThrough,
     )) {
       throw StateError(
         'Attendance policy data could not be verified for ${employee.fullName}.',
@@ -1503,6 +1524,7 @@ class _DtrReportsState extends State<DtrReports> {
             ),
           )
           .toList(growable: false),
+      reportableThrough: recordsPage.reportableThrough,
     );
   }
 

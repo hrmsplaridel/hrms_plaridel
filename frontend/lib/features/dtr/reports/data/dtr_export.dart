@@ -131,6 +131,7 @@ class DtrExportItem {
     this.assignmentEffectiveFrom,
     this.assignmentEffectiveTo,
     this.assignmentSegments = const [],
+    this.reportableThrough,
   });
 
   final String employeeName;
@@ -144,6 +145,7 @@ class DtrExportItem {
   final DateTime? assignmentEffectiveFrom;
   final DateTime? assignmentEffectiveTo;
   final List<DtrAssignmentSegment> assignmentSegments;
+  final DateTime? reportableThrough;
 }
 
 class DtrAssignmentSegment {
@@ -391,15 +393,17 @@ class DtrExport {
 
   /// Last date in [year]/[month] included in undertime/absent for print/PDF/Excel/Word.
   /// Days after this (rest of current month not yet occurred) print blank — not ABSENT.
-  static DateTime _exportStatsInclusiveEnd(int year, int month) {
+  static DateTime _exportStatsInclusiveEnd(
+    int year,
+    int month, {
+    DateTime? reportableThrough,
+  }) {
     final monthStart = DateTime(year, month, 1);
     final lastDay = DateTime(year, month + 1, 0).day;
     final monthEnd = DateTime(year, month, lastDay);
-    final t = DateTime(
-      DateTime.now().year,
-      DateTime.now().month,
-      DateTime.now().day,
-    );
+    final now = DateTime.now();
+    final source = reportableThrough ?? now;
+    final t = DateTime(source.year, source.month, source.day);
     if (monthEnd.isBefore(t)) {
       return monthEnd;
     }
@@ -725,6 +729,7 @@ class DtrExport {
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
     List<DtrAssignmentSegment> assignmentSegments = const [],
+    DateTime? reportableThrough,
     DtrExportSignatories? signatories,
     PdfPageFormat pageFormat = PdfPageFormat.legal,
   }) async {
@@ -756,6 +761,7 @@ class DtrExport {
         assignmentEffectiveFrom: assignmentEffectiveFrom,
         assignmentEffectiveTo: assignmentEffectiveTo,
         assignmentSegments: assignmentSegments,
+        reportableThrough: reportableThrough,
       );
       return _buildOneDtrForm(
         employeeName: employeeName,
@@ -853,6 +859,7 @@ class DtrExport {
           assignmentEffectiveFrom: item.assignmentEffectiveFrom,
           assignmentEffectiveTo: item.assignmentEffectiveTo,
           assignmentSegments: item.assignmentSegments,
+          reportableThrough: item.reportableThrough,
         );
         return _buildOneDtrForm(
           employeeName: item.employeeName,
@@ -1115,6 +1122,7 @@ class DtrExport {
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
     List<DtrAssignmentSegment> assignmentSegments = const [],
+    DateTime? reportableThrough,
   }) {
     var totalUndertimeMin = 0;
     var totalRawUndertimeMin = 0;
@@ -1126,7 +1134,11 @@ class DtrExport {
     final shiftWd = workingDays != null && workingDays.isNotEmpty
         ? workingDays.toSet()
         : {1, 2, 3, 4, 5};
-    final statsEnd = _exportStatsInclusiveEnd(year, month);
+    final statsEnd = _exportStatsInclusiveEnd(
+      year,
+      month,
+      reportableThrough: reportableThrough,
+    );
 
     for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
@@ -1388,6 +1400,7 @@ class DtrExport {
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
     List<DtrAssignmentSegment> assignmentSegments = const [],
+    DateTime? reportableThrough,
     DtrExportSignatories? signatories,
   }) async {
     const policy = _ExportAttendancePolicy.defaults;
@@ -1588,7 +1601,11 @@ class DtrExport {
     }
     row++;
 
-    final statsEndExcel = _exportStatsInclusiveEnd(year, month);
+    final statsEndExcel = _exportStatsInclusiveEnd(
+      year,
+      month,
+      reportableThrough: reportableThrough,
+    );
     for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
@@ -1870,6 +1887,7 @@ class DtrExport {
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
     List<DtrAssignmentSegment> assignmentSegments = const [],
+    DateTime? reportableThrough,
     DtrExportSignatories? signatories,
   }) async {
     const policy = _ExportAttendancePolicy.defaults;
@@ -1933,7 +1951,11 @@ class DtrExport {
         ? '<td class="right" style="color:#${c.length == 8 ? c.substring(2) : c};">$t</td>'
         : '<td class="right">$t</td>';
 
-    final statsEndWordExport = _exportStatsInclusiveEnd(year, month);
+    final statsEndWordExport = _exportStatsInclusiveEnd(
+      year,
+      month,
+      reportableThrough: reportableThrough,
+    );
     for (var d = start.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
@@ -2124,6 +2146,7 @@ class DtrExport {
     DateTime? assignmentEffectiveFrom,
     DateTime? assignmentEffectiveTo,
     List<DtrAssignmentSegment> assignmentSegments = const [],
+    DateTime? reportableThrough,
     DtrExportSignatories signatories = DtrExportSignatories.empty,
   }) {
     final policy = _ExportAttendancePolicy.defaults;
@@ -2187,7 +2210,11 @@ class DtrExport {
         ? '<td class="right" style="color:#${c.length == 8 ? c.substring(2) : c};">$t</td>'
         : '<td class="right">$t</td>';
 
-    final statsEndWordExport = _exportStatsInclusiveEnd(year, month);
+    final statsEndWordExport = _exportStatsInclusiveEnd(
+      year,
+      month,
+      reportableThrough: reportableThrough,
+    );
     for (var d = effectiveStart.day; d <= end.day; d++) {
       final dt = DateTime(year, month, d);
       final rec = recordsByDate[dt];
