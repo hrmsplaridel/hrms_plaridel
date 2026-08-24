@@ -115,6 +115,29 @@ const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const MAX_DTR_RANGE_DAYS = 62;
 const DEFAULT_DTR_PAGE_SIZE = 500;
 const MAX_DTR_PAGE_SIZE = 2000;
+const MAX_DTR_BULK_REPORT_EMPLOYEES = 100;
+
+function parseEmployeeIdList(value) {
+  const values = Array.isArray(value) ? value : String(value || '').split(',');
+  const ids = [
+    ...new Set(
+      values
+        .map((item) => String(item).trim().toLowerCase())
+        .filter(Boolean)
+    ),
+  ];
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (ids.some((id) => !uuidPattern.test(id))) {
+    return { ids: [], error: 'employee_ids must contain valid UUID values' };
+  }
+  if (ids.length > MAX_DTR_BULK_REPORT_EMPLOYEES) {
+    return {
+      ids: [],
+      error: `A bulk DTR report can include at most ${MAX_DTR_BULK_REPORT_EMPLOYEES} employees`,
+    };
+  }
+  return { ids, error: null };
+}
 
 function inclusiveIsoDateRangeDays(startDate, endDate) {
   const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -407,11 +430,20 @@ async function computePmLateStatus(employeeId, dateStr, breakInIso) {
  * Returns 0 for holiday/on_leave or when no shift. For partial-day suspension (coverage am_only/pm_only),
  * only the non-suspended half is evaluated. Seconds ignored.
  */
-async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, status, holidayId, coverage) {
+async function computeLateMinutes(
+  employeeId,
+  dateStr,
+  timeInIso,
+  breakInIso,
+  status,
+  holidayId,
+  coverage,
+  prefetchedShiftInfo = null
+) {
   if (status === 'on_leave') return 0;
   const isHolidayOrSuspension = status === 'holiday' || holidayId != null;
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
-  const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+  const shiftInfo = prefetchedShiftInfo || await getAssignmentShiftForDate(employeeId, dateStr);
   if (!shiftInfo) return 0;
   const { startMinutes, graceMinutes, breakEndMinutes } = shiftInfo;
   const type = getShiftType(shiftInfo);
@@ -452,7 +484,8 @@ async function computeUndertimeMinutes(
   coverage,
   timeInIso,
   breakInIso,
-  locatorSegments = []
+  locatorSegments = [],
+  prefetchedShiftInfo = null
 ) {
   if (status === 'on_leave') return 0;
   if (
@@ -466,7 +499,7 @@ async function computeUndertimeMinutes(
   }
   const isHolidayOrSuspension = status === 'holiday' || holidayId != null;
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
-  const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+  const shiftInfo = prefetchedShiftInfo || await getAssignmentShiftForDate(employeeId, dateStr);
   if (!shiftInfo || shiftInfo.endMinutes == null) return 0;
   const type = getShiftType(shiftInfo);
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
@@ -778,19 +811,25 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
   if (!startStr || !endStr) return map;
   await ensureShiftPunchModeColumn(pool);
   const res = await pool.query(
-    `SELECT a.employee_id,
+    `SELECT a.id,
+            a.employee_id,
             a.department_id,
+            d.name AS department_name,
+            p.name AS position_name,
             a.shift_id,
+            s.name AS shift_name,
             a.effective_from::text AS effective_from,
             a.effective_to::text AS effective_to,
-            COALESCE(a.override_start_time, s.start_time) AS start_time,
-            COALESCE(a.override_end_time, s.end_time) AS end_time,
-            COALESCE(a.override_break_end, s.break_end) AS break_end,
+            COALESCE(a.override_start_time, s.start_time)::text AS start_time,
+            COALESCE(a.override_end_time, s.end_time)::text AS end_time,
+            COALESCE(a.override_break_end, s.break_end)::text AS break_end,
             s.punch_mode,
             s.grace_period_minutes,
             s.working_days
      FROM assignments a
      LEFT JOIN shifts s ON s.id = a.shift_id
+     LEFT JOIN departments d ON d.id = a.department_id
+     LEFT JOIN positions p ON p.id = a.position_id
      WHERE a.employee_id = ANY($1::uuid[])
        AND a.effective_from <= $3::date
        AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
@@ -801,10 +840,17 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
     const empId = r.employee_id;
     const startTimeStr = r.start_time;
     const shift = {
+      id: r.id,
       departmentId: r.department_id || null,
+      departmentName: r.department_name || null,
+      positionName: r.position_name || null,
       shiftId: r.shift_id || null,
+      shiftName: r.shift_name || null,
       effective_from: String(r.effective_from).slice(0, 10),
       effective_to: r.effective_to ? String(r.effective_to).slice(0, 10) : null,
+      startTime: r.start_time || null,
+      endTime: r.end_time || null,
+      breakEnd: r.break_end || null,
       startMinutes: startTimeStr ? timeToMinutes(startTimeStr) : null,
       endMinutes: r.end_time ? timeToMinutes(r.end_time) : null,
       breakEndMinutes: r.break_end ? timeToMinutes(r.break_end) : null,
@@ -861,6 +907,56 @@ async function resolveReportableThrough({ employeeId, rangeEnd, holidayByDate })
   return candidate;
 }
 
+function resolveReportableThroughFromAssignments({
+  employeeId,
+  rangeEnd,
+  holidayByDate,
+  assignmentsByEmployee,
+}) {
+  const todayStr = todayInHrmsTimezone();
+  const nowMinutes = nowMinutesInHrmsTimezone();
+  let candidate = rangeEnd < todayStr ? rangeEnd : todayStr;
+
+  for (let checked = 0; checked < 3; checked += 1) {
+    const shiftInfo = getShiftInfoForDateFromAssignments(
+      assignmentsByEmployee,
+      employeeId,
+      candidate
+    );
+    if (
+      isAttendanceDateFinalized({
+        dateStr: candidate,
+        todayStr,
+        nowMinutes,
+        shiftInfo,
+        holidayInfo: holidayByDate.get(candidate) || null,
+      })
+    ) {
+      return candidate;
+    }
+    candidate = addDaysToIsoDate(candidate, -1);
+  }
+  return candidate;
+}
+
+function assignmentForBulkReport(assignment) {
+  return {
+    id: assignment.id || null,
+    department_id: assignment.departmentId || null,
+    department_name: assignment.departmentName || null,
+    position_name: assignment.positionName || null,
+    shift_id: assignment.shiftId || null,
+    shift_name: assignment.shiftName || null,
+    effective_from: assignment.effective_from,
+    effective_to: assignment.effective_to,
+    start_time: assignment.startTime,
+    end_time: assignment.endTime,
+    break_end: assignment.breakEnd,
+    punch_mode: assignment.punchMode || 'auto',
+    working_days: assignment.workingDays || [1, 2, 3, 4, 5],
+  };
+}
+
 /** True if holidays table has coverage column (work suspension migration applied). */
 let _holidaysHasCoverageColumnCached = null;
 async function _holidaysHasCoverageColumn() {
@@ -883,9 +979,17 @@ async function getHolidayByDate(dateStr) {
 // GET /api/dtr-daily-summary - list for admin (filters: start_date, end_date, employee_id, department_id, limit, offset)
 // - No date range: `limit` applies to SQL only (default 500, max 1000), e.g. dashboard "recent" list.
 // - With start_date + end_date: the final merged result is paginated and exposes its total count.
-router.get('/', protect, async (req, res) => {
+async function listDtrDailySummaries(req, res) {
   try {
-    const { start_date, end_date, employee_id, department_id, limit: limitRaw, offset: offsetRaw } = req.query;
+    const {
+      start_date,
+      end_date,
+      employee_id,
+      employee_ids,
+      department_id,
+      limit: limitRaw,
+      offset: offsetRaw,
+    } = req.query;
     if (!!start_date !== !!end_date) {
       return res.status(400).json({ error: 'start_date and end_date must be provided together' });
     }
@@ -910,6 +1014,14 @@ router.get('/', protect, async (req, res) => {
       employeeId: scopedEmployeeId,
       departmentId: scopedDepartmentId,
     } = resolveDtrDailySummaryScope(req.user, { employee_id, department_id });
+    const parsedEmployeeIds = parseEmployeeIdList(employee_ids);
+    if (parsedEmployeeIds.error) {
+      return res.status(400).json({ error: parsedEmployeeIds.error });
+    }
+    const requestedEmployeeIds = parsedEmployeeIds.ids;
+    if (requestedEmployeeIds.length > 0 && !privileged) {
+      return res.status(403).json({ error: 'Bulk employee DTR access is not allowed' });
+    }
     if (!privileged && !scopedEmployeeId) {
       return res.status(401).json({ error: 'Authenticated employee id is required' });
     }
@@ -928,6 +1040,10 @@ router.get('/', protect, async (req, res) => {
     if (scopedEmployeeId && privileged) {
       conditions.push(`d.employee_id = $${i++}`);
       params.push(scopedEmployeeId);
+    }
+    if (requestedEmployeeIds.length > 0) {
+      conditions.push(`d.employee_id = ANY($${i++}::uuid[])`);
+      params.push(requestedEmployeeIds);
     }
     if (scopedDepartmentId) {
       const depIdx = i;
@@ -998,11 +1114,23 @@ router.get('/', protect, async (req, res) => {
       rawEmployeeIds.length > 0 && rawRangeStart && rawRangeEnd
         ? await getAssignmentsForEmployeesInRange(rawEmployeeIds, rawRangeStart, rawRangeEnd)
         : new Map();
+    const rawAttendancePolicyContext =
+      rawEmployeeIds.length > 0 && rawRangeStart && rawRangeEnd
+        ? await loadAttendancePolicyContext(
+            pool,
+            rawEmployeeIds,
+            rawRangeStart,
+            rawRangeEnd,
+            rawAssignmentsByEmployee
+          )
+        : null;
     const activeHolidayByDate =
       rawRangeStart && rawRangeEnd
         ? await loadHolidayOverlayMap(pool, rawRangeStart, rawRangeEnd)
         : new Map();
 
+    let reportEmployeeIds = rawEmployeeIds;
+    let reportAssignmentsByEmployee = rawAssignmentsByEmployee;
     const rows = await Promise.all(rawRows.map(async (r) => {
       // Use the date-only text from SQL to avoid timezone shifting issues when JS receives Date objects.
       const dateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
@@ -1047,7 +1175,8 @@ router.get('/', protect, async (req, res) => {
           r.break_in,
           effectiveStatus,
           activeHolidayId,
-          coverage
+          coverage,
+          shiftInfo
         );
         undertimeMinutes = await computeUndertimeMinutes(
           r.employee_id,
@@ -1058,17 +1187,26 @@ router.get('/', protect, async (req, res) => {
           activeHolidayId,
           coverage,
           r.time_in,
-          r.break_in
+          r.break_in,
+          [],
+          shiftInfo
         );
-        const adjusted = await applyAttendancePolicyPenalties(
-          r.employee_id,
-          dateStr,
+        const policyForDay = rawAttendancePolicyContext
+          ? resolveAttendancePolicy(
+              rawAttendancePolicyContext,
+              r.employee_id,
+              dateStr,
+              shiftInfo
+            )
+          : await getAttendancePolicyForEmployeeDate(r.employee_id, dateStr);
+        const adjusted = calculateAttendancePolicyPenalties(
+          policyForDay,
           lateMinutes,
           undertimeMinutes
         );
         lateMinutes = adjusted.lateMinutes;
         undertimeMinutes = adjusted.undertimeMinutes;
-        effectiveAttendancePolicy = adjusted.policy;
+        effectiveAttendancePolicy = policyForDay;
       }
       const recordForRemark = {
         time_in: r.time_in,
@@ -1145,6 +1283,23 @@ router.get('/', protect, async (req, res) => {
           );
           if (u.rows[0]) userIdToName[scopedEmployeeId] = u.rows[0].full_name;
         }
+      } else if (requestedEmployeeIds.length > 0) {
+        const selectedEmployees = await pool.query(
+          `SELECT id, full_name
+           FROM users
+           WHERE id = ANY($1::uuid[])
+           ORDER BY full_name`,
+          [requestedEmployeeIds]
+        );
+        const availableById = new Map(
+          selectedEmployees.rows.map((row) => [String(row.id), row])
+        );
+        employeeIds = requestedEmployeeIds.filter((id) => availableById.has(id));
+        for (const employee of selectedEmployees.rows) {
+          if (employee.id && employee.full_name) {
+            userIdToName[employee.id] = employee.full_name;
+          }
+        }
       } else if (scopedDepartmentId && startStr && endStr) {
         const deptEmps = await pool.query(
           `SELECT DISTINCT u.id, u.full_name
@@ -1178,6 +1333,8 @@ router.get('/', protect, async (req, res) => {
       }
 
       const assignmentsByEmployee = await getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr);
+      reportEmployeeIds = employeeIds;
+      reportAssignmentsByEmployee = assignmentsByEmployee;
       const attendancePolicyContext = await loadAttendancePolicyContext(
         pool,
         employeeIds,
@@ -1533,7 +1690,8 @@ router.get('/', protect, async (req, res) => {
           coverage,
           row.time_in,
           row.break_in,
-          effectiveLocatorSegments
+          effectiveLocatorSegments,
+          shiftInfo
         );
         row.attendance_remark = await computeAttendanceRemark(
           row,
@@ -1588,8 +1746,17 @@ router.get('/', protect, async (req, res) => {
     const authorizedRows = privileged
       ? rows
       : rows.filter((row) => String(row.user_id) === String(scopedEmployeeId));
+    if (req.bulkReport && res.locals) {
+      res.locals.dtrReportContext = {
+        employeeIds: reportEmployeeIds,
+        assignmentsByEmployee: reportAssignmentsByEmployee,
+        holidayByDate: activeHolidayByDate,
+        rangeStart: startStr,
+        rangeEnd: endStr,
+      };
+    }
     let payload = authorizedRows;
-    if (hasDateRange) {
+    if (hasDateRange && !req.bulkReport) {
       if (scopedEmployeeId && endStr) {
         const reportableThrough = await resolveReportableThrough({
           employeeId: scopedEmployeeId,
@@ -1617,6 +1784,110 @@ router.get('/', protect, async (req, res) => {
   } catch (err) {
     console.error('[dtr-daily-summary GET]', err);
     res.status(500).json({ error: 'Failed to fetch DTR summary' });
+  }
+}
+
+router.get('/', protect, listDtrDailySummaries);
+
+// POST /api/dtr-daily-summary/bulk-report
+// Returns report-ready DTR rows and historical assignment timelines in one
+// bounded request. The Flutter client may call this endpoint in batches when
+// more than MAX_DTR_BULK_REPORT_EMPLOYEES are selected.
+router.post('/bulk-report', protect, requireAdminOrSupervisor, async (req, res) => {
+  try {
+    const { employee_ids, start_date, end_date } = req.body || {};
+    const parsedEmployeeIds = parseEmployeeIdList(employee_ids);
+    if (parsedEmployeeIds.error) {
+      return res.status(400).json({ error: parsedEmployeeIds.error });
+    }
+    if (parsedEmployeeIds.ids.length === 0) {
+      return res.status(400).json({ error: 'employee_ids is required' });
+    }
+    if (!start_date || !end_date) {
+      return res.status(400).json({ error: 'start_date and end_date are required' });
+    }
+
+    const captured = {
+      statusCode: 200,
+      body: null,
+      headers: {},
+      locals: {},
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(body) {
+        this.body = body;
+        return this;
+      },
+      setHeader(name, value) {
+        this.headers[String(name).toLowerCase()] = value;
+      },
+    };
+    const reportRequest = Object.create(req);
+    reportRequest.bulkReport = true;
+    Object.defineProperty(reportRequest, 'query', {
+      configurable: true,
+      enumerable: true,
+      value: {
+        start_date,
+        end_date,
+        employee_ids: parsedEmployeeIds.ids,
+        recompute: 'true',
+      },
+    });
+
+    await listDtrDailySummaries(reportRequest, captured);
+    if (captured.statusCode >= 400) {
+      return res.status(captured.statusCode).json(captured.body || {
+        error: 'Failed to prepare bulk DTR report',
+      });
+    }
+
+    const context = captured.locals.dtrReportContext || {};
+    const availableIds = new Set(
+      (context.employeeIds || []).map((id) => String(id))
+    );
+    const recordsByEmployee = new Map();
+    for (const row of Array.isArray(captured.body) ? captured.body : []) {
+      const employeeId = String(row.user_id || '');
+      if (!employeeId) continue;
+      const employeeRows = recordsByEmployee.get(employeeId) || [];
+      employeeRows.push(row);
+      recordsByEmployee.set(employeeId, employeeRows);
+    }
+
+    const employees = [];
+    const errors = [];
+    for (const employeeId of parsedEmployeeIds.ids) {
+      if (!availableIds.has(employeeId)) {
+        errors.push({ employee_id: employeeId, error: 'Employee was not found' });
+        continue;
+      }
+      const assignmentTimeline = context.assignmentsByEmployee?.get(employeeId) || [];
+      employees.push({
+        employee_id: employeeId,
+        records: recordsByEmployee.get(employeeId) || [],
+        assignments: assignmentTimeline.map(assignmentForBulkReport),
+        reportable_through: resolveReportableThroughFromAssignments({
+          employeeId,
+          rangeEnd: context.rangeEnd || String(end_date).slice(0, 10),
+          holidayByDate: context.holidayByDate || new Map(),
+          assignmentsByEmployee: context.assignmentsByEmployee || new Map(),
+        }),
+      });
+    }
+
+    return res.json({
+      start_date: String(start_date).slice(0, 10),
+      end_date: String(end_date).slice(0, 10),
+      batch_limit: MAX_DTR_BULK_REPORT_EMPLOYEES,
+      employees,
+      errors,
+    });
+  } catch (err) {
+    console.error('[dtr-daily-summary POST /bulk-report]', err);
+    return res.status(500).json({ error: 'Failed to prepare bulk DTR report' });
   }
 });
 
