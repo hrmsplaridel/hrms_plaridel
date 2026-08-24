@@ -3,11 +3,46 @@ const assert = require('node:assert/strict');
 
 const {
   getShiftType,
+  getExpectedWorkMinutesForCoverage,
   getShiftExpectedLogs,
   interpretPunchesForShift,
   computeTotalHoursFromRecord,
   computeClockOutUndertimeMinutes,
 } = require('../src/services/shiftAttendance');
+
+test('partial holiday coverage keeps only the scheduled shift session', () => {
+  const fullDay = {
+    startMinutes: 8 * 60,
+    endMinutes: 17 * 60,
+    breakEndMinutes: 13 * 60,
+    punchMode: 'full_day',
+  };
+  const amOnly = {
+    startMinutes: 8 * 60,
+    endMinutes: 12 * 60,
+    punchMode: 'am_only',
+  };
+  const pmOnly = {
+    startMinutes: 13 * 60,
+    endMinutes: 17 * 60,
+    punchMode: 'pm_only',
+  };
+  const eveningSession = {
+    startMinutes: 18 * 60,
+    endMinutes: 19 * 60,
+    punchMode: 'single_session',
+  };
+
+  assert.equal(getExpectedWorkMinutesForCoverage(fullDay, 'whole_day'), 0);
+  assert.equal(getExpectedWorkMinutesForCoverage(fullDay, 'am_only'), 240);
+  assert.equal(getExpectedWorkMinutesForCoverage(fullDay, 'pm_only'), 240);
+  assert.equal(getExpectedWorkMinutesForCoverage(amOnly, 'am_only'), 0);
+  assert.equal(getExpectedWorkMinutesForCoverage(amOnly, 'pm_only'), 240);
+  assert.equal(getExpectedWorkMinutesForCoverage(pmOnly, 'am_only'), 240);
+  assert.equal(getExpectedWorkMinutesForCoverage(pmOnly, 'pm_only'), 0);
+  assert.equal(getExpectedWorkMinutesForCoverage(eveningSession, 'am_only'), 60);
+  assert.equal(getExpectedWorkMinutesForCoverage(eveningSession, 'pm_only'), 0);
+});
 
 test('auto mode preserves legacy 10 AM to 2 PM classification as full day', () => {
   const shift = {

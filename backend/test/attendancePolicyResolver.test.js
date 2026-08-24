@@ -73,6 +73,47 @@ test('report deduction does not apply an already-processed multiplier twice', ()
   assert.equal(deduction.equivalent_day, 0.25);
 });
 
+test('report deduction exempts whole-day holidays but keeps partial-day penalties', () => {
+  const policy = {
+    workHoursPerDay: 8,
+    useEquivalentDayConversion: true,
+    deductLate: true,
+    deductUndertime: true,
+    absentEqualsFullDayDeduction: true,
+    deductionMultiplier: 1,
+  };
+
+  const wholeDay = calculateAttendanceReportDeduction({
+    policy,
+    lateMinutes: 0,
+    undertimeMinutes: 240,
+    status: 'holiday',
+    expectedWorkMinutes: 480,
+    holidayCoverage: 'whole_day',
+  });
+  const amOnly = calculateAttendanceReportDeduction({
+    policy,
+    lateMinutes: 0,
+    undertimeMinutes: 240,
+    status: 'holiday',
+    expectedWorkMinutes: 480,
+    holidayCoverage: 'am_only',
+  });
+  const pmOnly = calculateAttendanceReportDeduction({
+    policy,
+    lateMinutes: 15,
+    undertimeMinutes: 120,
+    status: 'holiday',
+    expectedWorkMinutes: 480,
+    holidayCoverage: 'pm_only',
+  });
+
+  assert.equal(wholeDay.total_minutes, 0);
+  assert.equal(amOnly.total_minutes, 240);
+  assert.equal(amOnly.equivalent_day, 0.5);
+  assert.equal(pmOnly.total_minutes, 135);
+});
+
 test('attendance penalties preserve late and undertime as separate source buckets', () => {
   const policy = {
     deductLate: true,

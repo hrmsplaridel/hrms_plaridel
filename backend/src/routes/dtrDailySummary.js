@@ -11,6 +11,7 @@ const {
   ensureShiftPunchModeColumn,
   getShiftType: resolveShiftType,
   getExpectedWorkMinutes: resolveExpectedWorkMinutes,
+  getExpectedWorkMinutesForCoverage,
   getExpectedAmEndMinutes,
   computeClockOutUndertimeMinutes,
   getExpectedLogsForDay: resolveExpectedLogsForDay,
@@ -1202,7 +1203,10 @@ router.get('/', protect, async (req, res) => {
               time_out: null,
               total_hours: null,
               late_minutes: 0,
-              undertime_minutes: 0,
+              undertime_minutes: getExpectedWorkMinutesForCoverage(
+                shiftInfo,
+                cov
+              ),
               status: 'holiday',
               pm_status: null,
               remarks: null,
@@ -1535,6 +1539,7 @@ router.get('/', protect, async (req, res) => {
           undertimeMinutes: row.undertime_minutes,
           status: row.status,
           expectedWorkMinutes: shiftInfo ? getExpectedWorkMinutes(shiftInfo) : 0,
+          holidayCoverage: row.coverage,
         });
       }
 
