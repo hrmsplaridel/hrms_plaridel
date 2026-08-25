@@ -20,6 +20,13 @@ const {
   normalizeEmployeeSetup,
   applyEmployeeSetup,
 } = require('../services/employeeSetupTransaction');
+const {
+  EmployeeAccountSecurityError,
+  lockAndValidateAccountTransition,
+  lockAndValidateBulkAccountStatusTransition,
+  revokeActiveRefreshTokens,
+  writeAccountSecurityAudit,
+} = require('../services/employeeAccountSecurity');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
@@ -581,6 +588,7 @@ router.get('/export/csv', protect, requireAdmin, async (req, res) => {
 
 // POST /api/employees/bulk-status — set is_active for many users (admin only).
 router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     const { employee_ids: idsRaw, is_active: isActive } = req.body;
     if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
@@ -597,14 +605,59 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
     if (ids.length === 0) {
       return res.status(400).json({ error: 'No valid employee IDs' });
     }
-    const result = await pool.query(
-      'UPDATE users SET is_active = $2, updated_at = now() WHERE id = ANY($1::uuid[]) RETURNING id',
-      [ids, isActive],
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const targets = await lockAndValidateBulkAccountStatusTransition(client, {
+      actorId: req.user.id,
+      targetIds: ids,
+      isActive,
+    });
+    const result = await client.query(
+      `UPDATE users
+          SET is_active = $2,
+              updated_at = now()
+        WHERE id = ANY($1::uuid[])
+        RETURNING id`,
+      [ids, isActive]
     );
+    if (!isActive) {
+      await revokeActiveRefreshTokens(
+        client,
+        targets.map((target) => target.id)
+      );
+    }
+    for (const target of targets) {
+      if (target.is_active === isActive) continue;
+      await writeAccountSecurityAudit(client, {
+        actorId: req.user.id,
+        targetId: target.id,
+        action: isActive
+          ? 'employee_account_reactivated'
+          : 'employee_account_deactivated',
+        previous: {
+          role: target.role,
+          is_active: target.is_active,
+          employment_status: target.employment_status,
+        },
+        next: {
+          role: target.role,
+          is_active: isActive,
+          employment_status: target.employment_status,
+        },
+        source: 'employee_bulk_status',
+      });
+    }
+    await client.query('COMMIT');
     res.json({ updated: result.rowCount });
   } catch (err) {
+    if (client) await client.query('ROLLBACK');
+    if (err instanceof EmployeeAccountSecurityError) {
+      return res.status(err.statusCode).json({ error: err.message, code: err.code });
+    }
     console.error('[employees POST /bulk-status]', err);
     res.status(500).json({ error: 'Failed to update employees' });
+  } finally {
+    client?.release();
   }
 });
 
@@ -938,6 +991,10 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const nonActiveEmploymentStatus =
       effectiveEmploymentStatus !== 'active';
     const effectiveIsActive = nonActiveEmploymentStatus ? false : is_active;
+    const requestedRole =
+      role !== undefined && ['admin', 'employee'].includes(role)
+        ? role
+        : undefined;
     const requestedLeaveCreditEligible = leave_credit_eligible !== undefined
       ? boolField(leave_credit_eligible, true)
       : existingRes.rows[0].leave_credit_eligible !== false;
@@ -1071,8 +1128,16 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     let result;
     let updatedSetup = null;
+    let accountTransition;
     try {
       await client.query('BEGIN');
+      accountTransition = await lockAndValidateAccountTransition(client, {
+        actorId: req.user.id,
+        targetId: id,
+        nextRole: requestedRole,
+        nextIsActive: effectiveIsActive,
+        nextEmploymentStatus: effectiveEmploymentStatus,
+      });
       result = await client.query(
         `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
          RETURNING ${returningColumns.join(', ')}`,
@@ -1131,13 +1196,20 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
               AND is_active = true`,
           [id, effectiveSeparationDate]
         );
-        await client.query(
-          `UPDATE auth_refresh_tokens
-              SET revoked_at = now()
-            WHERE user_id = $1::uuid
-              AND revoked_at IS NULL`,
-          [id]
-        );
+      }
+
+      if (accountTransition.revokeSessions) {
+        await revokeActiveRefreshTokens(client, id);
+      }
+      if (accountTransition.changed) {
+        await writeAccountSecurityAudit(client, {
+          actorId: req.user.id,
+          targetId: id,
+          action: 'employee_account_security_updated',
+          previous: accountTransition.previous,
+          next: accountTransition.next,
+          source: 'employee_update',
+        });
       }
 
       await client.query('COMMIT');
@@ -1150,6 +1222,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
     res.json({ ...result.rows[0], updated_setup: updatedSetup });
   } catch (err) {
+    if (err instanceof EmployeeAccountSecurityError) {
+      return res.status(err.statusCode).json({ error: err.message, code: err.code });
+    }
     if (err instanceof EmployeeSetupValidationError) {
       return res.status(err.statusCode).json({ error: err.message });
     }
@@ -1164,16 +1239,41 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
 // DELETE /api/employees/:id - deactivate (or soft-delete); optional hard delete
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
-    const result = await pool.query(
-      'UPDATE users SET is_active = false, updated_at = now() WHERE id = $1 RETURNING id',
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const transition = await lockAndValidateAccountTransition(client, {
+      actorId: req.user.id,
+      targetId: req.params.id,
+      nextIsActive: false,
+    });
+    await client.query(
+      'UPDATE users SET is_active = false, updated_at = now() WHERE id = $1::uuid',
       [req.params.id]
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
+    await revokeActiveRefreshTokens(client, req.params.id);
+    if (transition.changed) {
+      await writeAccountSecurityAudit(client, {
+        actorId: req.user.id,
+        targetId: req.params.id,
+        action: 'employee_account_deactivated',
+        previous: transition.previous,
+        next: transition.next,
+        source: 'employee_delete',
+      });
+    }
+    await client.query('COMMIT');
     res.status(204).send();
   } catch (err) {
+    if (client) await client.query('ROLLBACK');
+    if (err instanceof EmployeeAccountSecurityError) {
+      return res.status(err.statusCode).json({ error: err.message, code: err.code });
+    }
     console.error('[employees DELETE]', err);
     res.status(500).json({ error: 'Failed to deactivate employee' });
+  } finally {
+    client?.release();
   }
 });
 
