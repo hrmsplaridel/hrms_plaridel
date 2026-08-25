@@ -15,6 +15,12 @@ const {
   validateEmployeeSeparationDates,
   SEPARATION_EMPLOYMENT_STATUSES,
 } = require('../utils/employeeAccountValidation');
+const {
+  EmployeeSetupValidationError,
+  normalizeEmployeeSetup,
+  applyEmployeeSetup,
+} = require('../services/employeeSetupTransaction');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -59,15 +65,15 @@ function generateTemporaryPassword(length = 12) {
   return chars.join('');
 }
 
-async function allocateEmployeeNumber() {
+async function allocateEmployeeNumber(db = pool) {
   // Allocate stable, ascending employee numbers. Keep advancing if an older
   // record already occupies a sequence value (for example after data import).
   while (true) {
-    const seq = await pool.query(
+    const seq = await db.query(
       "SELECT nextval('users_employee_number_seq') AS n"
     );
     const candidate = parseInt(seq.rows[0].n, 10);
-    const exists = await pool.query(
+    const exists = await db.query(
       'SELECT 1 FROM users WHERE employee_number = $1 LIMIT 1',
       [candidate]
     );
@@ -672,7 +678,7 @@ router.get('/:id', protect, async (req, res) => {
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
     await ensureEmployeeProfileColumns();
-    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, separation_date, employment_status, biometric_user_id, leave_credit_eligible } = req.body;
+    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, separation_date, employment_status, biometric_user_id, leave_credit_eligible, setup } = req.body;
     const validationError = validateCreateEmployeePayload(req.body);
     if (validationError) {
       return res.status(400).json({ error: validationError });
@@ -686,7 +692,6 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         ? password.trim()
         : generateTemporaryPassword();
     const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
-    const empNo = await allocateEmployeeNumber();
     const normalizedEmploymentStatus =
       normalizeEmploymentStatus(employment_status);
     const accountIsActive = accountIsActiveForEmploymentStatus(
@@ -702,68 +707,93 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       boolField(leave_credit_eligible, true)
         ? separation_date
         : null;
+    const normalizedSetup = normalizeEmployeeSetup(setup, {
+      effectiveFrom: date_hired,
+      effectiveTo: separation_date || null,
+      isActive: accountIsActive,
+    });
 
-    const result = await pool.query(
-      `INSERT INTO users (
-         email, password_hash, role, first_name, full_name, last_name, middle_name,
-         suffix, sex, date_of_birth, contact_number, address, civil_status,
-         nationality, is_active, employee_number, employment_type, salary_grade,
-         date_hired, separation_date, employment_status, biometric_user_id,
-         leave_credit_eligible, leave_credit_eligible_until
-       )
-       VALUES (
-         $1, $2, $3, $4, $5, $6, $7,
-         $8, $9, $10::date, $11, $12, $13,
-         $14, $15, $16, $17, $18,
-         $19::date, $20::date, $21, $22, $23, $24::date
-       )
-       RETURNING id, employee_number, email, role, first_name, full_name, last_name,
-                 avatar_path, is_active, middle_name, suffix, sex, date_of_birth,
-                 contact_number, address, civil_status, nationality, employment_type,
-                 salary_grade, date_hired, separation_date, employment_status,
-                 biometric_user_id, leave_credit_eligible,
-                 leave_credit_eligible_until`,
-      [
-        email.trim().toLowerCase(),
-        passwordHash,
-        role,
-        first_name?.trim() || null,
-        full_name?.trim() || null,
-        last_name?.trim() || null,
-        middle_name?.trim() || null,
-        suffix?.trim() || null,
-        sex?.trim() || null,
-        date_of_birth || null,
-        contact_number?.trim() || null,
-        address?.trim() || null,
-        civil_status?.trim() || null,
-        nationality?.trim() || null,
-        accountIsActive,
-        empNo,
-        (employment_type && ['regular', 'contractual', 'job_order', 'casual'].includes(employment_type)) ? employment_type : null,
-        salary_grade?.trim() || null,
-        date_hired || null,
-        separation_date || null,
-        normalizedEmploymentStatus,
-        biometric_user_id?.trim() || null,
-        normalizedLeaveCreditEligible,
-        leaveCreditEligibleUntil,
-      ]
-    );
-
+    const client = await pool.connect();
+    let createdEmployee;
+    let initialSetup = null;
     try {
-      // VL/SL: earned credits come from monthly accrual only; no static 15-day seed.
-      await pool.query(
-        `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days)
-         VALUES ($1::uuid, 'vacationLeave', 0, 0, 0, 0), ($1::uuid, 'sickLeave', 0, 0, 0, 0)
-         ON CONFLICT (user_id, leave_type) DO NOTHING`,
-        [result.rows[0].id]
+      await client.query('BEGIN');
+      const empNo = await allocateEmployeeNumber(client);
+      const result = await client.query(
+        `INSERT INTO users (
+           email, password_hash, role, first_name, full_name, last_name, middle_name,
+           suffix, sex, date_of_birth, contact_number, address, civil_status,
+           nationality, is_active, employee_number, employment_type, salary_grade,
+           date_hired, separation_date, employment_status, biometric_user_id,
+           leave_credit_eligible, leave_credit_eligible_until
+         )
+         VALUES (
+           $1, $2, $3, $4, $5, $6, $7,
+           $8, $9, $10::date, $11, $12, $13,
+           $14, $15, $16, $17, $18,
+           $19::date, $20::date, $21, $22, $23, $24::date
+         )
+         RETURNING id, employee_number, email, role, first_name, full_name, last_name,
+                   avatar_path, is_active, middle_name, suffix, sex, date_of_birth,
+                   contact_number, address, civil_status, nationality, employment_type,
+                   salary_grade, date_hired, separation_date, employment_status,
+                   biometric_user_id, leave_credit_eligible,
+                   leave_credit_eligible_until`,
+        [
+          email.trim().toLowerCase(),
+          passwordHash,
+          role,
+          first_name?.trim() || null,
+          full_name?.trim() || null,
+          last_name?.trim() || null,
+          middle_name?.trim() || null,
+          suffix?.trim() || null,
+          sex?.trim() || null,
+          date_of_birth || null,
+          contact_number?.trim() || null,
+          address?.trim() || null,
+          civil_status?.trim() || null,
+          nationality?.trim() || null,
+          accountIsActive,
+          empNo,
+          (employment_type && ['regular', 'contractual', 'job_order', 'casual'].includes(employment_type)) ? employment_type : null,
+          salary_grade?.trim() || null,
+          date_hired || null,
+          separation_date || null,
+          normalizedEmploymentStatus,
+          biometric_user_id?.trim() || null,
+          normalizedLeaveCreditEligible,
+          leaveCreditEligibleUntil,
+        ]
       );
-    } catch (lbErr) {
-      console.warn('[employees POST] Could not create default leave balances:', lbErr.message);
+      createdEmployee = result.rows[0];
+
+      // VL/SL earned credits still come from month-end accrual; these are only
+      // the required zero-value wallets for the new employee.
+      await client.query(
+        `INSERT INTO leave_balances (
+           user_id, leave_type, earned_days, used_days, pending_days, adjusted_days
+         )
+         VALUES
+           ($1::uuid, 'vacationLeave', 0, 0, 0, 0),
+           ($1::uuid, 'sickLeave', 0, 0, 0, 0)
+         ON CONFLICT (user_id, leave_type) DO NOTHING`,
+        [createdEmployee.id]
+      );
+
+      initialSetup = await applyEmployeeSetup(client, {
+        employeeId: createdEmployee.id,
+        setup: normalizedSetup,
+        remarks: 'Initial assignment from employee setup',
+      });
+      await client.query('COMMIT');
+    } catch (transactionError) {
+      await client.query('ROLLBACK');
+      throw transactionError;
+    } finally {
+      client.release();
     }
 
-    const createdEmployee = result.rows[0];
     let accountEmailSent = false;
     let accountEmailError = null;
 
@@ -794,9 +824,16 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       account_email_sent: accountEmailSent,
       account_email_configured: isSmtpConfigured(),
       temporary_password: temporaryPassword,
+      initial_setup: initialSetup,
       ...(accountEmailError ? { account_email_error: accountEmailError } : {}),
     });
   } catch (err) {
+    if (err instanceof EmployeeSetupValidationError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.code === '22P02' || err.code === '23503') {
+      return res.status(400).json({ error: 'Invalid employee setup selection' });
+    }
     if (err.code === '23505') {
       const constraint = String(err.constraint || '');
       if (constraint.includes('biometric_user_id')) {
@@ -838,6 +875,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       biometric_user_id,
       leave_credit_eligible,
       office_id,
+      setup,
     } = req.body;
 
     const existingRes = await pool.query(
@@ -919,6 +957,16 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const canUseOfficeId = office_id !== undefined
       ? await hasUsersOfficeIdColumn()
       : false;
+    const normalizedSetup = normalizeEmployeeSetup(setup, {
+      effectiveFrom: todayInHrmsTimezone(),
+      effectiveTo: effectiveSeparationDate,
+      isActive: !nonActiveEmploymentStatus,
+    });
+    if (nonActiveEmploymentStatus && normalizedSetup?.isActive) {
+      return res.status(400).json({
+        error: 'Inactive or separated employees cannot receive an active setup',
+      });
+    }
 
     const fields = [
       ['first_name', first_name],
@@ -985,7 +1033,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       }
     }
 
-    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    if (updates.length === 0 && !normalizedSetup) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
     updates.push('updated_at = now()');
     values.push(id);
 
@@ -1020,13 +1070,20 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const client = await pool.connect();
     let result;
+    let updatedSetup = null;
     try {
       await client.query('BEGIN');
       result = await client.query(
         `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
          RETURNING ${returningColumns.join(', ')}`,
-        values
-      );
+         values
+       );
+
+      updatedSetup = await applyEmployeeSetup(client, {
+        employeeId: id,
+        setup: normalizedSetup,
+        remarks: 'Updated from employee edit',
+      });
 
       if (
         shouldUpdateSeparation &&
@@ -1092,8 +1149,14 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       client.release();
     }
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
-    res.json(result.rows[0]);
+    res.json({ ...result.rows[0], updated_setup: updatedSetup });
   } catch (err) {
+    if (err instanceof EmployeeSetupValidationError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.code === '22P02' || err.code === '23503') {
+      return res.status(400).json({ error: 'Invalid employee setup selection' });
+    }
     if (err.code === '23505') return res.status(409).json({ error: 'Email already exists' });
     console.error('[employees PUT]', err);
     res.status(500).json({ error: 'Failed to update employee' });
