@@ -239,7 +239,18 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             _biometricIdController.text.trim().isNotEmpty)
           'biometric_user_id': _biometricIdController.text.trim(),
       };
+      if (!_requiresSeparationDate(_employmentStatus)) {
+        final setupChanges = _setupSectionKey.currentState
+            ?.buildAtomicSetupPayload(
+              effectiveFrom: DateTime.now(),
+              changedOnly: true,
+            );
+        if (setupChanges != null) body['setup'] = setupChanges;
+      }
 
+      await ApiClient.instance.put('/api/employees/${_profile.id}', data: body);
+
+      var avatarUploadFailed = false;
       if (_selectedImageBytes != null && _selectedImageBytes!.isNotEmpty) {
         try {
           await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
@@ -248,17 +259,9 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             fileName: 'avatar.jpg',
           );
         } catch (e) {
+          avatarUploadFailed = true;
           debugPrint('Avatar upload failed: $e');
         }
-      }
-
-      if (!mounted) return;
-      await ApiClient.instance.put('/api/employees/${_profile.id}', data: body);
-      if (!_requiresSeparationDate(_employmentStatus)) {
-        await _setupSectionKey.currentState?.saveChangedSetupForEmployee(
-          employeeId: _profile.id,
-          effectiveFrom: DateTime.now(),
-        );
       }
 
       if (!mounted) return;
@@ -268,7 +271,13 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         dtr.loadEmployees(forceRefresh: true);
       } catch (_) {}
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Employee updated successfully.')),
+        SnackBar(
+          content: Text(
+            avatarUploadFailed
+                ? 'Employee setup was updated, but the photo upload failed. Reopen the employee to retry the photo.'
+                : 'Employee updated successfully.',
+          ),
+        ),
       );
       Navigator.of(context).pop(true);
     } catch (e) {

@@ -106,79 +106,45 @@ class EmployeeSetupSectionState extends State<EmployeeSetupSection> {
     });
   }
 
-  Future<void> createInitialSetupForEmployee({
-    required String employeeId,
+  Map<String, dynamic>? buildAtomicSetupPayload({
     required DateTime effectiveFrom,
     DateTime? effectiveTo,
     bool isActive = true,
-  }) async {
+    bool changedOnly = false,
+  }) {
     final current = selection;
-    final effectiveFromText = _dateOnly(effectiveFrom);
-    final effectiveToText = effectiveTo == null ? null : _dateOnly(effectiveTo);
+    final assignmentChanged = !current.sameAssignmentAs(_original);
+    final policyChanged = !current.samePolicyAs(_original);
+    final includeAssignment = changedOnly
+        ? assignmentChanged
+        : current.hasCompleteAssignment;
+    final includePolicy = changedOnly
+        ? policyChanged
+        : current.policyId != null;
+    if (!includeAssignment && !includePolicy) return null;
 
-    if (current.hasAssignmentChoice) {
-      await ApiClient.instance.post(
-        '/api/assignments',
-        data: {
-          'employee_id': employeeId,
-          'department_id': current.departmentId,
-          'position_id': current.positionId,
-          'shift_id': current.shiftId,
-          'effective_from': effectiveFromText,
-          'effective_to': effectiveToText,
-          'is_active': isActive,
-          'remarks': 'Initial assignment from employee setup',
-        },
-      );
+    final payload = <String, dynamic>{
+      'effective_from': _dateOnly(effectiveFrom),
+      'effective_to': effectiveTo == null ? null : _dateOnly(effectiveTo),
+      'is_active': isActive,
+    };
+
+    if (includeAssignment) {
+      payload['assignment'] = current.hasCompleteAssignment
+          ? <String, dynamic>{
+              'department_id': current.departmentId,
+              'position_id': current.positionId,
+              'shift_id': current.shiftId,
+            }
+          : null;
     }
 
-    if (current.policyId != null) {
-      await ApiClient.instance.post(
-        '/api/policy-assignments/employee-upsert',
-        data: {
-          'employee_id': employeeId,
-          'attendance_policy_id': current.policyId,
-          'effective_from': effectiveFromText,
-          'effective_to': effectiveToText,
-          'is_active': isActive,
-        },
-      );
+    if (includePolicy) {
+      payload['policy_assignment'] = current.policyId == null
+          ? null
+          : <String, dynamic>{'attendance_policy_id': current.policyId};
     }
-  }
-
-  Future<void> saveChangedSetupForEmployee({
-    required String employeeId,
-    required DateTime effectiveFrom,
-  }) async {
-    final current = selection;
-    final effectiveFromText = _dateOnly(effectiveFrom);
-
-    if (!current.sameAssignmentAs(_original)) {
-      await ApiClient.instance.post<Map<String, dynamic>>(
-        '/api/assignments',
-        data: {
-          'employee_id': employeeId,
-          'department_id': current.departmentId,
-          'position_id': current.positionId,
-          'shift_id': current.shiftId,
-          'effective_from': effectiveFromText,
-          'is_active': true,
-          'remarks': 'Updated from employee edit',
-        },
-      );
-    }
-
-    if (!current.samePolicyAs(_original)) {
-      await ApiClient.instance.post<Map<String, dynamic>>(
-        '/api/policy-assignments/employee-upsert',
-        data: {
-          'employee_id': employeeId,
-          'attendance_policy_id': current.policyId,
-          'effective_from': effectiveFromText,
-          'is_active': true,
-        },
-      );
-    }
+    return payload;
   }
 
   static String _dateOnly(DateTime d) =>

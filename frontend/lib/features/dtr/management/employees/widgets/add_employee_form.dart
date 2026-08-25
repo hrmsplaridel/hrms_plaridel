@@ -292,6 +292,15 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         'employment_status': _employmentStatus,
         'leave_credit_eligible': _leaveCreditEligible,
       };
+      final initialSetup = _setupSectionKey.currentState
+          ?.buildAtomicSetupPayload(
+            effectiveFrom: _dateHired!,
+            effectiveTo: _requiresSeparationDate(_employmentStatus)
+                ? _separationDate
+                : null,
+            isActive: !_requiresSeparationDate(_employmentStatus),
+          );
+      if (initialSetup != null) body['setup'] = initialSetup;
 
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
         '/api/employees',
@@ -305,24 +314,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       }
 
       final userId = data['id'] as String;
-      String? setupWarning;
-      try {
-        await _setupSectionKey.currentState?.createInitialSetupForEmployee(
-          employeeId: userId,
-          effectiveFrom: _dateHired ?? DateTime.now(),
-          effectiveTo: _requiresSeparationDate(_employmentStatus)
-              ? _separationDate
-              : null,
-          isActive: !_requiresSeparationDate(_employmentStatus),
-        );
-      } catch (e) {
-        setupWarning = _apiErrorMessageFromDio(
-          e,
-          fallback: 'Initial assignment/policy was not saved.',
-        );
-      }
-
-      if (!mounted) return;
+      final postCommitWarnings = <String>[];
       final hire = context.read<RecruitmentHirePrefill>();
       if (hire.hasPendingLink && hire.applicationId != null) {
         try {
@@ -338,11 +330,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           hire.clear();
           _lastAppliedPrefillStamp = null;
         } catch (e) {
-          if (mounted) {
-            _showSnackBar(
-              'Account created, but linking to recruitment failed: $e',
-            );
-          }
+          postCommitWarnings.add('Recruitment linking failed and needs retry.');
+          debugPrint('Recruitment linking failed after employee creation: $e');
         }
       }
 
@@ -354,6 +343,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             fileName: 'avatar.jpg',
           );
         } catch (e) {
+          postCommitWarnings.add('Photo upload failed and needs retry.');
           debugPrint('Avatar upload failed: $e');
         }
       }
@@ -379,12 +369,12 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       }
       if (!mounted) return;
       _clearForm();
-      if (setupWarning != null) {
-        _showSnackBar(
-          'Account created, but setup was not completed: $setupWarning',
-        );
-      }
       if (widget.onAccountCreated != null) {
+        if (postCommitWarnings.isNotEmpty) {
+          _showSnackBar(
+            'Account and setup were saved. ${postCommitWarnings.join(' ')}',
+          );
+        }
         widget.onAccountCreated!();
       } else {
         final emailStatus = !accountIsActive
@@ -394,8 +384,12 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             : emailConfigured
             ? ' Account email failed; please share the login details manually.'
             : ' Email is not configured; please share the login details manually.';
-        final setupStatus = setupWarning == null ? '' : ' Setup needs review.';
-        _showSnackBar('Account created as $privilege.$emailStatus$setupStatus');
+        final postCommitStatus = postCommitWarnings.isEmpty
+            ? ''
+            : ' ${postCommitWarnings.join(' ')}';
+        _showSnackBar(
+          'Account created as $privilege.$emailStatus$postCommitStatus',
+        );
       }
     } on DioException catch (e) {
       if (!mounted) return;
@@ -1180,7 +1174,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           EmployeeSetupSection(
             key: _setupSectionKey,
             title: 'Initial assignment',
-            subtitle: 'Optional setup created after the account is saved.',
+            subtitle:
+                'Optional assignment and policy saved together with the account.',
             validationMessage:
                 'For initial assignment, select Department, Position, and Shift; or leave all three blank.',
             showTopDivider: true,
