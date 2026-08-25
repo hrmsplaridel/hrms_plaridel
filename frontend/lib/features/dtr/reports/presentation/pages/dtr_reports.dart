@@ -69,6 +69,7 @@ class _DtrReportsState extends State<DtrReports> {
   final _searchController = TextEditingController();
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
+  List<int> _availableReportYears = <int>[DateTime.now().year];
   int _rangeStartDay = 1;
   int _rangeEndDay = DateTime(
     DateTime.now().year,
@@ -204,7 +205,10 @@ class _DtrReportsState extends State<DtrReports> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _loadAvailableReportYears();
+      if (mounted) await _load();
+    });
   }
 
   @override
@@ -233,6 +237,30 @@ class _DtrReportsState extends State<DtrReports> {
     return widget.selfService
         ? [if (employee != null) employee]
         : _reportEmployeeOptions;
+  }
+
+  Future<void> _loadAvailableReportYears() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/dtr-daily-summary/report-years',
+      );
+      final rawYears = response.data?['years'];
+      if (rawYears is! List) return;
+      final years =
+          rawYears
+              .map((value) => int.tryParse(value.toString()))
+              .whereType<int>()
+              .where((year) => year >= 1900 && year <= DateTime.now().year)
+              .toSet()
+              .toList()
+            ..sort();
+      if (!years.contains(_selectedYear)) years.add(_selectedYear);
+      years.sort();
+      if (!mounted || years.isEmpty) return;
+      setState(() => _availableReportYears = years);
+    } catch (_) {
+      // Keep the report usable with the local fallback if metadata is unavailable.
+    }
   }
 
   Future<List<EmployeeOption>> _fetchReportEmployees({
@@ -2089,7 +2117,7 @@ class _DtrReportsState extends State<DtrReports> {
             value: _selectedYear,
             dropdownColor: AppTheme.dashPanelOf(context),
             style: AppTheme.dashFieldTextStyle(context),
-            items: List.generate(11, (i) => DateTime.now().year - 5 + i)
+            items: _availableReportYears
                 .map(
                   (y) => DropdownMenuItem(
                     value: y,
@@ -2243,7 +2271,7 @@ class _DtrReportsState extends State<DtrReports> {
                     ),
                     radius: 8,
                   ),
-                  items: List.generate(11, (i) => DateTime.now().year - 5 + i)
+                  items: _availableReportYears
                       .map(
                         (y) => DropdownMenuItem(
                           value: y,
