@@ -130,6 +130,8 @@ function makeBalanceRow(overrides = {}) {
     employment_type: 'regular',
     employment_status: 'active',
     separation_date: null,
+    leave_credit_eligible: true,
+    leave_credit_eligible_until: null,
     ...overrides,
   };
 }
@@ -798,15 +800,17 @@ test('E5 - separationMonthAccrualAmount returns full rate when separation is las
   assert.equal(result.addDays, 1.25);
 });
 
-test('E5 - accrual run prorates separation month for separating employee', async () => {
+test('E5 - separated employee retains final-month accrual eligibility snapshot', async () => {
   // Employee's last day is May 15. Accrual runs for May.
   // Single month (last_accrual_date = 2026-04-01 → 1 month to credit for May)
   // Expected: separation proration only, not hire proration
-  const { pool } = createMockPool({
+  const { pool, calls } = createMockPool({
     balanceRows: [makeBalanceRow({
       last_accrual_date: '2026-04-01',
       separation_date: '2026-05-15',
-      employment_status: 'active', // still marked active until separation processed
+      employment_status: 'resigned',
+      leave_credit_eligible: false,
+      leave_credit_eligible_until: '2026-05-15',
     })],
   });
 
@@ -820,6 +824,13 @@ test('E5 - accrual run prorates separation month for separating employee', async
   const [detail] = result.details;
   assert.equal(detail.separation_prorated, true);
   assert.equal(detail.days_added, round3(15 / 31 * 1.25));
+  assert.ok(
+    calls.some(
+      (call) =>
+        call.sql.includes('FROM leave_balances lb') &&
+        call.sql.includes('leave_credit_eligible_until >= $2::date')
+    )
+  );
 });
 
 test('E5 - separation date in a different month does not affect target month accrual', async () => {

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   isValidIsoDate,
   isStrongTemporaryPassword,
+  validateEmployeeSeparationDates,
   validateCreateEmployeePayload,
 } = require('../src/utils/employeeAccountValidation');
 
@@ -71,5 +72,62 @@ test('requires a real ISO hire date and validates optional birth date', () => {
       date_of_birth: '1995-02-30',
     }),
     /^Date of birth/
+  );
+});
+
+test('requires a separation date for terminal employment statuses', () => {
+  assert.equal(
+    validateEmployeeSeparationDates({
+      dateHired: '2026-01-10',
+      employmentStatus: 'resigned',
+      separationDate: null,
+      today: '2026-08-25',
+    }),
+    'Separation date is required for resigned, retired, or terminated employees'
+  );
+});
+
+test('accepts a valid final service date for a separated employee', () => {
+  assert.equal(
+    validateEmployeeSeparationDates({
+      dateHired: '2026-01-10',
+      employmentStatus: 'retired',
+      separationDate: '2026-08-20',
+      today: '2026-08-25',
+    }),
+    null
+  );
+});
+
+test('rejects separation before hire or after the current Manila date', () => {
+  assert.equal(
+    validateEmployeeSeparationDates({
+      dateHired: '2026-08-10',
+      employmentStatus: 'terminated',
+      separationDate: '2026-08-09',
+      today: '2026-08-25',
+    }),
+    'Separation date cannot be before date hired'
+  );
+  assert.equal(
+    validateEmployeeSeparationDates({
+      dateHired: '2026-08-10',
+      employmentStatus: 'terminated',
+      separationDate: '2026-08-26',
+      today: '2026-08-25',
+    }),
+    'Separation date cannot be in the future'
+  );
+});
+
+test('does not retain a separation date for active or inactive status', () => {
+  assert.equal(
+    validateEmployeeSeparationDates({
+      dateHired: '2026-01-10',
+      employmentStatus: 'active',
+      separationDate: '2026-08-20',
+      today: '2026-08-25',
+    }),
+    'Separation date is allowed only for resigned, retired, or terminated employees'
   );
 });

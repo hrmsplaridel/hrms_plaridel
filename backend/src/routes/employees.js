@@ -12,6 +12,8 @@ const {
 } = require('../utils/employeeStatus');
 const {
   validateCreateEmployeePayload,
+  validateEmployeeSeparationDates,
+  SEPARATION_EMPLOYMENT_STATUSES,
 } = require('../utils/employeeAccountValidation');
 
 const router = express.Router();
@@ -100,6 +102,7 @@ async function ensureEmployeeProfileColumns() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible_until DATE`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
     ON users (leave_credit_eligible)
     WHERE leave_credit_eligible = true`);
@@ -140,6 +143,8 @@ function mapEmployeeListRow(r) {
     employment_type: r.employment_type,
     salary_grade: r.salary_grade,
     date_hired: r.date_hired,
+    separation_date: r.separation_date,
+    leave_credit_eligible_until: r.leave_credit_eligible_until,
     employment_status: r.employment_status ?? 'active',
     leave_credit_eligible: r.leave_credit_eligible !== false,
     current_department_id: r.current_department_id ?? null,
@@ -399,7 +404,9 @@ router.get('/', protect, async (req, res) => {
           `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
                   u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
                   u.civil_status, u.nationality,
-                  u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
+                  u.employment_type, u.salary_grade, u.date_hired, u.separation_date,
+                  u.leave_credit_eligible_until,
+                  u.employment_status, u.leave_credit_eligible,
                   cur.current_department_name, cur.current_position_name,
                   cur.current_shift_punch_mode
            FROM users u
@@ -464,7 +471,9 @@ router.get('/', protect, async (req, res) => {
       `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
               u.civil_status, u.nationality,
-              u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
+              u.employment_type, u.salary_grade, u.date_hired, u.separation_date,
+              u.leave_credit_eligible_until,
+              u.employment_status, u.leave_credit_eligible,
               cur.current_department_name, cur.current_position_name,
               cur.current_shift_punch_mode
        ${fromSql}
@@ -601,7 +610,9 @@ router.get('/:id', protect, async (req, res) => {
       `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active, u.avatar_path,
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
               u.civil_status, u.nationality,
-              u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
+              u.employment_type, u.salary_grade, u.date_hired, u.separation_date,
+              u.leave_credit_eligible_until,
+              u.employment_status, u.leave_credit_eligible,
               cur.current_department_name, cur.current_position_name,
               cur.current_shift_punch_mode
        FROM users u
@@ -644,6 +655,8 @@ router.get('/:id', protect, async (req, res) => {
       employment_type: r.employment_type,
       salary_grade: r.salary_grade,
       date_hired: r.date_hired,
+      separation_date: r.separation_date,
+      leave_credit_eligible_until: r.leave_credit_eligible_until,
       employment_status: r.employment_status ?? 'active',
       leave_credit_eligible: r.leave_credit_eligible !== false,
       current_department_name: r.current_department_name ?? null,
@@ -659,7 +672,7 @@ router.get('/:id', protect, async (req, res) => {
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
     await ensureEmployeeProfileColumns();
-    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, employment_status, biometric_user_id, leave_credit_eligible } = req.body;
+    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, separation_date, employment_status, biometric_user_id, leave_credit_eligible } = req.body;
     const validationError = validateCreateEmployeePayload(req.body);
     if (validationError) {
       return res.status(400).json({ error: validationError });
@@ -684,25 +697,32 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         normalizedEmploymentStatus,
         boolField(leave_credit_eligible, true)
       );
+    const leaveCreditEligibleUntil =
+      SEPARATION_EMPLOYMENT_STATUSES.has(normalizedEmploymentStatus) &&
+      boolField(leave_credit_eligible, true)
+        ? separation_date
+        : null;
 
     const result = await pool.query(
       `INSERT INTO users (
          email, password_hash, role, first_name, full_name, last_name, middle_name,
          suffix, sex, date_of_birth, contact_number, address, civil_status,
          nationality, is_active, employee_number, employment_type, salary_grade,
-         date_hired, employment_status, biometric_user_id, leave_credit_eligible
+         date_hired, separation_date, employment_status, biometric_user_id,
+         leave_credit_eligible, leave_credit_eligible_until
        )
        VALUES (
          $1, $2, $3, $4, $5, $6, $7,
          $8, $9, $10::date, $11, $12, $13,
          $14, $15, $16, $17, $18,
-         $19::date, $20, $21, $22
+         $19::date, $20::date, $21, $22, $23, $24::date
        )
        RETURNING id, employee_number, email, role, first_name, full_name, last_name,
                  avatar_path, is_active, middle_name, suffix, sex, date_of_birth,
                  contact_number, address, civil_status, nationality, employment_type,
-                 salary_grade, date_hired, employment_status, biometric_user_id,
-                 leave_credit_eligible`,
+                 salary_grade, date_hired, separation_date, employment_status,
+                 biometric_user_id, leave_credit_eligible,
+                 leave_credit_eligible_until`,
       [
         email.trim().toLowerCase(),
         passwordHash,
@@ -723,9 +743,11 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         (employment_type && ['regular', 'contractual', 'job_order', 'casual'].includes(employment_type)) ? employment_type : null,
         salary_grade?.trim() || null,
         date_hired || null,
+        separation_date || null,
         normalizedEmploymentStatus,
         biometric_user_id?.trim() || null,
         normalizedLeaveCreditEligible,
+        leaveCreditEligibleUntil,
       ]
     );
 
@@ -811,6 +833,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       employment_type,
       salary_grade,
       date_hired,
+      separation_date,
       employment_status,
       biometric_user_id,
       leave_credit_eligible,
@@ -818,7 +841,10 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     } = req.body;
 
     const existingRes = await pool.query(
-      'SELECT biometric_user_id, employment_status FROM users WHERE id = $1::uuid',
+      `SELECT biometric_user_id, employment_status, date_hired,
+              separation_date::text AS separation_date,
+              leave_credit_eligible, leave_credit_eligible_until::text
+       FROM users WHERE id = $1::uuid`,
       [id]
     );
     if (existingRes.rowCount === 0) {
@@ -849,12 +875,47 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const effectiveEmploymentStatus = validEmploymentStatus
       ? employment_status
       : normalizeEmploymentStatus(existingRes.rows[0].employment_status);
+    const effectiveDateHired = date_hired !== undefined
+      ? date_hired
+      : existingRes.rows[0].date_hired?.toISOString?.().slice(0, 10) ||
+        existingRes.rows[0].date_hired;
+    const suppliedSeparationDate = separation_date === null || separation_date === ''
+      ? null
+      : separation_date;
+    const effectiveSeparationDate = SEPARATION_EMPLOYMENT_STATUSES.has(
+      effectiveEmploymentStatus
+    )
+      ? (separation_date !== undefined
+          ? suppliedSeparationDate
+          : existingRes.rows[0].separation_date)
+      : null;
+    const lifecycleError = validateEmployeeSeparationDates({
+      dateHired: effectiveDateHired,
+      employmentStatus: effectiveEmploymentStatus,
+      separationDate: effectiveSeparationDate,
+    });
+    if (lifecycleError) {
+      return res.status(400).json({ error: lifecycleError });
+    }
     const nonActiveEmploymentStatus =
       effectiveEmploymentStatus !== 'active';
     const effectiveIsActive = nonActiveEmploymentStatus ? false : is_active;
+    const requestedLeaveCreditEligible = leave_credit_eligible !== undefined
+      ? boolField(leave_credit_eligible, true)
+      : existingRes.rows[0].leave_credit_eligible !== false;
     const effectiveLeaveCreditEligible = nonActiveEmploymentStatus
       ? false
-      : leave_credit_eligible;
+      : requestedLeaveCreditEligible;
+    const wasEligibleForAccrual =
+      existingRes.rows[0].leave_credit_eligible !== false ||
+      Boolean(existingRes.rows[0].leave_credit_eligible_until);
+    const effectiveLeaveCreditEligibleUntil =
+      SEPARATION_EMPLOYMENT_STATUSES.has(effectiveEmploymentStatus) &&
+      (wasEligibleForAccrual || requestedLeaveCreditEligible)
+        ? effectiveSeparationDate
+        : null;
+    const shouldUpdateSeparation =
+      separation_date !== undefined || employment_status !== undefined;
     const canUseOfficeId = office_id !== undefined
       ? await hasUsersOfficeIdColumn()
       : false;
@@ -878,9 +939,19 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['employment_type', employment_type],
       ['salary_grade', salary_grade],
       ['date_hired', date_hired],
+      [
+        'separation_date',
+        shouldUpdateSeparation ? effectiveSeparationDate : undefined,
+      ],
       ['employment_status', employment_status],
       ['biometric_user_id', biometric_user_id],
       ['leave_credit_eligible', effectiveLeaveCreditEligible],
+      [
+        'leave_credit_eligible_until',
+        shouldUpdateSeparation
+          ? effectiveLeaveCreditEligibleUntil
+          : undefined,
+      ],
       ...(canUseOfficeId ? [['office_id', office_id]] : []),
     ];
     for (const [col, val] of fields) {
@@ -899,7 +970,12 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           values.push(raw);
           continue;
         }
-        if (col === 'date_of_birth' || col === 'date_hired') {
+        if (
+          col === 'date_of_birth' ||
+          col === 'date_hired' ||
+          col === 'separation_date' ||
+          col === 'leave_credit_eligible_until'
+        ) {
           updates.push(`${col} = $${i++}::date`);
           values.push(val || null);
         } else {
@@ -934,17 +1010,87 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       'employment_type',
       'salary_grade',
       'date_hired',
+      'separation_date',
       'employment_status',
       'biometric_user_id',
       'leave_credit_eligible',
+      'leave_credit_eligible_until',
       ...(canUseOfficeId ? ['office_id'] : []),
     ];
 
-    const result = await pool.query(
-      `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING ${returningColumns.join(', ')}`,
-      values
-    );
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      result = await client.query(
+        `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
+         RETURNING ${returningColumns.join(', ')}`,
+        values
+      );
+
+      if (
+        shouldUpdateSeparation &&
+        SEPARATION_EMPLOYMENT_STATUSES.has(effectiveEmploymentStatus)
+      ) {
+        await client.query(
+          `UPDATE assignments
+              SET is_active = false,
+                  updated_at = now()
+            WHERE employee_id = $1::uuid
+              AND is_active = true
+              AND effective_from > $2::date`,
+          [id, effectiveSeparationDate]
+        );
+        await client.query(
+          `WITH target AS (
+             SELECT id
+               FROM assignments
+              WHERE employee_id = $1::uuid
+                AND effective_from <= $2::date
+                AND (
+                  effective_to IS NULL
+                  OR effective_to >= $2::date
+                  OR effective_to = $3::date
+                )
+              ORDER BY effective_from DESC, created_at DESC, id DESC
+              LIMIT 1
+           )
+           UPDATE assignments a
+              SET is_active = false,
+                  effective_to = $2::date,
+                  updated_at = now()
+             FROM target
+            WHERE a.id = target.id`,
+          [id, effectiveSeparationDate, existingRes.rows[0].separation_date]
+        );
+        await client.query(
+          `UPDATE policy_assignments
+              SET is_active = false,
+                  effective_to = CASE
+                    WHEN effective_from <= $2::date THEN $2::date
+                    ELSE effective_to
+                  END,
+                  updated_at = now()
+            WHERE employee_id = $1::uuid
+              AND is_active = true`,
+          [id, effectiveSeparationDate]
+        );
+        await client.query(
+          `UPDATE auth_refresh_tokens
+              SET revoked_at = now()
+            WHERE user_id = $1::uuid
+              AND revoked_at IS NULL`,
+          [id]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (transactionError) {
+      await client.query('ROLLBACK');
+      throw transactionError;
+    } finally {
+      client.release();
+    }
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
     res.json(result.rows[0]);
   } catch (err) {
