@@ -5,6 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 
 const List<String> _months = [
   'January',
@@ -266,24 +267,17 @@ class DtrExport {
   }
 
   static String _formatTime(DateTime? dt) {
-    if (dt == null) return '-';
-    final local = dt.toLocal();
-    final h = local.hour;
-    final m = local.minute;
-    final ampm = h >= 12 ? 'PM' : 'AM';
-    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-    return '$h12:${m.toString().padLeft(2, '0')} $ampm';
+    return formatOfficialPhilippineTime(dt, emptyValue: '-');
   }
 
   /// Time for print form (lowercase am/pm like reference).
   static String _formatTimePrint(DateTime? dt) {
-    if (dt == null) return '-';
-    final local = dt.toLocal();
-    final h = local.hour;
-    final m = local.minute;
-    final ampm = h >= 12 ? 'pm' : 'am';
-    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-    return '${h12.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}$ampm';
+    return formatOfficialPhilippineTime(
+      dt,
+      emptyValue: '-',
+      lowercasePeriod: true,
+      padHour: true,
+    );
   }
 
   static String _formatDateWithDay(DateTime d) {

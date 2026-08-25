@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_readiness.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
@@ -826,13 +827,7 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   static String _formatTime(DateTime? dt) {
-    if (dt == null) return '—';
-    final local = dt.toLocal();
-    final h = local.hour;
-    final m = local.minute;
-    final ampm = h >= 12 ? 'PM' : 'AM';
-    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-    return '$h12:${m.toString().padLeft(2, '0')} $ampm';
+    return formatOfficialPhilippineTime(dt);
   }
 
   static String _cellDisplayForSegment({
@@ -886,15 +881,9 @@ class _DtrReportsState extends State<DtrReports> {
       }
     }
     if (r.timeIn == null) return 'Absent';
-    final local = r.timeIn!.toLocal();
-    final officeStart = DateTime(
-      r.recordDate.year,
-      r.recordDate.month,
-      r.recordDate.day,
-      8,
-      0,
-    );
-    if (local.isAfter(officeStart)) return 'Late';
+    final official = toOfficialPhilippineTime(r.timeIn!);
+    final punchMinute = (official.hour * 60) + official.minute;
+    if (punchMinute > 8 * 60) return 'Late';
     return 'On Time';
   }
 
