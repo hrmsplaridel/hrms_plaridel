@@ -59,16 +59,18 @@ class _ExportAttendancePolicy {
   );
 }
 
-class _ExportTotals {
-  const _ExportTotals({
+class DtrExportTotals {
+  const DtrExportTotals({
     required this.totalLateMinutes,
     required this.totalUndertimeMinutes,
+    required this.displayedUndertimeMinutes,
     required this.totalDeductionMinutes,
     required this.equivalentDay,
   });
 
   final int totalLateMinutes;
   final int totalUndertimeMinutes;
+  final int displayedUndertimeMinutes;
   final int totalDeductionMinutes;
   final double equivalentDay;
 }
@@ -174,6 +176,89 @@ class DtrAssignmentSegment {
 /// DTR export to PDF, Excel, and Word (HTML) — single page, matches official form.
 class DtrExport {
   DtrExport._();
+
+  static DtrExportTotals calculateOfficialTotals({
+    required int year,
+    required int month,
+    required DateTime start,
+    required DateTime end,
+    required Map<DateTime, TimeRecord> recordsByDate,
+    double? scheduledWorkHoursPerDay,
+    List<int>? workingDays,
+    DateTime? assignmentEffectiveFrom,
+    DateTime? assignmentEffectiveTo,
+    List<DtrAssignmentSegment> assignmentSegments = const [],
+    DateTime? reportableThrough,
+  }) {
+    const policy = _ExportAttendancePolicy.defaults;
+    final shiftWorkingDays = workingDays != null && workingDays.isNotEmpty
+        ? workingDays.toSet()
+        : {1, 2, 3, 4, 5};
+    final statsEnd = _exportStatsInclusiveEnd(
+      year,
+      month,
+      reportableThrough: reportableThrough,
+    );
+    var totalLateMinutes = 0;
+    var totalUndertimeMinutes = 0;
+    var displayedUndertimeMinutes = 0;
+    var totalDeductionMinutes = 0;
+    var equivalentDay = 0.0;
+
+    for (var day = start.day; day <= end.day; day++) {
+      final date = DateTime(year, month, day);
+      final record = recordsByDate[date];
+      final assignment = _assignmentSegmentForDate(date, assignmentSegments);
+      final isScheduled = _isScheduledForAssignment(
+        date: date,
+        assignmentSegments: assignmentSegments,
+        fallbackWorkingDays: shiftWorkingDays,
+        fallbackEffectiveFrom: assignmentEffectiveFrom,
+        fallbackEffectiveTo: assignmentEffectiveTo,
+      );
+      if (!isScheduled || date.isAfter(statsEnd)) continue;
+
+      final effectiveWorkHours =
+          assignment?.scheduledWorkHoursPerDay ??
+          scheduledWorkHoursPerDay ??
+          policy.workHoursPerDay;
+      final (displayHours, displayMinutes) = _computeUndertime(
+        record,
+        date,
+        false,
+        effectiveWorkHours,
+        record?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
+      );
+      final (rawHours, rawMinutes) = _computeUndertime(
+        record,
+        date,
+        false,
+        effectiveWorkHours,
+        false,
+      );
+      final rawUndertimeMinutes = rawHours * 60 + rawMinutes;
+      final deduction = _dailyDeduction(
+        record: record,
+        fallbackUndertimeMinutes: rawUndertimeMinutes,
+        fallbackWorkHours: effectiveWorkHours,
+        fallbackPolicy: policy,
+      );
+
+      totalLateMinutes += record?.lateMinutes ?? 0;
+      totalUndertimeMinutes += rawUndertimeMinutes;
+      displayedUndertimeMinutes += displayHours * 60 + displayMinutes;
+      totalDeductionMinutes += deduction.totalMinutes;
+      equivalentDay += deduction.equivalentDay;
+    }
+
+    return DtrExportTotals(
+      totalLateMinutes: totalLateMinutes,
+      totalUndertimeMinutes: totalUndertimeMinutes,
+      displayedUndertimeMinutes: displayedUndertimeMinutes,
+      totalDeductionMinutes: totalDeductionMinutes,
+      equivalentDay: _round3(equivalentDay),
+    );
+  }
 
   static Future<DtrExportSignatories> resolveSignatories({
     bool requireVerifiedSource = false,
@@ -632,7 +717,7 @@ class DtrExport {
 
   /// Government-style form footer: certification, verified, signature line, officers, notes.
   static pw.Widget _buildFormFooter(
-    _ExportTotals totals, {
+    DtrExportTotals totals, {
     required DtrExportSignatories signatories,
     List<String> noteLines = const [],
   }) {
@@ -1103,7 +1188,7 @@ class DtrExport {
 
   /// Build table rows: body rows only + total row (header built separately).
   /// [workingDays] — ISO weekdays 1–7 for shift; null = use Mon–Fri.
-  static (List<pw.TableRow>, _ExportTotals) _buildFormTableRows({
+  static (List<pw.TableRow>, DtrExportTotals) _buildFormTableRows({
     required int year,
     required int month,
     required DateTime start,
@@ -1118,11 +1203,19 @@ class DtrExport {
     List<DtrAssignmentSegment> assignmentSegments = const [],
     DateTime? reportableThrough,
   }) {
-    var totalUndertimeMin = 0;
-    var totalRawUndertimeMin = 0;
-    var totalLateMin = 0;
-    var totalDeductionMin = 0;
-    var equivalentDayTotal = 0.0;
+    final totals = calculateOfficialTotals(
+      year: year,
+      month: month,
+      start: start,
+      end: end,
+      recordsByDate: recordsByDate,
+      scheduledWorkHoursPerDay: scheduledWorkHoursPerDay,
+      workingDays: workingDays,
+      assignmentEffectiveFrom: assignmentEffectiveFrom,
+      assignmentEffectiveTo: assignmentEffectiveTo,
+      assignmentSegments: assignmentSegments,
+      reportableThrough: reportableThrough,
+    );
     const fs = 5.0;
     final rows = <pw.TableRow>[];
     final shiftWd = workingDays != null && workingDays.isNotEmpty
@@ -1158,27 +1251,6 @@ class DtrExport {
         effectiveWorkHours,
         rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
-      final (rawUh, rawUm) = _computeUndertime(
-        rec,
-        dt,
-        isNonScheduled,
-        effectiveWorkHours,
-        false,
-      );
-      if (!isNonScheduled) {
-        totalUndertimeMin += uh * 60 + um;
-        totalRawUndertimeMin += rawUh * 60 + rawUm;
-        totalLateMin += rec?.lateMinutes ?? 0;
-        final deduction = _dailyDeduction(
-          record: rec,
-          fallbackUndertimeMinutes: rawUh * 60 + rawUm,
-          fallbackWorkHours: effectiveWorkHours,
-          fallbackPolicy: policy,
-        );
-        totalDeductionMin += deduction.totalMinutes;
-        equivalentDayTotal += deduction.equivalentDay;
-      }
-
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
       final hasAnyPunch =
@@ -1254,8 +1326,8 @@ class DtrExport {
       );
     }
 
-    final totalH = totalUndertimeMin ~/ 60;
-    final totalM = totalUndertimeMin % 60;
+    final totalH = totals.displayedUndertimeMinutes ~/ 60;
+    final totalM = totals.displayedUndertimeMinutes % 60;
     rows.add(
       pw.TableRow(
         decoration: const pw.BoxDecoration(color: PdfColors.grey200),
@@ -1271,17 +1343,7 @@ class DtrExport {
       ),
     );
 
-    final eq = _round3(equivalentDayTotal);
-
-    return (
-      rows,
-      _ExportTotals(
-        totalLateMinutes: totalLateMin,
-        totalUndertimeMinutes: totalRawUndertimeMin,
-        totalDeductionMinutes: totalDeductionMin,
-        equivalentDay: eq,
-      ),
-    );
+    return (rows, totals);
   }
 
   /// One copy of the government-style DTR form (for two-column print).
@@ -1292,7 +1354,7 @@ class DtrExport {
     required DateTime start,
     required DateTime end,
     required List<pw.TableRow> tableRows,
-    required _ExportTotals totals,
+    required DtrExportTotals totals,
     required _ExportAttendancePolicy policy,
     required String reportTitle,
     String? department,
@@ -1412,8 +1474,19 @@ class DtrExport {
         );
       }
     }
-    var totalUndertimeMin = 0;
-    var equivalentDayTotal = 0.0;
+    final totals = calculateOfficialTotals(
+      year: year,
+      month: month,
+      start: start,
+      end: end,
+      recordsByDate: recordsByDate,
+      scheduledWorkHoursPerDay: scheduledWorkHoursPerDay,
+      workingDays: workingDays,
+      assignmentEffectiveFrom: assignmentEffectiveFrom,
+      assignmentEffectiveTo: assignmentEffectiveTo,
+      assignmentSegments: assignmentSegments,
+      reportableThrough: reportableThrough,
+    );
     final excel = Excel.createExcel();
     final defaultName = excel.getDefaultSheet() ?? 'Sheet1';
     excel.rename(defaultName, 'DTR');
@@ -1624,24 +1697,6 @@ class DtrExport {
         effectiveWorkHours,
         rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
-      final (rawUh, rawUm) = _computeUndertime(
-        rec,
-        dt,
-        isNonScheduled,
-        effectiveWorkHours,
-        false,
-      );
-      if (!isNonScheduled) {
-        totalUndertimeMin += uh * 60 + um;
-        final deduction = _dailyDeduction(
-          record: rec,
-          fallbackUndertimeMinutes: rawUh * 60 + rawUm,
-          fallbackWorkHours: effectiveWorkHours,
-          fallbackPolicy: policy,
-        );
-        equivalentDayTotal += deduction.equivalentDay;
-      }
-
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
       final hasAnyPunch =
@@ -1739,18 +1794,18 @@ class DtrExport {
     setCellBoth(
       5,
       row,
-      TextCellValue('${totalUndertimeMin ~/ 60}'),
+      TextCellValue('${totals.displayedUndertimeMinutes ~/ 60}'),
       totalStyleRight,
     );
     setCellBoth(
       6,
       row,
-      TextCellValue('${totalUndertimeMin % 60}'),
+      TextCellValue('${totals.displayedUndertimeMinutes % 60}'),
       totalStyleRight,
     );
     row += 2;
 
-    final equivalentDay = _round3(equivalentDayTotal);
+    final equivalentDay = totals.equivalentDay;
     final footerCenterStyle = CellStyle(
       fontSize: 9,
       horizontalAlign: HorizontalAlign.Center,
@@ -1899,8 +1954,19 @@ class DtrExport {
         );
       }
     }
-    var totalUndertimeMin = 0;
-    var equivalentDayTotal = 0.0;
+    final totals = calculateOfficialTotals(
+      year: year,
+      month: month,
+      start: start,
+      end: end,
+      recordsByDate: recordsByDate,
+      scheduledWorkHoursPerDay: scheduledWorkHoursPerDay,
+      workingDays: workingDays,
+      assignmentEffectiveFrom: assignmentEffectiveFrom,
+      assignmentEffectiveTo: assignmentEffectiveTo,
+      assignmentSegments: assignmentSegments,
+      reportableThrough: reportableThrough,
+    );
     final title = reportTitle ?? 'DAILY TIME RECORD';
     final oneCopy = StringBuffer();
     oneCopy.writeln('<h2>$title</h2>');
@@ -1974,23 +2040,6 @@ class DtrExport {
         effectiveWorkHours,
         rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
-      final (rawUh, rawUm) = _computeUndertime(
-        rec,
-        dt,
-        isNonScheduled,
-        effectiveWorkHours,
-        false,
-      );
-      if (!isNonScheduled) {
-        totalUndertimeMin += uh * 60 + um;
-        final deduction = _dailyDeduction(
-          record: rec,
-          fallbackUndertimeMinutes: rawUh * 60 + rawUm,
-          fallbackWorkHours: effectiveWorkHours,
-          fallbackPolicy: policy,
-        );
-        equivalentDayTotal += deduction.equivalentDay;
-      }
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
       final hasAnyPunch =
@@ -2043,14 +2092,14 @@ class DtrExport {
       );
     }
 
-    final totalH = totalUndertimeMin ~/ 60;
-    final totalM = totalUndertimeMin % 60;
+    final totalH = totals.displayedUndertimeMinutes ~/ 60;
+    final totalM = totals.displayedUndertimeMinutes % 60;
     oneCopy.writeln(
       '<tr class="total-row"><td>Total Undertime</td><td></td><td></td><td></td><td></td><td class="right">$totalH</td><td class="right">$totalM</td></tr>',
     );
     oneCopy.writeln('</tbody></table>');
 
-    final equivalentDay = _round3(equivalentDayTotal);
+    final equivalentDay = totals.equivalentDay;
     oneCopy.writeln(
       '<div style="text-align:center;font-size:10pt;margin-top:12px;line-height:1.4;">',
     );
@@ -2158,8 +2207,19 @@ class DtrExport {
         );
       }
     }
-    var totalUndertimeMin = 0;
-    var equivalentDayTotal = 0.0;
+    final totals = calculateOfficialTotals(
+      year: year,
+      month: month,
+      start: effectiveStart,
+      end: end,
+      recordsByDate: recordsByDate,
+      scheduledWorkHoursPerDay: scheduledWorkHoursPerDay,
+      workingDays: workingDays,
+      assignmentEffectiveFrom: assignmentEffectiveFrom,
+      assignmentEffectiveTo: assignmentEffectiveTo,
+      assignmentSegments: assignmentSegments,
+      reportableThrough: reportableThrough,
+    );
     final title = reportTitle ?? 'DAILY TIME RECORD';
     final oneCopy = StringBuffer();
     oneCopy.writeln('<h2>$title</h2>');
@@ -2233,23 +2293,6 @@ class DtrExport {
         effectiveWorkHours,
         rec?.combineLateAndUndertime ?? policy.combineLateAndUndertime,
       );
-      final (rawUh, rawUm) = _computeUndertime(
-        rec,
-        dt,
-        isNonScheduled,
-        effectiveWorkHours,
-        false,
-      );
-      if (!isNonScheduled) {
-        totalUndertimeMin += uh * 60 + um;
-        final deduction = _dailyDeduction(
-          record: rec,
-          fallbackUndertimeMinutes: rawUh * 60 + rawUm,
-          fallbackWorkHours: effectiveWorkHours,
-          fallbackPolicy: policy,
-        );
-        equivalentDayTotal += deduction.equivalentDay;
-      }
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
       final hasAnyPunch =
@@ -2302,14 +2345,14 @@ class DtrExport {
       );
     }
 
-    final totalH = totalUndertimeMin ~/ 60;
-    final totalM = totalUndertimeMin % 60;
+    final totalH = totals.displayedUndertimeMinutes ~/ 60;
+    final totalM = totals.displayedUndertimeMinutes % 60;
     oneCopy.writeln(
       '<tr class="total-row"><td>Total Undertime</td><td></td><td></td><td></td><td></td><td class="right">$totalH</td><td class="right">$totalM</td></tr>',
     );
     oneCopy.writeln('</tbody></table>');
 
-    final equivalentDay = _round3(equivalentDayTotal);
+    final equivalentDay = totals.equivalentDay;
     oneCopy.writeln(
       '<div style="text-align:center;font-size:10pt;margin-top:12px;line-height:1.4;">',
     );

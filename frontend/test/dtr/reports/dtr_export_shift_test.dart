@@ -1,3 +1,4 @@
+import 'package:excel/excel.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
@@ -213,36 +214,131 @@ void main() {
     expect(html, contains('Equivalent Day (deduction): 0.500'));
   });
 
-  test('server reportable-through date controls current-day absence inference', () {
-    final date = DateTime(2026, 8, 24);
-    final beforeShiftEnd = DtrExport.generateWordHtmlSync(
-      employeeName: 'Current Employee',
+  test(
+    'server reportable-through date controls current-day absence inference',
+    () {
+      final date = DateTime(2026, 8, 24);
+      final beforeShiftEnd = DtrExport.generateWordHtmlSync(
+        employeeName: 'Current Employee',
+        year: date.year,
+        month: date.month,
+        start: date,
+        end: date,
+        recordsByDate: const {},
+        scheduledWorkHoursPerDay: 8,
+        workingDays: const [DateTime.monday],
+        assignmentEffectiveFrom: date,
+        reportableThrough: DateTime(2026, 8, 23),
+      );
+      final afterShiftEnd = DtrExport.generateWordHtmlSync(
+        employeeName: 'Current Employee',
+        year: date.year,
+        month: date.month,
+        start: date,
+        end: date,
+        recordsByDate: const {},
+        scheduledWorkHoursPerDay: 8,
+        workingDays: const [DateTime.monday],
+        assignmentEffectiveFrom: date,
+        reportableThrough: date,
+      );
+
+      expect(beforeShiftEnd, isNot(contains('ABSENT')));
+      expect(beforeShiftEnd, contains('Equivalent Day (deduction): 0.000'));
+      expect(afterShiftEnd, contains('ABSENT'));
+      expect(afterShiftEnd, contains('Equivalent Day (deduction): 1.000'));
+    },
+  );
+
+  test('PDF, Excel, and Word use the same official report totals', () async {
+    final date = DateTime(2026, 8, 14);
+    final records = {
+      date: TimeRecord(
+        userId: 'employee-1',
+        recordDate: date,
+        breakIn: DateTime(2026, 8, 14, 16, 41),
+        timeOut: DateTime(2026, 8, 14, 17, 36),
+        lateMinutes: 216,
+        undertimeMinutes: 240,
+        status: 'incomplete',
+        combineLateAndUndertime: true,
+        reportDeduction: const AttendanceReportDeduction(
+          lateMinutes: 216,
+          undertimeMinutes: 240,
+          absenceMinutes: 0,
+          totalMinutes: 456,
+          equivalentDay: 0.95,
+        ),
+      ),
+    };
+    final totals = DtrExport.calculateOfficialTotals(
       year: date.year,
       month: date.month,
       start: date,
       end: date,
-      recordsByDate: const {},
+      recordsByDate: records,
       scheduledWorkHoursPerDay: 8,
-      workingDays: const [DateTime.monday],
-      assignmentEffectiveFrom: date,
-      reportableThrough: DateTime(2026, 8, 23),
-    );
-    final afterShiftEnd = DtrExport.generateWordHtmlSync(
-      employeeName: 'Current Employee',
-      year: date.year,
-      month: date.month,
-      start: date,
-      end: date,
-      recordsByDate: const {},
-      scheduledWorkHoursPerDay: 8,
-      workingDays: const [DateTime.monday],
+      workingDays: const [DateTime.friday],
       assignmentEffectiveFrom: date,
       reportableThrough: date,
     );
 
-    expect(beforeShiftEnd, isNot(contains('ABSENT')));
-    expect(beforeShiftEnd, contains('Equivalent Day (deduction): 0.000'));
-    expect(afterShiftEnd, contains('ABSENT'));
-    expect(afterShiftEnd, contains('Equivalent Day (deduction): 1.000'));
+    expect(totals.totalLateMinutes, 216);
+    expect(totals.totalUndertimeMinutes, 240);
+    expect(totals.displayedUndertimeMinutes, 456);
+    expect(totals.totalDeductionMinutes, 456);
+    expect(totals.equivalentDay, 0.95);
+
+    final word = DtrExport.generateWordHtmlSync(
+      employeeName: 'Cross Format Employee',
+      year: date.year,
+      month: date.month,
+      start: date,
+      end: date,
+      recordsByDate: records,
+      scheduledWorkHoursPerDay: 8,
+      workingDays: const [DateTime.friday],
+      assignmentEffectiveFrom: date,
+      reportableThrough: date,
+    );
+    expect(word, contains('Equivalent Day (deduction): 0.950'));
+    expect(word, contains('<td class="right">7</td><td class="right">36</td>'));
+
+    final excelBytes = await DtrExport.generateExcel(
+      employeeName: 'Cross Format Employee',
+      year: date.year,
+      month: date.month,
+      start: date,
+      end: date,
+      recordsByDate: records,
+      scheduledWorkHoursPerDay: 8,
+      workingDays: const [DateTime.friday],
+      assignmentEffectiveFrom: date,
+      reportableThrough: date,
+      signatories: DtrExportSignatories.empty,
+    );
+    final workbook = Excel.decodeBytes(excelBytes);
+    final excelText = workbook.tables.values
+        .expand((sheet) => sheet.rows)
+        .expand((row) => row)
+        .map((cell) => cell?.value?.toString() ?? '')
+        .join('\n');
+    expect(excelText, contains('Equivalent Day (deduction): 0.950'));
+
+    final pdfBytes = await DtrExport.generatePdf(
+      employeeName: 'Cross Format Employee',
+      year: date.year,
+      month: date.month,
+      start: date,
+      end: date,
+      recordsByDate: records,
+      scheduledWorkHoursPerDay: 8,
+      workingDays: const [DateTime.friday],
+      assignmentEffectiveFrom: date,
+      reportableThrough: date,
+      signatories: DtrExportSignatories.empty,
+    );
+    expect(pdfBytes.length, greaterThan(1000));
+    expect(String.fromCharCodes(pdfBytes.take(4)), '%PDF');
   });
 }

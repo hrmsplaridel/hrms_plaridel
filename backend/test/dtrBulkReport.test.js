@@ -161,3 +161,76 @@ test('bulk DTR report rejects more than 100 employees', async () => {
   restoreDb();
   clearModule('../src/routes/dtrDailySummary');
 });
+
+test('bulk DTR report keeps valid employees and reports missing employees separately', async () => {
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      async query(sql) {
+        const text = String(sql);
+        if (/SELECT id, full_name\s+FROM users\s+WHERE id = ANY/i.test(text)) {
+          return {
+            rowCount: 1,
+            rows: [{ id: EMPLOYEE_ID, full_name: 'Available Employee' }],
+          };
+        }
+        if (
+          /FROM assignments a/i.test(text) &&
+          /LEFT JOIN departments d ON d\.id = a\.department_id/i.test(text)
+        ) {
+          return {
+            rowCount: 1,
+            rows: [{
+              id: ASSIGNMENT_ID,
+              employee_id: EMPLOYEE_ID,
+              department_id: DEPARTMENT_ID,
+              department_name: 'Human Resources',
+              position_name: 'Staff',
+              shift_id: SHIFT_ID,
+              shift_name: 'Regular',
+              effective_from: '2026-01-01',
+              effective_to: null,
+              start_time: '08:00:00',
+              end_time: '17:00:00',
+              break_end: '13:00:00',
+              punch_mode: 'full_day',
+              grace_period_minutes: 0,
+              working_days: [1, 2, 3, 4, 5],
+            }],
+          };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    },
+  });
+  const restoreWs = withMockedModule('../src/websockets/biometricStream', {
+    broadcastBiometricUpdate: () => 0,
+  });
+  clearModule('../src/routes/dtrDailySummary');
+  const router = require('../src/routes/dtrDailySummary');
+  const handlers = route(router, 'post', '/bulk-report');
+  const res = response();
+
+  await handlers[handlers.length - 1](
+    {
+      user: { id: '00000000-0000-4000-8000-000000000001', role: 'admin' },
+      body: {
+        employee_ids: [EMPLOYEE_ID, SECOND_EMPLOYEE_ID],
+        start_date: '2026-06-01',
+        end_date: '2026-06-01',
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.employees.length, 1);
+  assert.equal(res.payload.employees[0].employee_id, EMPLOYEE_ID);
+  assert.deepEqual(res.payload.errors, [{
+    employee_id: SECOND_EMPLOYEE_ID,
+    error: 'Employee was not found',
+  }]);
+
+  restoreWs();
+  restoreDb();
+  clearModule('../src/routes/dtrDailySummary');
+});
