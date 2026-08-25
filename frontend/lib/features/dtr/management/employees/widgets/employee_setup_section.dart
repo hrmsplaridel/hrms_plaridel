@@ -109,9 +109,12 @@ class EmployeeSetupSectionState extends State<EmployeeSetupSection> {
   Future<void> createInitialSetupForEmployee({
     required String employeeId,
     required DateTime effectiveFrom,
+    DateTime? effectiveTo,
+    bool isActive = true,
   }) async {
     final current = selection;
     final effectiveFromText = _dateOnly(effectiveFrom);
+    final effectiveToText = effectiveTo == null ? null : _dateOnly(effectiveTo);
 
     if (current.hasAssignmentChoice) {
       await ApiClient.instance.post(
@@ -122,7 +125,8 @@ class EmployeeSetupSectionState extends State<EmployeeSetupSection> {
           'position_id': current.positionId,
           'shift_id': current.shiftId,
           'effective_from': effectiveFromText,
-          'is_active': true,
+          'effective_to': effectiveToText,
+          'is_active': isActive,
           'remarks': 'Initial assignment from employee setup',
         },
       );
@@ -135,7 +139,8 @@ class EmployeeSetupSectionState extends State<EmployeeSetupSection> {
           'employee_id': employeeId,
           'attendance_policy_id': current.policyId,
           'effective_from': effectiveFromText,
-          'is_active': true,
+          'effective_to': effectiveToText,
+          'is_active': isActive,
         },
       );
     }

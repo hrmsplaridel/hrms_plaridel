@@ -24,6 +24,18 @@ part '../widgets/edit_employee_dialog.dart';
 part '../widgets/add_employee_form.dart';
 part '../widgets/biometric_employee_dialogs.dart';
 
+const Set<String> _separationEmploymentStatuses = {
+  'resigned',
+  'retired',
+  'terminated',
+};
+
+bool _requiresSeparationDate(String? status) =>
+    _separationEmploymentStatuses.contains(status);
+
+String _employeeDateText(DateTime date) =>
+    '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
 /// Employee profile for Manage screen (full data from profiles).
 class _EmployeeProfile {
   const _EmployeeProfile({
@@ -45,6 +57,8 @@ class _EmployeeProfile {
     this.employmentType,
     this.salaryGrade,
     this.dateHired,
+    this.separationDate,
+    this.leaveCreditEligibleUntil,
     this.employmentStatus,
     this.leaveCreditEligible = true,
     this.biometricUserId,
@@ -71,6 +85,8 @@ class _EmployeeProfile {
   final String? employmentType;
   final String? salaryGrade;
   final DateTime? dateHired;
+  final DateTime? separationDate;
+  final DateTime? leaveCreditEligibleUntil;
   final String? employmentStatus;
   final bool leaveCreditEligible;
   final String? biometricUserId;
@@ -174,6 +190,8 @@ _EmployeeProfile _employeeProfileFromJson(Map<String, dynamic> m) {
   final dob = m['date_of_birth'];
   final empNum = m['employee_number'];
   final dateHiredRaw = m['date_hired'];
+  final separationDateRaw = m['separation_date'];
+  final leaveCreditEligibleUntilRaw = m['leave_credit_eligible_until'];
   return _EmployeeProfile(
     id: m['id'] as String,
     fullName: m['full_name'] as String? ?? 'Unknown',
@@ -196,6 +214,12 @@ _EmployeeProfile _employeeProfileFromJson(Map<String, dynamic> m) {
     salaryGrade: m['salary_grade'] as String?,
     dateHired: dateHiredRaw != null
         ? DateTime.tryParse(dateHiredRaw.toString())
+        : null,
+    separationDate: separationDateRaw != null
+        ? DateTime.tryParse(separationDateRaw.toString())
+        : null,
+    leaveCreditEligibleUntil: leaveCreditEligibleUntilRaw != null
+        ? DateTime.tryParse(leaveCreditEligibleUntilRaw.toString())
         : null,
     employmentStatus: m['employment_status'] as String?,
     leaveCreditEligible: m['leave_credit_eligible'] != false,

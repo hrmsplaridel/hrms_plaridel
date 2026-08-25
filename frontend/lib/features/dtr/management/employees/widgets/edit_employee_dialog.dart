@@ -28,6 +28,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   DateTime? _dateOfBirth;
   String? _employmentType;
   DateTime? _dateHired;
+  DateTime? _separationDate;
   String? _employmentStatus;
   bool _leaveCreditEligible = true;
   Uint8List? _selectedImageBytes;
@@ -65,8 +66,11 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     _dateOfBirth = _profile.dateOfBirth;
     _employmentType = _profile.employmentType;
     _dateHired = _profile.dateHired;
+    _separationDate = _profile.separationDate;
     _employmentStatus = _profile.employmentStatus ?? 'active';
-    _leaveCreditEligible = _profile.leaveCreditEligible;
+    _leaveCreditEligible =
+        _profile.leaveCreditEligible ||
+        _profile.leaveCreditEligibleUntil != null;
     _biometricIdController.text = _profile.biometricUserId ?? '';
     _loadBioDevicesForPush();
   }
@@ -226,6 +230,9 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           'salary_grade': _salaryGradeController.text.trim(),
         if (_dateHired != null)
           'date_hired': _dateHired!.toIso8601String().split('T')[0],
+        'separation_date': _requiresSeparationDate(_employmentStatus)
+            ? _employeeDateText(_separationDate!)
+            : null,
         if (_employmentStatus != null) 'employment_status': _employmentStatus,
         'leave_credit_eligible': _leaveCreditEligible,
         if (!_biometricUserIdLocked &&
@@ -247,10 +254,12 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
 
       if (!mounted) return;
       await ApiClient.instance.put('/api/employees/${_profile.id}', data: body);
-      await _setupSectionKey.currentState?.saveChangedSetupForEmployee(
-        employeeId: _profile.id,
-        effectiveFrom: DateTime.now(),
-      );
+      if (!_requiresSeparationDate(_employmentStatus)) {
+        await _setupSectionKey.currentState?.saveChangedSetupForEmployee(
+          employeeId: _profile.id,
+          effectiveFrom: DateTime.now(),
+        );
+      }
 
       if (!mounted) return;
       try {
@@ -605,17 +614,18 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
               ],
             ),
           const SizedBox(height: 16),
-          EmployeeSetupSection(
-            key: _setupSectionKey,
-            title: 'Current assignment',
-            subtitle:
-                'Change these only if this employee needs a new current department, position, shift, or policy. Assignment changes start today and keep old history.',
-            validationMessage:
-                'For assignment, select Department, Position, and Shift; or leave all three blank.',
-            employeeId: _profile.id,
-            loadCurrentSetup: true,
-            boxed: true,
-          ),
+          if (!_requiresSeparationDate(_employmentStatus))
+            EmployeeSetupSection(
+              key: _setupSectionKey,
+              title: 'Current assignment',
+              subtitle:
+                  'Change these only if this employee needs a new current department, position, shift, or policy. Assignment changes start today and keep old history.',
+              validationMessage:
+                  'For assignment, select Department, Position, and Shift; or leave all three blank.',
+              employeeId: _profile.id,
+              loadCurrentSetup: true,
+              boxed: true,
+            ),
         ],
       ),
     );
@@ -818,30 +828,100 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
             onChanged: (v) => setState(() {
               _employmentStatus = v ?? 'active';
-              if (_employmentStatus != 'active') {
+              if (_employmentStatus == 'inactive') {
                 _leaveCreditEligible = false;
+              }
+              if (!_requiresSeparationDate(_employmentStatus)) {
+                _separationDate = null;
               }
             }),
           ),
+          if (_requiresSeparationDate(_employmentStatus)) ...[
+            const SizedBox(height: 16),
+            FormField<DateTime>(
+              key: ValueKey(
+                '${_employmentStatus}_${_separationDate?.toIso8601String() ?? 'separation_null'}',
+              ),
+              validator: (_) {
+                if (_separationDate == null) {
+                  return 'Last day of service is required';
+                }
+                if (_dateHired != null &&
+                    _separationDate!.isBefore(_dateHired!)) {
+                  return 'Last day of service cannot be before date hired';
+                }
+                if (_separationDate!.isAfter(DateTime.now())) {
+                  return 'Last day of service cannot be in the future';
+                }
+                return null;
+              },
+              builder: (state) => InkWell(
+                onTap: () async {
+                  final today = DateTime.now();
+                  final initial = _separationDate ?? today;
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: initial.isAfter(today) ? today : initial,
+                    firstDate: DateTime(1900),
+                    lastDate: today,
+                  );
+                  if (picked != null) {
+                    setState(() => _separationDate = picked);
+                    state.didChange(picked);
+                  }
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: InputDecorator(
+                  decoration: _inputDecoration('Last day of service').copyWith(
+                    errorText: state.errorText,
+                    suffixIcon: Icon(
+                      Icons.event_busy_outlined,
+                      size: 20,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  child: Text(
+                    _separationDate != null
+                        ? _employeeDateText(_separationDate!)
+                        : 'Tap calendar to choose',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: _separationDate != null
+                          ? AppTheme.dashTextPrimaryOf(context)
+                          : AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
             value: _leaveCreditEligible,
             title: Text(
-              'Earn monthly VL/SL credits',
+              _requiresSeparationDate(_employmentStatus)
+                  ? 'Eligible for VL/SL through separation'
+                  : 'Earn monthly VL/SL credits',
               style: TextStyle(
                 color: AppTheme.dashTextPrimaryOf(context),
                 fontWeight: FontWeight.w600,
               ),
             ),
-            subtitle: _employmentStatus == 'active'
-                ? null
-                : const Text('Available only for active employees'),
+            subtitle: _requiresSeparationDate(_employmentStatus)
+                ? const Text(
+                    'Used to calculate the prorated final-month credit.',
+                  )
+                : (_employmentStatus == 'active'
+                      ? null
+                      : const Text('Available only for active employees')),
             secondary: Icon(
               Icons.account_balance_wallet_outlined,
               color: AppTheme.primaryNavy,
             ),
-            onChanged: _employmentStatus == 'active'
+            onChanged:
+                _employmentStatus == 'active' ||
+                    _requiresSeparationDate(_employmentStatus)
                 ? (value) => setState(() => _leaveCreditEligible = value)
                 : null,
           ),

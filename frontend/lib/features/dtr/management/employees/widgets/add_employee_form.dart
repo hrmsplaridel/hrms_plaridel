@@ -33,6 +33,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   String? _employmentType;
   String _employmentStatus = 'active';
   DateTime? _dateHired;
+  DateTime? _separationDate;
   bool _leaveCreditEligible = true;
   Uint8List? _selectedImageBytes;
   bool _saving = false;
@@ -230,6 +231,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       _employmentType = null;
       _employmentStatus = 'active';
       _dateHired = null;
+      _separationDate = null;
       _leaveCreditEligible = true;
       _selectedImageBytes = null;
       _passwordController.clear();
@@ -284,6 +286,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         if (_biometricIdController.text.trim().isNotEmpty)
           'biometric_user_id': _biometricIdController.text.trim(),
         'date_hired': _dateHired!.toIso8601String().split('T')[0],
+        'separation_date': _requiresSeparationDate(_employmentStatus)
+            ? _employeeDateText(_separationDate!)
+            : null,
         'employment_status': _employmentStatus,
         'leave_credit_eligible': _leaveCreditEligible,
       };
@@ -305,6 +310,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         await _setupSectionKey.currentState?.createInitialSetupForEmployee(
           employeeId: userId,
           effectiveFrom: _dateHired ?? DateTime.now(),
+          effectiveTo: _requiresSeparationDate(_employmentStatus)
+              ? _separationDate
+              : null,
+          isActive: !_requiresSeparationDate(_employmentStatus),
         );
       } catch (e) {
         setupWarning = _apiErrorMessageFromDio(
@@ -1067,30 +1076,104 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
             onChanged: (v) => setState(() {
               _employmentStatus = v ?? 'active';
-              if (_employmentStatus != 'active') {
+              if (_employmentStatus == 'inactive') {
                 _leaveCreditEligible = false;
+              }
+              if (!_requiresSeparationDate(_employmentStatus)) {
+                _separationDate = null;
               }
             }),
           ),
+          if (_requiresSeparationDate(_employmentStatus)) ...[
+            const SizedBox(height: 20),
+            FormField<DateTime>(
+              key: ValueKey(
+                '${_employmentStatus}_${_separationDate?.toIso8601String() ?? 'separation_null'}',
+              ),
+              validator: (_) {
+                if (_separationDate == null) {
+                  return 'Last day of service is required';
+                }
+                if (_dateHired != null &&
+                    _separationDate!.isBefore(_dateHired!)) {
+                  return 'Last day of service cannot be before date hired';
+                }
+                if (_separationDate!.isAfter(DateTime.now())) {
+                  return 'Last day of service cannot be in the future';
+                }
+                return null;
+              },
+              builder: (state) => InkWell(
+                onTap: () async {
+                  final today = DateTime.now();
+                  final initial = _separationDate ?? today;
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: initial.isAfter(today) ? today : initial,
+                    firstDate: DateTime(1900),
+                    lastDate: today,
+                  );
+                  if (picked != null) {
+                    setState(() => _separationDate = picked);
+                    state.didChange(picked);
+                  }
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: InputDecorator(
+                  decoration:
+                      _fieldDecoration(
+                        'Last day of service',
+                        hint: 'Tap calendar to choose',
+                      ).copyWith(
+                        errorText: state.errorText,
+                        suffixIcon: Icon(
+                          Icons.event_busy_outlined,
+                          size: 20,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                  child: Text(
+                    _separationDate != null
+                        ? _employeeDateText(_separationDate!)
+                        : 'Tap calendar to choose',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: _separationDate != null
+                          ? _chromeHeadingColor(context)
+                          : _chromeMutedColor(context),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
             value: _leaveCreditEligible,
             title: Text(
-              'Earn monthly VL/SL credits',
+              _requiresSeparationDate(_employmentStatus)
+                  ? 'Eligible for VL/SL through separation'
+                  : 'Earn monthly VL/SL credits',
               style: TextStyle(
                 color: _chromeHeadingColor(context),
                 fontWeight: FontWeight.w600,
               ),
             ),
-            subtitle: _employmentStatus == 'active'
-                ? null
-                : const Text('Available only for active employees'),
+            subtitle: _requiresSeparationDate(_employmentStatus)
+                ? const Text(
+                    'Used to calculate the prorated final-month credit.',
+                  )
+                : (_employmentStatus == 'active'
+                      ? null
+                      : const Text('Available only for active employees')),
             secondary: Icon(
               Icons.account_balance_wallet_outlined,
               color: AppTheme.primaryNavy,
             ),
-            onChanged: _employmentStatus == 'active'
+            onChanged:
+                _employmentStatus == 'active' ||
+                    _requiresSeparationDate(_employmentStatus)
                 ? (value) => setState(() => _leaveCreditEligible = value)
                 : null,
           ),
