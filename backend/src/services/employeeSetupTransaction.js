@@ -1,3 +1,8 @@
+const {
+  createAssignmentTransition,
+  endEmployeeAssignmentsFromDate,
+} = require('./assignmentTransition');
+
 class EmployeeSetupValidationError extends Error {
   constructor(message) {
     super(message);
@@ -182,44 +187,22 @@ async function applyEmployeeSetup(db, { employeeId, setup, remarks }) {
 
   let assignment = null;
   if (setup.hasAssignmentChange) {
-    await db.query(
-      `UPDATE assignments
-       SET is_active = false,
-           effective_to = CASE
-             WHEN effective_from <= $2::date
-               AND (effective_to IS NULL OR effective_to >= $2::date)
-               THEN $2::date
-             ELSE effective_to
-           END,
-           updated_at = now()
-       WHERE employee_id = $1::uuid
-         AND is_active = true`,
-      [employeeId, setup.effectiveFrom]
-    );
-
     if (setup.assignment) {
-      const inserted = await db.query(
-        `INSERT INTO assignments (
-           employee_id, department_id, position_id, shift_id,
-           effective_from, effective_to, is_active, remarks
-         )
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
-                 $5::date, $6::date, $7, $8)
-         RETURNING id, employee_id, department_id, position_id, shift_id,
-                   effective_from::text AS effective_from,
-                   effective_to::text AS effective_to, is_active, remarks`,
-        [
-          employeeId,
-          setup.assignment.departmentId,
-          setup.assignment.positionId,
-          setup.assignment.shiftId,
-          setup.effectiveFrom,
-          setup.effectiveTo,
-          setup.isActive,
-          remarks || null,
-        ]
-      );
-      assignment = inserted.rows[0];
+      assignment = await createAssignmentTransition(db, {
+        employeeId,
+        departmentId: setup.assignment.departmentId,
+        positionId: setup.assignment.positionId,
+        shiftId: setup.assignment.shiftId,
+        effectiveFrom: setup.effectiveFrom,
+        effectiveTo: setup.effectiveTo,
+        isActive: setup.isActive,
+        remarks,
+      });
+    } else {
+      await endEmployeeAssignmentsFromDate(db, {
+        employeeId,
+        effectiveFrom: setup.effectiveFrom,
+      });
     }
   }
 

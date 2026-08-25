@@ -1113,8 +1113,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
               LIMIT 1
            )
            UPDATE assignments a
-              SET is_active = false,
-                  effective_to = $2::date,
+              SET effective_to = $2::date,
                   updated_at = now()
              FROM target
             WHERE a.id = target.id`,

@@ -97,6 +97,9 @@ test('applies selected assignment and policy through the provided transaction cl
       if (sql.includes('FROM attendance_policies')) {
         return { rowCount: 1, rows: [{ id: IDS.policy }] };
       }
+      if (sql.includes('FROM assignments')) {
+        return { rowCount: 0, rows: [] };
+      }
       if (sql.includes('INSERT INTO assignments')) {
         return { rowCount: 1, rows: [{ id: 'assignment-id' }] };
       }
@@ -115,7 +118,6 @@ test('applies selected assignment and policy through the provided transaction cl
 
   assert.equal(result.assignment.id, 'assignment-id');
   assert.equal(result.policyAssignment.id, 'policy-assignment-id');
-  assert.equal(calls.filter((call) => call.sql.includes('UPDATE assignments')).length, 1);
   assert.equal(calls.filter((call) => call.sql.includes('INSERT INTO assignments')).length, 1);
   assert.equal(calls.filter((call) => call.sql.includes('UPDATE policy_assignments')).length, 1);
   assert.equal(calls.filter((call) => call.sql.includes('INSERT INTO policy_assignments')).length, 1);

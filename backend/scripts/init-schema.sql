@@ -7,6 +7,7 @@
 -- For existing databases that predate this file, use backend/scripts/docutracker-install-*.sql instead.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 -- =========================================
 -- SEQUENCES
@@ -272,9 +273,21 @@ CREATE TABLE IF NOT EXISTS assignments (
     CHECK (effective_to IS NULL OR effective_to >= effective_from)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_assignments_one_active_per_employee
-ON assignments (employee_id)
-WHERE is_active = true;
+DROP INDEX IF EXISTS uq_assignments_one_active_per_employee;
+
+ALTER TABLE assignments
+  DROP CONSTRAINT IF EXISTS assignments_no_overlapping_effective_ranges;
+ALTER TABLE assignments
+  ADD CONSTRAINT assignments_no_overlapping_effective_ranges
+  EXCLUDE USING gist (
+    employee_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (is_active = true);
+
+CREATE INDEX IF NOT EXISTS idx_assignments_employee_effective_range
+  ON assignments (employee_id, effective_from, effective_to)
+  WHERE is_active = true;
 
 -- =========================================
 -- POLICY ASSIGNMENTS
