@@ -2,6 +2,13 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  AssignmentHistoryError,
+  deactivateAssignmentRecord,
+  normalizeChangeReason,
+  permanentlyDeleteFutureAssignment,
+  writeAssignmentHistoryAudit,
+} = require('../services/assignmentHistory');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -202,6 +209,8 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
 // PUT /api/employee-other-positions/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
+  let transactionStarted = false;
   try {
     await ensureTable();
     const { id } = req.params;
@@ -212,6 +221,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       effective_to,
       is_active,
       remarks,
+      change_reason,
     } = req.body;
 
     const updates = [];
@@ -252,14 +262,20 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
 
-    const existing = await pool.query(
-      `SELECT id, effective_from::text AS effective_from, effective_to::text AS effective_to
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transactionStarted = true;
+    const existing = await client.query(
+      `SELECT id, employee_id, department_id, position_id,
+              effective_from::text AS effective_from,
+              effective_to::text AS effective_to, is_active, remarks
        FROM employee_other_positions
-       WHERE id = $1`,
+       WHERE id = $1
+       FOR UPDATE`,
       [id],
     );
     if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Employee other position not found' });
+      throw new AssignmentHistoryError('Employee other position not found', 404);
     }
 
     const row = existing.rows[0];
@@ -270,12 +286,18 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         ? (effective_to === null || effective_to === '' ? null : parseDate(effective_to))
         : row.effective_to;
     if (effectiveToBeforeFrom(mergedEffectiveFrom, mergedEffectiveTo)) {
-      return res.status(400).json({ error: 'effective_to must be on or after effective_from' });
+      throw new AssignmentHistoryError(
+        'effective_to must be on or after effective_from'
+      );
     }
+    const isDeactivating = is_active === false && row.is_active !== false;
+    const deactivationReason = isDeactivating
+      ? normalizeChangeReason(change_reason)
+      : null;
 
     updates.push('updated_at = now()');
     values.push(id);
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE employee_other_positions SET ${updates.join(', ')}
        WHERE id = $${i}
        RETURNING id, employee_id, department_id, position_id,
@@ -285,28 +307,101 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       values,
     );
 
+    if (isDeactivating) {
+      await writeAssignmentHistoryAudit(client, {
+        actorId: req.user?.id,
+        recordType: 'additional',
+        recordId: id,
+        action: 'employee_other_position_deactivated',
+        reason: deactivationReason,
+        before: row,
+        after: result.rows[0],
+      });
+    }
+
+    await client.query('COMMIT');
+    transactionStarted = false;
     res.json(result.rows[0]);
   } catch (err) {
+    if (transactionStarted) {
+      await client.query('ROLLBACK');
+    }
+    if (err instanceof AssignmentHistoryError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[employee-other-positions PUT]', err);
     res.status(500).json({ error: 'Failed to update employee other position' });
+  } finally {
+    client?.release();
   }
 });
 
-// DELETE /api/employee-other-positions/:id - hard delete (admin only)
+// DELETE /api/employee-other-positions/:id - archive without erasing history
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     await ensureTable();
-    const result = await pool.query(
-      'DELETE FROM employee_other_positions WHERE id = $1 RETURNING id',
-      [req.params.id],
-    );
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Employee other position not found' });
+    client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      const result = await deactivateAssignmentRecord(client, {
+        actorId: req.user?.id,
+        recordType: 'additional',
+        recordId: req.params.id,
+        reason: req.body?.reason,
+      });
+      await client.query('COMMIT');
+      res.json({
+        message: result.changed
+          ? 'Employee other position deactivated and retained in history'
+          : 'Employee other position is already inactive',
+        assignment: result.record,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     }
-    res.status(204).send();
   } catch (err) {
+    if (err instanceof AssignmentHistoryError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[employee-other-positions DELETE]', err);
-    res.status(500).json({ error: 'Failed to delete employee other position' });
+    res.status(500).json({ error: 'Failed to deactivate employee other position' });
+  } finally {
+    client?.release();
+  }
+});
+
+// DELETE /api/employee-other-positions/:id/permanent - unused future mistake only
+router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
+  let client;
+  try {
+    await ensureTable();
+    client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      await permanentlyDeleteFutureAssignment(client, {
+        actorId: req.user?.id,
+        recordType: 'additional',
+        recordId: req.params.id,
+        reason: req.body?.reason,
+      });
+      await client.query('COMMIT');
+      res.json({ message: 'Mistaken future other position permanently deleted' });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  } catch (err) {
+    if (err instanceof AssignmentHistoryError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    console.error('[employee-other-positions permanent DELETE]', err);
+    res.status(500).json({
+      error: 'Failed to permanently delete employee other position',
+    });
+  } finally {
+    client?.release();
   }
 });
 

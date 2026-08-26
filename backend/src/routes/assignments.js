@@ -8,6 +8,13 @@ const {
   createAssignmentTransition,
   updateAssignmentTransition,
 } = require('../services/assignmentTransition');
+const {
+  AssignmentHistoryError,
+  deactivateAssignmentRecord,
+  normalizeChangeReason,
+  permanentlyDeleteFutureAssignment,
+  writeAssignmentHistoryAudit,
+} = require('../services/assignmentHistory');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -163,7 +170,16 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     client = await pool.connect();
     const { id } = req.params;
-    const { department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks } = req.body;
+    const {
+      department_id,
+      position_id,
+      shift_id,
+      effective_from,
+      effective_to,
+      is_active,
+      remarks,
+      change_reason,
+    } = req.body;
     if (
       department_id === undefined &&
       position_id === undefined &&
@@ -191,6 +207,22 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     await client.query('BEGIN');
     try {
+      const beforeResult = await client.query(
+        `SELECT id, employee_id, department_id, position_id, shift_id,
+                effective_from::text AS effective_from,
+                effective_to::text AS effective_to, is_active, remarks
+           FROM assignments
+          WHERE id = $1::uuid`,
+        [id]
+      );
+      if (beforeResult.rowCount === 0) {
+        throw new AssignmentTransitionError('Assignment not found', 404);
+      }
+      const before = beforeResult.rows[0];
+      const isDeactivating = is_active === false && before.is_active !== false;
+      const deactivationReason = isDeactivating
+        ? normalizeChangeReason(change_reason)
+        : null;
       const assignment = await updateAssignmentTransition(client, {
         assignmentId: id,
         changes: {
@@ -203,6 +235,17 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           remarks,
         },
       });
+      if (isDeactivating) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: id,
+          action: 'assignment_deactivated',
+          reason: deactivationReason,
+          before,
+          after: assignment,
+        });
+      }
       await client.query('COMMIT');
       res.json(assignment);
     } catch (e) {
@@ -210,7 +253,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       throw e;
     }
   } catch (err) {
-    if (err instanceof AssignmentTransitionError) {
+    if (err instanceof AssignmentTransitionError || err instanceof AssignmentHistoryError) {
       return res.status(err.statusCode).json({ error: err.message });
     }
     if (err.code === '23P01') {
@@ -226,15 +269,71 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /api/assignments/:id (admin only)
+// DELETE /api/assignments/:id - archive without erasing history (admin only)
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
-    const result = await pool.query('DELETE FROM assignments WHERE id = $1 RETURNING id', [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Assignment not found' });
-    res.status(204).send();
+    client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      const result = await deactivateAssignmentRecord(client, {
+        actorId: req.user?.id,
+        recordType: 'primary',
+        recordId: req.params.id,
+        reason: req.body?.reason,
+      });
+      await client.query('COMMIT');
+      res.json({
+        message: result.changed
+          ? 'Assignment deactivated and retained in history'
+          : 'Assignment is already inactive',
+        assignment: result.record,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
   } catch (err) {
+    if (err instanceof AssignmentHistoryError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[assignments DELETE]', err);
-    res.status(500).json({ error: 'Failed to delete assignment' });
+    res.status(500).json({ error: 'Failed to deactivate assignment' });
+  } finally {
+    client?.release();
+  }
+});
+
+// DELETE /api/assignments/:id/permanent - remove an unused future mistake only
+router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      const result = await permanentlyDeleteFutureAssignment(client, {
+        actorId: req.user?.id,
+        recordType: 'primary',
+        recordId: req.params.id,
+        reason: req.body?.reason,
+      });
+      await client.query('COMMIT');
+      res.json({
+        message: 'Mistaken future assignment permanently deleted',
+        restored_previous_assignment: result.restoredPredecessor?.after || null,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  } catch (err) {
+    if (err instanceof AssignmentHistoryError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    console.error('[assignments permanent DELETE]', err);
+    res.status(500).json({ error: 'Failed to permanently delete assignment' });
+  } finally {
+    client?.release();
   }
 });
 
