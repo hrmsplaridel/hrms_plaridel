@@ -16,6 +16,7 @@ import 'package:hrms_plaridel/features/recruitment/data/recruitment_hire_prefill
 import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/data/repositories/biometric_import_repository.dart';
+import 'package:hrms_plaridel/features/dtr/management/employees/data/employee_list_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/management/employees/widgets/employee_setup_section.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -250,6 +251,8 @@ class _ManageEmployeeState extends State<ManageEmployee> {
 
   final _searchController = TextEditingController();
   Timer? _searchDebounceTimer;
+  final EmployeeListRequestGuard _employeeListRequestGuard =
+      EmployeeListRequestGuard();
 
   /// Search text applied to the API (after debounce).
   String _searchQuery = '';
@@ -387,19 +390,24 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     return q;
   }
 
+  Map<String, dynamic> _employeeListPageQuery() => <String, dynamic>{
+    ..._employeeListQueryBase(),
+    'limit': _pageSize,
+    'offset': _pageIndex * _pageSize,
+  };
+
   Future<void> _loadEmployees({bool clampPage = true}) async {
     if (!mounted) return;
+    final query = _employeeListPageQuery();
+    final request = _employeeListRequestGuard.begin(query);
+    bool acceptsCurrentRequest() =>
+        mounted &&
+        _employeeListRequestGuard.accepts(request, _employeeListPageQuery());
     setState(() {
       _loading = true;
       _loadError = null;
     });
     try {
-      final query = <String, dynamic>{
-        ..._employeeListQueryBase(),
-        'limit': _pageSize,
-        'offset': _pageIndex * _pageSize,
-      };
-
       final bioDev = _biometricDeviceFilterId?.trim();
       final res = await ApiClient.instance.get<dynamic>(
         '/api/employees',
@@ -408,6 +416,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             ? Options(receiveTimeout: const Duration(seconds: 120))
             : null,
       );
+      if (!acceptsCurrentRequest()) return;
       final data = res.data;
       List<_EmployeeProfile> next;
       int total;
@@ -442,16 +451,13 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       }
 
       if (clampPage && pageIdx != _pageIndex) {
-        if (!mounted) return;
         setState(() {
           _pageIndex = pageIdx;
-          _loading = false;
         });
         await _loadEmployees(clampPage: false);
         return;
       }
 
-      if (!mounted) return;
       _syncRowFocusNodes(next.length);
       setState(() {
         _employees = next;
@@ -468,7 +474,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       });
     } catch (e) {
       debugPrint('Load employees failed: $e');
-      if (!mounted) return;
+      if (!acceptsCurrentRequest()) return;
       _syncRowFocusNodes(0);
       setState(() {
         _employees = [];
@@ -965,6 +971,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   @override
   void dispose() {
     _searchDebounceTimer?.cancel();
+    _employeeListRequestGuard.invalidate();
     for (final n in _rowFocusNodes) {
       n.dispose();
     }
