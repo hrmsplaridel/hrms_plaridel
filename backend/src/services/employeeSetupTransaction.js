@@ -1,13 +1,14 @@
 const {
+  AssignmentTransitionError,
   createAssignmentTransition,
   endEmployeeAssignmentsFromDate,
 } = require('./assignmentTransition');
 
 class EmployeeSetupValidationError extends Error {
-  constructor(message) {
+  constructor(message, statusCode = 400) {
     super(message);
     this.name = 'EmployeeSetupValidationError';
-    this.statusCode = 400;
+    this.statusCode = statusCode;
   }
 }
 
@@ -134,37 +135,6 @@ function normalizeEmployeeSetup(setup, defaults = {}) {
 }
 
 async function validateSetupReferences(db, setup) {
-  if (setup?.assignment) {
-    const result = await db.query(
-      `SELECT
-         EXISTS (SELECT 1 FROM departments WHERE id = $1::uuid) AS department_exists,
-         EXISTS (
-           SELECT 1
-           FROM positions
-           WHERE id = $2::uuid
-             AND department_id = $1::uuid
-         ) AS position_matches_department,
-         EXISTS (SELECT 1 FROM shifts WHERE id = $3::uuid) AS shift_exists`,
-      [
-        setup.assignment.departmentId,
-        setup.assignment.positionId,
-        setup.assignment.shiftId,
-      ]
-    );
-    const row = result.rows[0] || {};
-    if (!row.department_exists) {
-      throw new EmployeeSetupValidationError('Selected department was not found');
-    }
-    if (!row.position_matches_department) {
-      throw new EmployeeSetupValidationError(
-        'Selected position does not belong to the selected department'
-      );
-    }
-    if (!row.shift_exists) {
-      throw new EmployeeSetupValidationError('Selected shift was not found');
-    }
-  }
-
   if (setup?.policyAssignment) {
     const result = await db.query(
       `SELECT 1
@@ -188,16 +158,26 @@ async function applyEmployeeSetup(db, { employeeId, setup, remarks }) {
   let assignment = null;
   if (setup.hasAssignmentChange) {
     if (setup.assignment) {
-      assignment = await createAssignmentTransition(db, {
-        employeeId,
-        departmentId: setup.assignment.departmentId,
-        positionId: setup.assignment.positionId,
-        shiftId: setup.assignment.shiftId,
-        effectiveFrom: setup.effectiveFrom,
-        effectiveTo: setup.effectiveTo,
-        isActive: setup.isActive,
-        remarks,
-      });
+      try {
+        assignment = await createAssignmentTransition(db, {
+          employeeId,
+          departmentId: setup.assignment.departmentId,
+          positionId: setup.assignment.positionId,
+          shiftId: setup.assignment.shiftId,
+          effectiveFrom: setup.effectiveFrom,
+          effectiveTo: setup.effectiveTo,
+          isActive: setup.isActive,
+          remarks,
+        });
+      } catch (error) {
+        if (error instanceof AssignmentTransitionError) {
+          throw new EmployeeSetupValidationError(
+            error.message,
+            error.statusCode
+          );
+        }
+        throw error;
+      }
     } else {
       await endEmployeeAssignmentsFromDate(db, {
         employeeId,

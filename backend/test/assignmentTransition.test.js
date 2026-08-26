@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   AssignmentTransitionError,
+  validateAssignmentSelection,
   createAssignmentTransition,
   updateAssignmentTransition,
   endEmployeeAssignmentsFromDate,
@@ -30,11 +31,76 @@ function assignmentPayload(overrides = {}) {
   };
 }
 
+function validSelectionRow(overrides = {}) {
+  return {
+    employee_exists: true,
+    employee_is_active: true,
+    employee_status: 'active',
+    department_exists: true,
+    department_is_active: true,
+    position_exists: true,
+    position_is_active: true,
+    position_department_id: IDS.department,
+    shift_exists: true,
+    shift_is_active: true,
+    ...overrides,
+  };
+}
+
+test('primary assignment selection requires department, position, and shift', async () => {
+  let queried = false;
+  await assert.rejects(
+    validateAssignmentSelection(
+      { query: async () => { queried = true; } },
+      {
+        employeeId: IDS.employee,
+        departmentId: IDS.department,
+        positionId: null,
+        shiftId: IDS.shift,
+      }
+    ),
+    /Position is required/
+  );
+  assert.equal(queried, false);
+});
+
+test('assignment selection rejects a position from another department', async () => {
+  const db = {
+    query: async () => ({
+      rowCount: 1,
+      rows: [validSelectionRow({ position_department_id: IDS.current })],
+    }),
+  };
+  await assert.rejects(
+    validateAssignmentSelection(db, assignmentPayload()),
+    /Selected position does not belong to the selected department/
+  );
+});
+
+test('active assignment selection rejects inactive organizational records', async () => {
+  const db = {
+    query: async () => ({
+      rowCount: 1,
+      rows: [validSelectionRow({ shift_is_active: false })],
+    }),
+  };
+  await assert.rejects(
+    validateAssignmentSelection(db, assignmentPayload()),
+    (error) =>
+      error instanceof AssignmentTransitionError &&
+      error.statusCode === 409 &&
+      error.message === 'Selected shift is inactive'
+  );
+});
+
 test('future transfer closes the current assignment on the previous day', async () => {
   const calls = [];
   const db = {
     async query(sql, params) {
       calls.push({ sql, params });
+      if (sql.includes('AS employee_exists')) {
+        return { rowCount: 1, rows: [validSelectionRow()] };
+      }
       if (sql.includes('effective_from < $2::date')) {
         return {
           rowCount: 1,
@@ -78,6 +144,9 @@ test('same-day or otherwise overlapping assignment is rejected', async () => {
   const db = {
     async query(sql, params) {
       calls.push({ sql, params });
+      if (sql.includes('AS employee_exists')) {
+        return { rowCount: 1, rows: [validSelectionRow()] };
+      }
       if (sql.includes('effective_from < $2::date')) {
         return { rowCount: 0, rows: [] };
       }
@@ -123,6 +192,9 @@ test('updating an assignment rejects coverage that reaches a scheduled assignmen
             remarks: null,
           }],
         };
+      }
+      if (sql.includes('AS employee_exists')) {
+        return { rowCount: 1, rows: [validSelectionRow()] };
       }
       if (sql.includes('effective_from < $2::date')) {
         return { rowCount: 0, rows: [] };

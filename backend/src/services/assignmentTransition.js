@@ -39,6 +39,97 @@ function validateRange(effectiveFrom, effectiveTo) {
   }
 }
 
+function cleanRequiredSelectionId(value, label) {
+  const id = String(value || '').trim();
+  if (!id) {
+    throw new AssignmentTransitionError(`${label} is required`);
+  }
+  return id.toLowerCase();
+}
+
+async function validateAssignmentSelection(
+  db,
+  {
+    employeeId,
+    departmentId,
+    positionId,
+    shiftId,
+    requireActiveReferences = true,
+  }
+) {
+  const employee = cleanRequiredSelectionId(employeeId, 'Employee');
+  const department = cleanRequiredSelectionId(departmentId, 'Department');
+  const position = cleanRequiredSelectionId(positionId, 'Position');
+  const shift = cleanRequiredSelectionId(shiftId, 'Shift');
+  const result = await db.query(
+    `SELECT
+       (u.id IS NOT NULL) AS employee_exists,
+       COALESCE(u.is_active, false) AS employee_is_active,
+       COALESCE(u.employment_status, 'active') AS employee_status,
+       (d.id IS NOT NULL) AS department_exists,
+       COALESCE(d.is_active, false) AS department_is_active,
+       (p.id IS NOT NULL) AS position_exists,
+       COALESCE(p.is_active, false) AS position_is_active,
+       p.department_id::text AS position_department_id,
+       (s.id IS NOT NULL) AS shift_exists,
+       COALESCE(s.is_active, false) AS shift_is_active
+     FROM (SELECT 1) seed
+     LEFT JOIN users u ON u.id = $1::uuid
+     LEFT JOIN departments d ON d.id = $2::uuid
+     LEFT JOIN positions p ON p.id = $3::uuid
+     LEFT JOIN shifts s ON s.id = $4::uuid`,
+    [employee, department, position, shift]
+  );
+  const row = result.rows[0] || {};
+  if (!row.employee_exists) {
+    throw new AssignmentTransitionError('Selected employee was not found');
+  }
+  if (!row.department_exists) {
+    throw new AssignmentTransitionError('Selected department was not found');
+  }
+  if (!row.position_exists) {
+    throw new AssignmentTransitionError('Selected position was not found');
+  }
+  if (String(row.position_department_id || '') !== department) {
+    throw new AssignmentTransitionError(
+      'Selected position does not belong to the selected department'
+    );
+  }
+  if (!row.shift_exists) {
+    throw new AssignmentTransitionError('Selected shift was not found');
+  }
+  if (requireActiveReferences) {
+    if (
+      !row.employee_is_active ||
+      String(row.employee_status || 'active').toLowerCase() !== 'active'
+    ) {
+      throw new AssignmentTransitionError(
+        'An active assignment requires an active employee account',
+        409
+      );
+    }
+    if (!row.department_is_active) {
+      throw new AssignmentTransitionError(
+        'Selected department is inactive',
+        409
+      );
+    }
+    if (!row.position_is_active) {
+      throw new AssignmentTransitionError('Selected position is inactive', 409);
+    }
+    if (!row.shift_is_active) {
+      throw new AssignmentTransitionError('Selected shift is inactive', 409);
+    }
+  }
+
+  return {
+    employeeId: employee,
+    departmentId: department,
+    positionId: position,
+    shiftId: shift,
+  };
+}
+
 async function closeOverlappingPredecessor(
   db,
   { employeeId, effectiveFrom, excludeAssignmentId = null }
@@ -116,14 +207,21 @@ async function createAssignmentTransition(
   const from = cleanDate(effectiveFrom, 'effective_from', { required: true });
   const to = cleanDate(effectiveTo, 'effective_to');
   validateRange(from, to);
+  const selection = await validateAssignmentSelection(db, {
+    employeeId,
+    departmentId,
+    positionId,
+    shiftId,
+    requireActiveReferences: isActive === true,
+  });
 
   if (isActive) {
     await closeOverlappingPredecessor(db, {
-      employeeId,
+      employeeId: selection.employeeId,
       effectiveFrom: from,
     });
     const conflict = await findOverlappingAssignment(db, {
-      employeeId,
+      employeeId: selection.employeeId,
       effectiveFrom: from,
       effectiveTo: to,
     });
@@ -143,10 +241,10 @@ async function createAssignmentTransition(
                effective_from::text AS effective_from,
                effective_to::text AS effective_to, is_active, remarks`,
     [
-      employeeId,
-      departmentId || null,
-      positionId || null,
-      shiftId || null,
+      selection.employeeId,
+      selection.departmentId,
+      selection.positionId,
+      selection.shiftId,
       from,
       to,
       isActive === true,
@@ -186,6 +284,31 @@ async function updateAssignmentTransition(db, { assignmentId, changes = {} }) {
   const isActive = changes.isActive === undefined
     ? existing.is_active !== false
     : changes.isActive === true;
+  const selection = {
+    employeeId: existing.employee_id,
+    departmentId:
+      changes.departmentId === undefined
+        ? existing.department_id
+        : changes.departmentId,
+    positionId:
+      changes.positionId === undefined ? existing.position_id : changes.positionId,
+    shiftId: changes.shiftId === undefined ? existing.shift_id : changes.shiftId,
+  };
+  const selectionChanged =
+    changes.departmentId !== undefined ||
+    changes.positionId !== undefined ||
+    changes.shiftId !== undefined;
+  const reactivating = existing.is_active === false && isActive;
+  if (selectionChanged || reactivating) {
+    await validateAssignmentSelection(db, {
+      ...selection,
+      requireActiveReferences: isActive,
+    });
+  } else if (isActive) {
+    cleanRequiredSelectionId(selection.departmentId, 'Department');
+    cleanRequiredSelectionId(selection.positionId, 'Position');
+    cleanRequiredSelectionId(selection.shiftId, 'Shift');
+  }
 
   if (isActive) {
     await closeOverlappingPredecessor(db, {
@@ -220,13 +343,9 @@ async function updateAssignmentTransition(db, { assignmentId, changes = {} }) {
                effective_to::text AS effective_to, is_active, remarks`,
     [
       assignmentId,
-      changes.departmentId === undefined
-        ? existing.department_id
-        : changes.departmentId || null,
-      changes.positionId === undefined
-        ? existing.position_id
-        : changes.positionId || null,
-      changes.shiftId === undefined ? existing.shift_id : changes.shiftId || null,
+      selection.departmentId,
+      selection.positionId,
+      selection.shiftId,
       from,
       to,
       isActive,
@@ -272,6 +391,7 @@ async function endEmployeeAssignmentsFromDate(db, { employeeId, effectiveFrom })
 
 module.exports = {
   AssignmentTransitionError,
+  validateAssignmentSelection,
   createAssignmentTransition,
   updateAssignmentTransition,
   endEmployeeAssignmentsFromDate,

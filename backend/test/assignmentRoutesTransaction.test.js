@@ -42,6 +42,23 @@ test('failed assignment insert rolls back on the same checked-out client', async
       if (normalized === 'BEGIN' || normalized === 'ROLLBACK') {
         return { rowCount: 0, rows: [] };
       }
+      if (normalized.includes('AS employee_exists')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            employee_exists: true,
+            employee_is_active: true,
+            employee_status: 'active',
+            department_exists: true,
+            department_is_active: true,
+            position_exists: true,
+            position_is_active: true,
+            position_department_id: '22222222-2222-4222-8222-222222222222',
+            shift_exists: true,
+            shift_is_active: true,
+          }],
+        };
+      }
       if (normalized.startsWith('SELECT id, effective_from')) {
         return { rowCount: 0, rows: [] };
       }

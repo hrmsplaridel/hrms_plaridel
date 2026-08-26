@@ -84,13 +84,20 @@ test('applies selected assignment and policy through the provided transaction cl
   const db = {
     async query(sql, params) {
       calls.push({ sql, params });
-      if (sql.includes('department_exists')) {
+      if (sql.includes('AS employee_exists')) {
         return {
           rowCount: 1,
           rows: [{
+            employee_exists: true,
+            employee_is_active: true,
+            employee_status: 'active',
             department_exists: true,
-            position_matches_department: true,
+            department_is_active: true,
+            position_exists: true,
+            position_is_active: true,
+            position_department_id: IDS.department,
             shift_exists: true,
+            shift_is_active: true,
           }],
         };
       }
@@ -131,9 +138,16 @@ test('invalid assignment references fail before existing setup is changed', asyn
       return {
         rowCount: 1,
         rows: [{
+          employee_exists: true,
+          employee_is_active: true,
+          employee_status: 'active',
           department_exists: true,
-          position_matches_department: false,
+          department_is_active: true,
+          position_exists: true,
+          position_is_active: true,
+          position_department_id: IDS.shift,
           shift_exists: true,
+          shift_is_active: true,
         }],
       };
     },
@@ -151,4 +165,39 @@ test('invalid assignment references fail before existing setup is changed', asyn
   );
   assert.equal(calls.length, 1);
   assert.equal(calls.some((call) => call.sql.includes('UPDATE assignments')), false);
+});
+
+test('inactive assignment selection returns a setup conflict instead of a server error', async () => {
+  const db = {
+    async query() {
+      return {
+        rowCount: 1,
+        rows: [{
+          employee_exists: true,
+          employee_is_active: true,
+          employee_status: 'active',
+          department_exists: true,
+          department_is_active: true,
+          position_exists: true,
+          position_is_active: true,
+          position_department_id: IDS.department,
+          shift_exists: true,
+          shift_is_active: false,
+        }],
+      };
+    },
+  };
+  const assignmentOnlyPayload = completePayload();
+  delete assignmentOnlyPayload.policy_assignment;
+
+  await assert.rejects(
+    applyEmployeeSetup(db, {
+      employeeId: IDS.employee,
+      setup: normalizeEmployeeSetup(assignmentOnlyPayload),
+    }),
+    (error) =>
+      error instanceof EmployeeSetupValidationError &&
+      error.statusCode === 409 &&
+      error.message === 'Selected shift is inactive'
+  );
 });
