@@ -217,17 +217,16 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         'full_name': fullName,
         'last_name': lastName,
         'role': role,
-        if (middleName.isNotEmpty) 'middle_name': middleName,
-        if (_suffix != null && _suffix != 'None') 'suffix': _suffix,
-        if (_sex != null) 'sex': _sex,
-        if (_dateOfBirth != null)
-          'date_of_birth': _dateOfBirth!.toIso8601String().split('T')[0],
-        if (_contactController.text.trim().isNotEmpty)
-          'contact_number': _contactController.text.trim(),
-        if (encodedAddress.isNotEmpty) 'address': encodedAddress,
-        if (_employmentType != null) 'employment_type': _employmentType,
-        if (_salaryGradeController.text.trim().isNotEmpty)
-          'salary_grade': _salaryGradeController.text.trim(),
+        ...buildClearableEmployeeProfileUpdateFields(
+          middleName: middleName,
+          suffix: _suffix,
+          sex: _sex,
+          dateOfBirth: _dateOfBirth,
+          contactNumber: _contactController.text,
+          address: encodedAddress,
+          employmentType: _employmentType,
+          salaryGrade: _salaryGradeController.text,
+        ),
         if (_dateHired != null)
           'date_hired': _dateHired!.toIso8601String().split('T')[0],
         'separation_date': _requiresSeparationDate(_employmentStatus)
@@ -723,11 +722,17 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             borderRadius: BorderRadius.circular(8),
             child: InputDecorator(
               decoration: _inputDecoration('').copyWith(
-                suffixIcon: Icon(
-                  Icons.calendar_today_rounded,
-                  size: 20,
-                  color: AppTheme.textSecondary,
-                ),
+                suffixIcon: _dateOfBirth == null
+                    ? const Icon(
+                        Icons.calendar_today_rounded,
+                        size: 20,
+                        color: AppTheme.textSecondary,
+                      )
+                    : IconButton(
+                        onPressed: () => setState(() => _dateOfBirth = null),
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        tooltip: 'Clear date of birth',
+                      ),
               ),
               child: Text(
                 _dateOfBirth != null
@@ -766,16 +771,24 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
-            initialValue: _employmentType,
+            initialValue: _employmentType ?? '',
             decoration: _inputDecoration('Employment Type'),
             hint: const Text('Employment Type'),
             items: [
-              'regular',
-              'contractual',
-              'job_order',
-              'casual',
-            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-            onChanged: (v) => setState(() => _employmentType = v),
+              const DropdownMenuItem<String>(
+                value: '',
+                child: Text('Not specified'),
+              ),
+              ...[
+                'regular',
+                'contractual',
+                'job_order',
+                'casual',
+              ].map((o) => DropdownMenuItem(value: o, child: Text(o))),
+            ],
+            onChanged: (v) => setState(
+              () => _employmentType = v == null || v.isEmpty ? null : v,
+            ),
           ),
           const SizedBox(height: 16),
           TextFormField(
