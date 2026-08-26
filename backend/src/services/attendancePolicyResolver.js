@@ -44,11 +44,20 @@ function calculateAttendanceReportDeduction({
   undertimeMinutes,
   status,
   expectedWorkMinutes,
+  holidayCoverage,
 }) {
   const normalized = policy || normalizeAttendancePolicy(null);
   const normalizedStatus = String(status || '').trim().toLowerCase();
-  const excluded = new Set(['holiday', 'on_leave', 'rest_day', 'on_field']);
-  if (!normalized.useEquivalentDayConversion || excluded.has(normalizedStatus)) {
+  const normalizedCoverage = String(holidayCoverage || '').trim().toLowerCase();
+  const isWholeDayHoliday =
+    normalizedStatus === 'holiday' &&
+    (!normalizedCoverage || normalizedCoverage === 'whole_day');
+  const excluded = new Set(['on_leave', 'rest_day', 'on_field']);
+  if (
+    !normalized.useEquivalentDayConversion ||
+    excluded.has(normalizedStatus) ||
+    isWholeDayHoliday
+  ) {
     return {
       late_minutes: 0,
       undertime_minutes: 0,

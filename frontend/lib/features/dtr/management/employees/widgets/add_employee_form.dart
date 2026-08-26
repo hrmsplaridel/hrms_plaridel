@@ -33,6 +33,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   String? _employmentType;
   String _employmentStatus = 'active';
   DateTime? _dateHired;
+  DateTime? _separationDate;
   bool _leaveCreditEligible = true;
   Uint8List? _selectedImageBytes;
   bool _saving = false;
@@ -230,6 +231,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       _employmentType = null;
       _employmentStatus = 'active';
       _dateHired = null;
+      _separationDate = null;
       _leaveCreditEligible = true;
       _selectedImageBytes = null;
       _passwordController.clear();
@@ -284,9 +286,21 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         if (_biometricIdController.text.trim().isNotEmpty)
           'biometric_user_id': _biometricIdController.text.trim(),
         'date_hired': _dateHired!.toIso8601String().split('T')[0],
+        'separation_date': _requiresSeparationDate(_employmentStatus)
+            ? _employeeDateText(_separationDate!)
+            : null,
         'employment_status': _employmentStatus,
         'leave_credit_eligible': _leaveCreditEligible,
       };
+      final initialSetup = _setupSectionKey.currentState
+          ?.buildAtomicSetupPayload(
+            effectiveFrom: _dateHired!,
+            effectiveTo: _requiresSeparationDate(_employmentStatus)
+                ? _separationDate
+                : null,
+            isActive: !_requiresSeparationDate(_employmentStatus),
+          );
+      if (initialSetup != null) body['setup'] = initialSetup;
 
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
         '/api/employees',
@@ -300,20 +314,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       }
 
       final userId = data['id'] as String;
-      String? setupWarning;
-      try {
-        await _setupSectionKey.currentState?.createInitialSetupForEmployee(
-          employeeId: userId,
-          effectiveFrom: _dateHired ?? DateTime.now(),
-        );
-      } catch (e) {
-        setupWarning = _apiErrorMessageFromDio(
-          e,
-          fallback: 'Initial assignment/policy was not saved.',
-        );
-      }
-
-      if (!mounted) return;
+      final postCommitWarnings = <String>[];
       final hire = context.read<RecruitmentHirePrefill>();
       if (hire.hasPendingLink && hire.applicationId != null) {
         try {
@@ -329,11 +330,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           hire.clear();
           _lastAppliedPrefillStamp = null;
         } catch (e) {
-          if (mounted) {
-            _showSnackBar(
-              'Account created, but linking to recruitment failed: $e',
-            );
-          }
+          postCommitWarnings.add('Recruitment linking failed and needs retry.');
+          debugPrint('Recruitment linking failed after employee creation: $e');
         }
       }
 
@@ -345,6 +343,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             fileName: 'avatar.jpg',
           );
         } catch (e) {
+          postCommitWarnings.add('Photo upload failed and needs retry.');
           debugPrint('Avatar upload failed: $e');
         }
       }
@@ -370,12 +369,12 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       }
       if (!mounted) return;
       _clearForm();
-      if (setupWarning != null) {
-        _showSnackBar(
-          'Account created, but setup was not completed: $setupWarning',
-        );
-      }
       if (widget.onAccountCreated != null) {
+        if (postCommitWarnings.isNotEmpty) {
+          _showSnackBar(
+            'Account and setup were saved. ${postCommitWarnings.join(' ')}',
+          );
+        }
         widget.onAccountCreated!();
       } else {
         final emailStatus = !accountIsActive
@@ -385,8 +384,12 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             : emailConfigured
             ? ' Account email failed; please share the login details manually.'
             : ' Email is not configured; please share the login details manually.';
-        final setupStatus = setupWarning == null ? '' : ' Setup needs review.';
-        _showSnackBar('Account created as $privilege.$emailStatus$setupStatus');
+        final postCommitStatus = postCommitWarnings.isEmpty
+            ? ''
+            : ' ${postCommitWarnings.join(' ')}';
+        _showSnackBar(
+          'Account created as $privilege.$emailStatus$postCommitStatus',
+        );
       }
     } on DioException catch (e) {
       if (!mounted) return;
@@ -1067,37 +1070,112 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
             onChanged: (v) => setState(() {
               _employmentStatus = v ?? 'active';
-              if (_employmentStatus != 'active') {
+              if (_employmentStatus == 'inactive') {
                 _leaveCreditEligible = false;
+              }
+              if (!_requiresSeparationDate(_employmentStatus)) {
+                _separationDate = null;
               }
             }),
           ),
+          if (_requiresSeparationDate(_employmentStatus)) ...[
+            const SizedBox(height: 20),
+            FormField<DateTime>(
+              key: ValueKey(
+                '${_employmentStatus}_${_separationDate?.toIso8601String() ?? 'separation_null'}',
+              ),
+              validator: (_) {
+                if (_separationDate == null) {
+                  return 'Last day of service is required';
+                }
+                if (_dateHired != null &&
+                    _separationDate!.isBefore(_dateHired!)) {
+                  return 'Last day of service cannot be before date hired';
+                }
+                if (_separationDate!.isAfter(DateTime.now())) {
+                  return 'Last day of service cannot be in the future';
+                }
+                return null;
+              },
+              builder: (state) => InkWell(
+                onTap: () async {
+                  final today = DateTime.now();
+                  final initial = _separationDate ?? today;
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: initial.isAfter(today) ? today : initial,
+                    firstDate: DateTime(1900),
+                    lastDate: today,
+                  );
+                  if (picked != null) {
+                    setState(() => _separationDate = picked);
+                    state.didChange(picked);
+                  }
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: InputDecorator(
+                  decoration:
+                      _fieldDecoration(
+                        'Last day of service',
+                        hint: 'Tap calendar to choose',
+                      ).copyWith(
+                        errorText: state.errorText,
+                        suffixIcon: Icon(
+                          Icons.event_busy_outlined,
+                          size: 20,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                  child: Text(
+                    _separationDate != null
+                        ? _employeeDateText(_separationDate!)
+                        : 'Tap calendar to choose',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: _separationDate != null
+                          ? _chromeHeadingColor(context)
+                          : _chromeMutedColor(context),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
             value: _leaveCreditEligible,
             title: Text(
-              'Earn monthly VL/SL credits',
+              _requiresSeparationDate(_employmentStatus)
+                  ? 'Eligible for VL/SL through separation'
+                  : 'Earn monthly VL/SL credits',
               style: TextStyle(
                 color: _chromeHeadingColor(context),
                 fontWeight: FontWeight.w600,
               ),
             ),
-            subtitle: _employmentStatus == 'active'
-                ? null
-                : const Text('Available only for active employees'),
+            subtitle: _requiresSeparationDate(_employmentStatus)
+                ? const Text(
+                    'Used to calculate the prorated final-month credit.',
+                  )
+                : (_employmentStatus == 'active'
+                      ? null
+                      : const Text('Available only for active employees')),
             secondary: Icon(
               Icons.account_balance_wallet_outlined,
               color: AppTheme.primaryNavy,
             ),
-            onChanged: _employmentStatus == 'active'
+            onChanged:
+                _employmentStatus == 'active' ||
+                    _requiresSeparationDate(_employmentStatus)
                 ? (value) => setState(() => _leaveCreditEligible = value)
                 : null,
           ),
           EmployeeSetupSection(
             key: _setupSectionKey,
             title: 'Initial assignment',
-            subtitle: 'Optional setup created after the account is saved.',
+            subtitle:
+                'Optional assignment and policy saved together with the account.',
             validationMessage:
                 'For initial assignment, select Department, Position, and Shift; or leave all three blank.',
             showTopDivider: true,

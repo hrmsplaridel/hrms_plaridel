@@ -12,7 +12,22 @@ const {
 } = require('../utils/employeeStatus');
 const {
   validateCreateEmployeePayload,
+  validateEmployeeSeparationDates,
+  SEPARATION_EMPLOYMENT_STATUSES,
 } = require('../utils/employeeAccountValidation');
+const {
+  EmployeeSetupValidationError,
+  normalizeEmployeeSetup,
+  applyEmployeeSetup,
+} = require('../services/employeeSetupTransaction');
+const {
+  EmployeeAccountSecurityError,
+  lockAndValidateAccountTransition,
+  lockAndValidateBulkAccountStatusTransition,
+  revokeActiveRefreshTokens,
+  writeAccountSecurityAudit,
+} = require('../services/employeeAccountSecurity');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -57,15 +72,15 @@ function generateTemporaryPassword(length = 12) {
   return chars.join('');
 }
 
-async function allocateEmployeeNumber() {
+async function allocateEmployeeNumber(db = pool) {
   // Allocate stable, ascending employee numbers. Keep advancing if an older
   // record already occupies a sequence value (for example after data import).
   while (true) {
-    const seq = await pool.query(
+    const seq = await db.query(
       "SELECT nextval('users_employee_number_seq') AS n"
     );
     const candidate = parseInt(seq.rows[0].n, 10);
-    const exists = await pool.query(
+    const exists = await db.query(
       'SELECT 1 FROM users WHERE employee_number = $1 LIMIT 1',
       [candidate]
     );
@@ -100,6 +115,7 @@ async function ensureEmployeeProfileColumns() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible_until DATE`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
     ON users (leave_credit_eligible)
     WHERE leave_credit_eligible = true`);
@@ -140,6 +156,8 @@ function mapEmployeeListRow(r) {
     employment_type: r.employment_type,
     salary_grade: r.salary_grade,
     date_hired: r.date_hired,
+    separation_date: r.separation_date,
+    leave_credit_eligible_until: r.leave_credit_eligible_until,
     employment_status: r.employment_status ?? 'active',
     leave_credit_eligible: r.leave_credit_eligible !== false,
     current_department_id: r.current_department_id ?? null,
@@ -232,6 +250,29 @@ function buildEmployeeListFromSql(req, options = {}) {
   } else if (roleFilter === 'User' || roleFilter === 'Employee') {
     conditions.push(`${tbl}.role = $${i++}`);
     params.push('employee');
+  }
+  if (historicalRange?.startDate && historicalRange?.endDate) {
+    const startIdx = i++;
+    const endIdx = i++;
+    conditions.push(`(
+      EXISTS (
+        SELECT 1
+        FROM assignments historical_presence_assignment
+        WHERE historical_presence_assignment.employee_id = ${tbl}.id
+          AND historical_presence_assignment.effective_from <= $${endIdx}::date
+          AND (
+            historical_presence_assignment.effective_to IS NULL
+            OR historical_presence_assignment.effective_to >= $${startIdx}::date
+          )
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM dtr_daily_summary historical_presence_dtr
+        WHERE historical_presence_dtr.employee_id = ${tbl}.id
+          AND historical_presence_dtr.attendance_date BETWEEN $${startIdx}::date AND $${endIdx}::date
+      )
+    )`);
+    params.push(historicalRange.startDate, historicalRange.endDate);
   }
   if (departmentId) {
     if (historicalRange?.startDate && historicalRange?.endDate) {
@@ -357,7 +398,8 @@ function employeeRowsForRequester(rows, requester) {
 }
 
 // GET /api/employees - list all (?status=Active|Inactive|All, ?role=admin|employee|All, ?department_id=uuid, ?biometric_user_ids=id1,id2,id3)
-// Optional: ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD makes department membership historical for that range.
+// Optional: ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD limits employees to those
+// with an assignment or DTR record in the range and makes department membership historical.
 // Optional: ?biometric_device_id=<uuid> — admin only; restrict to employees whose biometric_user_id is enrolled on that ZKTeco (reads device live)
 // Optional: ?biometric_filter=set|has|missing|none — filter by whether biometric_user_id is set (set/has = non-empty; missing/none = empty)
 // Optional: ?q= search; ?sort= & ?order=asc|desc (sort whitelist: full_name, employee_number, role, email, department, position, employment_status, is_active)
@@ -375,7 +417,9 @@ router.get('/', protect, async (req, res) => {
           `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
                   u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
                   u.civil_status, u.nationality,
-                  u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
+                  u.employment_type, u.salary_grade, u.date_hired, u.separation_date,
+                  u.leave_credit_eligible_until,
+                  u.employment_status, u.leave_credit_eligible,
                   cur.current_department_name, cur.current_position_name,
                   cur.current_shift_punch_mode
            FROM users u
@@ -440,7 +484,9 @@ router.get('/', protect, async (req, res) => {
       `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.biometric_user_id, u.is_active, u.avatar_path,
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
               u.civil_status, u.nationality,
-              u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
+              u.employment_type, u.salary_grade, u.date_hired, u.separation_date,
+              u.leave_credit_eligible_until,
+              u.employment_status, u.leave_credit_eligible,
               cur.current_department_name, cur.current_position_name,
               cur.current_shift_punch_mode
        ${fromSql}
@@ -542,6 +588,7 @@ router.get('/export/csv', protect, requireAdmin, async (req, res) => {
 
 // POST /api/employees/bulk-status — set is_active for many users (admin only).
 router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     const { employee_ids: idsRaw, is_active: isActive } = req.body;
     if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
@@ -558,14 +605,59 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
     if (ids.length === 0) {
       return res.status(400).json({ error: 'No valid employee IDs' });
     }
-    const result = await pool.query(
-      'UPDATE users SET is_active = $2, updated_at = now() WHERE id = ANY($1::uuid[]) RETURNING id',
-      [ids, isActive],
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const targets = await lockAndValidateBulkAccountStatusTransition(client, {
+      actorId: req.user.id,
+      targetIds: ids,
+      isActive,
+    });
+    const result = await client.query(
+      `UPDATE users
+          SET is_active = $2,
+              updated_at = now()
+        WHERE id = ANY($1::uuid[])
+        RETURNING id`,
+      [ids, isActive]
     );
+    if (!isActive) {
+      await revokeActiveRefreshTokens(
+        client,
+        targets.map((target) => target.id)
+      );
+    }
+    for (const target of targets) {
+      if (target.is_active === isActive) continue;
+      await writeAccountSecurityAudit(client, {
+        actorId: req.user.id,
+        targetId: target.id,
+        action: isActive
+          ? 'employee_account_reactivated'
+          : 'employee_account_deactivated',
+        previous: {
+          role: target.role,
+          is_active: target.is_active,
+          employment_status: target.employment_status,
+        },
+        next: {
+          role: target.role,
+          is_active: isActive,
+          employment_status: target.employment_status,
+        },
+        source: 'employee_bulk_status',
+      });
+    }
+    await client.query('COMMIT');
     res.json({ updated: result.rowCount });
   } catch (err) {
+    if (client) await client.query('ROLLBACK');
+    if (err instanceof EmployeeAccountSecurityError) {
+      return res.status(err.statusCode).json({ error: err.message, code: err.code });
+    }
     console.error('[employees POST /bulk-status]', err);
     res.status(500).json({ error: 'Failed to update employees' });
+  } finally {
+    client?.release();
   }
 });
 
@@ -577,7 +669,9 @@ router.get('/:id', protect, async (req, res) => {
       `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active, u.avatar_path,
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
               u.civil_status, u.nationality,
-              u.employment_type, u.salary_grade, u.date_hired, u.employment_status, u.leave_credit_eligible,
+              u.employment_type, u.salary_grade, u.date_hired, u.separation_date,
+              u.leave_credit_eligible_until,
+              u.employment_status, u.leave_credit_eligible,
               cur.current_department_name, cur.current_position_name,
               cur.current_shift_punch_mode
        FROM users u
@@ -620,6 +714,8 @@ router.get('/:id', protect, async (req, res) => {
       employment_type: r.employment_type,
       salary_grade: r.salary_grade,
       date_hired: r.date_hired,
+      separation_date: r.separation_date,
+      leave_credit_eligible_until: r.leave_credit_eligible_until,
       employment_status: r.employment_status ?? 'active',
       leave_credit_eligible: r.leave_credit_eligible !== false,
       current_department_name: r.current_department_name ?? null,
@@ -635,7 +731,7 @@ router.get('/:id', protect, async (req, res) => {
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
     await ensureEmployeeProfileColumns();
-    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, employment_status, biometric_user_id, leave_credit_eligible } = req.body;
+    const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, separation_date, employment_status, biometric_user_id, leave_credit_eligible, setup } = req.body;
     const validationError = validateCreateEmployeePayload(req.body);
     if (validationError) {
       return res.status(400).json({ error: validationError });
@@ -649,7 +745,6 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         ? password.trim()
         : generateTemporaryPassword();
     const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
-    const empNo = await allocateEmployeeNumber();
     const normalizedEmploymentStatus =
       normalizeEmploymentStatus(employment_status);
     const accountIsActive = accountIsActiveForEmploymentStatus(
@@ -660,64 +755,98 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         normalizedEmploymentStatus,
         boolField(leave_credit_eligible, true)
       );
+    const leaveCreditEligibleUntil =
+      SEPARATION_EMPLOYMENT_STATUSES.has(normalizedEmploymentStatus) &&
+      boolField(leave_credit_eligible, true)
+        ? separation_date
+        : null;
+    const normalizedSetup = normalizeEmployeeSetup(setup, {
+      effectiveFrom: date_hired,
+      effectiveTo: separation_date || null,
+      isActive: accountIsActive,
+    });
 
-    const result = await pool.query(
-      `INSERT INTO users (
-         email, password_hash, role, first_name, full_name, last_name, middle_name,
-         suffix, sex, date_of_birth, contact_number, address, civil_status,
-         nationality, is_active, employee_number, employment_type, salary_grade,
-         date_hired, employment_status, biometric_user_id, leave_credit_eligible
-       )
-       VALUES (
-         $1, $2, $3, $4, $5, $6, $7,
-         $8, $9, $10::date, $11, $12, $13,
-         $14, $15, $16, $17, $18,
-         $19::date, $20, $21, $22
-       )
-       RETURNING id, employee_number, email, role, first_name, full_name, last_name,
-                 avatar_path, is_active, middle_name, suffix, sex, date_of_birth,
-                 contact_number, address, civil_status, nationality, employment_type,
-                 salary_grade, date_hired, employment_status, biometric_user_id,
-                 leave_credit_eligible`,
-      [
-        email.trim().toLowerCase(),
-        passwordHash,
-        role,
-        first_name?.trim() || null,
-        full_name?.trim() || null,
-        last_name?.trim() || null,
-        middle_name?.trim() || null,
-        suffix?.trim() || null,
-        sex?.trim() || null,
-        date_of_birth || null,
-        contact_number?.trim() || null,
-        address?.trim() || null,
-        civil_status?.trim() || null,
-        nationality?.trim() || null,
-        accountIsActive,
-        empNo,
-        (employment_type && ['regular', 'contractual', 'job_order', 'casual'].includes(employment_type)) ? employment_type : null,
-        salary_grade?.trim() || null,
-        date_hired || null,
-        normalizedEmploymentStatus,
-        biometric_user_id?.trim() || null,
-        normalizedLeaveCreditEligible,
-      ]
-    );
-
+    const client = await pool.connect();
+    let createdEmployee;
+    let initialSetup = null;
     try {
-      // VL/SL: earned credits come from monthly accrual only; no static 15-day seed.
-      await pool.query(
-        `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days)
-         VALUES ($1::uuid, 'vacationLeave', 0, 0, 0, 0), ($1::uuid, 'sickLeave', 0, 0, 0, 0)
-         ON CONFLICT (user_id, leave_type) DO NOTHING`,
-        [result.rows[0].id]
+      await client.query('BEGIN');
+      const empNo = await allocateEmployeeNumber(client);
+      const result = await client.query(
+        `INSERT INTO users (
+           email, password_hash, role, first_name, full_name, last_name, middle_name,
+           suffix, sex, date_of_birth, contact_number, address, civil_status,
+           nationality, is_active, employee_number, employment_type, salary_grade,
+           date_hired, separation_date, employment_status, biometric_user_id,
+           leave_credit_eligible, leave_credit_eligible_until
+         )
+         VALUES (
+           $1, $2, $3, $4, $5, $6, $7,
+           $8, $9, $10::date, $11, $12, $13,
+           $14, $15, $16, $17, $18,
+           $19::date, $20::date, $21, $22, $23, $24::date
+         )
+         RETURNING id, employee_number, email, role, first_name, full_name, last_name,
+                   avatar_path, is_active, middle_name, suffix, sex, date_of_birth,
+                   contact_number, address, civil_status, nationality, employment_type,
+                   salary_grade, date_hired, separation_date, employment_status,
+                   biometric_user_id, leave_credit_eligible,
+                   leave_credit_eligible_until`,
+        [
+          email.trim().toLowerCase(),
+          passwordHash,
+          role,
+          first_name?.trim() || null,
+          full_name?.trim() || null,
+          last_name?.trim() || null,
+          middle_name?.trim() || null,
+          suffix?.trim() || null,
+          sex?.trim() || null,
+          date_of_birth || null,
+          contact_number?.trim() || null,
+          address?.trim() || null,
+          civil_status?.trim() || null,
+          nationality?.trim() || null,
+          accountIsActive,
+          empNo,
+          (employment_type && ['regular', 'contractual', 'job_order', 'casual'].includes(employment_type)) ? employment_type : null,
+          salary_grade?.trim() || null,
+          date_hired || null,
+          separation_date || null,
+          normalizedEmploymentStatus,
+          biometric_user_id?.trim() || null,
+          normalizedLeaveCreditEligible,
+          leaveCreditEligibleUntil,
+        ]
       );
-    } catch (lbErr) {
-      console.warn('[employees POST] Could not create default leave balances:', lbErr.message);
+      createdEmployee = result.rows[0];
+
+      // VL/SL earned credits still come from month-end accrual; these are only
+      // the required zero-value wallets for the new employee.
+      await client.query(
+        `INSERT INTO leave_balances (
+           user_id, leave_type, earned_days, used_days, pending_days, adjusted_days
+         )
+         VALUES
+           ($1::uuid, 'vacationLeave', 0, 0, 0, 0),
+           ($1::uuid, 'sickLeave', 0, 0, 0, 0)
+         ON CONFLICT (user_id, leave_type) DO NOTHING`,
+        [createdEmployee.id]
+      );
+
+      initialSetup = await applyEmployeeSetup(client, {
+        employeeId: createdEmployee.id,
+        setup: normalizedSetup,
+        remarks: 'Initial assignment from employee setup',
+      });
+      await client.query('COMMIT');
+    } catch (transactionError) {
+      await client.query('ROLLBACK');
+      throw transactionError;
+    } finally {
+      client.release();
     }
 
-    const createdEmployee = result.rows[0];
     let accountEmailSent = false;
     let accountEmailError = null;
 
@@ -748,9 +877,16 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       account_email_sent: accountEmailSent,
       account_email_configured: isSmtpConfigured(),
       temporary_password: temporaryPassword,
+      initial_setup: initialSetup,
       ...(accountEmailError ? { account_email_error: accountEmailError } : {}),
     });
   } catch (err) {
+    if (err instanceof EmployeeSetupValidationError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.code === '22P02' || err.code === '23503') {
+      return res.status(400).json({ error: 'Invalid employee setup selection' });
+    }
     if (err.code === '23505') {
       const constraint = String(err.constraint || '');
       if (constraint.includes('biometric_user_id')) {
@@ -787,14 +923,19 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       employment_type,
       salary_grade,
       date_hired,
+      separation_date,
       employment_status,
       biometric_user_id,
       leave_credit_eligible,
       office_id,
+      setup,
     } = req.body;
 
     const existingRes = await pool.query(
-      'SELECT biometric_user_id, employment_status FROM users WHERE id = $1::uuid',
+      `SELECT biometric_user_id, employment_status, date_hired,
+              separation_date::text AS separation_date,
+              leave_credit_eligible, leave_credit_eligible_until::text
+       FROM users WHERE id = $1::uuid`,
       [id]
     );
     if (existingRes.rowCount === 0) {
@@ -825,15 +966,64 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const effectiveEmploymentStatus = validEmploymentStatus
       ? employment_status
       : normalizeEmploymentStatus(existingRes.rows[0].employment_status);
+    const effectiveDateHired = date_hired !== undefined
+      ? date_hired
+      : existingRes.rows[0].date_hired?.toISOString?.().slice(0, 10) ||
+        existingRes.rows[0].date_hired;
+    const suppliedSeparationDate = separation_date === null || separation_date === ''
+      ? null
+      : separation_date;
+    const effectiveSeparationDate = SEPARATION_EMPLOYMENT_STATUSES.has(
+      effectiveEmploymentStatus
+    )
+      ? (separation_date !== undefined
+          ? suppliedSeparationDate
+          : existingRes.rows[0].separation_date)
+      : null;
+    const lifecycleError = validateEmployeeSeparationDates({
+      dateHired: effectiveDateHired,
+      employmentStatus: effectiveEmploymentStatus,
+      separationDate: effectiveSeparationDate,
+    });
+    if (lifecycleError) {
+      return res.status(400).json({ error: lifecycleError });
+    }
     const nonActiveEmploymentStatus =
       effectiveEmploymentStatus !== 'active';
     const effectiveIsActive = nonActiveEmploymentStatus ? false : is_active;
+    const requestedRole =
+      role !== undefined && ['admin', 'employee'].includes(role)
+        ? role
+        : undefined;
+    const requestedLeaveCreditEligible = leave_credit_eligible !== undefined
+      ? boolField(leave_credit_eligible, true)
+      : existingRes.rows[0].leave_credit_eligible !== false;
     const effectiveLeaveCreditEligible = nonActiveEmploymentStatus
       ? false
-      : leave_credit_eligible;
+      : requestedLeaveCreditEligible;
+    const wasEligibleForAccrual =
+      existingRes.rows[0].leave_credit_eligible !== false ||
+      Boolean(existingRes.rows[0].leave_credit_eligible_until);
+    const effectiveLeaveCreditEligibleUntil =
+      SEPARATION_EMPLOYMENT_STATUSES.has(effectiveEmploymentStatus) &&
+      (wasEligibleForAccrual || requestedLeaveCreditEligible)
+        ? effectiveSeparationDate
+        : null;
+    const shouldUpdateSeparation =
+      separation_date !== undefined || employment_status !== undefined;
     const canUseOfficeId = office_id !== undefined
       ? await hasUsersOfficeIdColumn()
       : false;
+    const normalizedSetup = normalizeEmployeeSetup(setup, {
+      effectiveFrom: todayInHrmsTimezone(),
+      effectiveTo: effectiveSeparationDate,
+      isActive: !nonActiveEmploymentStatus,
+    });
+    if (nonActiveEmploymentStatus && normalizedSetup?.isActive) {
+      return res.status(400).json({
+        error: 'Inactive or separated employees cannot receive an active setup',
+      });
+    }
 
     const fields = [
       ['first_name', first_name],
@@ -854,9 +1044,19 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ['employment_type', employment_type],
       ['salary_grade', salary_grade],
       ['date_hired', date_hired],
+      [
+        'separation_date',
+        shouldUpdateSeparation ? effectiveSeparationDate : undefined,
+      ],
       ['employment_status', employment_status],
       ['biometric_user_id', biometric_user_id],
       ['leave_credit_eligible', effectiveLeaveCreditEligible],
+      [
+        'leave_credit_eligible_until',
+        shouldUpdateSeparation
+          ? effectiveLeaveCreditEligibleUntil
+          : undefined,
+      ],
       ...(canUseOfficeId ? [['office_id', office_id]] : []),
     ];
     for (const [col, val] of fields) {
@@ -875,7 +1075,12 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           values.push(raw);
           continue;
         }
-        if (col === 'date_of_birth' || col === 'date_hired') {
+        if (
+          col === 'date_of_birth' ||
+          col === 'date_hired' ||
+          col === 'separation_date' ||
+          col === 'leave_credit_eligible_until'
+        ) {
           updates.push(`${col} = $${i++}::date`);
           values.push(val || null);
         } else {
@@ -885,7 +1090,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       }
     }
 
-    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    if (updates.length === 0 && !normalizedSetup) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
     updates.push('updated_at = now()');
     values.push(id);
 
@@ -910,20 +1117,120 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       'employment_type',
       'salary_grade',
       'date_hired',
+      'separation_date',
       'employment_status',
       'biometric_user_id',
       'leave_credit_eligible',
+      'leave_credit_eligible_until',
       ...(canUseOfficeId ? ['office_id'] : []),
     ];
 
-    const result = await pool.query(
-      `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING ${returningColumns.join(', ')}`,
-      values
-    );
+    const client = await pool.connect();
+    let result;
+    let updatedSetup = null;
+    let accountTransition;
+    try {
+      await client.query('BEGIN');
+      accountTransition = await lockAndValidateAccountTransition(client, {
+        actorId: req.user.id,
+        targetId: id,
+        nextRole: requestedRole,
+        nextIsActive: effectiveIsActive,
+        nextEmploymentStatus: effectiveEmploymentStatus,
+      });
+      result = await client.query(
+        `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
+         RETURNING ${returningColumns.join(', ')}`,
+         values
+       );
+
+      updatedSetup = await applyEmployeeSetup(client, {
+        employeeId: id,
+        setup: normalizedSetup,
+        remarks: 'Updated from employee edit',
+      });
+
+      if (
+        shouldUpdateSeparation &&
+        SEPARATION_EMPLOYMENT_STATUSES.has(effectiveEmploymentStatus)
+      ) {
+        await client.query(
+          `UPDATE assignments
+              SET is_active = false,
+                  updated_at = now()
+            WHERE employee_id = $1::uuid
+              AND is_active = true
+              AND effective_from > $2::date`,
+          [id, effectiveSeparationDate]
+        );
+        await client.query(
+          `WITH target AS (
+             SELECT id
+               FROM assignments
+              WHERE employee_id = $1::uuid
+                AND effective_from <= $2::date
+                AND (
+                  effective_to IS NULL
+                  OR effective_to >= $2::date
+                  OR effective_to = $3::date
+                )
+              ORDER BY effective_from DESC, created_at DESC, id DESC
+              LIMIT 1
+           )
+           UPDATE assignments a
+              SET effective_to = $2::date,
+                  updated_at = now()
+             FROM target
+            WHERE a.id = target.id`,
+          [id, effectiveSeparationDate, existingRes.rows[0].separation_date]
+        );
+        await client.query(
+          `UPDATE policy_assignments
+              SET is_active = false,
+                  effective_to = CASE
+                    WHEN effective_from <= $2::date THEN $2::date
+                    ELSE effective_to
+                  END,
+                  updated_at = now()
+            WHERE employee_id = $1::uuid
+              AND is_active = true`,
+          [id, effectiveSeparationDate]
+        );
+      }
+
+      if (accountTransition.revokeSessions) {
+        await revokeActiveRefreshTokens(client, id);
+      }
+      if (accountTransition.changed) {
+        await writeAccountSecurityAudit(client, {
+          actorId: req.user.id,
+          targetId: id,
+          action: 'employee_account_security_updated',
+          previous: accountTransition.previous,
+          next: accountTransition.next,
+          source: 'employee_update',
+        });
+      }
+
+      await client.query('COMMIT');
+    } catch (transactionError) {
+      await client.query('ROLLBACK');
+      throw transactionError;
+    } finally {
+      client.release();
+    }
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
-    res.json(result.rows[0]);
+    res.json({ ...result.rows[0], updated_setup: updatedSetup });
   } catch (err) {
+    if (err instanceof EmployeeAccountSecurityError) {
+      return res.status(err.statusCode).json({ error: err.message, code: err.code });
+    }
+    if (err instanceof EmployeeSetupValidationError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.code === '22P02' || err.code === '23503') {
+      return res.status(400).json({ error: 'Invalid employee setup selection' });
+    }
     if (err.code === '23505') return res.status(409).json({ error: 'Email already exists' });
     console.error('[employees PUT]', err);
     res.status(500).json({ error: 'Failed to update employee' });
@@ -932,16 +1239,41 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
 // DELETE /api/employees/:id - deactivate (or soft-delete); optional hard delete
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
-    const result = await pool.query(
-      'UPDATE users SET is_active = false, updated_at = now() WHERE id = $1 RETURNING id',
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const transition = await lockAndValidateAccountTransition(client, {
+      actorId: req.user.id,
+      targetId: req.params.id,
+      nextIsActive: false,
+    });
+    await client.query(
+      'UPDATE users SET is_active = false, updated_at = now() WHERE id = $1::uuid',
       [req.params.id]
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
+    await revokeActiveRefreshTokens(client, req.params.id);
+    if (transition.changed) {
+      await writeAccountSecurityAudit(client, {
+        actorId: req.user.id,
+        targetId: req.params.id,
+        action: 'employee_account_deactivated',
+        previous: transition.previous,
+        next: transition.next,
+        source: 'employee_delete',
+      });
+    }
+    await client.query('COMMIT');
     res.status(204).send();
   } catch (err) {
+    if (client) await client.query('ROLLBACK');
+    if (err instanceof EmployeeAccountSecurityError) {
+      return res.status(err.statusCode).json({ error: err.message, code: err.code });
+    }
     console.error('[employees DELETE]', err);
     res.status(500).json({ error: 'Failed to deactivate employee' });
+  } finally {
+    client?.release();
   }
 });
 

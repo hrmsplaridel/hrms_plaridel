@@ -135,6 +135,10 @@ function endOfMonth(d) {
 async function ensureLeaveCreditEligibilityColumn(db) {
   await db.query(
     `ALTER TABLE users
+       ADD COLUMN IF NOT EXISTS leave_credit_eligible_until DATE`
+  );
+  await db.query(
+    `ALTER TABLE users
        ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true`
   );
   await db.query(
@@ -142,6 +146,13 @@ async function ensureLeaveCreditEligibilityColumn(db) {
        ON users (leave_credit_eligible)
        WHERE leave_credit_eligible = true`
   );
+}
+
+function accrualEligibleDuringTargetMonthSql(userAlias, targetStartParam) {
+  return `(
+    ${userAlias}.leave_credit_eligible = true
+    OR ${userAlias}.leave_credit_eligible_until >= ${targetStartParam}::date
+  )`;
 }
 
 async function ensureMonthlyAccrualPostingTable(db) {
@@ -593,7 +604,7 @@ async function loadAccrualPostingsForReconciliation(
             lb.adjusted_days, lb.last_accrual_date,
             u.full_name, u.date_hired, u.separation_date,
             (
-              u.leave_credit_eligible = true
+              ${accrualEligibleDuringTargetMonthSql('u', '$2')}
               AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
               AND ${serviceMonthAssignmentExistsSql('u', '$2', '$3')}
             ) AS target_eligible
@@ -869,7 +880,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
        LEFT JOIN leave_balances lb
          ON lb.user_id = u.id
         AND lb.leave_type = t.leave_type
-       WHERE u.leave_credit_eligible = true
+       WHERE ${accrualEligibleDuringTargetMonthSql('u', '$2')}
          AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
          AND ${serviceMonthAssignmentExistsSql('u', '$2', '$3')}
          AND lb.id IS NULL`,
@@ -891,7 +902,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
          LEFT JOIN leave_balances lb
            ON lb.user_id = u.id
           AND lb.leave_type = t.leave_type
-         WHERE u.leave_credit_eligible = true
+         WHERE ${accrualEligibleDuringTargetMonthSql('u', '$2')}
            AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
            AND ${serviceMonthAssignmentExistsSql('u', '$2', '$3')}
            AND lb.id IS NULL
@@ -918,7 +929,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
          FROM leave_balances lb
          INNER JOIN users u ON u.id = lb.user_id
          WHERE lb.leave_type = ANY($1::text[])
-           AND u.leave_credit_eligible = true
+           AND ${accrualEligibleDuringTargetMonthSql('u', '$2')}
            AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
            AND ${serviceMonthAssignmentExistsSql('u', '$2', '$3')}
          ${dryRun ? '' : 'FOR UPDATE OF lb'}`,

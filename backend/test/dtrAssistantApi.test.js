@@ -145,7 +145,29 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
   );
 
   const restoreDb = withMockedModule('../src/config/db', {
-    pool: { query: async () => ({ rows: [], rowCount: 0 }) },
+    pool: {
+      query: async (sql, params = []) => {
+        if (/FROM users\s+WHERE id = \$1::uuid/i.test(sql)) {
+          const id = params[0];
+          return {
+            rowCount: 1,
+            rows: [
+              {
+                id,
+                email:
+                  id === otherEmployeeId
+                    ? 'other@example.test'
+                    : 'employee@example.test',
+                role: 'employee',
+                is_active: true,
+                employment_status: 'active',
+              },
+            ],
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+    },
   });
   const restoreService = withMockedModule(
     '../src/services/dtrAssistant/dtrAssistantService',

@@ -9,6 +9,9 @@ const {
   loadAttendancePolicyContext,
   resolveAttendancePolicy,
 } = require('../src/services/attendancePolicyResolver');
+const {
+  equivalentDaysFromMinutes,
+} = require('../src/services/leaveAttendanceDeduction');
 
 test('report deduction uses the effective policy denominator and switches', () => {
   const oneHourPolicy = {
@@ -71,6 +74,105 @@ test('report deduction does not apply an already-processed multiplier twice', ()
 
   assert.equal(deduction.total_minutes, 120);
   assert.equal(deduction.equivalent_day, 0.25);
+});
+
+test('report totals match month-end equivalent-day conversion for effective policies', () => {
+  const scenarios = [
+    {
+      name: 'one-hour employee policy',
+      policy: {
+        workHoursPerDay: 1,
+        useEquivalentDayConversion: true,
+        deductLate: true,
+        deductUndertime: true,
+        absentEqualsFullDayDeduction: true,
+        deductionMultiplier: 1,
+      },
+      lateMinutes: 30,
+      undertimeMinutes: 15,
+      expectedWorkMinutes: 60,
+    },
+    {
+      name: 'eight-hour department policy',
+      policy: {
+        workHoursPerDay: 8,
+        useEquivalentDayConversion: true,
+        deductLate: false,
+        deductUndertime: true,
+        absentEqualsFullDayDeduction: true,
+        deductionMultiplier: 1,
+      },
+      lateMinutes: 30,
+      undertimeMinutes: 60,
+      expectedWorkMinutes: 480,
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const penalties = calculateAttendancePolicyPenalties(
+      scenario.policy,
+      scenario.lateMinutes,
+      scenario.undertimeMinutes
+    );
+    const monthEndEquivalentDay = equivalentDaysFromMinutes(
+      penalties.lateMinutes + penalties.undertimeMinutes,
+      scenario.policy.workHoursPerDay
+    );
+    const reportDeduction = calculateAttendanceReportDeduction({
+      policy: scenario.policy,
+      lateMinutes: scenario.lateMinutes,
+      undertimeMinutes: scenario.undertimeMinutes,
+      status: 'present',
+      expectedWorkMinutes: scenario.expectedWorkMinutes,
+    });
+
+    assert.equal(
+      reportDeduction.equivalent_day,
+      monthEndEquivalentDay,
+      scenario.name
+    );
+  }
+});
+
+test('report deduction exempts whole-day holidays but keeps partial-day penalties', () => {
+  const policy = {
+    workHoursPerDay: 8,
+    useEquivalentDayConversion: true,
+    deductLate: true,
+    deductUndertime: true,
+    absentEqualsFullDayDeduction: true,
+    deductionMultiplier: 1,
+  };
+
+  const wholeDay = calculateAttendanceReportDeduction({
+    policy,
+    lateMinutes: 0,
+    undertimeMinutes: 240,
+    status: 'holiday',
+    expectedWorkMinutes: 480,
+    holidayCoverage: 'whole_day',
+  });
+  const amOnly = calculateAttendanceReportDeduction({
+    policy,
+    lateMinutes: 0,
+    undertimeMinutes: 240,
+    status: 'holiday',
+    expectedWorkMinutes: 480,
+    holidayCoverage: 'am_only',
+  });
+  const pmOnly = calculateAttendanceReportDeduction({
+    policy,
+    lateMinutes: 15,
+    undertimeMinutes: 120,
+    status: 'holiday',
+    expectedWorkMinutes: 480,
+    holidayCoverage: 'pm_only',
+  });
+
+  assert.equal(wholeDay.total_minutes, 0);
+  assert.equal(amOnly.total_minutes, 240);
+  assert.equal(amOnly.equivalent_day, 0.5);
+  assert.equal(pmOnly.total_minutes, 135);
 });
 
 test('attendance penalties preserve late and undertime as separate source buckets', () => {

@@ -1,5 +1,10 @@
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const SEPARATION_EMPLOYMENT_STATUSES = new Set([
+  'resigned',
+  'retired',
+  'terminated',
+]);
 
 function isValidIsoDate(value) {
   if (typeof value !== 'string') return false;
@@ -26,6 +31,46 @@ function isStrongTemporaryPassword(value) {
     /\d/.test(value) &&
     /[^A-Za-z0-9]/.test(value)
   );
+}
+
+function manilaTodayDate() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+function validateEmployeeSeparationDates({
+  dateHired,
+  employmentStatus,
+  separationDate,
+  today = manilaTodayDate(),
+} = {}) {
+  const status = String(employmentStatus || 'active').trim().toLowerCase();
+  const requiresSeparationDate = SEPARATION_EMPLOYMENT_STATUSES.has(status);
+  const separation = separationDate == null ? '' : String(separationDate).trim();
+
+  if (requiresSeparationDate && !separation) {
+    return 'Separation date is required for resigned, retired, or terminated employees';
+  }
+  if (!requiresSeparationDate && separation) {
+    return 'Separation date is allowed only for resigned, retired, or terminated employees';
+  }
+  if (!separation) return null;
+  if (!isValidIsoDate(separation)) {
+    return 'Separation date must use YYYY-MM-DD';
+  }
+  if (dateHired && isValidIsoDate(String(dateHired)) && separation < dateHired) {
+    return 'Separation date cannot be before date hired';
+  }
+  if (today && isValidIsoDate(today) && separation > today) {
+    return 'Separation date cannot be in the future';
+  }
+  return null;
 }
 
 function validateCreateEmployeePayload(payload = {}) {
@@ -67,11 +112,20 @@ function validateCreateEmployeePayload(payload = {}) {
     return 'Date of birth must use YYYY-MM-DD';
   }
 
+  const separationError = validateEmployeeSeparationDates({
+    dateHired: payload.date_hired,
+    employmentStatus: payload.employment_status,
+    separationDate: payload.separation_date,
+  });
+  if (separationError) return separationError;
+
   return null;
 }
 
 module.exports = {
   isValidIsoDate,
   isStrongTemporaryPassword,
+  validateEmployeeSeparationDates,
   validateCreateEmployeePayload,
+  SEPARATION_EMPLOYMENT_STATUSES,
 };

@@ -3,6 +3,18 @@ const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const { resolveAssignmentEmployeeAccess } = require('../services/assignmentAccess');
+const {
+  AssignmentTransitionError,
+  createAssignmentTransition,
+  updateAssignmentTransition,
+} = require('../services/assignmentTransition');
+const {
+  AssignmentHistoryError,
+  deactivateAssignmentRecord,
+  normalizeChangeReason,
+  permanentlyDeleteFutureAssignment,
+  writeAssignmentHistoryAudit,
+} = require('../services/assignmentHistory');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -102,7 +114,9 @@ router.get('/', protect, async (req, res) => {
 
 // POST /api/assignments - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
+    client = await pool.connect();
     const { employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active = true, remarks } = req.body;
     if (!employee_id || !effective_from) {
       return res.status(400).json({ error: 'employee_id and effective_from are required' });
@@ -115,131 +129,211 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'effective_to must be on or after effective_from' });
     }
 
-    await pool.query('BEGIN');
+    await client.query('BEGIN');
     try {
-      if (is_active) {
-        await pool.query(
-          `UPDATE assignments SET is_active = false, effective_to = $1::date, updated_at = now()
-           WHERE employee_id = $2 AND is_active = true AND (effective_to IS NULL OR effective_to >= $1::date)`,
-          [ef, employee_id]
-        );
-      }
-      const result = await pool.query(
-        `INSERT INTO assignments (employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks)
-         VALUES ($1, $2, $3, $4, $5::date, $6::date, $7, $8)
-         RETURNING id, employee_id, department_id, position_id, shift_id,
-                   effective_from::text AS effective_from,
-                   effective_to::text AS effective_to,
-                   is_active, remarks`,
-        [employee_id, department_id || null, position_id || null, shift_id || null, ef, et, !!is_active, remarks?.trim() || null]
-      );
-      await pool.query('COMMIT');
-      res.status(201).json(result.rows[0]);
+      const assignment = await createAssignmentTransition(client, {
+        employeeId: employee_id,
+        departmentId: department_id,
+        positionId: position_id,
+        shiftId: shift_id,
+        effectiveFrom: ef,
+        effectiveTo: et,
+        isActive: is_active === true,
+        remarks,
+      });
+      await client.query('COMMIT');
+      res.status(201).json(assignment);
     } catch (e) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw e;
     }
   } catch (err) {
+    if (err instanceof AssignmentTransitionError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.code === '23P01') {
+      return res.status(409).json({ error: 'Assignment dates overlap an existing assignment' });
+    }
+    if (err.code === '22P02' || err.code === '23503') {
+      return res.status(400).json({ error: 'Invalid assignment selection' });
+    }
     console.error('[assignments POST]', err);
     res.status(500).json({ error: 'Failed to create assignment' });
+  } finally {
+    client?.release();
   }
 });
 
 // PUT /api/assignments/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
+    client = await pool.connect();
     const { id } = req.params;
-    const { department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks } = req.body;
-
-    const updates = [];
-    const values = [];
-    let i = 1;
-
-    if (department_id !== undefined) { updates.push(`department_id = $${i++}`); values.push(department_id || null); }
-    if (position_id !== undefined) { updates.push(`position_id = $${i++}`); values.push(position_id || null); }
-    if (shift_id !== undefined) { updates.push(`shift_id = $${i++}`); values.push(shift_id || null); }
-    if (effective_from !== undefined) {
-      const ef = parseDate(effective_from);
-      if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
-      updates.push(`effective_from = $${i++}::date`); values.push(ef);
-    }
-    if (effective_to !== undefined) {
-      const et = effective_to === null || effective_to === '' ? null : parseDate(effective_to);
-      if (effective_to !== null && effective_to !== '' && !et) return res.status(400).json({ error: 'Invalid effective_to' });
-      updates.push(`effective_to = $${i++}::date`); values.push(et);
-    }
-    if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(!!is_active); }
-    if (remarks !== undefined) { updates.push(`remarks = $${i++}`); values.push(remarks?.trim() || null); }
-
-    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
-
-    const existing = await pool.query(
-      `SELECT id, employee_id,
-              effective_from::text AS effective_from,
-              effective_to::text AS effective_to,
-              is_active
-       FROM assignments
-       WHERE id = $1`,
-      [id]
-    );
-    if (existing.rows.length === 0) return res.status(404).json({ error: 'Assignment not found' });
-    const row = existing.rows[0];
-
-    const mergedEffectiveFrom =
-      effective_from !== undefined ? parseDate(effective_from) : dateFromRow(row.effective_from);
-    const mergedEffectiveTo =
-      effective_to !== undefined
-        ? (effective_to === null || effective_to === '' ? null : parseDate(effective_to))
-        : dateFromRow(row.effective_to);
-    const mergedIsActive =
-      is_active !== undefined ? !!is_active : (row.is_active == null || row.is_active === true);
-
-    if (effectiveToBeforeFrom(mergedEffectiveFrom, mergedEffectiveTo)) {
-      return res.status(400).json({ error: 'effective_to must be on or after effective_from' });
+    const {
+      department_id,
+      position_id,
+      shift_id,
+      effective_from,
+      effective_to,
+      is_active,
+      remarks,
+      change_reason,
+    } = req.body;
+    if (
+      department_id === undefined &&
+      position_id === undefined &&
+      shift_id === undefined &&
+      effective_from === undefined &&
+      effective_to === undefined &&
+      is_active === undefined &&
+      remarks === undefined
+    ) {
+      return res.status(400).json({ error: 'No fields to update' });
     }
 
-    await pool.query('BEGIN');
+    const parsedEffectiveFrom = effective_from === undefined
+      ? undefined
+      : parseDate(effective_from);
+    if (effective_from !== undefined && !parsedEffectiveFrom) {
+      return res.status(400).json({ error: 'Invalid effective_from' });
+    }
+    const parsedEffectiveTo = effective_to === undefined
+      ? undefined
+      : (effective_to === null || effective_to === '' ? null : parseDate(effective_to));
+    if (effective_to !== undefined && effective_to !== null && effective_to !== '' && !parsedEffectiveTo) {
+      return res.status(400).json({ error: 'Invalid effective_to' });
+    }
+
+    await client.query('BEGIN');
     try {
-      if (mergedIsActive && mergedEffectiveFrom) {
-        await pool.query(
-          `UPDATE assignments SET is_active = false, effective_to = $1::date, updated_at = now()
-           WHERE employee_id = $2 AND id <> $3::uuid AND is_active = true
-             AND (effective_to IS NULL OR effective_to >= $1::date)`,
-          [mergedEffectiveFrom, row.employee_id, id]
-        );
-      }
-
-      updates.push('updated_at = now()');
-      values.push(id);
-      const result = await pool.query(
-        `UPDATE assignments SET ${updates.join(', ')} WHERE id = $${i}
-         RETURNING id, employee_id, department_id, position_id, shift_id,
-                   effective_from::text AS effective_from,
-                   effective_to::text AS effective_to,
-                   is_active, remarks`,
-        values
+      const beforeResult = await client.query(
+        `SELECT id, employee_id, department_id, position_id, shift_id,
+                effective_from::text AS effective_from,
+                effective_to::text AS effective_to, is_active, remarks
+           FROM assignments
+          WHERE id = $1::uuid`,
+        [id]
       );
-      await pool.query('COMMIT');
-      res.json(result.rows[0]);
+      if (beforeResult.rowCount === 0) {
+        throw new AssignmentTransitionError('Assignment not found', 404);
+      }
+      const before = beforeResult.rows[0];
+      const isDeactivating = is_active === false && before.is_active !== false;
+      const deactivationReason = isDeactivating
+        ? normalizeChangeReason(change_reason)
+        : null;
+      const assignment = await updateAssignmentTransition(client, {
+        assignmentId: id,
+        changes: {
+          departmentId: department_id,
+          positionId: position_id,
+          shiftId: shift_id,
+          effectiveFrom: parsedEffectiveFrom,
+          effectiveTo: parsedEffectiveTo,
+          isActive: is_active === undefined ? undefined : is_active === true,
+          remarks,
+        },
+      });
+      if (isDeactivating) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: id,
+          action: 'assignment_deactivated',
+          reason: deactivationReason,
+          before,
+          after: assignment,
+        });
+      }
+      await client.query('COMMIT');
+      res.json(assignment);
     } catch (e) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw e;
     }
   } catch (err) {
+    if (err instanceof AssignmentTransitionError || err instanceof AssignmentHistoryError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.code === '23P01') {
+      return res.status(409).json({ error: 'Assignment dates overlap an existing assignment' });
+    }
+    if (err.code === '22P02' || err.code === '23503') {
+      return res.status(400).json({ error: 'Invalid assignment selection' });
+    }
     console.error('[assignments PUT]', err);
     res.status(500).json({ error: 'Failed to update assignment' });
+  } finally {
+    client?.release();
   }
 });
 
-// DELETE /api/assignments/:id (admin only)
+// DELETE /api/assignments/:id - archive without erasing history (admin only)
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
-    const result = await pool.query('DELETE FROM assignments WHERE id = $1 RETURNING id', [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Assignment not found' });
-    res.status(204).send();
+    client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      const result = await deactivateAssignmentRecord(client, {
+        actorId: req.user?.id,
+        recordType: 'primary',
+        recordId: req.params.id,
+        reason: req.body?.reason,
+      });
+      await client.query('COMMIT');
+      res.json({
+        message: result.changed
+          ? 'Assignment deactivated and retained in history'
+          : 'Assignment is already inactive',
+        assignment: result.record,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
   } catch (err) {
+    if (err instanceof AssignmentHistoryError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[assignments DELETE]', err);
-    res.status(500).json({ error: 'Failed to delete assignment' });
+    res.status(500).json({ error: 'Failed to deactivate assignment' });
+  } finally {
+    client?.release();
+  }
+});
+
+// DELETE /api/assignments/:id/permanent - remove an unused future mistake only
+router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      const result = await permanentlyDeleteFutureAssignment(client, {
+        actorId: req.user?.id,
+        recordType: 'primary',
+        recordId: req.params.id,
+        reason: req.body?.reason,
+      });
+      await client.query('COMMIT');
+      res.json({
+        message: 'Mistaken future assignment permanently deleted',
+        restored_previous_assignment: result.restoredPredecessor?.after || null,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  } catch (err) {
+    if (err instanceof AssignmentHistoryError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    console.error('[assignments permanent DELETE]', err);
+    res.status(500).json({ error: 'Failed to permanently delete assignment' });
+  } finally {
+    client?.release();
   }
 });
 

@@ -473,7 +473,10 @@ router.get('/me', authMiddleware, async (req, res) => {
               p.name AS position_name
        FROM users u
        LEFT JOIN assignments a
-         ON a.employee_id = u.id AND a.is_active = true
+         ON a.employee_id = u.id
+        AND a.is_active = true
+        AND a.effective_from <= CURRENT_DATE
+        AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
        LEFT JOIN departments d ON d.id = a.department_id
        LEFT JOIN positions p ON p.id = a.position_id
        WHERE u.id = $1`,

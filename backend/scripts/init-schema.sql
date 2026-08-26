@@ -7,6 +7,7 @@
 -- For existing databases that predate this file, use backend/scripts/docutracker-install-*.sql instead.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 -- =========================================
 -- SEQUENCES
@@ -59,6 +60,7 @@ CREATE TABLE IF NOT EXISTS users (
     CHECK (employment_status IN ('active', 'inactive', 'resigned', 'retired', 'terminated')),
   leave_credit_eligible BOOLEAN NOT NULL DEFAULT true,
   separation_date DATE,
+  leave_credit_eligible_until DATE,
 
   biometric_user_id TEXT UNIQUE,
 
@@ -69,6 +71,20 @@ CREATE TABLE IF NOT EXISTS users (
     CHECK (
       COALESCE(employment_status, 'active') = 'active'
       OR (is_active = false AND leave_credit_eligible = false)
+    ),
+  CONSTRAINT chk_users_separation_after_hire
+    CHECK (
+      separation_date IS NULL
+      OR date_hired IS NULL
+      OR separation_date >= date_hired
+    ),
+  CONSTRAINT chk_users_credit_eligibility_end
+    CHECK (
+      leave_credit_eligible_until IS NULL
+      OR (
+        separation_date IS NOT NULL
+        AND leave_credit_eligible_until = separation_date
+      )
     )
 );
 
@@ -257,9 +273,21 @@ CREATE TABLE IF NOT EXISTS assignments (
     CHECK (effective_to IS NULL OR effective_to >= effective_from)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_assignments_one_active_per_employee
-ON assignments (employee_id)
-WHERE is_active = true;
+DROP INDEX IF EXISTS uq_assignments_one_active_per_employee;
+
+ALTER TABLE assignments
+  DROP CONSTRAINT IF EXISTS assignments_no_overlapping_effective_ranges;
+ALTER TABLE assignments
+  ADD CONSTRAINT assignments_no_overlapping_effective_ranges
+  EXCLUDE USING gist (
+    employee_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (is_active = true);
+
+CREATE INDEX IF NOT EXISTS idx_assignments_employee_effective_range
+  ON assignments (employee_id, effective_from, effective_to)
+  WHERE is_active = true;
 
 -- =========================================
 -- POLICY ASSIGNMENTS
@@ -2271,6 +2299,9 @@ CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
 CREATE INDEX IF NOT EXISTS idx_users_separation_date
   ON users (separation_date)
   WHERE separation_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible_until
+  ON users (leave_credit_eligible_until)
+  WHERE leave_credit_eligible_until IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_user_id ON auth_refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_expires_at ON auth_refresh_tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_revoked_at ON auth_refresh_tokens(revoked_at);
