@@ -48,6 +48,8 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
 
   Widget _buildDrawerFooter(BuildContext drawerContext) {
     final isEditing = _selectedAssignment != null;
+    final canDeleteMistake =
+        isEditing && _isFutureAssignment(_selectedAssignment!.effectiveFrom);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -79,6 +81,18 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
               ),
+            ),
+          if (canDeleteMistake)
+            IconButton(
+              onPressed: () async {
+                final ok = await _deleteMistakenAssignment();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.delete_forever_rounded),
+              color: Colors.red,
+              tooltip: 'Delete mistaken future assignment',
             ),
           FilledButton.icon(
             onPressed: _loadingLookups
@@ -153,6 +167,8 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
     final isEditing = _selectedDesignation != null;
     final canDeactivate =
         isEditing && (_selectedDesignation?.isActive ?? false);
+    final canDeleteMistake =
+        isEditing && _isFutureAssignment(_selectedDesignation!.effectiveFrom);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -184,6 +200,18 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
               ),
+            ),
+          if (canDeleteMistake)
+            IconButton(
+              onPressed: () async {
+                final ok = await _deleteMistakenDesignation();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.delete_forever_rounded),
+              color: Colors.red,
+              tooltip: 'Delete mistaken future other position',
             ),
           FilledButton.icon(
             onPressed: _loadingLookups

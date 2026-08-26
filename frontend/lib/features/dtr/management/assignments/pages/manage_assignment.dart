@@ -905,6 +905,62 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     );
   }
 
+  Future<String?> _requestDeactivationReason({
+    required String title,
+    required String description,
+    String actionLabel = 'Deactivate',
+    String hintText = 'Why is this assignment being deactivated?',
+  }) async {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(description),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 1000,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  labelText: 'Reason',
+                  hintText: hintText,
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Reason is required'
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() != true) return;
+              Navigator.of(ctx).pop(controller.text.trim());
+            },
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return reason;
+  }
+
   Future<bool> _deactivateAssignment() async {
     final a = _selectedAssignment;
     if (a == null) {
@@ -913,35 +969,67 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
       return false;
     }
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Deactivate assignment?'),
-        content: const Text(
-          'This will deactivate the selected assignment. You can reactivate it later.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Deactivate'),
-          ),
-        ],
-      ),
+    final reason = await _requestDeactivationReason(
+      title: 'Deactivate assignment?',
+      description:
+          'This keeps the assignment history and removes it from active assignments.',
     );
-    if (ok != true || !mounted) return false;
+    if (reason == null || !mounted) return false;
     try {
       await ApiClient.instance.put(
         '/api/assignments/${a.id}',
-        data: {'is_active': false},
+        data: {'is_active': false, 'change_reason': reason},
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Assignment deactivated.')),
+        );
+        _clearForm();
+        _loadAssignments();
+      }
+      return true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
+      }
+      return false;
+    }
+  }
+
+  bool _isFutureAssignment(DateTime effectiveFrom) {
+    return DateUtils.dateOnly(
+      effectiveFrom,
+    ).isAfter(DateUtils.dateOnly(DateTime.now()));
+  }
+
+  Future<bool> _deleteMistakenAssignment() async {
+    final assignment = _selectedAssignment;
+    if (assignment == null || !_isFutureAssignment(assignment.effectiveFrom)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Only a future assignment can be permanently deleted.'),
+        ),
+      );
+      return false;
+    }
+    final reason = await _requestDeactivationReason(
+      title: 'Delete mistaken assignment?',
+      description:
+          'This permanently removes the unused future assignment. Its deletion is still recorded in the audit log.',
+      actionLabel: 'Delete permanently',
+      hintText: 'Why was this assignment created by mistake?',
+    );
+    if (reason == null || !mounted) return false;
+    try {
+      await ApiClient.instance.delete(
+        '/api/assignments/${assignment.id}/permanent',
+        data: {'reason': reason},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mistaken assignment deleted.')),
         );
         _clearForm();
         _loadAssignments();
@@ -1067,35 +1155,64 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
       return false;
     }
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Deactivate other position?'),
-        content: const Text(
-          'This keeps the history but removes it from active other positions.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Deactivate'),
-          ),
-        ],
-      ),
+    final reason = await _requestDeactivationReason(
+      title: 'Deactivate other position?',
+      description:
+          'This keeps the position history and removes it from active other positions.',
     );
-    if (ok != true || !mounted) return false;
+    if (reason == null || !mounted) return false;
     try {
       await ApiClient.instance.put(
         '/api/employee-other-positions/${designation.id}',
-        data: {'is_active': false},
+        data: {'is_active': false, 'change_reason': reason},
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Other position deactivated.')),
+        );
+        _clearDesignationForm();
+        _loadDesignations();
+      }
+      return true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _deleteMistakenDesignation() async {
+    final designation = _selectedDesignation;
+    if (designation == null ||
+        !_isFutureAssignment(designation.effectiveFrom)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Only a future additional position can be permanently deleted.',
+          ),
+        ),
+      );
+      return false;
+    }
+    final reason = await _requestDeactivationReason(
+      title: 'Delete mistaken other position?',
+      description:
+          'This permanently removes the unused future position. Its deletion is still recorded in the audit log.',
+      actionLabel: 'Delete permanently',
+      hintText: 'Why was this position created by mistake?',
+    );
+    if (reason == null || !mounted) return false;
+    try {
+      await ApiClient.instance.delete(
+        '/api/employee-other-positions/${designation.id}/permanent',
+        data: {'reason': reason},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mistaken other position deleted.')),
         );
         _clearDesignationForm();
         _loadDesignations();
