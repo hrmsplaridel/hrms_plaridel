@@ -28,6 +28,7 @@ const {
   writeAccountSecurityAudit,
 } = require('../services/employeeAccountSecurity');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { csvEscape } = require('../utils/csv');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -376,13 +377,6 @@ function resolveEmployeeOrderBy(sortRaw, orderRaw) {
   const col = EMPLOYEE_SORT_COLUMNS[key] || EMPLOYEE_SORT_COLUMNS.full_name;
   const dir = String(orderRaw || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
   return `${col} ${dir} NULLS LAST, u.id ASC`;
-}
-
-function csvEscape(val) {
-  if (val == null) return '';
-  const s = String(val);
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
 }
 
 function employeeRowsForRequester(rows, requester) {
