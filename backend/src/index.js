@@ -55,6 +55,7 @@ const {
 const { isUniSmsConfigured } = require('./utils/uniSmsSms');
 
 const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
+const { validateEmployeeSchema } = require('./services/employeeSchemaValidation');
 
 const app = express();
 app.disable('x-powered-by');
@@ -167,7 +168,11 @@ app.use('/api/locator-slips', locatorSlipsRoutes);
 app.use('/api/contact', contactPublicRoutes);
 
 // --- Start server ---
-const server = app.listen(PORT, HOST, () => {
+async function startServer() {
+  await validateEmployeeSchema(pool);
+  console.log('[startup] Employee database schema validated.');
+
+  const server = app.listen(PORT, HOST, () => {
   console.log(`HRMS API listening on http://${HOST}:${PORT}`);
   console.log('  GET  /health           - app health');
   console.log('  GET  /health/db        - database health');
@@ -269,4 +274,12 @@ server.on('upgrade', (req, socket, head) => {
   targetWss.handleUpgrade(req, socket, head, (ws) => {
     targetWss.emit('connection', ws, req);
   });
+});
+
+  return server;
+}
+
+startServer().catch((error) => {
+  console.error(`[startup] ${error.message}`);
+  process.exit(1);
 });

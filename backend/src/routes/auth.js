@@ -134,22 +134,6 @@ async function ensurePasswordResetOtpTable() {
   passwordResetOtpTableReady = true;
 }
 
-async function ensurePersonalInfoColumns() {
-  // Safe, idempotent additions so older DBs don't break /auth/me + PATCH /auth/me.
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS middle_name TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS suffix TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS sex TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_number TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS civil_status TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`);
-}
-
 function hashRefreshToken(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
 }
@@ -461,7 +445,6 @@ router.post('/logout', authTokenLimiter, async (req, res) => {
  */
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    await ensurePersonalInfoColumns();
     const result = await pool.query(
       `SELECT u.id, u.email, u.role, u.full_name, u.avatar_path, u.is_active,
               u.first_name, u.middle_name, u.last_name, u.suffix,
@@ -569,7 +552,6 @@ router.post('/logout-all', authMiddleware, async (req, res) => {
  */
 router.patch('/me', authMiddleware, async (req, res) => {
   try {
-    await ensurePersonalInfoColumns();
     const {
       first_name,
       middle_name,
@@ -750,7 +732,6 @@ router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
   }
 
   try {
-    await ensurePersonalInfoColumns();
     await ensurePasswordResetOtpTable();
 
     const userResult = await pool.query(

@@ -23,11 +23,12 @@ const {
 const {
   EmployeeAccountSecurityError,
   lockAndValidateAccountTransition,
-  lockAndValidateBulkAccountStatusTransition,
+  lockAndPlanBulkAccountStatusTransition,
   revokeActiveRefreshTokens,
   writeAccountSecurityAudit,
 } = require('../services/employeeAccountSecurity');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { csvEscape } = require('../utils/csv');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -106,19 +107,6 @@ async function hasUsersOfficeIdColumn() {
   );
   usersOfficeColumnReady = result.rowCount > 0;
   return usersOfficeColumnReady;
-}
-
-async function ensureEmployeeProfileColumns() {
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS civil_status TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible_until DATE`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
-    ON users (leave_credit_eligible)
-    WHERE leave_credit_eligible = true`);
 }
 
 function boolField(value, fallback = true) {
@@ -378,13 +366,6 @@ function resolveEmployeeOrderBy(sortRaw, orderRaw) {
   return `${col} ${dir} NULLS LAST, u.id ASC`;
 }
 
-function csvEscape(val) {
-  if (val == null) return '';
-  const s = String(val);
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
 function employeeRowsForRequester(rows, requester) {
   const privileged = ['admin', 'hr', 'supervisor'].includes(requester?.role);
   if (privileged) return rows;
@@ -406,7 +387,6 @@ function employeeRowsForRequester(rows, requester) {
 // Optional: ?limit=&offset= — when limit is set, response is { employees, total } instead of a raw array.
 router.get('/', protect, async (req, res) => {
   try {
-    await ensureEmployeeProfileColumns();
     const biometricUserIdsRaw = req.query.biometric_user_ids;
 
     // When biometric_user_ids is provided, return only matching users (exact match).
@@ -607,27 +587,32 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
     }
     client = await pool.connect();
     await client.query('BEGIN');
-    const targets = await lockAndValidateBulkAccountStatusTransition(client, {
+    const plan = await lockAndPlanBulkAccountStatusTransition(client, {
       actorId: req.user.id,
       targetIds: ids,
       isActive,
     });
-    const result = await client.query(
-      `UPDATE users
-          SET is_active = $2,
-              updated_at = now()
-        WHERE id = ANY($1::uuid[])
-        RETURNING id`,
-      [ids, isActive]
-    );
-    if (!isActive) {
+    const updateIds = plan.updateTargets.map((target) => target.id);
+    let updated = 0;
+    if (updateIds.length > 0) {
+      const result = await client.query(
+        `UPDATE users
+            SET is_active = $2,
+                updated_at = now()
+          WHERE id = ANY($1::uuid[])
+            AND is_active IS DISTINCT FROM $2
+          RETURNING id`,
+        [updateIds, isActive]
+      );
+      updated = result.rowCount;
+    }
+    if (!isActive && updateIds.length > 0) {
       await revokeActiveRefreshTokens(
         client,
-        targets.map((target) => target.id)
+        updateIds
       );
     }
-    for (const target of targets) {
-      if (target.is_active === isActive) continue;
+    for (const target of plan.updateTargets) {
       await writeAccountSecurityAudit(client, {
         actorId: req.user.id,
         targetId: target.id,
@@ -648,7 +633,16 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
       });
     }
     await client.query('COMMIT');
-    res.json({ updated: result.rowCount });
+    const countOutcome = (outcome) =>
+      plan.results.filter((result) => result.outcome === outcome).length;
+    res.json({
+      requested: ids.length,
+      updated,
+      skipped: countOutcome('skipped'),
+      rejected: countOutcome('rejected'),
+      not_found: countOutcome('not_found'),
+      results: plan.results.map(({ statusCode, ...result }) => result),
+    });
   } catch (err) {
     if (client) await client.query('ROLLBACK');
     if (err instanceof EmployeeAccountSecurityError) {
@@ -664,7 +658,6 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
 // GET /api/employees/:id - get one employee (matches profiles + list row department/position)
 router.get('/:id', protect, async (req, res) => {
   try {
-    await ensureEmployeeProfileColumns();
     const result = await pool.query(
       `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active, u.avatar_path,
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
@@ -730,7 +723,6 @@ router.get('/:id', protect, async (req, res) => {
 // POST /api/employees - create employee (admin only); same as auth/register but admin creates
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    await ensureEmployeeProfileColumns();
     const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, separation_date, employment_status, biometric_user_id, leave_credit_eligible, setup } = req.body;
     const validationError = validateCreateEmployeePayload(req.body);
     if (validationError) {
@@ -902,7 +894,6 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 // PUT /api/employees/:id - update employee (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
-    await ensureEmployeeProfileColumns();
     const { id } = req.params;
     const {
       first_name,
