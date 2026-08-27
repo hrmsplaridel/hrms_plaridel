@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'employee'
     CHECK (role IN ('admin', 'hr', 'employee', 'supervisor')),
 
+  first_name TEXT,
   full_name TEXT NOT NULL,
+  last_name TEXT,
   avatar_path TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
 
@@ -51,6 +53,8 @@ CREATE TABLE IF NOT EXISTS users (
   date_of_birth DATE,
   contact_number TEXT,
   address TEXT,
+  civil_status TEXT,
+  nationality TEXT,
 
   employment_type TEXT
     CHECK (employment_type IN ('regular', 'contractual', 'job_order', 'casual')),

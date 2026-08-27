@@ -85,3 +85,29 @@ test('employee and profile request routes contain no users-table DDL', () => {
     assert.doesNotMatch(source, /ensurePersonalInfoColumns/);
   }
 });
+
+test('authoritative init schema contains every required employee field and index', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../scripts/init-schema.sql'),
+    'utf8'
+  );
+  const usersTable = source.match(
+    /CREATE TABLE IF NOT EXISTS users\s*\(([\s\S]*?)\n\);/i
+  );
+  assert.ok(usersTable, 'users table definition must exist in init-schema.sql');
+
+  for (const column of REQUIRED_EMPLOYEE_COLUMNS) {
+    assert.match(
+      usersTable[1],
+      new RegExp(`^\\s*${column}\\s+`, 'mi'),
+      `${column} must be defined on users`
+    );
+  }
+  for (const index of REQUIRED_EMPLOYEE_INDEXES) {
+    assert.match(
+      source,
+      new RegExp(`CREATE\\s+INDEX\\s+IF\\s+NOT\\s+EXISTS\\s+${index}\\b`, 'i'),
+      `${index} must be defined in init-schema.sql`
+    );
+  }
+});
