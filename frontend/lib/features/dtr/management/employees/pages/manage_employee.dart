@@ -682,6 +682,78 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     return KeyEventResult.ignored;
   }
 
+  int _bulkStatusCount(Map<String, dynamic> payload, String key) {
+    final value = payload[key];
+    return value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+  }
+
+  Future<void> _showBulkStatusResult(
+    Map<String, dynamic> payload, {
+    required bool activating,
+  }) async {
+    if (!mounted) return;
+    final updated = _bulkStatusCount(payload, 'updated');
+    final skipped = _bulkStatusCount(payload, 'skipped');
+    final rejected = _bulkStatusCount(payload, 'rejected');
+    final notFound = _bulkStatusCount(payload, 'not_found');
+    final action = activating ? 'activated' : 'deactivated';
+    final parts = <String>[
+      '$updated ${updated == 1 ? 'employee' : 'employees'} $action.',
+      if (skipped > 0) '$skipped already in that state.',
+      if (rejected > 0) '$rejected rejected.',
+      if (notFound > 0) '$notFound not found.',
+    ];
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(parts.join(' '))));
+
+    final rawResults = payload['results'];
+    if (rawResults is! List) return;
+    final issues = rawResults
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .where(
+          (item) =>
+              item['outcome'] == 'rejected' || item['outcome'] == 'not_found',
+        )
+        .toList();
+    if (issues.isEmpty || !mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Some accounts were not updated'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520, maxHeight: 360),
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: issues.length,
+            separatorBuilder: (_, __) => const Divider(height: 20),
+            itemBuilder: (_, index) {
+              final issue = issues[index];
+              final name = issue['employee_name']?.toString().trim();
+              final employeeId = issue['employee_id']?.toString() ?? 'Unknown';
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.error_outline_rounded),
+                title: Text(name == null || name.isEmpty ? employeeId : name),
+                subtitle: Text(
+                  issue['reason']?.toString() ?? 'Account was not updated.',
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _confirmBulkDeactivate() async {
     final targets = _employees
         .where((e) => _selectedBulkIds.contains(e.id) && e.isActive)
@@ -714,7 +786,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     final dtr = context.read<DtrProvider>();
     setState(() => _bulkWorking = true);
     try {
-      await ApiClient.instance.post(
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
         '/api/employees/bulk-status',
         data: {
           'employee_ids': targets.map((e) => e.id).toList(),
@@ -722,9 +794,11 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         },
       );
       if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text('${targets.length} employees deactivated.')),
+      await _showBulkStatusResult(
+        response.data ?? const <String, dynamic>{},
+        activating: false,
       );
+      if (!mounted) return;
       setState(() {
         _bulkWorking = false;
         _selectedBulkIds.clear();
@@ -778,7 +852,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     final dtr = context.read<DtrProvider>();
     setState(() => _bulkWorking = true);
     try {
-      await ApiClient.instance.post(
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
         '/api/employees/bulk-status',
         data: {
           'employee_ids': targets.map((e) => e.id).toList(),
@@ -786,9 +860,11 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         },
       );
       if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text('${targets.length} employees activated.')),
+      await _showBulkStatusResult(
+        response.data ?? const <String, dynamic>{},
+        activating: true,
       );
+      if (!mounted) return;
       setState(() {
         _bulkWorking = false;
         _selectedBulkIds.clear();

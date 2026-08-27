@@ -23,7 +23,7 @@ const {
 const {
   EmployeeAccountSecurityError,
   lockAndValidateAccountTransition,
-  lockAndValidateBulkAccountStatusTransition,
+  lockAndPlanBulkAccountStatusTransition,
   revokeActiveRefreshTokens,
   writeAccountSecurityAudit,
 } = require('../services/employeeAccountSecurity');
@@ -601,27 +601,32 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
     }
     client = await pool.connect();
     await client.query('BEGIN');
-    const targets = await lockAndValidateBulkAccountStatusTransition(client, {
+    const plan = await lockAndPlanBulkAccountStatusTransition(client, {
       actorId: req.user.id,
       targetIds: ids,
       isActive,
     });
-    const result = await client.query(
-      `UPDATE users
-          SET is_active = $2,
-              updated_at = now()
-        WHERE id = ANY($1::uuid[])
-        RETURNING id`,
-      [ids, isActive]
-    );
-    if (!isActive) {
+    const updateIds = plan.updateTargets.map((target) => target.id);
+    let updated = 0;
+    if (updateIds.length > 0) {
+      const result = await client.query(
+        `UPDATE users
+            SET is_active = $2,
+                updated_at = now()
+          WHERE id = ANY($1::uuid[])
+            AND is_active IS DISTINCT FROM $2
+          RETURNING id`,
+        [updateIds, isActive]
+      );
+      updated = result.rowCount;
+    }
+    if (!isActive && updateIds.length > 0) {
       await revokeActiveRefreshTokens(
         client,
-        targets.map((target) => target.id)
+        updateIds
       );
     }
-    for (const target of targets) {
-      if (target.is_active === isActive) continue;
+    for (const target of plan.updateTargets) {
       await writeAccountSecurityAudit(client, {
         actorId: req.user.id,
         targetId: target.id,
@@ -642,7 +647,16 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
       });
     }
     await client.query('COMMIT');
-    res.json({ updated: result.rowCount });
+    const countOutcome = (outcome) =>
+      plan.results.filter((result) => result.outcome === outcome).length;
+    res.json({
+      requested: ids.length,
+      updated,
+      skipped: countOutcome('skipped'),
+      rejected: countOutcome('rejected'),
+      not_found: countOutcome('not_found'),
+      results: plan.results.map(({ statusCode, ...result }) => result),
+    });
   } catch (err) {
     if (client) await client.query('ROLLBACK');
     if (err instanceof EmployeeAccountSecurityError) {

@@ -124,6 +124,26 @@ async function lockAndValidateBulkAccountStatusTransition(
   db,
   { actorId, targetIds, isActive }
 ) {
+  const plan = await lockAndPlanBulkAccountStatusTransition(db, {
+    actorId,
+    targetIds,
+    isActive,
+  });
+  const rejected = plan.results.find((result) => result.outcome === 'rejected');
+  if (rejected) {
+    throw new EmployeeAccountSecurityError(
+      rejected.reason,
+      rejected.statusCode,
+      rejected.code
+    );
+  }
+  return plan.targets;
+}
+
+async function lockAndPlanBulkAccountStatusTransition(
+  db,
+  { actorId, targetIds, isActive }
+) {
   await acquireAdministratorSafetyLock(db);
   const targetResult = await db.query(
     `SELECT id, full_name, email, role, is_active, employment_status
@@ -133,37 +153,119 @@ async function lockAndValidateBulkAccountStatusTransition(
     [targetIds]
   );
   const targets = targetResult.rows;
+  const targetById = new Map(
+    targets.map((target) => [String(target.id).toLowerCase(), target])
+  );
+  const results = [];
+  const updateTargets = [];
+  const candidateAdministrators = [];
 
-  if (!isActive && targets.some((target) => sameId(target.id, actorId))) {
-    throw new EmployeeAccountSecurityError(
-      'You cannot deactivate your own administrator account',
-      400,
-      'SELF_DEACTIVATION_BLOCKED'
-    );
+  for (const requestedId of targetIds) {
+    const target = targetById.get(String(requestedId).toLowerCase());
+    if (!target) {
+      results.push({
+        employee_id: requestedId,
+        outcome: 'not_found',
+        code: 'EMPLOYEE_NOT_FOUND',
+        reason: 'Employee not found',
+        statusCode: 404,
+      });
+      continue;
+    }
+
+    const resultBase = {
+      employee_id: target.id,
+      employee_name: target.full_name || target.email || 'Employee',
+    };
+    const employmentStatus = String(
+      target.employment_status || 'active'
+    ).toLowerCase();
+
+    if (isActive && employmentStatus !== 'active') {
+      results.push({
+        ...resultBase,
+        outcome: 'rejected',
+        code: 'EMPLOYMENT_STATUS_NOT_ACTIVE',
+        reason: `Employment status is ${employmentStatus}; complete the rehire or reactivation workflow first`,
+        statusCode: 409,
+      });
+      continue;
+    }
+    if (target.is_active === isActive) {
+      results.push({
+        ...resultBase,
+        outcome: 'skipped',
+        code: 'ACCOUNT_ALREADY_IN_REQUESTED_STATE',
+        reason: `Account is already ${isActive ? 'active' : 'inactive'}`,
+        statusCode: 200,
+      });
+      continue;
+    }
+    if (!isActive && sameId(target.id, actorId)) {
+      results.push({
+        ...resultBase,
+        outcome: 'rejected',
+        code: 'SELF_DEACTIVATION_BLOCKED',
+        reason: 'You cannot deactivate your own administrator account',
+        statusCode: 400,
+      });
+      continue;
+    }
+
+    if (!isActive && target.role === 'admin') {
+      candidateAdministrators.push(target);
+      continue;
+    }
+
+    updateTargets.push(target);
+    results.push({
+      ...resultBase,
+      outcome: 'updated',
+      code: isActive ? 'ACCOUNT_ACTIVATED' : 'ACCOUNT_DEACTIVATED',
+      reason: isActive ? 'Account activated' : 'Account deactivated',
+      statusCode: 200,
+    });
   }
 
-  const removesAdministrator =
-    !isActive &&
-    targets.some((target) => target.role === 'admin' && target.is_active === true);
-  if (removesAdministrator) {
+  if (candidateAdministrators.length > 0) {
+    const candidateIds = candidateAdministrators.map((target) => target.id);
     const remainingResult = await db.query(
       `SELECT COUNT(*)::int AS count
          FROM users
         WHERE role = 'admin'
           AND is_active = true
           AND NOT (id = ANY($1::uuid[]))`,
-      [targetIds]
+      [candidateIds]
     );
-    if (Number(remainingResult.rows[0]?.count || 0) === 0) {
-      throw new EmployeeAccountSecurityError(
-        'The last active administrator cannot be deactivated',
-        409,
-        'LAST_ACTIVE_ADMIN_BLOCKED'
-      );
+    const canDeactivateAdministrators =
+      Number(remainingResult.rows[0]?.count || 0) > 0;
+    for (const target of candidateAdministrators) {
+      const resultBase = {
+        employee_id: target.id,
+        employee_name: target.full_name || target.email || 'Administrator',
+      };
+      if (!canDeactivateAdministrators) {
+        results.push({
+          ...resultBase,
+          outcome: 'rejected',
+          code: 'LAST_ACTIVE_ADMIN_BLOCKED',
+          reason: 'The last active administrator cannot be deactivated',
+          statusCode: 409,
+        });
+        continue;
+      }
+      updateTargets.push(target);
+      results.push({
+        ...resultBase,
+        outcome: 'updated',
+        code: 'ACCOUNT_DEACTIVATED',
+        reason: 'Account deactivated',
+        statusCode: 200,
+      });
     }
   }
 
-  return targets;
+  return { targets, updateTargets, results };
 }
 
 async function revokeActiveRefreshTokens(db, userIds) {
@@ -200,6 +302,7 @@ module.exports = {
   EmployeeAccountSecurityError,
   lockAndValidateAccountTransition,
   lockAndValidateBulkAccountStatusTransition,
+  lockAndPlanBulkAccountStatusTransition,
   revokeActiveRefreshTokens,
   writeAccountSecurityAudit,
 };
