@@ -109,19 +109,6 @@ async function hasUsersOfficeIdColumn() {
   return usersOfficeColumnReady;
 }
 
-async function ensureEmployeeProfileColumns() {
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS civil_status TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible BOOLEAN NOT NULL DEFAULT true`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_credit_eligible_until DATE`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
-    ON users (leave_credit_eligible)
-    WHERE leave_credit_eligible = true`);
-}
-
 function boolField(value, fallback = true) {
   if (value === undefined) return fallback;
   if (value === null) return fallback;
@@ -400,7 +387,6 @@ function employeeRowsForRequester(rows, requester) {
 // Optional: ?limit=&offset= — when limit is set, response is { employees, total } instead of a raw array.
 router.get('/', protect, async (req, res) => {
   try {
-    await ensureEmployeeProfileColumns();
     const biometricUserIdsRaw = req.query.biometric_user_ids;
 
     // When biometric_user_ids is provided, return only matching users (exact match).
@@ -672,7 +658,6 @@ router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
 // GET /api/employees/:id - get one employee (matches profiles + list row department/position)
 router.get('/:id', protect, async (req, res) => {
   try {
-    await ensureEmployeeProfileColumns();
     const result = await pool.query(
       `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active, u.avatar_path,
               u.first_name, u.middle_name, u.last_name, u.suffix, u.sex, u.date_of_birth, u.contact_number, u.address,
@@ -738,7 +723,6 @@ router.get('/:id', protect, async (req, res) => {
 // POST /api/employees - create employee (admin only); same as auth/register but admin creates
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    await ensureEmployeeProfileColumns();
     const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, separation_date, employment_status, biometric_user_id, leave_credit_eligible, setup } = req.body;
     const validationError = validateCreateEmployeePayload(req.body);
     if (validationError) {
@@ -910,7 +894,6 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 // PUT /api/employees/:id - update employee (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
-    await ensureEmployeeProfileColumns();
     const { id } = req.params;
     const {
       first_name,
