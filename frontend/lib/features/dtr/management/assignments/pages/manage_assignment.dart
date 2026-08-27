@@ -800,12 +800,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         if (_effectiveTo != null)
           'effective_to': _effectiveTo!.toIso8601String().split('T')[0],
         'is_active': true,
+        'attendance_policy_id': _selectedPolicyId,
         'remarks': _remarksController.text.trim().isEmpty
             ? null
             : _remarksController.text.trim(),
       };
       await ApiClient.instance.post('/api/assignments', data: data);
-      await _upsertEmployeePolicyAssignment();
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -865,12 +865,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         'effective_to': _effectiveTo != null
             ? _effectiveTo!.toIso8601String().split('T')[0]
             : null,
+        'attendance_policy_id': _selectedPolicyId,
         'remarks': _remarksController.text.trim().isEmpty
             ? null
             : _remarksController.text.trim(),
       };
       await ApiClient.instance.put('/api/assignments/${a.id}', data: data);
-      await _upsertEmployeePolicyAssignment();
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -887,22 +887,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       }
       return false;
     }
-  }
-
-  Future<void> _upsertEmployeePolicyAssignment() async {
-    if (_selectedEmployeeId == null || _effectiveFrom == null) return;
-    await ApiClient.instance.post(
-      '/api/policy-assignments/employee-upsert',
-      data: {
-        'employee_id': _selectedEmployeeId,
-        'attendance_policy_id': _selectedPolicyId,
-        'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],
-        'effective_to': _effectiveTo != null
-            ? _effectiveTo!.toIso8601String().split('T')[0]
-            : null,
-        'is_active': true,
-      },
-    );
   }
 
   Future<String?> _requestDeactivationReason({

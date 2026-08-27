@@ -2,6 +2,10 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  EmployeePolicyAssignmentError,
+  upsertEmployeePolicyAssignment,
+} = require('../services/employeePolicyAssignment');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -56,6 +60,7 @@ router.get('/', protect, async (req, res) => {
 // Upsert employee-level policy assignment for a date range.
 // If attendance_policy_id is null, deactivates overlapping employee-level policy assignments.
 router.post('/employee-upsert', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     const {
       employee_id,
@@ -78,45 +83,33 @@ router.post('/employee-upsert', protect, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'effective_to must be on or after effective_from' });
     }
 
-    await pool.query('BEGIN');
+    client = await pool.connect();
+    await client.query('BEGIN');
     try {
-      await pool.query(
-        `UPDATE policy_assignments
-         SET is_active = false,
-             effective_to = COALESCE(effective_to, $2::date),
-             updated_at = now()
-         WHERE employee_id = $1::uuid
-           AND department_id IS NULL
-           AND shift_id IS NULL
-           AND (is_active IS NULL OR is_active = true)
-           AND effective_from <= COALESCE($3::date, '9999-12-31'::date)
-           AND COALESCE(effective_to, '9999-12-31'::date) >= $2::date`,
-        [employee_id, ef, et]
-      );
-
-      if (!attendance_policy_id) {
-        await pool.query('COMMIT');
+      const policyAssignment = await upsertEmployeePolicyAssignment(client, {
+        employeeId: employee_id,
+        attendancePolicyId: attendance_policy_id,
+        effectiveFrom: ef,
+        effectiveTo: et,
+        isActive: !!is_active,
+      });
+      await client.query('COMMIT');
+      if (!policyAssignment) {
         return res.status(204).send();
       }
-
-      const inserted = await pool.query(
-        `INSERT INTO policy_assignments (
-           attendance_policy_id, employee_id, department_id, shift_id,
-           effective_from, effective_to, is_active
-         )
-         VALUES ($1::uuid, $2::uuid, NULL, NULL, $3::date, $4::date, $5)
-         RETURNING id, attendance_policy_id, employee_id, effective_from, effective_to, is_active`,
-        [attendance_policy_id, employee_id, ef, et, !!is_active]
-      );
-      await pool.query('COMMIT');
-      res.status(201).json(inserted.rows[0]);
+      res.status(201).json(policyAssignment);
     } catch (e) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw e;
     }
   } catch (err) {
+    if (err instanceof EmployeePolicyAssignmentError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[policy-assignments employee-upsert POST]', err);
     res.status(500).json({ error: 'Failed to upsert employee policy assignment' });
+  } finally {
+    client?.release();
   }
 });
 

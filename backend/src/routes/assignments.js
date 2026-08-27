@@ -15,6 +15,10 @@ const {
   permanentlyDeleteFutureAssignment,
   writeAssignmentHistoryAudit,
 } = require('../services/assignmentHistory');
+const {
+  EmployeePolicyAssignmentError,
+  upsertEmployeePolicyAssignment,
+} = require('../services/employeePolicyAssignment');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -117,7 +121,21 @@ router.post('/', protect, requireAdmin, async (req, res) => {
   let client;
   try {
     client = await pool.connect();
-    const { employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active = true, remarks } = req.body;
+    const {
+      employee_id,
+      department_id,
+      position_id,
+      shift_id,
+      effective_from,
+      effective_to,
+      is_active = true,
+      remarks,
+      attendance_policy_id,
+    } = req.body;
+    const hasPolicyChange = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      'attendance_policy_id'
+    );
     if (!employee_id || !effective_from) {
       return res.status(400).json({ error: 'employee_id and effective_from are required' });
     }
@@ -141,14 +159,29 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         isActive: is_active === true,
         remarks,
       });
+      const policyAssignment = hasPolicyChange
+        ? await upsertEmployeePolicyAssignment(client, {
+            employeeId: employee_id,
+            attendancePolicyId: attendance_policy_id,
+            effectiveFrom: assignment.effective_from,
+            effectiveTo: assignment.effective_to,
+            isActive: assignment.is_active !== false,
+          })
+        : null;
       await client.query('COMMIT');
-      res.status(201).json(assignment);
+      res.status(201).json({
+        ...assignment,
+        policy_assignment: policyAssignment,
+      });
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
     }
   } catch (err) {
-    if (err instanceof AssignmentTransitionError) {
+    if (
+      err instanceof AssignmentTransitionError ||
+      err instanceof EmployeePolicyAssignmentError
+    ) {
       return res.status(err.statusCode).json({ error: err.message });
     }
     if (err.code === '23P01') {
@@ -179,7 +212,12 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       is_active,
       remarks,
       change_reason,
+      attendance_policy_id,
     } = req.body;
+    const hasPolicyChange = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      'attendance_policy_id'
+    );
     if (
       department_id === undefined &&
       position_id === undefined &&
@@ -235,6 +273,15 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           remarks,
         },
       });
+      const policyAssignment = hasPolicyChange
+        ? await upsertEmployeePolicyAssignment(client, {
+            employeeId: assignment.employee_id,
+            attendancePolicyId: attendance_policy_id,
+            effectiveFrom: assignment.effective_from,
+            effectiveTo: assignment.effective_to,
+            isActive: assignment.is_active !== false,
+          })
+        : null;
       if (isDeactivating) {
         await writeAssignmentHistoryAudit(client, {
           actorId: req.user?.id,
@@ -247,13 +294,20 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         });
       }
       await client.query('COMMIT');
-      res.json(assignment);
+      res.json({
+        ...assignment,
+        policy_assignment: policyAssignment,
+      });
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
     }
   } catch (err) {
-    if (err instanceof AssignmentTransitionError || err instanceof AssignmentHistoryError) {
+    if (
+      err instanceof AssignmentTransitionError ||
+      err instanceof AssignmentHistoryError ||
+      err instanceof EmployeePolicyAssignmentError
+    ) {
       return res.status(err.statusCode).json({ error: err.message });
     }
     if (err.code === '23P01') {
