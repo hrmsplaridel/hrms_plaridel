@@ -13,6 +13,7 @@ const {
   deactivateAssignmentRecord,
   normalizeChangeReason,
   permanentlyDeleteFutureAssignment,
+  repairPrimaryPredecessorAfterFutureChange,
   writeAssignmentHistoryAudit,
 } = require('../services/assignmentHistory');
 const {
@@ -273,6 +274,18 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           remarks,
         },
       });
+      const shouldRepairPredecessor =
+        isDeactivating ||
+        (
+          assignment.is_active !== false &&
+          assignment.effective_from > before.effective_from
+        );
+      const restoredPredecessor = shouldRepairPredecessor
+        ? await repairPrimaryPredecessorAfterFutureChange(client, {
+            previousRecord: before,
+            replacementRecord: assignment,
+          })
+        : null;
       const policyAssignment = hasPolicyChange
         ? await upsertEmployeePolicyAssignment(client, {
             employeeId: assignment.employee_id,
@@ -293,10 +306,25 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           after: assignment,
         });
       }
+      if (restoredPredecessor) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: restoredPredecessor.after.id,
+          action: 'assignment_predecessor_restored',
+          reason:
+            deactivationReason ||
+            String(change_reason || '').trim() ||
+            'Future assignment effective date changed',
+          before: restoredPredecessor.before,
+          after: restoredPredecessor.after,
+        });
+      }
       await client.query('COMMIT');
       res.json({
         ...assignment,
         policy_assignment: policyAssignment,
+        predecessor_restored: restoredPredecessor?.after || null,
       });
     } catch (e) {
       await client.query('ROLLBACK');
@@ -342,6 +370,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
           ? 'Assignment deactivated and retained in history'
           : 'Assignment is already inactive',
         assignment: result.record,
+        predecessor_restored: result.restoredPredecessor?.after || null,
       });
     } catch (error) {
       await client.query('ROLLBACK');

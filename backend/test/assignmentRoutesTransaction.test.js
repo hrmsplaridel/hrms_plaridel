@@ -317,3 +317,106 @@ test('standalone policy upsert rolls back through one checked-out client', async
     restoreDb();
   }
 });
+
+test('moving a future transfer later restores its predecessor in the update transaction', async () => {
+  const previous = {
+    id: '55555555-5555-4555-8555-555555555555',
+    employee_id: '11111111-1111-4111-8111-111111111111',
+    department_id: '22222222-2222-4222-8222-222222222222',
+    position_id: '33333333-3333-4333-8333-333333333333',
+    shift_id: '44444444-4444-4444-8444-444444444444',
+    effective_from: '2026-09-01',
+    effective_to: null,
+    is_active: true,
+    remarks: null,
+  };
+  const replacement = { ...previous, effective_from: '2026-10-01' };
+  const predecessor = {
+    id: '77777777-7777-4777-8777-777777777777',
+    employee_id: previous.employee_id,
+    effective_from: '2026-01-01',
+    effective_to: '2026-08-31',
+    is_active: true,
+  };
+  const restored = { ...predecessor, effective_to: '2026-09-30' };
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql, params = []) {
+      const normalized = String(sql).trim();
+      calls.push({ normalized, params });
+      if (['BEGIN', 'COMMIT'].includes(normalized)) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.startsWith('SELECT id, employee_id')) {
+        return { rowCount: 1, rows: [previous] };
+      }
+      if (normalized.startsWith('SELECT id, effective_from')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.startsWith('UPDATE assignments') &&
+          normalized.includes('SET department_id')) {
+        return { rowCount: 1, rows: [replacement] };
+      }
+      if (normalized.includes('AS is_future')) {
+        return { rowCount: 1, rows: [{ is_future: true }] };
+      }
+      if (normalized.startsWith('SELECT *') &&
+          normalized.includes('effective_to = ($3::date')) {
+        return { rowCount: 1, rows: [predecessor] };
+      }
+      if (normalized.startsWith('UPDATE assignments') &&
+          normalized.includes('SET effective_to')) {
+        assert.equal(params[1], '2026-09-30');
+        return { rowCount: 1, rows: [restored] };
+      }
+      if (normalized.startsWith('INSERT INTO audit_logs')) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${normalized}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+    async query() {
+      throw new Error('pool.query must not be used inside this transaction');
+    },
+  };
+
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/assignments');
+  delete require.cache[routePath];
+  try {
+    const router = require('../src/routes/assignments');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.put
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      params: { id: previous.id },
+      body: { effective_from: '2026-10-01' },
+      user: { id: '88888888-8888-4888-8888-888888888888' },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.effective_from, '2026-10-01');
+    assert.deepEqual(res.body.predecessor_restored, restored);
+    assert.equal(calls.at(-1).normalized, 'COMMIT');
+    assert.equal(
+      calls.some(({ normalized }) => normalized === 'ROLLBACK'),
+      false
+    );
+    assert.equal(released, true);
+  } finally {
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});

@@ -67,7 +67,7 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
             onPressed: () => Navigator.of(drawerContext).pop(),
             child: const Text('Cancel'),
           ),
-          if (isEditing)
+          if (isEditing && !canDeleteMistake)
             OutlinedButton.icon(
               onPressed: () async {
                 final ok = await _deactivateAssignment();
@@ -83,7 +83,7 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
               ),
             ),
           if (canDeleteMistake)
-            IconButton(
+            OutlinedButton.icon(
               onPressed: () async {
                 final ok = await _deleteMistakenAssignment();
                 if (ok && drawerContext.mounted) {
@@ -91,8 +91,11 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
                 }
               },
               icon: const Icon(Icons.delete_forever_rounded),
-              color: Colors.red,
-              tooltip: 'Delete mistaken future assignment',
+              label: const Text('Remove Mistaken Future Assignment'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
             ),
           FilledButton.icon(
             onPressed: _loadingLookups
