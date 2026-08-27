@@ -126,7 +126,9 @@ test('applies selected assignment and policy through the provided transaction cl
   assert.equal(result.assignment.id, 'assignment-id');
   assert.equal(result.policyAssignment.id, 'policy-assignment-id');
   assert.equal(calls.filter((call) => call.sql.includes('INSERT INTO assignments')).length, 1);
-  assert.equal(calls.filter((call) => call.sql.includes('UPDATE policy_assignments')).length, 1);
+  assert.equal(calls.filter((call) => call.sql.includes('SELECT pg_advisory_xact_lock')).length, 1);
+  assert.equal(calls.filter((call) => call.sql.includes('SELECT id, attendance_policy_id')).length, 1);
+  assert.equal(calls.filter((call) => call.sql.includes('UPDATE policy_assignments')).length, 0);
   assert.equal(calls.filter((call) => call.sql.includes('INSERT INTO policy_assignments')).length, 1);
 });
 

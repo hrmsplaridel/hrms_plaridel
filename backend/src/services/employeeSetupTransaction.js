@@ -3,6 +3,10 @@ const {
   createAssignmentTransition,
   endEmployeeAssignmentsFromDate,
 } = require('./assignmentTransition');
+const {
+  EmployeePolicyAssignmentError,
+  upsertEmployeePolicyAssignment,
+} = require('./employeePolicyAssignment');
 
 class EmployeeSetupValidationError extends Error {
   constructor(message, statusCode = 400) {
@@ -188,42 +192,23 @@ async function applyEmployeeSetup(db, { employeeId, setup, remarks }) {
 
   let policyAssignment = null;
   if (setup.hasPolicyChange) {
-    await db.query(
-      `UPDATE policy_assignments
-       SET is_active = false,
-           effective_to = CASE
-             WHEN effective_from <= $2::date
-               AND (effective_to IS NULL OR effective_to >= $2::date)
-               THEN $2::date
-             ELSE effective_to
-           END,
-           updated_at = now()
-       WHERE employee_id = $1::uuid
-         AND department_id IS NULL
-         AND shift_id IS NULL
-         AND is_active = true`,
-      [employeeId, setup.effectiveFrom]
-    );
-
-    if (setup.policyAssignment) {
-      const inserted = await db.query(
-        `INSERT INTO policy_assignments (
-           attendance_policy_id, employee_id, department_id, shift_id,
-           effective_from, effective_to, is_active
-         )
-         VALUES ($1::uuid, $2::uuid, NULL, NULL, $3::date, $4::date, $5)
-         RETURNING id, attendance_policy_id, employee_id,
-                   effective_from::text AS effective_from,
-                   effective_to::text AS effective_to, is_active`,
-        [
-          setup.policyAssignment.attendancePolicyId,
-          employeeId,
-          setup.effectiveFrom,
-          setup.effectiveTo,
-          setup.isActive,
-        ]
-      );
-      policyAssignment = inserted.rows[0];
+    try {
+      policyAssignment = await upsertEmployeePolicyAssignment(db, {
+        employeeId,
+        attendancePolicyId:
+          setup.policyAssignment?.attendancePolicyId ?? null,
+        effectiveFrom: setup.effectiveFrom,
+        effectiveTo: setup.effectiveTo,
+        isActive: setup.isActive,
+      });
+    } catch (error) {
+      if (error instanceof EmployeePolicyAssignmentError) {
+        throw new EmployeeSetupValidationError(
+          error.message,
+          error.statusCode
+        );
+      }
+      throw error;
     }
   }
 

@@ -434,6 +434,8 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
             _buildAssignmentsTable(hasSelection),
             if (hasSelection) ...[
               const SizedBox(height: 24),
+              _buildPolicyPeriodsSection(),
+              const SizedBox(height: 24),
               _buildDesignationsSection(),
             ],
           ],
@@ -529,10 +531,6 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                   child: Text('Shift', style: _tableHeaderStyle(context)),
                 ),
                 Expanded(
-                  flex: 2,
-                  child: Text('Policy', style: _tableHeaderStyle(context)),
-                ),
-                Expanded(
                   flex: 1,
                   child: Text('Time', style: _tableHeaderStyle(context)),
                 ),
@@ -601,16 +599,6 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                           ),
                         ),
                         Expanded(
-                          flex: 2,
-                          child: Text(
-                            (a.policyName != null &&
-                                    a.policyName!.trim().isNotEmpty)
-                                ? a.policyName!
-                                : 'Default policy',
-                            style: _tableCellStyle(context),
-                          ),
-                        ),
-                        Expanded(
                           flex: 1,
                           child: Text(
                             '${_timeStr(a.startTime)} - ${_timeStr(a.endTime)}',
@@ -630,6 +618,155 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                 ),
               );
             }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPolicyPeriodsSection() {
+    final dark = _isDark(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: dark
+            ? AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.65)
+            : AppTheme.lightGray.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(8),
+              ),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.policy_rounded,
+                  size: 18,
+                  color: _mutedColor(context),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Attendance Policy Periods',
+                    style: _tableHeaderStyle(context),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _loadingLookups
+                      ? null
+                      : () => _openPolicyPeriodDrawer(),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Add Period'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFE85D04),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_loadingPolicyAssignments)
+            const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_policyAssignments.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: Text(
+                  'No employee-level policy periods. Fallback policy applies.',
+                  style: TextStyle(color: _mutedColor(context)),
+                ),
+              ),
+            )
+          else ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Text('Policy', style: _tableHeaderStyle(context)),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      'Effective period',
+                      style: _tableHeaderStyle(context),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 92,
+                    child: Text('Status', style: _tableHeaderStyle(context)),
+                  ),
+                ],
+              ),
+            ),
+            ..._policyAssignments.map((policy) {
+              final status = _policyPeriodStatus(policy);
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _openPolicyPeriodDrawer(policyPeriod: policy),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: AppTheme.dashHairlineOf(
+                            context,
+                          ).withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            policy.policyName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _tableCellStyle(context),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            _policyEffectivePeriodStr(policy),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _tableCellStyle(context),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 92,
+                          child: _buildDesignationStatusBadge(status),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
         ],
       ),
     );

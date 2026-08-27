@@ -322,6 +322,21 @@ CREATE TABLE IF NOT EXISTS policy_assignments (
     CHECK (effective_to IS NULL OR effective_to >= effective_from)
 );
 
+ALTER TABLE policy_assignments
+  DROP CONSTRAINT IF EXISTS policy_assignments_no_overlapping_employee_ranges;
+ALTER TABLE policy_assignments
+  ADD CONSTRAINT policy_assignments_no_overlapping_employee_ranges
+  EXCLUDE USING gist (
+    employee_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (
+    is_active = true
+    AND employee_id IS NOT NULL
+    AND department_id IS NULL
+    AND shift_id IS NULL
+  );
+
 -- =========================================
 -- HOLIDAYS
 -- =========================================
@@ -2338,6 +2353,14 @@ CREATE INDEX IF NOT EXISTS idx_policy_assignments_employee_id ON policy_assignme
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_department_id ON policy_assignments(department_id);
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_shift_id ON policy_assignments(shift_id);
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_policy_id ON policy_assignments(attendance_policy_id);
+CREATE INDEX IF NOT EXISTS idx_policy_assignments_employee_effective_range
+  ON policy_assignments (employee_id, effective_from, effective_to)
+  WHERE (
+    is_active = true
+    AND employee_id IS NOT NULL
+    AND department_id IS NULL
+    AND shift_id IS NULL
+  );
 
 CREATE INDEX IF NOT EXISTS idx_holidays_date_range ON holidays(date_from, date_to);
 CREATE INDEX IF NOT EXISTS idx_holidays_type ON holidays(holiday_type);

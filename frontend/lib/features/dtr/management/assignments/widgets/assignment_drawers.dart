@@ -163,6 +163,81 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
     );
   }
 
+  Widget _buildPolicyPeriodDrawer(BuildContext drawerContext) {
+    final isEditing = _selectedPolicyPeriod != null;
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isEditing ? 'Change Policy Period' : 'Add Policy Period',
+                    style: TextStyle(
+                      color: _headingColor(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  icon: Icon(Icons.close_rounded, color: _mutedColor(context)),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(child: _buildPolicyPeriodForm()),
+          ),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.dashPanelOf(context),
+              border: Border(
+                top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 12),
+                FilledButton.icon(
+                  onPressed: _loadingLookups
+                      ? null
+                      : () async {
+                          final ok = await _savePolicyPeriod();
+                          if (ok && drawerContext.mounted) {
+                            Navigator.of(drawerContext).pop();
+                          }
+                        },
+                  icon: const Icon(Icons.save_rounded, size: 18),
+                  label: Text(isEditing ? 'Apply Change' : 'Save Period'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE85D04),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDesignationDrawerFooter(BuildContext drawerContext) {
     final isEditing = _selectedDesignation != null;
     final canDeactivate =

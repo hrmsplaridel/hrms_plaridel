@@ -168,6 +168,12 @@ test('failed policy insert rolls back the primary assignment on the same client'
           }],
         };
       }
+      if (normalized.startsWith('SELECT pg_advisory_xact_lock')) {
+        return { rowCount: 1, rows: [{}] };
+      }
+      if (normalized.startsWith('SELECT id, attendance_policy_id')) {
+        return { rowCount: 0, rows: [] };
+      }
       if (normalized.startsWith('UPDATE policy_assignments')) {
         return { rowCount: 1, rows: [] };
       }
@@ -243,6 +249,12 @@ test('standalone policy upsert rolls back through one checked-out client', async
       if (['BEGIN', 'ROLLBACK'].includes(normalized)) {
         return { rowCount: 0, rows: [] };
       }
+      if (normalized.startsWith('SELECT pg_advisory_xact_lock')) {
+        return { rowCount: 1, rows: [{}] };
+      }
+      if (normalized.startsWith('SELECT id, attendance_policy_id')) {
+        return { rowCount: 0, rows: [] };
+      }
       if (normalized.startsWith('UPDATE policy_assignments')) {
         return { rowCount: 1, rows: [] };
       }
@@ -297,6 +309,7 @@ test('standalone policy upsert rolls back through one checked-out client', async
       ['BEGIN', 'ROLLBACK']
     );
     assert.equal(clientCalls.includes('COMMIT'), false);
+    assert.ok(clientCalls.some((sql) => sql.startsWith('INSERT INTO policy_assignments')));
     assert.equal(released, true);
   } finally {
     console.error = originalConsoleError;
