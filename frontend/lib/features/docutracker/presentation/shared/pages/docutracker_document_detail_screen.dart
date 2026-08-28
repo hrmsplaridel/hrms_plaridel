@@ -10,7 +10,6 @@ import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_style
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
-import 'package:hrms_plaridel/features/docutracker/models/document_ai_summary.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_record.dart';
@@ -75,48 +74,6 @@ class _DocuTrackerDocumentDetailScreenState
   bool _canDownloadAttachment = false;
   bool _canModifyAttachment = false;
   Map<String, DocuTrackerPermissionExplanation> _permissionExplanations = {};
-  DocumentAiSummary? _aiSummary;
-  bool _aiSummaryLoading = false;
-  bool _aiSummaryGenerating = false;
-  String? _aiSummaryError;
-
-  Future<void> _loadAiSummary(String documentId) async {
-    setState(() {
-      _aiSummaryLoading = true;
-      _aiSummaryError = null;
-    });
-    final result = await DocuTrackerRepository.instance.getAiSummary(
-      documentId,
-    );
-    if (!mounted) return;
-    setState(() {
-      _aiSummaryLoading = false;
-      if (result is DocuTrackerSuccess<DocumentAiSummary?>) {
-        _aiSummary = result.value;
-      } else if (result is DocuTrackerFailure<DocumentAiSummary?>) {
-        _aiSummaryError = result.message;
-      }
-    });
-  }
-
-  Future<void> _generateAiSummary(String documentId) async {
-    setState(() {
-      _aiSummaryGenerating = true;
-      _aiSummaryError = null;
-    });
-    final result = await DocuTrackerRepository.instance.generateAiSummary(
-      documentId,
-    );
-    if (!mounted) return;
-    setState(() {
-      _aiSummaryGenerating = false;
-      if (result is DocuTrackerSuccess<DocumentAiSummary>) {
-        _aiSummary = result.value;
-      } else if (result is DocuTrackerFailure<DocumentAiSummary>) {
-        _aiSummaryError = result.message;
-      }
-    });
-  }
 
   Future<void> _refreshEffectivePermissions({
     required DocuTrackerDocument doc,
@@ -154,38 +111,45 @@ class _DocuTrackerDocumentDetailScreenState
       DocumentAction.reject.value,
       DocumentAction.returnDoc.value,
     ];
-    final explanations = <String, bool>{};
-    final explanationDetails = <String, DocuTrackerPermissionExplanation>{};
-    for (final action in actions) {
-      final exp = await repo.explainPermission(
-        userId: userId,
-        roleId: roleId,
-        documentType: doc.documentType,
-        action: action,
-        documentId: documentId,
-        isAdmin: isAdmin,
-      );
-      explanations[action] = exp.granted;
-      explanationDetails[action] = exp;
-    }
+    final explanationEntries = await Future.wait(
+      actions.map((action) async {
+        final explanation = await repo.explainPermission(
+          userId: userId,
+          roleId: roleId,
+          documentType: doc.documentType,
+          action: action,
+          documentId: documentId,
+          isAdmin: isAdmin,
+        );
+        return MapEntry(action, explanation);
+      }),
+    );
+    final explanationDetails =
+        Map<String, DocuTrackerPermissionExplanation>.fromEntries(
+          explanationEntries,
+        );
+    bool granted(String action) => explanationDetails[action]?.granted == true;
     if (!mounted) return;
     setState(() {
       _permissionExplanations = explanationDetails;
-      _canViewAuditTrail = explanations[DocumentAction.view.value] == true;
-      _canEdit = isAdmin || explanations[DocumentAction.edit.value] == true;
-      _canSubmitAction = explanations[DocumentAction.submit.value] == true;
-      _canApproveAction = explanations[DocumentAction.approve.value] == true;
-      _canForwardAction = explanations[DocumentAction.forward.value] == true;
-      _canRejectAction = explanations[DocumentAction.reject.value] == true;
-      _canReturnAction = explanations[DocumentAction.returnDoc.value] == true;
+      _canViewAuditTrail = granted(DocumentAction.view.value);
+      _canEdit = isAdmin || granted(DocumentAction.edit.value);
+      _canSubmitAction =
+          granted(DocumentAction.submit.value) &&
+          doc.createdBy == userId &&
+          DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc);
+      _canApproveAction = granted(DocumentAction.approve.value);
+      _canForwardAction = granted(DocumentAction.forward.value);
+      _canRejectAction = granted(DocumentAction.reject.value);
+      _canReturnAction = granted(DocumentAction.returnDoc.value);
       _canDownloadAttachment =
-          explanations[DocumentAction.download.value] == true ||
-          explanations[DocumentAction.view.value] == true;
+          granted(DocumentAction.download.value) ||
+          granted(DocumentAction.view.value);
       _canModifyAttachment =
           isAdmin ||
           (DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc) &&
               doc.createdBy == userId) ||
-          explanations[DocumentAction.edit.value] == true;
+          granted(DocumentAction.edit.value);
       _permissionsLoading = false;
     });
   }
@@ -237,7 +201,6 @@ class _DocuTrackerDocumentDetailScreenState
         return;
       }
 
-      await _loadAiSummary(docId);
       // Load audit trail eagerly; we'll still hide it if permissions deny access.
       provider.loadDocumentHistory(docId);
       await provider.loadRoutingConfigs();
@@ -436,6 +399,8 @@ class _DocuTrackerDocumentDetailScreenState
     final doc = docId != null ? _resolveDocForView(provider) : widget.document;
     final userId = auth.user?.id ?? '';
     final isPending = doc.status == DocumentStatus.pending;
+    final isCreator = doc.createdBy == userId;
+    final isWip = DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc);
     final canAct =
         doc.status != DocumentStatus.approved &&
         doc.status != DocumentStatus.rejected &&
@@ -460,11 +425,12 @@ class _DocuTrackerDocumentDetailScreenState
             (currentRouting == null && doc.currentHolderId == userId));
 
     final workflowReady = _workflowConfigIssue == null;
-    final statusAllowsSubmit =
-        doc.status == DocumentStatus.pending ||
-        doc.status == DocumentStatus.returned;
     final canSubmit =
-        workflowReady && canAct && _canSubmitAction && statusAllowsSubmit;
+        workflowReady &&
+        canAct &&
+        _canSubmitAction &&
+        isCreator &&
+        isWip;
 
     // Review actions only valid if NOT pending and workflow is configured.
     final canApprove =
@@ -548,8 +514,6 @@ class _DocuTrackerDocumentDetailScreenState
                         ),
                         const SizedBox(height: 24),
                       ],
-                      _buildAiSummarySection(doc),
-                      const SizedBox(height: 24),
                       _buildAttachmentSection(doc),
                       const SizedBox(height: 24),
                       _buildDocumentInfoSection(doc),
@@ -586,8 +550,6 @@ class _DocuTrackerDocumentDetailScreenState
                         ),
                         const SizedBox(height: 24),
                       ],
-                      _buildAiSummarySection(doc),
-                      const SizedBox(height: 24),
                       _buildAttachmentSection(doc),
                       const SizedBox(height: 24),
                       _buildDocumentInfoSection(doc),
@@ -821,112 +783,6 @@ class _DocuTrackerDocumentDetailScreenState
       document: doc,
       canDownload: _canDownloadAttachment,
       canModify: _canModifyAttachment,
-    );
-  }
-
-  Widget _buildAiSummarySection(DocuTrackerDocument doc) {
-    final documentId = doc.id;
-    final busy = _aiSummaryLoading || _aiSummaryGenerating;
-    final summary = _aiSummary;
-    return DocuTrackerDetailSectionCard(
-      icon: Icons.auto_awesome_rounded,
-      title: 'AI Summary',
-      subtitle: summary?.generatedAt != null
-          ? docuTrackerFormatRelativeSaved(summary!.generatedAt)
-          : 'Metadata-only document summary',
-      trailing: documentId == null
-          ? null
-          : TextButton.icon(
-              onPressed: busy ? null : () => _generateAiSummary(documentId),
-              icon: busy
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(
-                      summary == null
-                          ? Icons.auto_awesome_rounded
-                          : Icons.refresh_rounded,
-                      size: 16,
-                    ),
-              label: Text(summary == null ? 'Generate' : 'Regenerate'),
-              style: TextButton.styleFrom(
-                foregroundColor: DocuTrackerTokens.brand,
-                textStyle: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-      child: _buildAiSummaryBody(summary, busy),
-    );
-  }
-
-  Widget _buildAiSummaryBody(DocumentAiSummary? summary, bool busy) {
-    if (_aiSummaryLoading && summary == null) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 16),
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    if (summary == null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_aiSummaryError != null) ...[
-            DocuTrackerStyles.stateMessage(
-              icon: Icons.info_outline_rounded,
-              color: DocuTrackerTokens.alertOrange,
-              message: _aiSummaryError!,
-            ),
-            const SizedBox(height: 12),
-          ],
-          const Text(
-            'No AI summary has been generated for this document.',
-            style: TextStyle(
-              fontSize: 13,
-              color: DocuTrackerTokens.textSecondary,
-              height: 1.4,
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_aiSummaryError != null) ...[
-          DocuTrackerStyles.stateMessage(
-            icon: Icons.info_outline_rounded,
-            color: DocuTrackerTokens.alertOrange,
-            message: _aiSummaryError!,
-          ),
-          const SizedBox(height: 12),
-        ],
-        _AiSummaryTextBlock(label: 'Purpose', value: summary.purpose),
-        _AiSummaryTextBlock(label: 'Status', value: summary.statusSummary),
-        _AiSummaryTextBlock(
-          label: 'Required action',
-          value: summary.requiredAction,
-        ),
-        _AiSummaryListBlock(
-          label: 'Important dates',
-          values: summary.importantDates,
-        ),
-        _AiSummaryListBlock(
-          label: 'Risks or missing info',
-          values: summary.risksOrMissingInfo,
-        ),
-        if (busy) ...[
-          const SizedBox(height: 12),
-          const LinearProgressIndicator(minHeight: 2),
-        ],
-      ],
     );
   }
 
@@ -2015,107 +1871,6 @@ class _InfoRow extends StatelessWidget {
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AiSummaryTextBlock extends StatelessWidget {
-  const _AiSummaryTextBlock({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = value.trim();
-    if (text.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: DocuTrackerTokens.metaStyle(context).copyWith(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.4,
-            ),
-          ),
-          const SizedBox(height: 5),
-          SelectableText(
-            text,
-            style: const TextStyle(
-              color: DocuTrackerTokens.textPrimary,
-              fontSize: 13,
-              height: 1.4,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AiSummaryListBlock extends StatelessWidget {
-  const _AiSummaryListBlock({required this.label, required this.values});
-
-  final String label;
-  final List<String> values;
-
-  @override
-  Widget build(BuildContext context) {
-    final items = values
-        .map((v) => v.trim())
-        .where((v) => v.isNotEmpty)
-        .toList();
-    if (items.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: DocuTrackerTokens.metaStyle(context).copyWith(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.4,
-            ),
-          ),
-          const SizedBox(height: 6),
-          for (final item in items)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 7),
-                    child: Icon(
-                      Icons.circle,
-                      size: 5,
-                      color: DocuTrackerTokens.brand,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: SelectableText(
-                      item,
-                      style: const TextStyle(
-                        color: DocuTrackerTokens.textPrimary,
-                        fontSize: 13,
-                        height: 1.4,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
         ],
       ),
     );

@@ -197,4 +197,29 @@ void main() {
     expect(find.textContaining('Beatriz Reviewer'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('user overrides present inherit, allow, and deny choices', (
+    tester,
+  ) async {
+    await pumpEditor(tester, userTab: true);
+
+    expect(find.text('Inherit'), findsWidgets);
+    expect(find.text('Allow'), findsWidgets);
+    expect(find.text('Deny'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('user overrides show workflow-controlled actions separately', (
+    tester,
+  ) async {
+    await pumpEditor(tester, userTab: true);
+
+    expect(
+      find.text('Workflow-controlled actions (per document)'),
+      findsOneWidget,
+    );
+    expect(find.text('Edit own draft'), findsOneWidget);
+    expect(find.text('Forward'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

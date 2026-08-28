@@ -529,7 +529,7 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
   final VoidCallback onMenu;
 
   static IconData _iconForType(DocumentRoutingConfig config) {
-    return switch (config.documentType.name) {
+    return switch (config.documentType.value) {
       'purchaseRequest' => Icons.shopping_cart_outlined,
       _ => Icons.description_outlined,
     };

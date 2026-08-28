@@ -32,7 +32,7 @@ const DOC_ACTIONS = new Set([
 ]);
 // Overdue is still "at holder / active review" — same holder actions as in_review / escalated.
 const TRANSITION_ALLOWED_FROM = {
-  submit: new Set(['draft', 'pending', 'returned']),
+  submit: new Set(['draft', 'pending']),
   forward: new Set(['in_review', 'escalated', 'overdue']),
   approve: new Set(['in_review', 'escalated', 'overdue']),
   reject: new Set(['in_review', 'escalated', 'overdue']),
@@ -40,6 +40,7 @@ const TRANSITION_ALLOWED_FROM = {
 };
 
 let usersOfficeColumnReady = null;
+let docutrackerDocumentFilesTableReady = null;
 
 async function hasUsersOfficeIdColumn(client) {
   if (usersOfficeColumnReady !== null) return usersOfficeColumnReady;
@@ -53,6 +54,35 @@ async function hasUsersOfficeIdColumn(client) {
   );
   usersOfficeColumnReady = result.rowCount > 0;
   return usersOfficeColumnReady;
+}
+
+async function hasDocutrackerDocumentFilesTable(client) {
+  if (docutrackerDocumentFilesTableReady !== null) return docutrackerDocumentFilesTableReady;
+  const result = await client.query(
+    `SELECT 1
+     FROM information_schema.tables
+     WHERE table_schema = 'public'
+       AND table_name = 'docutracker_document_files'
+     LIMIT 1`
+  );
+  docutrackerDocumentFilesTableReady = result.rowCount > 0;
+  return docutrackerDocumentFilesTableReady;
+}
+
+async function recordInitialDocumentFile(client, { documentId, fileName, filePath, uploadedBy }) {
+  if (!documentId || !fileName || !filePath) return;
+  if (!(await hasDocutrackerDocumentFilesTable(client))) return;
+  await client.query(
+    `INSERT INTO docutracker_document_files
+       (document_id, file_name, file_path, version, uploaded_by, is_current)
+     VALUES ($1, $2, $3, 1, $4, true)
+     ON CONFLICT (document_id, file_name, version)
+     DO UPDATE SET
+       file_path = EXCLUDED.file_path,
+       uploaded_by = COALESCE(EXCLUDED.uploaded_by, docutracker_document_files.uploaded_by),
+       is_current = true`,
+    [documentId, fileName, filePath, uploadedBy || null]
+  );
 }
 
 function normalizeStatus(value) {
@@ -1029,27 +1059,21 @@ async function getWorkflowStepAssigneeRecord(client, { document, userId }) {
 
 
 function assigneeAllowsAction(assigneeRow, action) {
-  if (!assigneeRow) return null; // unknown (likely legacy config)
+  if (!assigneeRow) return false;
   if (assigneeRow.is_enabled === false) return false;
   const allowed = Array.isArray(assigneeRow.allowed_actions) ? assigneeRow.allowed_actions : [];
-  // Treat empty allowed_actions as "allow all workflow actions" for backward compatibility.
-  if (allowed.length === 0) return true;
+  // The strict-actions migration backfills legacy empty rows. Empty is deny-all.
+  if (allowed.length === 0) return false;
   return allowed.includes(action);
 }
 
 async function canUserPerformWorkflowAction(client, { user, document, action }) {
   if (!WORKFLOW_STEP_ACTIONS.has(action)) return false;
   if (user?.role === 'admin') return true;
-  if (isCurrentHolder(document, user.id)) return true;
 
-  // Prefer normalized table restrictions when available.
+  // A non-admin must be assigned to the active step and granted this action.
   const row = await getWorkflowStepAssigneeRecord(client, { document, userId: user.id });
-  const allowedByRow = assigneeAllowsAction(row, action);
-  if (allowedByRow === true) return true;
-  if (allowedByRow === false) return false;
-
-  // Fallback to legacy behavior (no per-action assignments): holder or step assignee.
-  return isUserAssignedToCurrentStep(client, { document, userId: user.id });
+  return assigneeAllowsAction(row, action);
 }
 
 async function canUserPerformGeneralAction(client, { user, documentType, action }) {
@@ -1776,6 +1800,13 @@ async function createDocument(pool, user, input) {
 
     const doc = docRes.rows[0];
 
+    await recordInitialDocumentFile(client, {
+      documentId: doc.id,
+      fileName: input.file_name || null,
+      filePath: input.file_path || null,
+      uploadedBy: user.id,
+    });
+
     await insertHistory(client, {
       document_id: doc.id,
       action: 'created',
@@ -1877,6 +1908,15 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
       throw validationError(`Cannot ${action} document in ${status} status`);
     }
     ensureActionAllowedFromStatus(action, status);
+
+    if (action === 'submit' && user.role !== 'admin') {
+      if (doc.created_by !== user.id) {
+        throw forbiddenError('Only the document creator can submit this document');
+      }
+      if (!isDraftOrWipDocument(doc, status)) {
+        throw validationError('Only an unassigned draft can be submitted');
+      }
+    }
 
     const config = await getRoutingConfig(
       client,

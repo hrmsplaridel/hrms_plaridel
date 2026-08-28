@@ -4,10 +4,10 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/escalation_config.dart';
-import 'package:hrms_plaridel/features/docutracker/models/document_ai_summary.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_governance_audit_entry.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_record.dart';
@@ -41,6 +41,40 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   static const _base = '/api/docutracker';
 
   late final DocuTrackerPermissionService _permissionService;
+
+  Future<List<DocuTrackerGovernanceAuditEntry>> listGovernanceAudit({
+    String? documentType,
+    String? eventType,
+    String? actorId,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/governance-audit',
+        queryParameters: {
+          if (documentType != null && documentType.trim().isNotEmpty)
+            'document_type': documentType.trim(),
+          if (eventType != null && eventType.trim().isNotEmpty)
+            'event_type': eventType.trim(),
+          if (actorId != null && actorId.trim().isNotEmpty)
+            'actor_id': actorId.trim(),
+          'limit': limit.clamp(1, 200),
+          'offset': offset < 0 ? 0 : offset,
+        },
+      );
+      return (res.data ?? const [])
+          .whereType<Map>()
+          .map(
+            (row) => DocuTrackerGovernanceAuditEntry.fromJson(
+              Map<String, dynamic>.from(row),
+            ),
+          )
+          .toList();
+    } catch (e) {
+      throw Exception(_apiErrorMessage(e));
+    }
+  }
 
   Future<List<DocumentRoutingConfig>> getRoutingConfigs() async {
     try {
@@ -341,46 +375,6 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
-  Future<DocuTrackerResult<DocumentAiSummary?>> getAiSummary(
-    String documentId,
-  ) async {
-    try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>(
-        '$_base/documents/$documentId/ai-summary',
-      );
-      final row = res.data;
-      if (row == null) return const DocuTrackerSuccess(null);
-      return DocuTrackerSuccess(DocumentAiSummary.fromJson(row));
-    } on DioException catch (e) {
-      if (e.response?.statusCode == 404) {
-        return const DocuTrackerSuccess(null);
-      }
-      return DocuTrackerFailure(_apiErrorMessage(e));
-    } catch (e) {
-      return DocuTrackerFailure(_apiErrorMessage(e));
-    }
-  }
-
-  Future<DocuTrackerResult<DocumentAiSummary>> generateAiSummary(
-    String documentId,
-  ) async {
-    try {
-      final res = await ApiClient.instance.post<Map<String, dynamic>>(
-        '$_base/documents/$documentId/ai-summary',
-        data: const <String, dynamic>{},
-      );
-      final row = res.data;
-      if (row == null) {
-        return DocuTrackerFailure<DocumentAiSummary>(
-          'Empty response from server',
-        );
-      }
-      return DocuTrackerSuccess(DocumentAiSummary.fromJson(row));
-    } catch (e) {
-      return DocuTrackerFailure(_apiErrorMessage(e));
-    }
-  }
-
   Future<List<DocumentNotification>> listMyNotifications() async {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
@@ -538,8 +532,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       final deleted = res.data?['deleted'];
       if (deleted is num) return deleted.toInt();
       return 0;
-    } catch (_) {
-      return 0;
+    } catch (e) {
+      throw Exception(_apiErrorMessage(e));
     }
   }
 
@@ -606,7 +600,24 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   }
 
   Future<List<DocumentType>> creatableDocumentTypes() async {
-    const allTypes = DocumentType.values;
+    List<DocumentType> allTypes;
+    try {
+      final configs = await getRoutingConfigs();
+      allTypes = configs
+          .map((config) => config.documentType)
+          .toSet()
+          .toList()
+        ..sort(
+          (a, b) => a.displayName.toLowerCase().compareTo(
+            b.displayName.toLowerCase(),
+          ),
+        );
+    } catch (_) {
+      allTypes = List<DocumentType>.from(DocumentType.values);
+    }
+    if (allTypes.isEmpty) {
+      allTypes = List<DocumentType>.from(DocumentType.values);
+    }
     final action = DocumentAction.createDraft.value;
     final wildcardAllowed = await hasCurrentUserPermission(
       documentType: '*',

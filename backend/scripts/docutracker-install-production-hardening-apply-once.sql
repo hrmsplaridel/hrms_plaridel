@@ -1,5 +1,5 @@
 -- =============================================================================
--- HRMS Plaridel — DocuTracker: PRODUCTION HARDENING (apply once)
+-- HRMS Plaridel - DocuTracker: PRODUCTION HARDENING (apply once)
 -- =============================================================================
 -- Source: migrate-docutracker-production-hardening-apply-once.sql
 -- Run AFTER phase 1 (docutracker-install-core.sql) completes successfully.
