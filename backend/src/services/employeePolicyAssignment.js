@@ -41,6 +41,7 @@ async function upsertEmployeePolicyAssignment(
     effectiveFrom,
     effectiveTo = null,
     isActive = true,
+    includeTransition = false,
   }
 ) {
   const employee = String(employeeId || '').trim();
@@ -93,6 +94,7 @@ async function upsertEmployeePolicyAssignment(
   }
 
   const preservedRanges = [];
+  const preservedAssignments = [];
   for (const row of overlapping.rows) {
     if (row.effective_from < from) {
       preservedRanges.push({
@@ -111,12 +113,15 @@ async function upsertEmployeePolicyAssignment(
   }
 
   for (const range of preservedRanges) {
-    await db.query(
+    const preserved = await db.query(
       `INSERT INTO policy_assignments (
          attendance_policy_id, employee_id, department_id, shift_id,
          effective_from, effective_to, is_active
        )
-       VALUES ($1::uuid, $2::uuid, NULL, NULL, $3::date, $4::date, true)`,
+       VALUES ($1::uuid, $2::uuid, NULL, NULL, $3::date, $4::date, true)
+       RETURNING id, attendance_policy_id, employee_id,
+                 effective_from::text AS effective_from,
+                 effective_to::text AS effective_to, is_active`,
       [
         range.attendancePolicyId,
         employee,
@@ -124,9 +129,18 @@ async function upsertEmployeePolicyAssignment(
         range.effectiveTo,
       ]
     );
+    if (preserved.rows[0]) preservedAssignments.push(preserved.rows[0]);
   }
 
-  if (!policyId) return null;
+  if (!policyId) {
+    return includeTransition
+      ? {
+          assignment: null,
+          before: overlapping.rows,
+          after: preservedAssignments,
+        }
+      : null;
+  }
 
   const inserted = await db.query(
     `INSERT INTO policy_assignments (
@@ -139,7 +153,14 @@ async function upsertEmployeePolicyAssignment(
                effective_to::text AS effective_to, is_active`,
     [policyId, employee, from, to, isActive === true]
   );
-  return inserted.rows[0] || null;
+  const assignment = inserted.rows[0] || null;
+  return includeTransition
+    ? {
+        assignment,
+        before: overlapping.rows,
+        after: [...preservedAssignments, ...(assignment ? [assignment] : [])],
+      }
+    : assignment;
 }
 
 module.exports = {

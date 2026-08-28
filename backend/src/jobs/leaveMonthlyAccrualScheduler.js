@@ -20,9 +20,14 @@ const {
 } = require('../services/leaveAttendanceDeduction');
 const {
   DEFAULT_QUEUE_LIMIT,
+  listPendingReconciliationEmployees,
   listPendingReconciliationMonths,
   recordReconciliationFailure,
 } = require('../services/dtrMonthEndReconciliation');
+const {
+  clearBiometricAttendancePolicyCache,
+  processBiometricLogsToSummary,
+} = require('../services/biometricProcessing');
 const { broadcastAppEvent } = require('../websockets/appEvents');
 
 /** Stable key for pg_try_advisory_lock (must not collide with other app locks). */
@@ -89,6 +94,34 @@ function manilaCompletedYearMonthNow(now = new Date()) {
   const [year, month] = current.split('-').map((value) => parseInt(value, 10));
   const completed = new Date(year, month - 2, 1);
   return `${completed.getFullYear()}-${String(completed.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthDateRange(targetMonth) {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(targetMonth || ''));
+  if (!match) throw new Error(`Invalid reconciliation month: ${targetMonth}`);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return {
+    dateFrom: `${match[1]}-${match[2]}-01`,
+    dateTo: `${match[1]}-${match[2]}-${String(lastDay).padStart(2, '0')}`,
+  };
+}
+
+async function rebuildQueuedDtrMonth(
+  targetMonth,
+  employeeIds,
+  { dtrRebuilder, policyCacheInvalidator }
+) {
+  const employees = Array.isArray(employeeIds)
+    ? [...new Set(employeeIds.filter(Boolean).map(String))]
+    : [];
+  if (employees.length === 0) return { inserted: 0, updated: 0 };
+  const range = monthDateRange(targetMonth);
+  for (const employeeId of employees) {
+    policyCacheInvalidator({ employeeId, ...range });
+  }
+  return dtrRebuilder(employees, range.dateFrom, range.dateTo);
 }
 
 function monthlyAccrualAffectedUserIds(result = {}) {
@@ -193,7 +226,10 @@ async function runScheduledCompletedMonthEnd(
     attendanceRunner = runMonthlyAttendanceDeductions,
     resultBroadcaster = broadcastMonthlyAccrualResult,
     queueLoader = listPendingReconciliationMonths,
+    queueEmployeeLoader = listPendingReconciliationEmployees,
     queueFailureRecorder = recordReconciliationFailure,
+    dtrRebuilder = processBiometricLogsToSummary,
+    policyCacheInvalidator = clearBiometricAttendancePolicyCache,
     queuedMonthLimit = Math.max(
       1,
       Math.min(
@@ -218,6 +254,13 @@ async function runScheduledCompletedMonthEnd(
       dryRun: false,
       maxCatchUpMonths: CRON_MAX_CATCH_UP_MONTHS,
       targetMonth: ym,
+    });
+    const regularQueueEmployees = await queueEmployeeLoader(pool, {
+      serviceMonth: `${ym}-01`,
+    });
+    await rebuildQueuedDtrMonth(ym, regularQueueEmployees, {
+      dtrRebuilder,
+      policyCacheInvalidator,
     });
     const attendanceDeductions = await attendanceRunner(pool, {
       dryRun: false,
@@ -259,6 +302,10 @@ async function runScheduledCompletedMonthEnd(
     for (const queued of queuedMonths) {
       const targetMonth = queued.targetMonth || String(queued.serviceMonth).slice(0, 7);
       try {
+        await rebuildQueuedDtrMonth(targetMonth, queued.employeeIds, {
+          dtrRebuilder,
+          policyCacheInvalidator,
+        });
         const queuedAttendance = await attendanceRunner(pool, {
           dryRun: false,
           targetMonth,
@@ -414,6 +461,8 @@ module.exports = {
   /** @internal for tests */
   manilaYearMonthNow,
   manilaCompletedYearMonthNow,
+  monthDateRange,
+  rebuildQueuedDtrMonth,
   runScheduledCompletedMonthEnd,
   scheduleLeaveMonthlyAccrualStartupRecovery,
   monthlyAccrualAffectedUserIds,

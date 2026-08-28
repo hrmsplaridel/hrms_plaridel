@@ -6,6 +6,11 @@ const {
   EmployeePolicyAssignmentError,
   upsertEmployeePolicyAssignment,
 } = require('../services/employeePolicyAssignment');
+const { writeAssignmentHistoryAudit } = require('../services/assignmentHistory');
+const {
+  queueAssignmentReconciliation,
+  rebuildAfterAssignmentCommit,
+} = require('../services/assignmentReconciliation');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -86,18 +91,39 @@ router.post('/employee-upsert', protect, requireAdmin, async (req, res) => {
     client = await pool.connect();
     await client.query('BEGIN');
     try {
-      const policyAssignment = await upsertEmployeePolicyAssignment(client, {
+      const transition = await upsertEmployeePolicyAssignment(client, {
         employeeId: employee_id,
         attendancePolicyId: attendance_policy_id,
         effectiveFrom: ef,
         effectiveTo: et,
         isActive: !!is_active,
+        includeTransition: true,
+      });
+      const policyAssignment = transition.assignment;
+      await writeAssignmentHistoryAudit(client, {
+        actorId: req.user?.id,
+        recordType: 'policy',
+        recordId: policyAssignment?.id || transition.before[0]?.id || null,
+        action: 'employee_policy_assignment_updated',
+        reason: policyAssignment
+          ? 'Employee attendance policy period saved'
+          : 'Employee attendance policy removed for selected period',
+        before: transition.before,
+        after: transition.after,
+      });
+      const queued = await queueAssignmentReconciliation(client, {
+        employeeId: employee_id,
+        before: null,
+        after: { effective_from: ef, effective_to: et },
+        reason: 'employee_policy_assignment_updated',
+        metadata: { policy_assignment_id: policyAssignment?.id || null },
       });
       await client.query('COMMIT');
-      if (!policyAssignment) {
-        return res.status(204).send();
-      }
-      res.status(201).json(policyAssignment);
+      const reconciliation = await rebuildAfterAssignmentCommit(employee_id, queued);
+      res.status(policyAssignment ? 201 : 200).json({
+        policy_assignment: policyAssignment,
+        reconciliation,
+      });
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;

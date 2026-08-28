@@ -19,6 +19,11 @@ const ASSIGNMENT_RECORD_TYPES = Object.freeze({
     entityType: 'employee_other_position',
     notFoundMessage: 'Employee other position not found',
   },
+  policy: {
+    table: 'policy_assignments',
+    entityType: 'policy_assignment',
+    notFoundMessage: 'Policy assignment not found',
+  },
 });
 
 function normalizeChangeReason(value) {
@@ -73,7 +78,7 @@ async function deactivateAssignmentRecord(
 
   const before = existing.rows[0];
   if (before.is_active === false) {
-    return { changed: false, record: before };
+    return { changed: false, before, record: before };
   }
 
   const updated = await db.query(
@@ -111,7 +116,7 @@ async function deactivateAssignmentRecord(
       after: restoredPredecessor.after,
     });
   }
-  return { changed: true, record: after, restoredPredecessor };
+  return { changed: true, before, record: after, restoredPredecessor };
 }
 
 async function findPrimaryAssignmentDependencies(db, record) {

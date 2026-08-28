@@ -20,6 +20,10 @@ const {
   EmployeePolicyAssignmentError,
   upsertEmployeePolicyAssignment,
 } = require('../services/employeePolicyAssignment');
+const {
+  queueAssignmentReconciliation,
+  rebuildAfterAssignmentCommit,
+} = require('../services/assignmentReconciliation');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -50,6 +54,18 @@ function dateFromRow(val) {
 /** ef, et are YYYY-MM-DD; et null means open-ended. */
 function effectiveToBeforeFrom(ef, et) {
   return ef != null && et != null && et < ef;
+}
+
+function assignmentComputationChanged(before, after) {
+  if (!before || !after) return true;
+  return [
+    'department_id',
+    'position_id',
+    'shift_id',
+    'effective_from',
+    'effective_to',
+    'is_active',
+  ].some((key) => String(before[key] ?? '') !== String(after[key] ?? ''));
 }
 
 // GET /api/assignments?employee_id=uuid - list assignments for employee (Schema v2: effective_from/to, override times)
@@ -150,7 +166,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
     await client.query('BEGIN');
     try {
-      const assignment = await createAssignmentTransition(client, {
+      const assignmentTransition = await createAssignmentTransition(client, {
         employeeId: employee_id,
         departmentId: department_id,
         positionId: position_id,
@@ -159,20 +175,68 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         effectiveTo: et,
         isActive: is_active === true,
         remarks,
+        includeTransition: true,
       });
-      const policyAssignment = hasPolicyChange
+      const assignment = assignmentTransition.assignment;
+      const policyTransition = hasPolicyChange
         ? await upsertEmployeePolicyAssignment(client, {
             employeeId: employee_id,
             attendancePolicyId: attendance_policy_id,
             effectiveFrom: assignment.effective_from,
             effectiveTo: assignment.effective_to,
             isActive: assignment.is_active !== false,
+            includeTransition: true,
           })
         : null;
+      const policyAssignment = policyTransition?.assignment || null;
+      const auditReason = String(remarks || '').trim() || 'Primary assignment created';
+      await writeAssignmentHistoryAudit(client, {
+        actorId: req.user?.id,
+        recordType: 'primary',
+        recordId: assignment.id,
+        action: 'assignment_created',
+        reason: auditReason,
+        before: null,
+        after: assignment,
+      });
+      if (assignmentTransition.closedPredecessor) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: assignmentTransition.closedPredecessor.after.id,
+          action: 'assignment_predecessor_closed',
+          reason: `New primary assignment starts ${assignment.effective_from}`,
+          before: assignmentTransition.closedPredecessor.before,
+          after: assignmentTransition.closedPredecessor.after,
+        });
+      }
+      if (policyTransition) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'policy',
+          recordId: policyAssignment?.id || policyTransition.before[0]?.id || null,
+          action: 'employee_policy_assignment_updated',
+          reason: 'Initial attendance policy saved with primary assignment',
+          before: policyTransition.before,
+          after: policyTransition.after,
+        });
+      }
+      const queued = await queueAssignmentReconciliation(client, {
+        employeeId: assignment.employee_id,
+        before: null,
+        after: assignment,
+        reason: 'assignment_created',
+        metadata: { assignment_id: assignment.id },
+      });
       await client.query('COMMIT');
+      const reconciliation = await rebuildAfterAssignmentCommit(
+        assignment.employee_id,
+        queued
+      );
       res.status(201).json({
         ...assignment,
         policy_assignment: policyAssignment,
+        reconciliation,
       });
     } catch (e) {
       await client.query('ROLLBACK');
@@ -262,7 +326,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       const deactivationReason = isDeactivating
         ? normalizeChangeReason(change_reason)
         : null;
-      const assignment = await updateAssignmentTransition(client, {
+      const assignmentTransition = await updateAssignmentTransition(client, {
         assignmentId: id,
         changes: {
           departmentId: department_id,
@@ -273,7 +337,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           isActive: is_active === undefined ? undefined : is_active === true,
           remarks,
         },
+        includeTransition: true,
       });
+      const assignment = assignmentTransition.assignment;
       const shouldRepairPredecessor =
         isDeactivating ||
         (
@@ -286,15 +352,17 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
             replacementRecord: assignment,
           })
         : null;
-      const policyAssignment = hasPolicyChange
+      const policyTransition = hasPolicyChange
         ? await upsertEmployeePolicyAssignment(client, {
             employeeId: assignment.employee_id,
             attendancePolicyId: attendance_policy_id,
             effectiveFrom: assignment.effective_from,
             effectiveTo: assignment.effective_to,
             isActive: assignment.is_active !== false,
+            includeTransition: true,
           })
         : null;
+      const policyAssignment = policyTransition?.assignment || null;
       if (isDeactivating) {
         await writeAssignmentHistoryAudit(client, {
           actorId: req.user?.id,
@@ -320,11 +388,65 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           after: restoredPredecessor.after,
         });
       }
+      if (assignmentTransition.closedPredecessor) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: assignmentTransition.closedPredecessor.after.id,
+          action: 'assignment_predecessor_closed',
+          reason:
+            String(change_reason || '').trim() ||
+            `Updated primary assignment starts ${assignment.effective_from}`,
+          before: assignmentTransition.closedPredecessor.before,
+          after: assignmentTransition.closedPredecessor.after,
+        });
+      }
+      if (!isDeactivating) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: id,
+          action: 'assignment_updated',
+          reason:
+            String(change_reason || '').trim() ||
+            String(remarks || '').trim() ||
+            'Primary assignment updated',
+          before,
+          after: assignment,
+        });
+      }
+      if (policyTransition) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'policy',
+          recordId: policyAssignment?.id || policyTransition.before[0]?.id || null,
+          action: 'employee_policy_assignment_updated',
+          reason: 'Attendance policy updated with primary assignment',
+          before: policyTransition.before,
+          after: policyTransition.after,
+        });
+      }
+      const needsReconciliation =
+        assignmentComputationChanged(before, assignment) || hasPolicyChange;
+      const queued = needsReconciliation
+        ? await queueAssignmentReconciliation(client, {
+            employeeId: assignment.employee_id,
+            before,
+            after: assignment,
+            reason: 'assignment_updated',
+            metadata: { assignment_id: assignment.id },
+          })
+        : { range: null, count: 0, months: [] };
       await client.query('COMMIT');
+      const reconciliation = await rebuildAfterAssignmentCommit(
+        assignment.employee_id,
+        queued
+      );
       res.json({
         ...assignment,
         policy_assignment: policyAssignment,
         predecessor_restored: restoredPredecessor?.after || null,
+        reconciliation,
       });
     } catch (e) {
       await client.query('ROLLBACK');
@@ -364,13 +486,27 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
         recordId: req.params.id,
         reason: req.body?.reason,
       });
+      const queued = result.changed
+        ? await queueAssignmentReconciliation(client, {
+            employeeId: result.record.employee_id,
+            before: result.before,
+            after: result.record,
+            reason: 'assignment_deactivated',
+            metadata: { assignment_id: result.record.id },
+          })
+        : { range: null, count: 0, months: [] };
       await client.query('COMMIT');
+      const reconciliation = await rebuildAfterAssignmentCommit(
+        result.record.employee_id,
+        queued
+      );
       res.json({
         message: result.changed
           ? 'Assignment deactivated and retained in history'
           : 'Assignment is already inactive',
         assignment: result.record,
         predecessor_restored: result.restoredPredecessor?.after || null,
+        reconciliation,
       });
     } catch (error) {
       await client.query('ROLLBACK');

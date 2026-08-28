@@ -20,6 +20,19 @@ let _cachedAttendancePolicy = null;
 let _cachedAttendancePolicyAt = 0;
 const _policyByEmployeeDateCache = new Map();
 
+function clearBiometricAttendancePolicyCache({ employeeId = null, dateFrom = null, dateTo = null } = {}) {
+  const employee = employeeId == null ? null : String(employeeId);
+  for (const key of _policyByEmployeeDateCache.keys()) {
+    const separator = key.indexOf('|');
+    const cachedEmployee = separator < 0 ? key : key.slice(0, separator);
+    const cachedDate = separator < 0 ? '' : key.slice(separator + 1);
+    if (employee && cachedEmployee !== employee) continue;
+    if (dateFrom && cachedDate < dateFrom) continue;
+    if (dateTo && cachedDate > dateTo) continue;
+    _policyByEmployeeDateCache.delete(key);
+  }
+}
+
 function _normalizePolicy(row) {
   return {
     id: row?.id || null,
@@ -884,6 +897,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
 }
 
 module.exports = {
+  clearBiometricAttendancePolicyCache,
   processBiometricLogsToSummary,
   interpretPunchesForDay,
   hasBiometricSummaryChanged,

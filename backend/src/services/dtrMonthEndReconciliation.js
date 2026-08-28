@@ -128,6 +128,74 @@ async function enqueueHolidayReconciliation(
   return result.rowCount || 0;
 }
 
+async function enqueueEmployeeRangeReconciliation(
+  db,
+  {
+    employeeId,
+    dateFrom,
+    dateTo,
+    reason = 'historical_employee_configuration_changed',
+    metadata = null,
+    timeZone = DEFAULT_TIME_ZONE,
+  } = {}
+) {
+  const employee = String(employeeId || '').trim();
+  const start = dateOnly(dateFrom);
+  const end = dateOnly(dateTo);
+  if (!employee || !start || !end || start > end) {
+    return { count: 0, months: [] };
+  }
+
+  await ensureDtrMonthEndReconciliationTable(db);
+  const result = await db.query(
+    `WITH completed_months AS (
+       SELECT generate_series(
+                date_trunc('month', $2::date),
+                date_trunc(
+                  'month',
+                  LEAST(
+                    $3::date,
+                    date_trunc(
+                      'month',
+                      CURRENT_TIMESTAMP AT TIME ZONE $6
+                    )::date - 1
+                  )
+                ),
+                INTERVAL '1 month'
+              )::date AS service_month
+     )
+     INSERT INTO dtr_month_end_reconciliation_queue (
+       employee_id, service_month, status, reason, metadata_json,
+       required_at, reconciled_at, updated_at
+     )
+     SELECT $1::uuid, service_month, 'pending', $4::text, $5::jsonb,
+            now(), NULL, now()
+       FROM completed_months
+      WHERE service_month <= $3::date
+     ON CONFLICT (employee_id, service_month) DO UPDATE
+       SET status = 'pending',
+           reason = EXCLUDED.reason,
+           metadata_json = EXCLUDED.metadata_json,
+           required_at = now(),
+           last_error = NULL,
+           reconciled_at = NULL,
+           updated_at = now()
+     RETURNING service_month::text AS service_month`,
+    [
+      employee,
+      start,
+      end,
+      reason,
+      metadata == null ? null : JSON.stringify(metadata),
+      timeZone,
+    ]
+  );
+  const months = result.rows
+    .map((row) => dateOnly(row.service_month))
+    .filter(Boolean);
+  return { count: months.length, months };
+}
+
 async function listPendingReconciliationMonths(
   db,
   { excludeServiceMonth = null, limit = DEFAULT_QUEUE_LIMIT, timeZone = DEFAULT_TIME_ZONE } = {}
@@ -137,6 +205,7 @@ async function listPendingReconciliationMonths(
   const result = await db.query(
     `SELECT service_month::text AS service_month,
             COUNT(*)::int AS employee_count,
+            array_agg(employee_id::text ORDER BY employee_id::text) AS employee_ids,
             MAX(required_at) AS cutoff
        FROM dtr_month_end_reconciliation_queue
       WHERE status = 'pending'
@@ -152,8 +221,30 @@ async function listPendingReconciliationMonths(
     serviceMonth: dateOnly(row.service_month),
     targetMonth: dateOnly(row.service_month)?.slice(0, 7),
     employeeCount: Number(row.employee_count || 0),
+    employeeIds: Array.isArray(row.employee_ids) ? row.employee_ids.map(String) : [],
     cutoff: row.cutoff,
   }));
+}
+
+async function listPendingReconciliationEmployees(
+  db,
+  { serviceMonth, cutoff = new Date(), timeZone = DEFAULT_TIME_ZONE } = {}
+) {
+  const month = serviceMonthForDate(serviceMonth);
+  if (!month) return [];
+  await ensureDtrMonthEndReconciliationTable(db);
+  const result = await db.query(
+    `SELECT employee_id::text AS employee_id
+       FROM dtr_month_end_reconciliation_queue
+      WHERE status = 'pending'
+        AND service_month = $1::date
+        AND service_month <
+            date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE $3)::date
+        AND required_at <= $2::timestamptz
+      ORDER BY employee_id::text`,
+    [month, cutoff, timeZone]
+  );
+  return result.rows.map((row) => String(row.employee_id)).filter(Boolean);
 }
 
 async function resolveReconciliationMonth(
@@ -205,7 +296,9 @@ module.exports = {
   serviceMonthForDate,
   monthsInRange,
   ensureDtrMonthEndReconciliationTable,
+  enqueueEmployeeRangeReconciliation,
   enqueueHolidayReconciliation,
+  listPendingReconciliationEmployees,
   listPendingReconciliationMonths,
   resolveReconciliationMonth,
   recordReconciliationFailure,

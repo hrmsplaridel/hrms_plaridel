@@ -799,6 +799,26 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     });
   }
 
+  String _saveMessageWithReconciliation(
+    String baseMessage,
+    Map<String, dynamic>? payload,
+  ) {
+    final raw = payload?['reconciliation'];
+    if (raw is! Map) return baseMessage;
+    final reconciliation = Map<String, dynamic>.from(raw);
+    final warning = reconciliation['warning']?.toString().trim();
+    if (warning != null && warning.isNotEmpty) {
+      return '$baseMessage $warning';
+    }
+    final months = reconciliation['queued_months'];
+    final queuedCount = months is List ? months.length : 0;
+    if (reconciliation['required'] == true && queuedCount > 0) {
+      final noun = queuedCount == 1 ? 'month' : 'months';
+      return '$baseMessage $queuedCount completed $noun queued for DTR reconciliation.';
+    }
+    return baseMessage;
+  }
+
   Future<bool> _addAssignment() async {
     if (_selectedEmployeeId == null) return false;
     if (_selectedDeptId == null ||
@@ -841,11 +861,21 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             ? null
             : _remarksController.text.trim(),
       };
-      await ApiClient.instance.post('/api/assignments', data: data);
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/assignments',
+        data: data,
+      );
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Assignment added.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _saveMessageWithReconciliation(
+                'Assignment added.',
+                response.data,
+              ),
+            ),
+          ),
+        );
         _clearForm();
         _loadAssignments();
       }
@@ -898,7 +928,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
 
     try {
-      await ApiClient.instance.post(
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
         '/api/policy-assignments/employee-upsert',
         data: {
           'employee_id': _selectedEmployeeId,
@@ -914,9 +944,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         final message = _policyPeriodPolicyId == null
             ? 'Employee policy removed for the selected period.'
             : 'Attendance policy period saved.';
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _saveMessageWithReconciliation(message, response.data),
+            ),
+          ),
+        );
         _clearPolicyPeriodForm();
         await _loadAssignments();
       }
@@ -976,11 +1010,21 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             ? null
             : _remarksController.text.trim(),
       };
-      await ApiClient.instance.put('/api/assignments/${a.id}', data: data);
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '/api/assignments/${a.id}',
+        data: data,
+      );
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Assignment updated.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _saveMessageWithReconciliation(
+                'Assignment updated.',
+                response.data,
+              ),
+            ),
+          ),
+        );
         _clearForm();
         _loadAssignments();
       }
@@ -1066,13 +1110,20 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     );
     if (reason == null || !mounted) return false;
     try {
-      await ApiClient.instance.put(
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
         '/api/assignments/${a.id}',
         data: {'is_active': false, 'change_reason': reason},
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Assignment deactivated.')),
+          SnackBar(
+            content: Text(
+              _saveMessageWithReconciliation(
+                'Assignment deactivated.',
+                response.data,
+              ),
+            ),
+          ),
         );
         _clearForm();
         _loadAssignments();

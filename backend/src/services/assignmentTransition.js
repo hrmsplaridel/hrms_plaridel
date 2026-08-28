@@ -160,7 +160,9 @@ async function closeOverlappingPredecessor(
                effective_to::text AS effective_to, is_active`,
     [predecessor.rows[0].id, previousDay]
   );
-  return updated.rows[0] || null;
+  return updated.rows[0]
+    ? { before: predecessor.rows[0], after: updated.rows[0] }
+    : null;
 }
 
 async function findOverlappingAssignment(
@@ -202,6 +204,7 @@ async function createAssignmentTransition(
     effectiveTo = null,
     isActive = true,
     remarks = null,
+    includeTransition = false,
   }
 ) {
   const from = cleanDate(effectiveFrom, 'effective_from', { required: true });
@@ -215,8 +218,9 @@ async function createAssignmentTransition(
     requireActiveReferences: isActive === true,
   });
 
+  let closedPredecessor = null;
   if (isActive) {
-    await closeOverlappingPredecessor(db, {
+    closedPredecessor = await closeOverlappingPredecessor(db, {
       employeeId: selection.employeeId,
       effectiveFrom: from,
     });
@@ -251,10 +255,14 @@ async function createAssignmentTransition(
       String(remarks || '').trim() || null,
     ]
   );
-  return result.rows[0];
+  const assignment = result.rows[0];
+  return includeTransition ? { assignment, closedPredecessor } : assignment;
 }
 
-async function updateAssignmentTransition(db, { assignmentId, changes = {} }) {
+async function updateAssignmentTransition(
+  db,
+  { assignmentId, changes = {}, includeTransition = false }
+) {
   const existingResult = await db.query(
     `SELECT id, employee_id, department_id, position_id, shift_id,
             effective_from::text AS effective_from,
@@ -310,8 +318,9 @@ async function updateAssignmentTransition(db, { assignmentId, changes = {} }) {
     cleanRequiredSelectionId(selection.shiftId, 'Shift');
   }
 
+  let closedPredecessor = null;
   if (isActive) {
-    await closeOverlappingPredecessor(db, {
+    closedPredecessor = await closeOverlappingPredecessor(db, {
       employeeId: existing.employee_id,
       effectiveFrom: from,
       excludeAssignmentId: assignmentId,
@@ -354,7 +363,8 @@ async function updateAssignmentTransition(db, { assignmentId, changes = {} }) {
         : String(changes.remarks || '').trim() || null,
     ]
   );
-  return result.rows[0];
+  const assignment = result.rows[0];
+  return includeTransition ? { assignment, closedPredecessor } : assignment;
 }
 
 async function endEmployeeAssignmentsFromDate(db, { employeeId, effectiveFrom }) {
