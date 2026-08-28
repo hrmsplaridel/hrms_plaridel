@@ -1,8 +1,8 @@
-/* Builds DocuTracker SQL rollups from individual scripts under backend/scripts/. */
+/* Builds DocuTracker SQL rollups from its dedicated migration directory. */
 const fs = require("fs");
 const path = require("path");
 
-const base = __dirname;
+const sqlDir = path.join(__dirname, "migrations", "docutracker");
 
 const APPLY_ONCE_FILE = "migrate-docutracker-production-hardening-apply-once.sql";
 
@@ -26,7 +26,7 @@ const postSections = [
 ];
 
 function readBody(file) {
-  const p = path.join(base, file);
+  const p = path.join(sqlDir, file);
   if (!fs.existsSync(p)) {
     throw new Error(`Missing: ${p}`);
   }
@@ -83,7 +83,7 @@ const applyOnceOut = `-- =======================================================
 -- then re-run with ON_ERROR_STOP.
 --
 -- USAGE:
---   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f scripts/docutracker-install-production-hardening-apply-once.sql
+--   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-production-hardening-apply-once.sql
 -- =============================================================================
 
 ${applyOnceBody}
@@ -117,7 +117,7 @@ const orchestratorOut = `-- ====================================================
 --   3) docutracker-install-post-production-hardening.sql (sections 10-14)
 --
 -- USAGE (from repo root; path must point at this file - \\ir resolves next to it):
---   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/docutracker-install-all-in-order.sql
+--   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-all-in-order.sql
 --
 -- To run phases separately, execute those three -f files in order (see each file's header).
 --
@@ -141,7 +141,7 @@ const writes = [
 ];
 
 for (const [name, content] of writes) {
-  const dest = path.join(base, name);
+  const dest = path.join(sqlDir, name);
   fs.writeFileSync(dest, content, "utf8");
   console.log(`Wrote ${dest} (${content.length} bytes)`);
 }

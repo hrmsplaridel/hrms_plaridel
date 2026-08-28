@@ -4,7 +4,7 @@
 -- Run: psql -d hrms_plaridel -f scripts/init-schema.sql
 --
 -- DocuTracker tables, constraints, functions, and seeds are included below.
--- For existing databases that predate this file, use backend/scripts/docutracker-install-*.sql instead.
+-- For existing databases that predate this file, use backend/scripts/migrations/docutracker/docutracker-install-*.sql instead.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS btree_gist;

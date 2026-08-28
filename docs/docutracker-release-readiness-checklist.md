@@ -6,7 +6,7 @@ Use this document for P0/P1/P2 closure before go-live.
 
 ### 1) Schema parity (mandatory)
 
-- [ ] Run: `backend/scripts/verify-docutracker-source-parity.sql`
+- [ ] Run: `backend/scripts/migrations/docutracker/verify-docutracker-source-parity.sql`
 - [ ] Required source tables exist:
   - [ ] `training_daily_reports`
   - [ ] `leave_requests`
@@ -23,7 +23,7 @@ Use this document for P0/P1/P2 closure before go-live.
 
 ### 2) Permission baseline (mandatory)
 
-- [ ] Apply baseline seed: `backend/scripts/seed-docutracker-permission-baseline.sql`
+- [ ] Apply baseline seed: `backend/scripts/migrations/docutracker/seed-docutracker-permission-baseline.sql`
 - [ ] Confirm role matrix loaded (employee/hr/supervisor/admin + aliases)
 - [ ] Validate selected-employee override behavior in setup screen
 

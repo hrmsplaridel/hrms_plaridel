@@ -1,6 +1,6 @@
 -- DocuTracker permission baseline seed/upsert
 -- Usage:
---   psql -d hrms_plaridel -f backend/scripts/seed-docutracker-permission-baseline.sql
+--   psql -d hrms_plaridel -f backend/scripts/migrations/docutracker/seed-docutracker-permission-baseline.sql
 --
 -- Notes:
 -- - This script defines baseline ROLE permissions using document_type='*'.

@@ -10,7 +10,7 @@
 --   3) docutracker-install-post-production-hardening.sql (sections 10-14)
 --
 -- USAGE (from repo root; path must point at this file - \ir resolves next to it):
---   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/docutracker-install-all-in-order.sql
+--   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-all-in-order.sql
 --
 -- To run phases separately, execute those three -f files in order (see each file's header).
 --

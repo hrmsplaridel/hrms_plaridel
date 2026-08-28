@@ -1,6 +1,6 @@
 -- DocuTracker source-schema parity verifier
 -- Usage:
---   psql -d hrms_plaridel -f backend/scripts/verify-docutracker-source-parity.sql
+--   psql -d hrms_plaridel -f backend/scripts/migrations/docutracker/verify-docutracker-source-parity.sql
 --
 -- Purpose:
 --   Fail fast if DocuTracker required source/core tables are missing.

@@ -9,7 +9,7 @@
 -- then re-run with ON_ERROR_STOP.
 --
 -- USAGE:
---   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f scripts/docutracker-install-production-hardening-apply-once.sql
+--   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-production-hardening-apply-once.sql
 -- =============================================================================
 
 -- DocuTracker production hardening (apply-once, labeled sections)

@@ -146,7 +146,7 @@ END $$;
 
 -- DocuTracker permission baseline seed/upsert
 -- Usage:
---   psql -d hrms_plaridel -f backend/scripts/seed-docutracker-permission-baseline.sql
+--   psql -d hrms_plaridel -f backend/scripts/migrations/docutracker/seed-docutracker-permission-baseline.sql
 --
 -- Notes:
 -- - This script defines baseline ROLE permissions using document_type='*'.
@@ -238,7 +238,7 @@ ORDER BY role_id, document_type, action;
 
 -- DocuTracker source-schema parity verifier
 -- Usage:
---   psql -d hrms_plaridel -f backend/scripts/verify-docutracker-source-parity.sql
+--   psql -d hrms_plaridel -f backend/scripts/migrations/docutracker/verify-docutracker-source-parity.sql
 --
 -- Purpose:
 --   Fail fast if DocuTracker required source/core tables are missing.

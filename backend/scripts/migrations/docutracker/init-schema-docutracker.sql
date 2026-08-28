@@ -1,6 +1,6 @@
 -- HRMS Plaridel - DocuTracker Module
 -- Run AFTER init-schema.sql (requires: users, departments)
--- Run: psql -d hrms_plaridel -f scripts/init-schema-docutracker.sql
+-- Run: psql -d hrms_plaridel -f backend/scripts/migrations/docutracker/init-schema-docutracker.sql
 
 -- =========================
 -- DOCUTRACKER - DOCUMENTS

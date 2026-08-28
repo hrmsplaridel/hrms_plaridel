@@ -26,7 +26,7 @@
 
 -- HRMS Plaridel - DocuTracker Module
 -- Run AFTER init-schema.sql (requires: users, departments)
--- Run: psql -d hrms_plaridel -f scripts/init-schema-docutracker.sql
+-- Run: psql -d hrms_plaridel -f backend/scripts/migrations/docutracker/init-schema-docutracker.sql
 
 -- =========================
 -- DOCUTRACKER - DOCUMENTS
@@ -232,7 +232,7 @@ ALTER TABLE docutracker_routing_records
 
 -- Align existing PostgreSQL DocuTracker tables with standalone HRMS schema
 -- (migrated from Supabase). Safe to run multiple times.
--- Run: psql -d hrms_plaridel -f scripts/migrate-docutracker-supabase-parity.sql
+-- Run: psql -d hrms_plaridel -f backend/scripts/migrations/docutracker/migrate-docutracker-supabase-parity.sql
 
 ALTER TABLE docutracker_document_history
   ADD COLUMN IF NOT EXISTS actor_name TEXT;

@@ -2,7 +2,7 @@
 -- Document visibility is enforced by relationship rules in docutrackerWorkflowService.js.
 -- Run once on existing databases after deploying the service change.
 --
---   psql -d YOUR_DB -f backend/scripts/docutracker-fix-view-list-scope.sql
+--   psql -d YOUR_DB -f backend/scripts/migrations/docutracker/docutracker-fix-view-list-scope.sql
 
 UPDATE docutracker_permissions
 SET granted = false,

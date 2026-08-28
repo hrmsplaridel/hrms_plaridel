@@ -56,7 +56,7 @@ psql -d hrms_plaridel -f scripts/init-schema.sql
 psql -d hrms_plaridel -f scripts/rsp-storage-attachment-policy.sql
 ```
 
-**DocuTracker (optional):** after `init-schema.sql`, run `scripts/init-schema-docutracker.sql` (and `scripts/migrate-docutracker-supabase-parity.sql` if upgrading an older DB).
+**DocuTracker (optional):** after `init-schema.sql`, run `scripts/migrations/docutracker/docutracker-install-all-in-order.sql`. Individual DocuTracker migrations and SQL utilities are kept in `scripts/migrations/docutracker/`.
 
 `init-schema-ld.sql` and `init-schema-rsp.sql` are deprecated stubs; new installs only need `init-schema.sql`.
 
