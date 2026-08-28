@@ -1,11 +1,12 @@
 -- =============================================================================
--- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-14)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-15)
 -- =============================================================================
 -- PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.
 -- Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.
 -- Section 11 fails if multiple active routing rows exist per document; fix data then re-run.
 -- Section 13 raises if optional source-module tables are missing; comment it out for DocuTracker-only DBs.
 -- Section 14 is additive and keeps existing app-facing table/column names stable.
+-- Section 15 allows configuration steps with zero assignees while preserving assigned-step invariants.
 --
 -- TABLE OF CONTENTS
 --   10 - STATUS SEMANTICS V2 (drop forwarded as document status)
@@ -13,6 +14,7 @@
 --   12 - SEED PERMISSION BASELINE (role rows)
 --   13 - OPTIONAL VERIFY (checks source tables exist)
 --   14 - SAFE SCHEMA IMPROVEMENTS (metadata, files, notifications)
+--   15 - ALLOW UNASSIGNED WORKFLOW STEPS
 --
 -- =============================================================================
 
@@ -566,5 +568,66 @@ WHERE NOT EXISTS (
     AND ns.scope_type = 'global'
     AND ns.scope_id IS NULL
 );
+
+COMMIT;
+
+
+-- #############################################################################
+-- 15 - ALLOW UNASSIGNED WORKFLOW STEPS
+-- Source file: migrate-docutracker-allow-unassigned-workflow-steps-v2.sql
+-- #############################################################################
+
+-- DocuTracker: allow workflow steps to remain unassigned during configuration.
+--
+-- Existing assigned steps still require at least one enabled assignee and
+-- exactly one enabled primary assignee. Workflow execution remains responsible
+-- for rejecting a transition into a step that has no valid assignee.
+
+BEGIN;
+
+CREATE OR REPLACE FUNCTION docutracker_enforce_step_assignees_invariants()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  sid uuid;
+  assignee_count int;
+  enabled_count int;
+  enabled_primary_count int;
+BEGIN
+  sid := COALESCE(NEW.step_id, OLD.step_id);
+  IF sid IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM docutracker_workflow_steps WHERE id = sid) THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT
+    COUNT(*),
+    COUNT(*) FILTER (WHERE a.is_enabled = true),
+    COUNT(*) FILTER (WHERE a.is_enabled = true AND a.is_primary = true)
+  INTO assignee_count, enabled_count, enabled_primary_count
+  FROM docutracker_workflow_step_assignees a
+  WHERE a.step_id = sid;
+
+  IF assignee_count = 0 THEN
+    RETURN NULL;
+  END IF;
+
+  IF enabled_count < 1 THEN
+    RAISE EXCEPTION 'Workflow step % must have at least one enabled assignee', sid
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF enabled_primary_count <> 1 THEN
+    RAISE EXCEPTION 'Workflow step % must have exactly one enabled primary assignee', sid
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NULL;
+END;
+$$;
 
 COMMIT;

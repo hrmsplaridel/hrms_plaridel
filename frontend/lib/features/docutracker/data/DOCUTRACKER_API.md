@@ -49,6 +49,18 @@ Sample REST/PostgREST endpoints for DocuTracker. Supabase provides these via Pos
 | POST | /docutracker_routing_configs | Add config |
 | PATCH | /docutracker_routing_configs?id=eq.{id} | Update config |
 
+## Workflow Step Assignees
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/docutracker/workflow-steps | List normalized workflow steps and assignees for an admin |
+| PUT | /api/docutracker/workflow-steps/{stepId}/assignees | Replace the complete assignee set for one workflow step |
+
+The PUT body is `{"assignees": [...]}`. Sending `{"assignees": []}` leaves
+the step unassigned. An assigned step must contain exactly one enabled primary
+assignee. Documents cannot transition into an unassigned step until an admin
+adds a valid assignee.
+
 ## Escalation Configs
 
 | Method | Endpoint | Description |

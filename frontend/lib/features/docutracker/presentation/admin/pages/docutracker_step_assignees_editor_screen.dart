@@ -9,7 +9,6 @@ import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker
 import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
-import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
@@ -403,7 +402,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
-            final canSave = draft.isNotEmpty && draft.any((a) => a.isPrimary);
+            final canSave = draft.isEmpty || draft.any((a) => a.isPrimary);
             final youMustHavePrimary =
                 draft.isNotEmpty && !draft.any((a) => a.isPrimary);
             return Padding(
@@ -585,7 +584,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                             Padding(
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               child: Text(
-                                'No assignees yet.',
+                                'No assignees. Save to leave this workflow step unassigned.',
                                 style: TextStyle(color: AppTheme.textSecondary),
                               ),
                             )
@@ -626,26 +625,16 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                     );
                                   });
                                 },
-                                onRemove: draft.length == 1
-                                    ? null
-                                    : () {
-                                        setModalState(() {
-                                          draft.removeAt(i);
-                                          normalizePrimaryAndRanks(draft);
-                                        });
-                                      },
+                                onRemove: () {
+                                  setModalState(() {
+                                    draft.removeAt(i);
+                                    normalizePrimaryAndRanks(draft);
+                                  });
+                                },
                               ),
                               const SizedBox(height: 10),
                             ],
                           ],
-                          if (draft.length == 1)
-                            Text(
-                              'Each workflow step must keep at least one primary assignee. Add a replacement before removing this user.',
-                              style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 12,
-                              ),
-                            ),
                           if (youMustHavePrimary)
                             Text(
                               'Pick exactly one primary user.',
@@ -690,6 +679,29 @@ class _DocuTrackerStepAssigneesEditorScreenState
     );
 
     if (saved != true) return;
+    if (!mounted) return;
+    if (draft.isEmpty) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Leave this step unassigned?'),
+          content: const Text(
+            'Documents cannot enter this workflow step until an assignee is added.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Remove assignee'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
 
     final payload = <Map<String, dynamic>>[];
     for (final a in draft) {
@@ -710,7 +722,9 @@ class _DocuTrackerStepAssigneesEditorScreenState
     await _load();
     if (!mounted) return;
     final msg = saveResult is DocuTrackerSuccess<bool>
-        ? 'Saved step assignees.'
+        ? draft.isEmpty
+              ? 'Removed all step assignees.'
+              : 'Saved step assignees.'
         : saveResult is DocuTrackerFailure<bool>
         ? saveResult.message
         : 'Failed to save step assignees.';
@@ -1042,7 +1056,7 @@ class _AssigneeEditorCard extends StatelessWidget {
   final VoidCallback onSetPrimary;
   final ValueChanged<bool> onToggleEnabled;
   final void Function(String action, bool value) onToggleAction;
-  final VoidCallback? onRemove;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {

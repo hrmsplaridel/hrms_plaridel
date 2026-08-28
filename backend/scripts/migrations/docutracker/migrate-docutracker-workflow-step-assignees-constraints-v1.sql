@@ -1,8 +1,9 @@
 -- DocuTracker: stronger validation for selected-person workflow assignees (constraints v1)
 --
 -- Enforces at COMMIT time (deferrable) that:
--- - each workflow step has at least one ENABLED assignee row
--- - exactly one ENABLED primary assignee exists per step
+-- - an unassigned workflow step may have zero assignee rows
+-- - an assigned workflow step has at least one ENABLED assignee row
+-- - exactly one ENABLED primary assignee exists when assignees are configured
 --
 -- This complements existing UNIQUE constraints and API-level validation.
 
@@ -15,6 +16,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   sid uuid;
+  assignee_count int;
   enabled_count int;
   enabled_primary_count int;
 BEGIN
@@ -29,11 +31,16 @@ BEGIN
   END IF;
 
   SELECT
+    COUNT(*) AS assignee_count,
     COUNT(*) FILTER (WHERE a.is_enabled = true) AS enabled_count,
     COUNT(*) FILTER (WHERE a.is_enabled = true AND a.is_primary = true) AS enabled_primary_count
-  INTO enabled_count, enabled_primary_count
+  INTO assignee_count, enabled_count, enabled_primary_count
   FROM docutracker_workflow_step_assignees a
   WHERE a.step_id = sid;
+
+  IF assignee_count = 0 THEN
+    RETURN NULL;
+  END IF;
 
   IF enabled_count < 1 THEN
     RAISE EXCEPTION 'Workflow step % must have at least one enabled assignee', sid

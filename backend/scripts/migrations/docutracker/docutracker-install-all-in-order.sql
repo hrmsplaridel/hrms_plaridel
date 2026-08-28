@@ -7,7 +7,7 @@
 -- This file uses psql \ir (include relative to this file) to run, in order:
 --   1) docutracker-install-core.sql                    (sections 01-08)
 --   2) docutracker-install-production-hardening-apply-once.sql
---   3) docutracker-install-post-production-hardening.sql (sections 10-14)
+--   3) docutracker-install-post-production-hardening.sql (sections 10-15)
 --
 -- USAGE (from repo root; path must point at this file - \ir resolves next to it):
 --   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-all-in-order.sql
@@ -21,6 +21,6 @@
 \ir docutracker-install-core.sql
 \echo 'DocuTracker phase 2/3: production hardening (apply once)...'
 \ir docutracker-install-production-hardening-apply-once.sql
-\echo 'DocuTracker phase 3/3: post production hardening (10-14)...'
+\echo 'DocuTracker phase 3/3: post production hardening (10-15)...'
 \ir docutracker-install-post-production-hardening.sql
 \echo 'DocuTracker install finished.'

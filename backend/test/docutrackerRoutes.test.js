@@ -239,3 +239,74 @@ test('POST /permissions normalizes create to create_draft', async () => {
   restoreRbac();
   delete require.cache[routePath];
 });
+
+test('PUT /workflow-steps/:stepId/assignees accepts an empty replacement set', async () => {
+  const queries = [];
+  let auditedAfterState = null;
+  const client = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (sql.includes('SELECT id, department_id')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: 'step-1', department_id: null }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+    release() {},
+  };
+  const restoreWorkflow = withMockedModule('../src/services/docutrackerWorkflowService', {
+    DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
+  });
+  const restoreAudit = withMockedModule('../src/services/docutrackerGovernanceAudit', {
+    writeGovernanceAudit: async (_client, entry) => {
+      auditedAfterState = entry.afterState;
+    },
+  });
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      connect: async () => client,
+      query: async () => ({ rowCount: 0, rows: [] }),
+    },
+  });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'put', '/workflow-steps/:stepId/assignees');
+
+  const req = {
+    params: { stepId: 'step-1' },
+    body: { assignees: [] },
+    headers: {},
+    user: { id: 'admin-1', role: 'admin' },
+  };
+  const res = createMockResponse();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload?.updated, 0);
+  assert.deepEqual(auditedAfterState, { assignees: [] });
+  assert.ok(
+    queries.some((q) => q.sql.includes('DELETE FROM docutracker_workflow_step_assignees'))
+  );
+  assert.equal(
+    queries.some((q) => q.sql.includes('INSERT INTO docutracker_workflow_step_assignees')),
+    false
+  );
+  assert.ok(queries.some((q) => q.sql === 'COMMIT'));
+
+  restoreWorkflow();
+  restoreAudit();
+  restoreDb();
+  restoreAuth();
+  restoreRbac();
+  delete require.cache[routePath];
+});

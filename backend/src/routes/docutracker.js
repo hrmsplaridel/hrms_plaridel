@@ -1526,7 +1526,8 @@ router.get('/workflow-steps', protect, requireAdmin, async (req, res) => {
  *   ]
  * }
  *
- * Replaces the assignee set for the step.
+ * Replaces the assignee set for the step. An empty list leaves the step
+ * unassigned; workflow execution remains blocked until an assignee is added.
  */
 router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (req, res) => {
   const stepId = String(req.params.stepId || '').trim();
@@ -1556,12 +1557,10 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
       }))
       .filter((a) => typeof a.user_id === 'string' && a.user_id.trim().length > 0);
 
-    // Basic validation: at most one primary; ranks unique; actions whitelisted.
-    if (normalized.length === 0) {
-      return res.status(400).json({ error: 'Each step must have at least one assigned user.' });
-    }
+    // Basic validation: assigned steps have one primary; ranks are unique;
+    // actions are whitelisted. An empty list intentionally leaves the step unassigned.
     const primaries = normalized.filter((a) => a.is_primary);
-    if (primaries.length !== 1) {
+    if (normalized.length > 0 && primaries.length !== 1) {
       return res.status(400).json({ error: 'Each step must have exactly one primary assignee.' });
     }
     const seenRanks = new Set();

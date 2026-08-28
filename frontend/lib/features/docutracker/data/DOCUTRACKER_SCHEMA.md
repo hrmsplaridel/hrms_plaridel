@@ -11,6 +11,8 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | docutracker_document_history | Audit trail, overdue/escalation logs |
 | docutracker_permissions | Role/user action permissions |
 | docutracker_routing_configs | Workflow definitions per document type |
+| docutracker_workflow_steps | Normalized workflow steps per type and version |
+| docutracker_workflow_step_assignees | Selected users assigned to each workflow step |
 | docutracker_escalation_configs | Escalation rules per type/department |
 | docutracker_notifications | User notifications |
 
@@ -99,3 +101,31 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | document_type | TEXT | memo, purchaseRequest |
 | steps | JSONB | Array of {step_order, assignee_type, role_id, department_id, label} |
 | review_deadline_hours | INT | Default deadline in hours |
+
+## docutracker_workflow_steps
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| document_type | TEXT | Workflow document type |
+| workflow_version | INT | Published workflow version |
+| step_order | INT | One-based workflow position |
+| department_id | UUID | Optional department scope |
+| label | TEXT | Step display label |
+| enabled | BOOLEAN | Whether the step participates in routing |
+
+## docutracker_workflow_step_assignees
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| step_id | UUID | FK to docutracker_workflow_steps |
+| user_id | UUID | Selected assignee |
+| is_primary | BOOLEAN | Primary reviewer marker |
+| backup_rank | INT | Backup order; null for the primary |
+| is_enabled | BOOLEAN | Whether this assignment can receive work |
+| allowed_actions | TEXT[] | Existing allowed workflow actions |
+
+A workflow step may have zero assignee rows while it is being configured. When
+one or more assignees exist, at least one must be enabled and exactly one enabled
+assignee must be primary. Runtime routing rejects entry into an unassigned step.
