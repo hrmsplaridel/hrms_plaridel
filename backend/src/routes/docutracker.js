@@ -572,8 +572,9 @@ router.patch('/notifications/:id/read', protect, async (req, res) => {
 
 /**
  * GET /api/docutracker/escalation-configs
+ * Admin-only.
  */
-router.get('/escalation-configs', protect, async (req, res) => {
+router.get('/escalation-configs', protect, requireAdmin, async (req, res) => {
   try {
     const { document_type, department_id } = req.query;
     const params = [];

@@ -111,7 +111,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
-  Future<List<EscalationConfig>> listEscalationConfigs({
+  Future<DocuTrackerResult<List<EscalationConfig>>> listEscalationConfigs({
     String? documentType,
     String? departmentId,
   }) async {
@@ -126,14 +126,17 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
         },
       );
       final list = res.data ?? [];
-      return list
-          .map(
-            (e) =>
-                EscalationConfig.fromJson(Map<String, dynamic>.from(e as Map)),
-          )
-          .toList();
-    } catch (_) {
-      return const [];
+      return DocuTrackerSuccess(
+        list
+            .map(
+              (e) => EscalationConfig.fromJson(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
+            .toList(),
+      );
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
     }
   }
 
