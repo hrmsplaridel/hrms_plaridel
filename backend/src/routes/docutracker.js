@@ -20,6 +20,7 @@ const {
 } = require('../services/docutrackerStatusSemantics');
 const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
 const { sameEntityId } = require('../utils/sameEntityId');
+const { writeGovernanceAudit } = require('../services/docutrackerGovernanceAudit');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -600,6 +601,41 @@ router.get('/escalation-configs', protect, async (req, res) => {
 });
 
 /**
+ * GET /api/docutracker/governance-audit
+ * Admin-only immutable configuration audit trail.
+ */
+router.get('/governance-audit', protect, requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const params = [];
+    const where = [];
+    const add = (sql, value) => {
+      params.push(value);
+      where.push(sql.replace('?', `$${params.length}`));
+    };
+    if (req.query.document_type) add('a.document_type = ?', String(req.query.document_type));
+    if (req.query.event_type) add('a.event_type = ?', String(req.query.event_type));
+    if (req.query.actor_id) add('a.actor_id = ?::uuid', String(req.query.actor_id));
+    const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    params.push(limit, offset);
+    const result = await pool.query(
+      `SELECT a.*, u.full_name AS actor_name
+       FROM docutracker_governance_audit a
+       JOIN users u ON u.id = a.actor_id
+       ${filter}
+       ORDER BY a.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[docutracker GET /governance-audit]', err);
+    res.status(500).json({ error: 'Failed to fetch governance audit log' });
+  }
+});
+
+/**
  * POST /api/docutracker/escalation-configs
  * Admin-only. Body: document_type, escalation_target_role, escalation_delay_minutes?,
  * max_escalation_level?, notify_original_sender?, department_id?
@@ -642,6 +678,14 @@ router.post('/escalation-configs', protect, requireAdmin, async (req, res) => {
         notifyOriginal,
       ]
     );
+    await writeGovernanceAudit(pool, {
+      actorId: req.user.id,
+      eventType: 'escalation_created',
+      entityType: 'escalation_config',
+      entityId: result.rows[0].id,
+      documentType: result.rows[0].document_type,
+      afterState: result.rows[0],
+    });
     return res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[docutracker POST /escalation-configs]', err);
@@ -715,6 +759,14 @@ router.patch('/escalation-configs/:id', protect, requireAdmin, async (req, res) 
     if (!result.rows.length) {
       return res.status(404).json({ error: 'Escalation config not found' });
     }
+    await writeGovernanceAudit(pool, {
+      actorId: req.user.id,
+      eventType: 'escalation_updated',
+      entityType: 'escalation_config',
+      entityId: result.rows[0].id,
+      documentType: result.rows[0].document_type,
+      afterState: result.rows[0],
+    });
     return res.json(result.rows[0]);
   } catch (err) {
     console.error('[docutracker PATCH /escalation-configs/:id]', err);
@@ -1360,6 +1412,15 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
         }
       }
 
+      await writeGovernanceAudit(client, {
+        actorId: req.user.id,
+        eventType: 'workflow_published',
+        entityType: 'workflow_version',
+        entityId: `${document_type}:${nextVersion}`,
+        documentType: document_type,
+        workflowVersion: nextVersion,
+        afterState: vRes.rows[0],
+      });
       await client.query('COMMIT');
       res.status(201).json(vRes.rows[0]);
     } catch (e) {
@@ -1608,6 +1669,13 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
         );
       }
 
+      await writeGovernanceAudit(client, {
+        actorId: req.user.id,
+        eventType: 'step_assignees_updated',
+        entityType: 'workflow_step',
+        entityId: stepId,
+        afterState: { assignees: normalized },
+      });
       await client.query('COMMIT');
       return res.json({ ok: true, step_id: stepId, updated: normalized.length });
     } catch (e) {
@@ -1778,6 +1846,20 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
       );
       row = insert.rows[0];
     }
+
+    await writeGovernanceAudit(pool, {
+      actorId: req.user.id,
+      eventType: 'permission_saved',
+      entityType: 'permission',
+      entityId: row.id,
+      documentType: row.document_type,
+      targetUserId: row.user_id,
+      targetRoleId: row.role_id,
+      afterState: {
+        action: row.action,
+        granted: row.granted,
+      },
+    });
 
     res.status(201).json({
       id: row.id,

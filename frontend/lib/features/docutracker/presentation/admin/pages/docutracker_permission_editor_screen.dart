@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/features/docutracker/services/docutracker_permissi
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/docutracker_permission_governance_ui.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/admin/pages/docutracker_governance_audit_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 
 String _permissionExplanationChipTooltip(DocuTrackerPermissionExplanation e) {
@@ -47,6 +48,32 @@ String _permissionExplanationChipTooltip(DocuTrackerPermissionExplanation e) {
     buf.write('\nMatched role id: $role');
   }
   return buf.toString();
+}
+
+/// A user override must remain distinguishable from an explicit denial.
+enum _UserOverrideDecision {
+  inherit,
+  allow,
+  deny;
+
+  String get label => switch (this) {
+    _UserOverrideDecision.inherit => 'Inherit',
+    _UserOverrideDecision.allow => 'Allow',
+    _UserOverrideDecision.deny => 'Deny',
+  };
+
+  bool? get granted => switch (this) {
+    _UserOverrideDecision.inherit => null,
+    _UserOverrideDecision.allow => true,
+    _UserOverrideDecision.deny => false,
+  };
+
+  static _UserOverrideDecision fromPermission(DocumentPermission? permission) {
+    if (permission == null) return _UserOverrideDecision.inherit;
+    return permission.granted
+        ? _UserOverrideDecision.allow
+        : _UserOverrideDecision.deny;
+  }
 }
 
 /// Admin permission editor for DocuTracker.
@@ -108,9 +135,9 @@ class _DocuTrackerPermissionEditorScreenState
   String? _userRoleId;
   Map<String, bool> _userRoleBaselineGranted = {};
   Map<String, DocumentPermission> _overrideSpecificByAction = const {};
-  Map<String, bool> _overrideSpecificDraft = const {};
+  Map<String, _UserOverrideDecision> _overrideSpecificDraft = const {};
   Map<String, DocumentPermission> _overrideWildcardByAction = const {};
-  Map<String, bool> _overrideWildcardDraft = const {};
+  Map<String, _UserOverrideDecision> _overrideWildcardDraft = const {};
 
   bool _loading = true;
   String? _error;
@@ -319,11 +346,13 @@ class _DocuTrackerPermissionEditorScreenState
     if (_userId == null) {
       _overrideSpecificByAction = const {};
       _overrideSpecificDraft = {
-        for (final a in _editableActions) a.name: false,
+        for (final a in _editableActions)
+          a.name: _UserOverrideDecision.inherit,
       };
       _overrideWildcardByAction = const {};
       _overrideWildcardDraft = {
-        for (final a in _editableActions) a.name: false,
+        for (final a in _editableActions)
+          a.name: _UserOverrideDecision.inherit,
       };
       _userRoleBaselineGranted = {
         for (final a in _editableActions) a.name: false,
@@ -331,12 +360,12 @@ class _DocuTrackerPermissionEditorScreenState
       return;
     }
 
-    await _loadUserRoleBaseline(); // Load baseline first so we can use it for defaults
+    await _loadUserRoleBaseline();
 
-    Future<(Map<String, DocumentPermission>, Map<String, bool>)> loadForDocType(
-      String docType,
-      bool isWildcard,
-    ) async {
+    Future<
+      (Map<String, DocumentPermission>, Map<String, _UserOverrideDecision>)
+    >
+    loadForDocType(String docType) async {
       final perms = await _repo.listPermissions(
         userId: _userId,
         documentType: docType,
@@ -345,25 +374,18 @@ class _DocuTrackerPermissionEditorScreenState
       for (final p in perms) {
         byAction[p.action.name] = p;
       }
-      final draft = <String, bool>{};
+      final draft = <String, _UserOverrideDecision>{};
       for (final a in _editableActions) {
-        if (byAction.containsKey(a.name)) {
-          draft[a.name] = byAction[a.name]!.granted;
-        } else {
-          // Default to baseline if no explicit override exists
-          draft[a.name] = isWildcard
-              ? false
-              : (_userRoleBaselineGranted[a.name] ?? false);
-        }
+        draft[a.name] = _UserOverrideDecision.fromPermission(byAction[a.name]);
       }
       return (byAction, draft);
     }
 
-    final specific = await loadForDocType(_documentType, false);
+    final specific = await loadForDocType(_documentType);
     _overrideSpecificByAction = specific.$1;
     _overrideSpecificDraft = specific.$2;
 
-    final wild = await loadForDocType('*', true);
+    final wild = await loadForDocType('*');
     _overrideWildcardByAction = wild.$1;
     _overrideWildcardDraft = wild.$2;
   }
@@ -448,6 +470,93 @@ class _DocuTrackerPermissionEditorScreenState
       );
     }
     return changes;
+  }
+
+  List<_UserOverrideChange> _diffOverrideChanges({
+    required String documentType,
+    required Map<String, _UserOverrideDecision> desiredByAction,
+    required Map<String, DocumentPermission> existingByAction,
+  }) {
+    final changes = <_UserOverrideChange>[];
+    for (final action in _editableActions) {
+      final before = _UserOverrideDecision.fromPermission(
+        existingByAction[action.name],
+      );
+      final after =
+          desiredByAction[action.name] ?? _UserOverrideDecision.inherit;
+      if (before == after) continue;
+      changes.add(
+        _UserOverrideChange(
+          documentType: documentType,
+          action: action,
+          before: before,
+          after: after,
+        ),
+      );
+    }
+    return changes;
+  }
+
+  Future<bool> _confirmOverrideSave(List<_UserOverrideChange> changes) async {
+    if (changes.isEmpty) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No changes to save.')));
+      return false;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirm user overrides'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'You are about to update ${changes.length} user override(s).',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              for (final change in changes.take(12))
+                Text(
+                  '${change.documentType} - ${change.action.displayName}: '
+                  '${change.before.label} to ${change.after.label}',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              if (changes.length > 12)
+                Text(
+                  '...and ${changes.length - 12} more',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                ),
+              const SizedBox(height: 12),
+              Text(
+                'Inherit removes the user-specific rule and returns access to the role baseline.',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
   }
 
   Future<bool> _confirmBulkSave(List<_PermissionChange> changes) async {
@@ -592,23 +701,21 @@ class _DocuTrackerPermissionEditorScreenState
 
   Future<void> _saveOverrides() async {
     if (_userId == null) return;
-    final changes = <_PermissionChange>[
-      ..._diffChanges(
-        scopeLabel: 'User override (${_userDisplayLabel()})',
+    final changes = <_UserOverrideChange>[
+      ..._diffOverrideChanges(
         documentType: _documentType,
         desiredByAction: _overrideSpecificDraft,
         existingByAction: _overrideSpecificByAction,
       ),
       if (_editWildcardToo && _documentType != '*')
-        ..._diffChanges(
-          scopeLabel: 'User override (${_userDisplayLabel()})',
+        ..._diffOverrideChanges(
           documentType: '*',
           desiredByAction: _overrideWildcardDraft,
           existingByAction: _overrideWildcardByAction,
         ),
     ];
 
-    final ok = await _confirmBulkSave(changes);
+    final ok = await _confirmOverrideSave(changes);
     if (!ok) return;
 
     setState(() => _loading = true);
@@ -617,16 +724,24 @@ class _DocuTrackerPermissionEditorScreenState
         final existing = change.documentType == '*'
             ? _overrideWildcardByAction[change.action.name]
             : _overrideSpecificByAction[change.action.name];
-        await _repo.savePermission(
-          DocumentPermission(
-            id: existing?.id,
-            roleId: null,
+        if (change.after == _UserOverrideDecision.inherit) {
+          await _repo.resetPermissions(
             userId: _userId,
             documentType: change.documentType,
-            action: change.action,
-            granted: change.after,
-          ),
-        );
+            action: change.action.value,
+          );
+        } else {
+          await _repo.savePermission(
+            DocumentPermission(
+              id: existing?.id,
+              roleId: null,
+              userId: _userId,
+              documentType: change.documentType,
+              action: change.action,
+              granted: change.after.granted!,
+            ),
+          );
+        }
       }
 
       await _refresh();
@@ -820,15 +935,13 @@ class _DocuTrackerPermissionEditorScreenState
 
   int _countPendingOverrideChanges() {
     if (_userId == null) return 0;
-    var count = _diffChanges(
-      scopeLabel: 'User override',
+    var count = _diffOverrideChanges(
       documentType: _documentType,
       desiredByAction: _overrideSpecificDraft,
       existingByAction: _overrideSpecificByAction,
     ).length;
     if (_editWildcardToo && _documentType != '*') {
-      count += _diffChanges(
-        scopeLabel: 'User override',
+      count += _diffOverrideChanges(
         documentType: '*',
         desiredByAction: _overrideWildcardDraft,
         existingByAction: _overrideWildcardByAction,
@@ -840,9 +953,9 @@ class _DocuTrackerPermissionEditorScreenState
   Widget _buildGovernanceSidebar() {
     return DocuTrackerPermissionGovernanceSidebar(
       onViewAuditLog: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Audit log export will be available soon.'),
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const DocuTrackerGovernanceAuditScreen(),
           ),
         );
       },
@@ -941,9 +1054,14 @@ class _DocuTrackerPermissionEditorScreenState
         userOverrideSubtitle: _userDisplayLabel(),
         baselineGranted: _userRoleBaselineGranted,
         overrideDraft: _overrideSpecificDraft,
+        effectiveGranted: {
+          for (final row in _effectiveRows)
+            row.action.name: row.explanation.granted,
+        },
+        hasPendingChanges: _countPendingOverrideChanges() > 0,
         enabled: !_loading && _userId != null,
-        onOverrideToggle: (action, v) {
-          setState(() => _overrideSpecificDraft[action.name] = v);
+        onOverrideChanged: (action, value) {
+          setState(() => _overrideSpecificDraft[action.name] = value);
         },
       ),
     );
@@ -999,14 +1117,13 @@ class _DocuTrackerPermissionEditorScreenState
                   ..._editableActions.map(
                     (a) => DataCell(
                       Center(
-                        child: Checkbox(
-                          value: _overrideWildcardDraft[a.name] ?? false,
-                          onChanged: (_loading || _userId == null)
-                              ? null
-                              : (v) => setState(
-                                  () => _overrideWildcardDraft[a.name] =
-                                      v ?? false,
-                                ),
+                        child: _UserOverrideDecisionControl(
+                          value: _overrideWildcardDraft[a.name] ??
+                              _UserOverrideDecision.inherit,
+                          enabled: !_loading && _userId != null,
+                          onChanged: (value) => setState(
+                            () => _overrideWildcardDraft[a.name] = value,
+                          ),
                         ),
                       ),
                     ),
@@ -1017,6 +1134,22 @@ class _DocuTrackerPermissionEditorScreenState
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildWorkflowControlledActions() {
+    final rows = _effectiveRows
+        .where(
+          (row) =>
+              _draftOwnerActions.contains(row.action) ||
+              _workflowActions.contains(row.action),
+        )
+        .toList();
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: _WorkflowControlledActionsPanel(rows: rows),
     );
   }
 
@@ -1348,6 +1481,7 @@ class _DocuTrackerPermissionEditorScreenState
                             child: _buildUserCompareMatrix(),
                           ),
                           _buildUserWildcardRow(),
+                          _buildWorkflowControlledActions(),
                         ],
                       ],
                     ),
@@ -1392,7 +1526,7 @@ class _DocuTrackerPermissionEditorScreenState
   }
 }
 
-/// Two logical rows: baseline (icons) vs override (checkboxes).
+/// Two logical rows: role baseline and a tri-state user override.
 class _UserBaselineOverrideMatrix extends StatelessWidget {
   const _UserBaselineOverrideMatrix({
     required this.actions,
@@ -1400,17 +1534,22 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
     required this.userOverrideSubtitle,
     required this.baselineGranted,
     required this.overrideDraft,
+    required this.effectiveGranted,
+    required this.hasPendingChanges,
     required this.enabled,
-    required this.onOverrideToggle,
+    required this.onOverrideChanged,
   });
 
   final List<DocumentAction> actions;
   final String roleTitle;
   final String userOverrideSubtitle;
   final Map<String, bool> baselineGranted;
-  final Map<String, bool> overrideDraft;
+  final Map<String, _UserOverrideDecision> overrideDraft;
+  final Map<String, bool> effectiveGranted;
+  final bool hasPendingChanges;
   final bool enabled;
-  final void Function(DocumentAction action, bool value) onOverrideToggle;
+  final void Function(DocumentAction action, _UserOverrideDecision value)
+  onOverrideChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1533,9 +1672,11 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
             ...actions.map(
               (a) => DataCell(
                 Center(
-                  child: DocuTrackerPermissionGovernanceToggle(
-                    value: overrideDraft[a.name] ?? false,
-                    onChanged: enabled ? (v) => onOverrideToggle(a, v) : null,
+                  child: _UserOverrideDecisionControl(
+                    value: overrideDraft[a.name] ??
+                        _UserOverrideDecision.inherit,
+                    enabled: enabled,
+                    onChanged: (value) => onOverrideChanged(a, value),
                   ),
                 ),
               ),
@@ -1560,7 +1701,9 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    'What they actually get',
+                    hasPendingChanges
+                        ? 'Saved result; save changes to refresh'
+                        : 'What they actually get',
                     style: TextStyle(
                       fontSize: 11,
                       color: AppTheme.textSecondary,
@@ -1570,13 +1713,190 @@ class _UserBaselineOverrideMatrix extends StatelessWidget {
               ),
             ),
             ...actions.map((a) {
-              final effective = overrideDraft[a.name] ?? false;
+              final effective = effectiveGranted[a.name] ?? false;
               return DataCell(Center(child: cellLabel(effective)));
             }),
           ],
         ),
       ],
     );
+  }
+}
+
+class _UserOverrideDecisionControl extends StatelessWidget {
+  const _UserOverrideDecisionControl({
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final _UserOverrideDecision value;
+  final bool enabled;
+  final ValueChanged<_UserOverrideDecision> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message:
+          'Inherit uses the role baseline. Allow and Deny create a user-specific rule.',
+      child: SegmentedButton<_UserOverrideDecision>(
+        segments: const [
+          ButtonSegment(
+            value: _UserOverrideDecision.inherit,
+            label: Text('Inherit'),
+          ),
+          ButtonSegment(
+            value: _UserOverrideDecision.allow,
+            label: Text('Allow'),
+          ),
+          ButtonSegment(
+            value: _UserOverrideDecision.deny,
+            label: Text('Deny'),
+          ),
+        ],
+        selected: {value},
+        showSelectedIcon: false,
+        style: const ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          textStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+          ),
+          padding: WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+          ),
+        ),
+        onSelectionChanged: enabled
+            ? (selection) => onChanged(selection.first)
+            : null,
+      ),
+    );
+  }
+}
+
+class _WorkflowControlledActionsPanel extends StatelessWidget {
+  const _WorkflowControlledActionsPanel({required this.rows});
+
+  final List<_EffectiveRow> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: DocuTrackerTokens.surface,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Workflow-controlled actions (per document)',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'These actions are decided for each document by ownership and the active workflow step.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowHeight: 40,
+                dataRowMinHeight: 48,
+                dataRowMaxHeight: 64,
+                columns: const [
+                  DataColumn(label: Text('Action')),
+                  DataColumn(label: Text('When it is allowed')),
+                  DataColumn(label: Text('Enforced rule')),
+                ],
+                rows: [
+                  for (final row in rows)
+                    DataRow(
+                      cells: [
+                        DataCell(
+                          Text(
+                            switch (row.action) {
+                              DocumentAction.edit => 'Edit own draft',
+                              DocumentAction.delete => 'Delete own draft',
+                              _ => row.action.displayName,
+                            },
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            row.explanation.source ==
+                                    DocuTrackerPermissionSource.admin
+                                ? 'Always available'
+                                : 'When document conditions match',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                        DataCell(
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 320),
+                            child: Tooltip(
+                              message: _workflowRuleTooltip(
+                                row.action,
+                                row.explanation,
+                              ),
+                              child: Text(
+                                _workflowRule(row.action, row.explanation),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _workflowRule(
+    DocumentAction action,
+    DocuTrackerPermissionExplanation explanation,
+  ) {
+    if (explanation.source == DocuTrackerPermissionSource.admin) {
+      return 'System administrator access';
+    }
+    return switch (action) {
+      DocumentAction.edit => 'Document creator while the document is Draft or WIP',
+      DocumentAction.delete =>
+        'Document creator while the document is Draft or WIP',
+      DocumentAction.forward =>
+        'Current holder or an assignee allowed to forward at the active step',
+      DocumentAction.approve =>
+        'Current holder or an assignee allowed to approve at the active step',
+      DocumentAction.reject =>
+        'Current holder or an assignee allowed to reject at the active step',
+      DocumentAction.returnDoc =>
+        'Current holder or an assignee allowed to return at the active step',
+      _ => 'Evaluated by the backend for the selected document',
+    };
+  }
+
+  String _workflowRuleTooltip(
+    DocumentAction action,
+    DocuTrackerPermissionExplanation explanation,
+  ) {
+    final rule = _workflowRule(action, explanation);
+    final detail = _permissionExplanationChipTooltip(explanation);
+    return '$rule\n\nType-level result: $detail';
   }
 }
 
@@ -1653,4 +1973,18 @@ class _PermissionChange {
   final DocumentAction action;
   final bool before;
   final bool after;
+}
+
+class _UserOverrideChange {
+  const _UserOverrideChange({
+    required this.documentType,
+    required this.action,
+    required this.before,
+    required this.after,
+  });
+
+  final String documentType;
+  final DocumentAction action;
+  final _UserOverrideDecision before;
+  final _UserOverrideDecision after;
 }

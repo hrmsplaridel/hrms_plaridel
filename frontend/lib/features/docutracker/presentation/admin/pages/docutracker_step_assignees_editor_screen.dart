@@ -108,6 +108,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
   int? _workflowVersion;
   bool _loading = true;
   String? _error;
+  List<String> _availableDocumentTypes = const [];
 
   final List<_DocStep> _steps = [];
   final Map<String, String> _departmentNameById = {};
@@ -146,7 +147,22 @@ class _DocuTrackerStepAssigneesEditorScreenState
             : DocumentRoutingConfig.defaults.first.documentType.value);
     _workflowVersion = widget.initialWorkflowVersion;
     _empSearchController.addListener(_scheduleEmpSearch);
+    _loadAvailableDocumentTypes();
     _load();
+  }
+
+  Future<void> _loadAvailableDocumentTypes() async {
+    try {
+      final configs = await _repo.getRoutingConfigs();
+      final types = <String>{
+        for (final config in configs) config.documentType.value,
+        if (_documentType != null && _documentType!.trim().isNotEmpty)
+          _documentType!.trim(),
+      }.toList()..sort();
+      if (mounted) setState(() => _availableDocumentTypes = types);
+    } catch (_) {
+      // Keep the current selection available while the normal step load reports errors.
+    }
   }
 
   @override
@@ -687,6 +703,9 @@ class _DocuTrackerStepAssigneesEditorScreenState
   Widget build(BuildContext context) {
     final typeOptions = {
       for (final c in DocumentRoutingConfig.defaults) c.documentType.value,
+      ..._availableDocumentTypes,
+      if (_documentType != null && _documentType!.trim().isNotEmpty)
+        _documentType!.trim(),
     }.toList()..sort();
 
     return Scaffold(
@@ -695,6 +714,14 @@ class _DocuTrackerStepAssigneesEditorScreenState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton(
+                tooltip: 'Back',
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
+            ),
             DocuTrackerModuleHeader(
               title: 'Workflow step assignees',
               subtitle:
@@ -961,11 +988,13 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                       ],
                                     ),
                                   ),
-                                  Icon(
-                                    Icons.chevron_right_rounded,
-                                    color: AppTheme.textSecondary.withValues(
-                                      alpha: 0.5,
+                                  OutlinedButton.icon(
+                                    onPressed: () => _editAssignees(s),
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 16,
                                     ),
+                                    label: const Text('Edit'),
                                   ),
                                 ],
                               ),

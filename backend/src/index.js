@@ -90,13 +90,23 @@ if (!process.env.JWT_REFRESH_SECRET) {
 
 // Middleware (large limit: RSP/L&D forms e.g. turn-around tables with many JSON rows)
 const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean);
-if (corsOrigins && corsOrigins.length > 0) {
-  app.use(cors({ origin: corsOrigins }));
-} else {
-  // Fail closed. Same-origin web requests still work, and native Flutter clients
-  // are not governed by CORS. Cross-origin web deployments must be allowlisted.
-  app.use(cors({ origin: false }));
-}
+const isLocalDevelopment = process.env.NODE_ENV !== 'production';
+const isLocalDevelopmentOrigin = (origin) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin);
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (
+        !origin ||
+        corsOrigins?.includes(origin) ||
+        (isLocalDevelopment && isLocalDevelopmentOrigin(origin))
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
+  }),
+);
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');

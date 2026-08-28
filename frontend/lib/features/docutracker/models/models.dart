@@ -3,6 +3,7 @@ library;
 
 export 'document.dart';
 export 'document_action.dart';
+export 'docutracker_governance_audit_entry.dart';
 export 'document_permission.dart';
 export 'document_routing_config.dart';
 export 'document_routing_record.dart';

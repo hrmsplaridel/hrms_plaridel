@@ -212,12 +212,42 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     BuildContext context,
     DocuTrackerProvider provider,
   ) async {
+    final typeNameController = TextEditingController();
+    final configuredTypes = <DocumentType>{
+      ...DocumentType.values,
+      ...provider.routingConfigs.map((config) => config.documentType),
+    }.toList()..sort(
+      (a, b) => a.displayName.toLowerCase().compareTo(
+        b.displayName.toLowerCase(),
+      ),
+    );
     final type = await showDialog<DocumentType>(
       context: context,
       builder: (ctx) {
-        var selected = DocumentType.values.first;
+        var selected = configuredTypes.first;
+        var query = '';
         return StatefulBuilder(
           builder: (ctx, setModal) {
+            final filteredTypes = configuredTypes
+                .where(
+                  (type) => type.displayName.toLowerCase().contains(
+                        query.toLowerCase(),
+                      ) ||
+                      type.value.toLowerCase().contains(query.toLowerCase()),
+                )
+                .toList();
+            DocumentType? customType;
+            if (query.trim().isNotEmpty) {
+              try {
+                customType = DocumentType.fromDisplayName(query);
+              } on ArgumentError {
+                customType = null;
+              }
+            }
+            final customTypeToAdd =
+                customType != null && !configuredTypes.contains(customType)
+                ? customType
+                : null;
             return AlertDialog(
               title: const Text('New workflow'),
               content: Column(
@@ -225,7 +255,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'Pick a document type. Add steps in the editor; saving publishes the next workflow version for that type.',
+                    'Select a type or enter a new one. Publishing makes the type available for future documents.',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 13,
@@ -233,21 +263,74 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<DocumentType>(
-                    key: ValueKey<DocumentType>(selected),
-                    initialValue: selected,
-                    decoration: DocuTrackerStyles.dropdownDecoration(
+                  TextField(
+                    controller: typeNameController,
+                    autofocus: true,
+                    decoration: DocuTrackerStyles.inputDecoration(
                       context,
-                      'Document type',
+                      'Search or enter document type',
+                      Icons.search_rounded,
                     ),
-                    items: [
-                      for (final t in DocumentType.values)
-                        DropdownMenuItem(value: t, child: Text(t.displayName)),
-                    ],
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setModal(() => selected = v);
+                    textInputAction: TextInputAction.done,
+                    onChanged: (value) => setModal(() => query = value),
+                    onSubmitted: (_) {
+                      if (customTypeToAdd != null) {
+                        Navigator.pop(ctx, customTypeToAdd);
+                      }
                     },
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: 520,
+                    height: 248,
+                    child: Material(
+                      color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final option in filteredTypes)
+                            RadioListTile<DocumentType>(
+                              value: option,
+                              groupValue: selected,
+                              dense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              title: Text(option.displayName),
+                              subtitle: Text(
+                                option.value,
+                                style: Theme.of(ctx).textTheme.bodySmall,
+                              ),
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setModal(() {
+                                  selected = value;
+                                  typeNameController.clear();
+                                  query = '';
+                                });
+                              },
+                            ),
+                          if (customTypeToAdd != null)
+                            ListTile(
+                              leading: const Icon(Icons.add_circle_outline),
+                              title: Text(
+                                'Create "${customTypeToAdd.displayName}"',
+                              ),
+                              subtitle: Text(customTypeToAdd.value),
+                              onTap: () =>
+                                  Navigator.pop(ctx, customTypeToAdd),
+                            ),
+                          if (filteredTypes.isEmpty && customTypeToAdd == null)
+                            const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text(
+                                'Enter letters or numbers for a new type.',
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -258,7 +341,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 ),
                 FilledButton(
                   onPressed: () => Navigator.pop(ctx, selected),
-                  child: const Text('Continue'),
+                  child: const Text('Continue with selected type'),
                 ),
               ],
             );
@@ -266,6 +349,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
         );
       },
     );
+    typeNameController.dispose();
     if (type == null || !context.mounted) return;
     final configs = _routingConfigsForDisplay(provider);
     DocumentRoutingConfig? existing;

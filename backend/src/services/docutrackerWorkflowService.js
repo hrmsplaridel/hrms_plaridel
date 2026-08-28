@@ -32,7 +32,7 @@ const DOC_ACTIONS = new Set([
 ]);
 // Overdue is still "at holder / active review" — same holder actions as in_review / escalated.
 const TRANSITION_ALLOWED_FROM = {
-  submit: new Set(['draft', 'pending', 'returned']),
+  submit: new Set(['draft', 'pending']),
   forward: new Set(['in_review', 'escalated', 'overdue']),
   approve: new Set(['in_review', 'escalated', 'overdue']),
   reject: new Set(['in_review', 'escalated', 'overdue']),
@@ -1059,27 +1059,21 @@ async function getWorkflowStepAssigneeRecord(client, { document, userId }) {
 
 
 function assigneeAllowsAction(assigneeRow, action) {
-  if (!assigneeRow) return null; // unknown (likely legacy config)
+  if (!assigneeRow) return false;
   if (assigneeRow.is_enabled === false) return false;
   const allowed = Array.isArray(assigneeRow.allowed_actions) ? assigneeRow.allowed_actions : [];
-  // Treat empty allowed_actions as "allow all workflow actions" for backward compatibility.
-  if (allowed.length === 0) return true;
+  // The strict-actions migration backfills legacy empty rows. Empty is deny-all.
+  if (allowed.length === 0) return false;
   return allowed.includes(action);
 }
 
 async function canUserPerformWorkflowAction(client, { user, document, action }) {
   if (!WORKFLOW_STEP_ACTIONS.has(action)) return false;
   if (user?.role === 'admin') return true;
-  if (isCurrentHolder(document, user.id)) return true;
 
-  // Prefer normalized table restrictions when available.
+  // A non-admin must be assigned to the active step and granted this action.
   const row = await getWorkflowStepAssigneeRecord(client, { document, userId: user.id });
-  const allowedByRow = assigneeAllowsAction(row, action);
-  if (allowedByRow === true) return true;
-  if (allowedByRow === false) return false;
-
-  // Fallback to legacy behavior (no per-action assignments): holder or step assignee.
-  return isUserAssignedToCurrentStep(client, { document, userId: user.id });
+  return assigneeAllowsAction(row, action);
 }
 
 async function canUserPerformGeneralAction(client, { user, documentType, action }) {
@@ -1914,6 +1908,15 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
       throw validationError(`Cannot ${action} document in ${status} status`);
     }
     ensureActionAllowedFromStatus(action, status);
+
+    if (action === 'submit' && user.role !== 'admin') {
+      if (doc.created_by !== user.id) {
+        throw forbiddenError('Only the document creator can submit this document');
+      }
+      if (!isDraftOrWipDocument(doc, status)) {
+        throw validationError('Only an unassigned draft can be submitted');
+      }
+    }
 
     const config = await getRoutingConfig(
       client,

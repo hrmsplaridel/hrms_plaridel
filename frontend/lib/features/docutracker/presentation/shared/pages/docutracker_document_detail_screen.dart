@@ -111,38 +111,45 @@ class _DocuTrackerDocumentDetailScreenState
       DocumentAction.reject.value,
       DocumentAction.returnDoc.value,
     ];
-    final explanations = <String, bool>{};
-    final explanationDetails = <String, DocuTrackerPermissionExplanation>{};
-    for (final action in actions) {
-      final exp = await repo.explainPermission(
-        userId: userId,
-        roleId: roleId,
-        documentType: doc.documentType,
-        action: action,
-        documentId: documentId,
-        isAdmin: isAdmin,
-      );
-      explanations[action] = exp.granted;
-      explanationDetails[action] = exp;
-    }
+    final explanationEntries = await Future.wait(
+      actions.map((action) async {
+        final explanation = await repo.explainPermission(
+          userId: userId,
+          roleId: roleId,
+          documentType: doc.documentType,
+          action: action,
+          documentId: documentId,
+          isAdmin: isAdmin,
+        );
+        return MapEntry(action, explanation);
+      }),
+    );
+    final explanationDetails =
+        Map<String, DocuTrackerPermissionExplanation>.fromEntries(
+          explanationEntries,
+        );
+    bool granted(String action) => explanationDetails[action]?.granted == true;
     if (!mounted) return;
     setState(() {
       _permissionExplanations = explanationDetails;
-      _canViewAuditTrail = explanations[DocumentAction.view.value] == true;
-      _canEdit = isAdmin || explanations[DocumentAction.edit.value] == true;
-      _canSubmitAction = explanations[DocumentAction.submit.value] == true;
-      _canApproveAction = explanations[DocumentAction.approve.value] == true;
-      _canForwardAction = explanations[DocumentAction.forward.value] == true;
-      _canRejectAction = explanations[DocumentAction.reject.value] == true;
-      _canReturnAction = explanations[DocumentAction.returnDoc.value] == true;
+      _canViewAuditTrail = granted(DocumentAction.view.value);
+      _canEdit = isAdmin || granted(DocumentAction.edit.value);
+      _canSubmitAction =
+          granted(DocumentAction.submit.value) &&
+          doc.createdBy == userId &&
+          DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc);
+      _canApproveAction = granted(DocumentAction.approve.value);
+      _canForwardAction = granted(DocumentAction.forward.value);
+      _canRejectAction = granted(DocumentAction.reject.value);
+      _canReturnAction = granted(DocumentAction.returnDoc.value);
       _canDownloadAttachment =
-          explanations[DocumentAction.download.value] == true ||
-          explanations[DocumentAction.view.value] == true;
+          granted(DocumentAction.download.value) ||
+          granted(DocumentAction.view.value);
       _canModifyAttachment =
           isAdmin ||
           (DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc) &&
               doc.createdBy == userId) ||
-          explanations[DocumentAction.edit.value] == true;
+          granted(DocumentAction.edit.value);
       _permissionsLoading = false;
     });
   }
@@ -392,6 +399,8 @@ class _DocuTrackerDocumentDetailScreenState
     final doc = docId != null ? _resolveDocForView(provider) : widget.document;
     final userId = auth.user?.id ?? '';
     final isPending = doc.status == DocumentStatus.pending;
+    final isCreator = doc.createdBy == userId;
+    final isWip = DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc);
     final canAct =
         doc.status != DocumentStatus.approved &&
         doc.status != DocumentStatus.rejected &&
@@ -416,11 +425,12 @@ class _DocuTrackerDocumentDetailScreenState
             (currentRouting == null && doc.currentHolderId == userId));
 
     final workflowReady = _workflowConfigIssue == null;
-    final statusAllowsSubmit =
-        doc.status == DocumentStatus.pending ||
-        doc.status == DocumentStatus.returned;
     final canSubmit =
-        workflowReady && canAct && _canSubmitAction && statusAllowsSubmit;
+        workflowReady &&
+        canAct &&
+        _canSubmitAction &&
+        isCreator &&
+        isWip;
 
     // Review actions only valid if NOT pending and workflow is configured.
     final canApprove =
