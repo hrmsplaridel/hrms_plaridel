@@ -27,6 +27,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
 
 /// Step 9: Document detail with audit trail timeline.
 /// Step 8: Document actions - Review, Approve, Reject, Return, Forward, Add remarks.
@@ -426,11 +427,7 @@ class _DocuTrackerDocumentDetailScreenState
 
     final workflowReady = _workflowConfigIssue == null;
     final canSubmit =
-        workflowReady &&
-        canAct &&
-        _canSubmitAction &&
-        isCreator &&
-        isWip;
+        workflowReady && canAct && _canSubmitAction && isCreator && isWip;
 
     // Review actions only valid if NOT pending and workflow is configured.
     final canApprove =
@@ -1285,7 +1282,8 @@ class _DocuTrackerDocumentDetailScreenState
         : null;
 
     final isDraft = DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc);
-    final showQuickAccess = _canEdit || _canDownloadAttachment;
+    final showQuickAccess =
+        _canViewAuditTrail || _canEdit || _canDownloadAttachment;
 
     Widget fullWidth(Widget child) =>
         SizedBox(width: double.infinity, child: child);
@@ -1362,6 +1360,31 @@ class _DocuTrackerDocumentDetailScreenState
             const SizedBox(height: 10),
             Row(
               children: [
+                if (_canViewAuditTrail)
+                  Expanded(
+                    child: _QuickAccessChip(
+                      label: 'Open Document',
+                      icon: Icons.article_outlined,
+                      onTap: provider.loading
+                          ? null
+                          : () async {
+                              await Navigator.of(context).push<void>(
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      DocuTrackerDocumentBuilderScreen(
+                                        document: doc,
+                                      ),
+                                ),
+                              );
+                              if (mounted && doc.id != null) {
+                                provider.refreshDocument(doc.id!);
+                              }
+                            },
+                    ),
+                  ),
+                if (_canViewAuditTrail &&
+                    ((_canEdit && isDraft) || _canDownloadAttachment))
+                  const SizedBox(width: 8),
                 if (_canEdit && isDraft)
                   Expanded(
                     child: _QuickAccessChip(

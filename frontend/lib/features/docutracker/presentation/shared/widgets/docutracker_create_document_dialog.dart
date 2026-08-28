@@ -4,6 +4,7 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
 
 /// Shows the DocuTracker "Create Document" dialog.
 Future<void> showDocuTrackerCreateDocumentDialog(
@@ -75,7 +76,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'Start a new workflow document with optional attachment.',
+                                'Create the draft, then compose it on real A4 pages with formatting and e-signatures.',
                                 style: TextStyle(
                                   color: Theme.of(ctx).hintColor,
                                   fontSize: 13,
@@ -332,6 +333,14 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                                       SnackBar(content: Text(successMessage)),
                                     );
                                     onCreated?.call();
+                                    await Navigator.of(context).push<void>(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) =>
+                                            DocuTrackerDocumentBuilderScreen(
+                                              document: created,
+                                            ),
+                                      ),
+                                    );
                                   }
                                   return;
                                 }
@@ -353,7 +362,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                                   color: Colors.white,
                                 ),
                               )
-                            : const Text('Create Draft'),
+                            : const Text('Create & Open Builder'),
                       ),
                     ],
                   ),

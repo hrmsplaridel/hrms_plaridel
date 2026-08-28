@@ -24,6 +24,8 @@ const postSections = [
   ["13 - OPTIONAL VERIFY (checks source tables exist)", "verify-docutracker-source-parity.sql"],
   ["14 - SAFE SCHEMA IMPROVEMENTS (metadata, files, notifications)", "migrate-docutracker-safe-improvements-v1.sql"],
   ["15 - ALLOW UNASSIGNED WORKFLOW STEPS", "migrate-docutracker-allow-unassigned-workflow-steps-v2.sql"],
+  ["16 - DOCUMENT BUILDER + E-SIGNATURES", "migrate-docutracker-document-builder-esign-v1.sql"],
+  ["17 - E-SIGNATURE HISTORY ACTION", "migrate-docutracker-history-signed-action-v1.sql"],
 ];
 
 function readBody(file) {
@@ -90,10 +92,10 @@ const applyOnceOut = `-- =======================================================
 ${applyOnceBody}
 `;
 
-// --- Phase 3: post production hardening (10-15)
+// --- Phase 3: post production hardening (10-17)
 const postToc = postSections.map(([t]) => t);
 const postOut = buildRollup({
-  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-15)",
+  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-17)",
   descriptionLines: [
     "PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.",
     "Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.",
@@ -101,6 +103,8 @@ const postOut = buildRollup({
     "Section 13 raises if optional source-module tables are missing; comment it out for DocuTracker-only DBs.",
     "Section 14 is additive and keeps existing app-facing table/column names stable.",
     "Section 15 allows configuration steps with zero assignees while preserving assigned-step invariants.",
+    "Section 16 adds A4 document content and server-locked e-signature persistence.",
+    "Section 17 allows the server-audited signed history action.",
   ],
   tocLines: postToc,
   sections: postSections,
@@ -116,7 +120,7 @@ const orchestratorOut = `-- ====================================================
 -- This file uses psql \\ir (include relative to this file) to run, in order:
 --   1) docutracker-install-core.sql                    (sections 01-08)
 --   2) docutracker-install-production-hardening-apply-once.sql
---   3) docutracker-install-post-production-hardening.sql (sections 10-15)
+--   3) docutracker-install-post-production-hardening.sql (sections 10-17)
 --
 -- USAGE (from repo root; path must point at this file - \\ir resolves next to it):
 --   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-all-in-order.sql

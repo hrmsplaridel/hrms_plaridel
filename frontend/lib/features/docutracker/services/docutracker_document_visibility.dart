@@ -36,6 +36,7 @@ abstract final class DocuTrackerDocumentVisibility {
 
     if (_sameId(doc.createdBy, uid)) return true;
     if (_sameId(doc.currentHolderId, uid)) return true;
+    if (doc.signatureSignerIds.any((id) => _sameId(id, uid))) return true;
 
     final step = doc.currentStep;
     if (routingForDocument != null && step != null && step > 0) {

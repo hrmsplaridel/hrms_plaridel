@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
@@ -38,6 +39,9 @@ class DocuTrackerProvider extends ChangeNotifier {
   List<DocumentNotification> _notifications = [];
   bool _loading = false;
   String? _error;
+  DocuTrackerDocumentBuilderData? _builderData;
+  bool _builderLoading = false;
+  String? _builderError;
 
   // Prevent duplicate transitions due to double taps / retries.
   final Set<String> _transitionInFlight = <String>{};
@@ -274,6 +278,9 @@ class DocuTrackerProvider extends ChangeNotifier {
   List<DocumentPermission> get permissions => List.unmodifiable(_permissions);
   bool get loading => _loading;
   String? get error => _error;
+  DocuTrackerDocumentBuilderData? get builderData => _builderData;
+  bool get builderLoading => _builderLoading;
+  String? get builderError => _builderError;
 
   /// Load routing configs (Step 1 & 3).
   Future<void> loadRoutingConfigs() async {
@@ -564,6 +571,100 @@ class DocuTrackerProvider extends ChangeNotifier {
       _loading = false;
       notifyListeners();
       return null;
+    }
+  }
+
+  Future<DocuTrackerDocumentBuilderData?> loadDocumentBuilder(
+    String documentId,
+  ) async {
+    _builderLoading = true;
+    _builderError = null;
+    notifyListeners();
+    final result = await _repo.getDocumentBuilder(documentId);
+    _builderLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
+        _builderData = value;
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
+        _builderError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<DocuTrackerDocumentBuilderData?> saveDocumentBuilder({
+    required String documentId,
+    required List<DocuTrackerDocumentPage> pages,
+    required List<DocuTrackerSignatureField> signatureFields,
+    required int revision,
+  }) async {
+    if (_builderLoading) return null;
+    _builderLoading = true;
+    _builderError = null;
+    notifyListeners();
+    final result = await _repo.saveDocumentBuilder(
+      documentId: documentId,
+      pages: pages,
+      signatureFields: signatureFields,
+      revision: revision,
+    );
+    _builderLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
+        _builderData = value;
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
+        _builderError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<List<DocuTrackerSignatureAsset>> listSavedSignatures() async {
+    final result = await _repo.listSavedSignatureAssets();
+    return switch (result) {
+      DocuTrackerSuccess<List<DocuTrackerSignatureAsset>>(:final value) =>
+        value,
+      DocuTrackerFailure<List<DocuTrackerSignatureAsset>>(:final message) =>
+        throw Exception(message),
+    };
+  }
+
+  Future<DocuTrackerDocumentBuilderData?> signDocumentField({
+    required String documentId,
+    required String fieldId,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    if (_builderLoading) return null;
+    _builderLoading = true;
+    _builderError = null;
+    notifyListeners();
+    final result = await _repo.signDocumentField(
+      documentId: documentId,
+      fieldId: fieldId,
+      signatureAssetId: signatureAssetId,
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      saveForReuse: saveForReuse,
+    );
+    _builderLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
+        _builderData = value;
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
+        _builderError = message;
+        notifyListeners();
+        return null;
     }
   }
 

@@ -31,6 +31,11 @@ class EmployeeDirectoryLookup {
   bool isLoaded = false;
 
   EmployeeDirectoryEntry? operator [](String id) => _byId[id];
+  List<EmployeeDirectoryEntry> get entries {
+    final values = _byId.values.toList(growable: false);
+    values.sort((a, b) => a.fullName.compareTo(b.fullName));
+    return values;
+  }
 
   /// One batched request (paged). Safe for typical org sizes; extend with backend `ids=` if needed.
   Future<void> load({int limit = 4000}) async {

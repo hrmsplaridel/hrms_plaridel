@@ -21,6 +21,13 @@ const {
 const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
 const { sameEntityId } = require('../utils/sameEntityId');
 const { writeGovernanceAudit } = require('../services/docutrackerGovernanceAudit');
+const {
+  getDocumentBuilder,
+  saveDocumentBuilder,
+  createSignatureAsset,
+  listSavedSignatureAssets,
+  signDocumentField,
+} = require('../services/docutrackerDocumentBuilderService');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -309,6 +316,9 @@ function mapDocumentRow(row) {
     workflow_version: row.workflow_version,
     escalation_level: row.escalation_level,
     needs_admin_intervention: row.needs_admin_intervention,
+    signature_signer_ids: Array.isArray(row.signature_signer_ids)
+      ? row.signature_signer_ids.map(String)
+      : [],
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -427,6 +437,70 @@ router.post('/documents', protect, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     console.error('[docutracker POST /documents]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** GET /api/docutracker/signature-assets - current user's saved signatures. */
+router.get('/signature-assets', protect, async (req, res) => {
+  try {
+    res.json(await listSavedSignatureAssets(pool, req.user));
+  } catch (err) {
+    console.error('[docutracker GET /signature-assets]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** POST /api/docutracker/signature-assets - draw/upload a signature owned by current user. */
+router.post('/signature-assets', protect, async (req, res) => {
+  try {
+    const created = await createSignatureAsset(pool, req.user, req.body || {});
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('[docutracker POST /signature-assets]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** GET /api/docutracker/documents/:id/builder - A4 content and signature fields. */
+router.get('/documents/:id/builder', protect, async (req, res) => {
+  try {
+    res.json(await getDocumentBuilder(pool, req.user, req.params.id));
+  } catch (err) {
+    console.error('[docutracker GET /documents/:id/builder]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** PUT /api/docutracker/documents/:id/builder - save pages and unsigned field layout. */
+router.put('/documents/:id/builder', protect, async (req, res) => {
+  try {
+    res.json(await saveDocumentBuilder(pool, req.user, req.params.id, req.body || {}));
+  } catch (err) {
+    console.error('[docutracker PUT /documents/:id/builder]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** POST /api/docutracker/documents/:id/signature-fields/:fieldId/sign. */
+router.post('/documents/:id/signature-fields/:fieldId/sign', protect, async (req, res) => {
+  try {
+    res.json(
+      await signDocumentField(
+        pool,
+        req.user,
+        req.params.id,
+        req.params.fieldId,
+        req.body || {}
+      )
+    );
+  } catch (err) {
+    console.error('[docutracker POST /documents/:id/signature-fields/:fieldId/sign]', err);
     const mapped = mapWorkflowServiceError(err);
     res.status(mapped.status).json({ error: mapped.error });
   }
@@ -1945,6 +2019,7 @@ function mapWorkflowServiceError(err) {
   const code = err?.code;
   if (code === 'FORBIDDEN') return { status: 403, error: err.message || 'Forbidden' };
   if (code === 'NOT_FOUND') return { status: 404, error: err.message || 'Not found' };
+  if (code === 'CONFLICT') return { status: 409, error: err.message || 'Conflict' };
   if (code === 'VALIDATION') {
     return { status: 400, error: err.message || 'Request could not be completed.' };
   }

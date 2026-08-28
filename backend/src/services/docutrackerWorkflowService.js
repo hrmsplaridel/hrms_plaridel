@@ -119,6 +119,9 @@ function mapDocumentRow(row) {
     workflow_version: row.workflow_version,
     escalation_level: row.escalation_level,
     needs_admin_intervention: row.needs_admin_intervention,
+    signature_signer_ids: Array.isArray(row.signature_signer_ids)
+      ? row.signature_signer_ids.map(String)
+      : [],
     source_only: row.source_only === true,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -862,13 +865,19 @@ async function filterDocumentsViewableByUser(pool, user, rows) {
   if (!rows?.length || user?.role === 'admin') return rows || [];
   const uid = user.id;
   const ids = rows.map((r) => r.id).filter(Boolean);
+  const viewPermissionRows = await fetchAllPermissionRowsForAction(pool, {
+    role: user.role,
+    userId: uid,
+    action: 'view',
+  });
 
   let currentStepAssigneeIds = new Set();
   let anyStepAssigneeIds = new Set();
   let historyActorDocIds = new Set();
+  let signatureSignerDocIds = new Set();
 
   if (ids.length) {
-    const [currentStepRes, anyStepRes, historyRes] = await Promise.all([
+    const [currentStepRes, anyStepRes, historyRes, signatureRes] = await Promise.all([
       pool.query(
         `SELECT DISTINCT d.id
          FROM docutracker_documents d
@@ -896,14 +905,27 @@ async function filterDocumentsViewableByUser(pool, user, rows) {
            AND document_id = ANY($2::uuid[])`,
         [uid, ids]
       ),
+      pool.query(
+        `SELECT DISTINCT document_id AS id
+         FROM docutracker_signature_fields
+         WHERE assigned_signer_id = $1::uuid
+           AND document_id = ANY($2::uuid[])`,
+        [uid, ids]
+      ),
     ]);
     currentStepAssigneeIds = new Set(currentStepRes.rows.map((x) => x.id));
     anyStepAssigneeIds = new Set(anyStepRes.rows.map((x) => x.id));
     historyActorDocIds = new Set(historyRes.rows.map((x) => x.id));
+    signatureSignerDocIds = new Set(signatureRes.rows.map((x) => x.id));
   }
 
   const out = [];
   for (const row of rows) {
+    const userSpecificView = resolveUserSpecificPermissionFromRows(
+      viewPermissionRows,
+      { userId: uid, documentType: row.document_type }
+    );
+    if (userSpecificView === false) continue;
     const rel = getRelationshipFlags(row, user);
     if (rel.isCreator || rel.isReviewer) {
       out.push(row);
@@ -913,7 +935,11 @@ async function filterDocumentsViewableByUser(pool, user, rows) {
       out.push(row);
       continue;
     }
-    if (anyStepAssigneeIds.has(row.id) || historyActorDocIds.has(row.id)) {
+    if (
+      anyStepAssigneeIds.has(row.id) ||
+      historyActorDocIds.has(row.id) ||
+      signatureSignerDocIds.has(row.id)
+    ) {
       out.push(row);
       continue;
     }
@@ -1230,6 +1256,22 @@ async function isUserAssignedToAnyStep(client, { document, userId }) {
   }
 }
 
+async function isUserAssignedSignature(client, { document, userId }) {
+  if (!document?.id || !userId) return false;
+  try {
+    const result = await client.query(
+      `SELECT 1 FROM docutracker_signature_fields
+       WHERE document_id = $1 AND assigned_signer_id = $2::uuid
+       LIMIT 1`,
+      [document.id, userId]
+    );
+    return result.rowCount > 0;
+  } catch (error) {
+    if (error?.code === '42P01') return false;
+    throw error;
+  }
+}
+
 async function canUserPerformDocumentAction(client, { user, document, action }) {
   const relationship = getRelationshipFlags(document, user);
   if (relationship.isAdmin) return true;
@@ -1239,8 +1281,23 @@ async function canUserPerformDocumentAction(client, { user, document, action }) 
 
   // WIP (Draft) logic:
   if (isWip) {
-    // Creator can view, edit, or delete their own draft.
-    if (action === 'view' || action === 'edit' || action === 'delete') {
+    if (action === 'view') {
+      const viewRows = await fetchPermissionRows(client, {
+        role: user.role,
+        userId: user.id,
+        documentType: document.document_type,
+        action: 'view',
+      });
+      const userSpecific = resolveUserSpecificPermissionFromRows(viewRows, {
+        userId: user.id,
+        documentType: document.document_type,
+      });
+      if (userSpecific === false) return false;
+      if (relationship.isCreator) return true;
+      return isUserAssignedSignature(client, { document, userId: user.id });
+    }
+    // Creator can edit or delete their own draft.
+    if (action === 'edit' || action === 'delete') {
       return relationship.isCreator;
     }
     // Only authorized users (e.g. HR, Supervisors) can submit.
@@ -1281,6 +1338,7 @@ async function canUserPerformDocumentAction(client, { user, document, action }) 
     if (userSpecific === false) return false;
 
     if (relationship.isCreator || relationship.isReviewer) return true;
+    if (await isUserAssignedSignature(client, { document, userId: user.id })) return true;
     if (await isUserAssignedToCurrentStep(client, { document, userId: user.id })) return true;
     if (await isUserAssignedToAnyStep(client, { document, userId: user.id })) return true;
     return false;
@@ -1403,10 +1461,15 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
       document,
       userId: user.id,
     });
+    const isSignatureSigner = await isUserAssignedSignature(client, {
+      document,
+      userId: user.id,
+    });
     const relationshipAllowed =
       relationship.isCreator ||
       isHolder ||
       isAssigned ||
+      isSignatureSigner ||
       (await isUserAssignedToAnyStep(client, { document, userId: user.id }));
 
     if (userSpecificDecision === false) {
@@ -1428,6 +1491,7 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
           ...relationship,
           isCurrentHolder: isHolder,
           isStepAssignee: isAssigned,
+          isSignatureSigner,
         },
         reason: 'explicit_permission',
       };
@@ -1444,6 +1508,8 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
             ? 'current_holder'
             : isAssigned
               ? 'step_assignee'
+              : isSignatureSigner
+                ? 'signature_signer'
               : 'past_participant'
       : 'relationship_required';
 
@@ -1465,6 +1531,7 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
         ...relationship,
         isCurrentHolder: isHolder,
         isStepAssignee: isAssigned,
+        isSignatureSigner,
       },
       reason,
     };
@@ -1546,7 +1613,15 @@ async function listDocuments(pool, user, filters = {}) {
   params.push(limitVal, offsetVal);
 
   const result = await pool.query(
-    `SELECT d.*, creator.full_name AS creator_name
+    `SELECT d.*, creator.full_name AS creator_name,
+            COALESCE(
+              ARRAY(
+                SELECT DISTINCT sf.assigned_signer_id::text
+                FROM docutracker_signature_fields sf
+                WHERE sf.document_id = d.id
+              ),
+              '{}'::text[]
+            ) AS signature_signer_ids
      FROM docutracker_documents d
      LEFT JOIN users creator ON creator.id = d.created_by
      ${whereSql}

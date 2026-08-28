@@ -1,8 +1,12 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/escalation_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
@@ -314,6 +318,132 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>> getDocumentBuilder(
+    String documentId,
+  ) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/documents/$documentId/builder',
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('Document builder data is unavailable');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocumentBuilderData.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>>
+  saveDocumentBuilder({
+    required String documentId,
+    required List<DocuTrackerDocumentPage> pages,
+    required List<DocuTrackerSignatureField> signatureFields,
+    required int revision,
+  }) async {
+    try {
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '$_base/documents/$documentId/builder',
+        data: <String, dynamic>{
+          'pages': pages.map((page) => page.toJson()).toList(growable: false),
+          'signature_fields': signatureFields
+              .map((field) => field.toLayoutJson())
+              .toList(growable: false),
+          'revision': revision,
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The document layout was not saved');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocumentBuilderData.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<List<DocuTrackerSignatureAsset>>>
+  listSavedSignatureAssets() async {
+    try {
+      final response = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/signature-assets',
+      );
+      final assets = (response.data ?? const <dynamic>[])
+          .whereType<Map>()
+          .map(
+            (item) => DocuTrackerSignatureAsset.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList(growable: false);
+      return DocuTrackerSuccess(assets);
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSignatureAsset>> createSignatureAsset({
+    required Uint8List imageBytes,
+    required String mimeType,
+    required String sourceType,
+    String? displayName,
+    bool saveForReuse = false,
+  }) async {
+    try {
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/signature-assets',
+        data: <String, dynamic>{
+          'image_base64': base64Encode(imageBytes),
+          'mime_type': mimeType,
+          'source_type': sourceType,
+          if (displayName != null) 'display_name': displayName,
+          'is_saved': saveForReuse,
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The signature was not saved');
+      }
+      return DocuTrackerSuccess(DocuTrackerSignatureAsset.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>> signDocumentField({
+    required String documentId,
+    required String fieldId,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    try {
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/documents/$documentId/signature-fields/$fieldId/sign',
+        data: <String, dynamic>{
+          if (signatureAssetId != null)
+            'signature_asset_id': signatureAssetId
+          else ...<String, dynamic>{
+            'image_base64': base64Encode(imageBytes ?? Uint8List(0)),
+            'mime_type': mimeType,
+            'source_type': sourceType,
+            'is_saved': saveForReuse,
+          },
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The document was not signed');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocumentBuilderData.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
   Future<List<DocumentHistoryEntry>> listDocumentHistory(
     String documentId,
   ) async {
@@ -606,10 +736,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     List<DocumentType> allTypes;
     try {
       final configs = await getRoutingConfigs();
-      allTypes = configs
-          .map((config) => config.documentType)
-          .toSet()
-          .toList()
+      allTypes = configs.map((config) => config.documentType).toSet().toList()
         ..sort(
           (a, b) => a.displayName.toLowerCase().compareTo(
             b.displayName.toLowerCase(),

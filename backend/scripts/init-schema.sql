@@ -1842,7 +1842,12 @@ CREATE TABLE IF NOT EXISTS docutracker_document_history (
   is_overdue_log BOOLEAN DEFAULT false,
   is_escalation_log BOOLEAN DEFAULT false,
   escalation_level INT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_docutracker_history_action
+    CHECK (action IS NULL OR action IN (
+      'created', 'submitted', 'forwarded', 'approved', 'rejected', 'returned',
+      'metadata_updated', 'remark', 'escalated', 'overdue', 'assigned', 'signed'
+    ))
 );
 
 CREATE TABLE IF NOT EXISTS docutracker_routing_records (
@@ -1920,6 +1925,59 @@ CREATE TABLE IF NOT EXISTS docutracker_escalation_configs (
     CHECK (max_escalation_level >= 1)
 );
 
+CREATE TABLE IF NOT EXISTS docutracker_document_contents (
+  document_id UUID PRIMARY KEY REFERENCES docutracker_documents(id) ON DELETE CASCADE,
+  format_version INT NOT NULL DEFAULT 1 CHECK (format_version > 0),
+  pages JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(pages) = 'array'),
+  page_size TEXT NOT NULL DEFAULT 'A4' CHECK (page_size = 'A4'),
+  margins JSONB NOT NULL DEFAULT
+    '{"top":0.08,"right":0.08,"bottom":0.08,"left":0.08}'::jsonb
+    CHECK (jsonb_typeof(margins) = 'object'),
+  revision INT NOT NULL DEFAULT 1 CHECK (revision > 0),
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_signature_assets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  image_bytes BYTEA NOT NULL CHECK (octet_length(image_bytes) BETWEEN 1 AND 2097152),
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('image/png', 'image/jpeg')),
+  source_type TEXT NOT NULL CHECK (source_type IN ('drawn', 'uploaded')),
+  display_name TEXT,
+  is_saved BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_signature_fields (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
+  page_number INT NOT NULL CHECK (page_number > 0),
+  position_x DOUBLE PRECISION NOT NULL CHECK (position_x >= 0 AND position_x <= 1),
+  position_y DOUBLE PRECISION NOT NULL CHECK (position_y >= 0 AND position_y <= 1),
+  width DOUBLE PRECISION NOT NULL CHECK (width > 0 AND width <= 1 AND position_x + width <= 1),
+  height DOUBLE PRECISION NOT NULL CHECK (height > 0 AND height <= 1 AND position_y + height <= 1),
+  assigned_signer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  label TEXT NOT NULL DEFAULT 'Sign Here' CHECK (length(btrim(label)) BETWEEN 1 AND 80),
+  signature_asset_id UUID REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
+  signed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+  signer_name_snapshot TEXT,
+  signed_at TIMESTAMPTZ,
+  locked_at TIMESTAMPTZ,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (signature_asset_id IS NULL AND signed_by IS NULL AND signed_at IS NULL
+      AND locked_at IS NULL AND signer_name_snapshot IS NULL)
+    OR
+    (signature_asset_id IS NOT NULL AND signed_by IS NOT NULL AND signed_at IS NOT NULL
+      AND locked_at IS NOT NULL AND signer_name_snapshot IS NOT NULL)
+  )
+);
+
 CREATE TABLE IF NOT EXISTS docutracker_transition_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
@@ -1948,6 +2006,14 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_documents_holder_status_deadline
 CREATE INDEX IF NOT EXISTS idx_docutracker_documents_deadline_active
   ON docutracker_documents(deadline_time)
   WHERE status IN ('pending', 'in_review', 'escalated', 'overdue');
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_signature_assets_owner_saved
+  ON docutracker_signature_assets(owner_user_id, is_saved, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_document_page
+  ON docutracker_signature_fields(document_id, page_number, created_at);
+CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_signer_pending
+  ON docutracker_signature_fields(assigned_signer_id, document_id)
+  WHERE signed_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_docutracker_routing_config_versions_type_version_desc
   ON docutracker_routing_config_versions(document_type, version DESC);

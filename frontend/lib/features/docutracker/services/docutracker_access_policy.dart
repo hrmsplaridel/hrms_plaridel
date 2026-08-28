@@ -40,7 +40,8 @@ abstract final class DocuTrackerAccessPolicy {
   }) {
     final uid = userId.trim();
     if (uid.isEmpty) return false;
-    return document.createdBy == uid;
+    return document.createdBy == uid ||
+        document.signatureSignerIds.any((id) => id == uid);
   }
 
   static List<DocuTrackerDocument> filterDocumentsForMobileUser(
