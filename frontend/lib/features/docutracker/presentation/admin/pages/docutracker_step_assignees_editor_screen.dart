@@ -378,6 +378,14 @@ class _DocuTrackerStepAssigneesEditorScreenState
           }
         }
       }
+      if (list.isNotEmpty && !list.any((a) => a.isPrimary)) {
+        final enabledIndex = list.indexWhere((a) => a.isEnabled);
+        final replacementIndex = enabledIndex < 0 ? 0 : enabledIndex;
+        list[replacementIndex] = list[replacementIndex].copyWith(
+          isPrimary: true,
+          isEnabled: true,
+        );
+      }
       final backups = list.where((a) => !a.isPrimary).toList();
       for (var i = 0; i < backups.length; i++) {
         final b = backups[i];
@@ -618,16 +626,26 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                     );
                                   });
                                 },
-                                onRemove: () {
-                                  setModalState(() {
-                                    draft.removeAt(i);
-                                    normalizePrimaryAndRanks(draft);
-                                  });
-                                },
+                                onRemove: draft.length == 1
+                                    ? null
+                                    : () {
+                                        setModalState(() {
+                                          draft.removeAt(i);
+                                          normalizePrimaryAndRanks(draft);
+                                        });
+                                      },
                               ),
                               const SizedBox(height: 10),
                             ],
                           ],
+                          if (draft.length == 1)
+                            Text(
+                              'Each workflow step must keep at least one primary assignee. Add a replacement before removing this user.',
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
                           if (youMustHavePrimary)
                             Text(
                               'Pick exactly one primary user.',
@@ -1024,7 +1042,7 @@ class _AssigneeEditorCard extends StatelessWidget {
   final VoidCallback onSetPrimary;
   final ValueChanged<bool> onToggleEnabled;
   final void Function(String action, bool value) onToggleAction;
-  final VoidCallback onRemove;
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
