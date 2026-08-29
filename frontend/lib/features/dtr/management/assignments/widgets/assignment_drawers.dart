@@ -49,7 +49,7 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
   Widget _buildDrawerFooter(BuildContext drawerContext) {
     final isEditing = _selectedAssignment != null;
     final canDeleteMistake =
-        isEditing && _isFutureAssignment(_selectedAssignment!.effectiveFrom);
+        isEditing && _selectedAssignment!.canPermanentlyDelete;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -246,7 +246,7 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
     final canDeactivate =
         isEditing && (_selectedDesignation?.isActive ?? false);
     final canDeleteMistake =
-        isEditing && _isFutureAssignment(_selectedDesignation!.effectiveFrom);
+        isEditing && _selectedDesignation!.canPermanentlyDelete;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(

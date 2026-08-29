@@ -27,6 +27,12 @@ String _userFacingApiError(Object e) {
   return e.toString();
 }
 
+DateTime? _assignmentDateFromApi(dynamic value) {
+  final text = value?.toString().trim() ?? '';
+  if (text.isEmpty) return null;
+  return DateTime.tryParse(text);
+}
+
 /// Assignment management screen: employee list + assignment CRUD.
 class ManageAssignment extends StatefulWidget {
   const ManageAssignment({
@@ -52,6 +58,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   String _assignmentStatusFilter = 'Current';
   String? _selectedEmployeeId;
   String? _selectedEmployeeName;
+  DateTime? _officialHrmsDate;
+  DateTime? _assignmentPickerFirstDate;
+  DateTime? _assignmentPickerLastDate;
   List<_EmployeeSummary> _employees = [];
   bool _loadingEmployees = false;
   int _pageIndex = 0;
@@ -515,6 +524,33 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _loadingPolicyAssignments = true;
     });
     try {
+      final contextRes = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/assignments/context',
+        queryParameters: {'employee_id': employeeId},
+      );
+      if (!mounted ||
+          !_assignmentRequestGuard.accepts(
+            request,
+            _assignmentQueryContext(),
+          )) {
+        return;
+      }
+      final assignmentContext = contextRes.data ?? const <String, dynamic>{};
+      final officialDate = _assignmentDateFromApi(
+        assignmentContext['official_date'],
+      );
+      final pickerFirstDate = _assignmentDateFromApi(
+        assignmentContext['first_date'],
+      );
+      final pickerLastDate = _assignmentDateFromApi(
+        assignmentContext['last_date'],
+      );
+      if (officialDate == null ||
+          pickerFirstDate == null ||
+          pickerLastDate == null) {
+        throw const FormatException('Invalid assignment date context');
+      }
+
       final policyRes = await ApiClient.instance.get<List<dynamic>>(
         '/api/policy-assignments',
         queryParameters: {
@@ -588,6 +624,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               : null,
           isActive: m['is_active'] as bool? ?? true,
           computedStatus: m['computed_status']?.toString() ?? 'Current',
+          canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
           remarks: m['remarks'] as String?,
         );
       }).toList();
@@ -597,6 +634,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         _loadingAssignments = false;
         _loadingPolicyAssignments = false;
         _selectedAssignment = null;
+        _officialHrmsDate = officialDate;
+        _assignmentPickerFirstDate = pickerFirstDate;
+        _assignmentPickerLastDate = pickerLastDate;
       });
     } catch (e) {
       debugPrint('Load assignments failed: $e');
@@ -665,6 +705,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               : null,
           isActive: m['is_active'] as bool? ?? true,
           computedStatus: m['computed_status']?.toString() ?? 'Current',
+          canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
           remarks: m['remarks'] as String?,
           departmentName: m['department_name'] as String?,
           positionName: m['position_name'] as String?,
@@ -811,6 +852,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     _updateAssignmentFormState(() {
       _selectedEmployeeId = employee.id;
       _selectedEmployeeName = employee.fullName;
+      _officialHrmsDate = null;
+      _assignmentPickerFirstDate = null;
+      _assignmentPickerLastDate = null;
       _selectedAssignment = null;
       _selectedDeptId = null;
       _selectedPositionId = null;
@@ -836,6 +880,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     _designationRequestGuard.invalidate();
     _selectedEmployeeId = null;
     _selectedEmployeeName = null;
+    _officialHrmsDate = null;
+    _assignmentPickerFirstDate = null;
+    _assignmentPickerLastDate = null;
     _assignments = [];
     _policyAssignments = [];
     _designations = [];
@@ -1270,18 +1317,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
   }
 
-  bool _isFutureAssignment(DateTime effectiveFrom) {
-    return DateUtils.dateOnly(
-      effectiveFrom,
-    ).isAfter(DateUtils.dateOnly(DateTime.now()));
-  }
-
   Future<bool> _deleteMistakenAssignment() async {
     final assignment = _selectedAssignment;
-    if (assignment == null || !_isFutureAssignment(assignment.effectiveFrom)) {
+    if (assignment == null || !assignment.canPermanentlyDelete) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Only a future assignment can be permanently deleted.'),
+          content: Text(
+            'This assignment is no longer eligible for permanent deletion.',
+          ),
         ),
       );
       return false;
@@ -1458,12 +1501,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   Future<bool> _deleteMistakenDesignation() async {
     final designation = _selectedDesignation;
-    if (designation == null ||
-        !_isFutureAssignment(designation.effectiveFrom)) {
+    if (designation == null || !designation.canPermanentlyDelete) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Only a future additional position can be permanently deleted.',
+            'This additional position is no longer eligible for permanent deletion.',
           ),
         ),
       );

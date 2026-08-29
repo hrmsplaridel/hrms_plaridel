@@ -672,6 +672,17 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
     DateTime? value,
     ValueChanged<DateTime> onChanged,
   ) {
+    final firstDate = _assignmentPickerFirstDate;
+    final lastDate = _assignmentPickerLastDate;
+    final pickerEnabled = firstDate != null && lastDate != null;
+
+    DateTime clampToRange(DateTime candidate) {
+      final date = DateUtils.dateOnly(candidate);
+      if (date.isBefore(firstDate!)) return firstDate;
+      if (date.isAfter(lastDate!)) return lastDate;
+      return date;
+    }
+
     return SizedBox(
       width: 160,
       child: Column(
@@ -687,15 +698,23 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
           ),
           const SizedBox(height: 6),
           InkWell(
-            onTap: () async {
-              final d = await showDatePicker(
-                context: context,
-                initialDate: value ?? DateTime.now(),
-                firstDate: DateTime(2020),
-                lastDate: DateTime(2030),
-              );
-              if (d != null) onChanged(d);
-            },
+            onTap: !pickerEnabled
+                ? null
+                : () async {
+                    final initialDate = clampToRange(
+                      value ?? _officialHrmsDate ?? firstDate,
+                    );
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: initialDate,
+                      currentDate: clampToRange(
+                        _officialHrmsDate ?? initialDate,
+                      ),
+                      firstDate: firstDate,
+                      lastDate: lastDate,
+                    );
+                    if (d != null) onChanged(d);
+                  },
             borderRadius: BorderRadius.circular(8),
             child: InputDecorator(
               decoration: _inputDecoration('Select date').copyWith(

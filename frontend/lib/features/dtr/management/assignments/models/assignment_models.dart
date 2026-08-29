@@ -35,6 +35,7 @@ class _AssignmentRecord {
     this.effectiveTo,
     required this.isActive,
     required this.computedStatus,
+    required this.canPermanentlyDelete,
     this.remarks,
   });
   final String id;
@@ -50,6 +51,7 @@ class _AssignmentRecord {
   final DateTime? effectiveTo;
   final bool isActive;
   final String computedStatus;
+  final bool canPermanentlyDelete;
   final String? remarks;
 }
 
@@ -85,6 +87,7 @@ class _DesignationRecord {
     this.effectiveTo,
     required this.isActive,
     required this.computedStatus,
+    required this.canPermanentlyDelete,
     this.remarks,
     this.departmentName,
     this.positionName,
@@ -98,6 +101,7 @@ class _DesignationRecord {
   final DateTime? effectiveTo;
   final bool isActive;
   final String computedStatus;
+  final bool canPermanentlyDelete;
   final String? remarks;
   final String? departmentName;
   final String? positionName;
