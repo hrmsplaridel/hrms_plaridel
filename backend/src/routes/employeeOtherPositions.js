@@ -104,7 +104,6 @@ router.get('/', protect, async (req, res) => {
        LEFT JOIN departments d ON d.id = eop.department_id
        JOIN positions p ON p.id = eop.position_id
        WHERE ${where} ${statusWhere}
-         AND (u.is_active IS NULL OR u.is_active = true)
        ORDER BY eop.is_active DESC, eop.effective_from DESC, eop.created_at DESC`,
       params,
     );

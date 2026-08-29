@@ -71,6 +71,53 @@ test('employee cannot search the additional-position employee directory', async 
   });
 });
 
+test('admin can read an inactive employee historical additional positions', async () => {
+  const employeeId = '22222222-2222-4222-8222-222222222222';
+  let executedSql = '';
+  const pool = {
+    async query(sql) {
+      executedSql = String(sql);
+      return {
+        rows: [{
+          id: '33333333-3333-4333-8333-333333333333',
+          employee_id: employeeId,
+          department_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          position_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          effective_from: '2026-01-01',
+          effective_to: '2026-06-30',
+          is_active: false,
+          employee_name: 'Maria Santos',
+          department_name: 'Human Resources',
+          position_name: 'Acting Department Head',
+          access_department_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        }],
+      };
+    },
+  };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = '../src/routes/employeeOtherPositions';
+  clearModule(routePath);
+  try {
+    const handler = getHandler(require(routePath));
+    const req = {
+      user: { id: '11111111-1111-4111-8111-111111111111', role: 'admin' },
+      query: { employee_id: employeeId, status: 'Inactive' },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.length, 1);
+    assert.equal(res.body[0].position_name, 'Acting Department Head');
+    assert.match(executedSql, /eop\.is_active = false/i);
+    assert.doesNotMatch(executedSql, /u\.is_active/i);
+  } finally {
+    clearModule(routePath);
+    restoreDb();
+  }
+});
+
 test('supervisor cannot read a primary assignment outside their department', async () => {
   const targetId = '22222222-2222-4222-8222-222222222222';
   const supervisorId = '11111111-1111-4111-8111-111111111111';
