@@ -3,6 +3,11 @@ const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const {
+  assignmentAccessDeniedForRows,
+  filterAssignmentRowsForAccess,
+  resolveAssignmentEmployeeAccess,
+} = require('../services/assignmentAccess');
+const {
   AssignmentHistoryError,
   deactivateAssignmentRecord,
   normalizeChangeReason,
@@ -84,7 +89,6 @@ function mapOtherPositionRow(row) {
 // GET /api/employee-other-positions?position_title=Title&status=Active
 router.get('/', protect, async (req, res) => {
   try {
-    await ensureTable();
     const employeeId = (req.query.employee_id || '').toString().trim();
     const positionTitle = (req.query.position_title || '').toString().trim();
     const status = req.query.status || 'All';
@@ -92,6 +96,15 @@ router.get('/', protect, async (req, res) => {
     if (!employeeId && !positionTitle) {
       return res.status(400).json({ error: 'employee_id or position_title is required' });
     }
+
+    const access = resolveAssignmentEmployeeAccess(req.user, employeeId || null, {
+      allowDirectorySearch: Boolean(positionTitle),
+    });
+    if (!access.allowed) {
+      return res.status(access.statusCode).json({ error: access.error });
+    }
+
+    await ensureTable();
 
     let statusWhere = '';
     if (status === 'Active') {
@@ -130,7 +143,8 @@ router.get('/', protect, async (req, res) => {
               eop.is_active, eop.remarks, eop.created_at, eop.updated_at,
               u.full_name AS employee_name,
               d.name AS department_name,
-              p.name AS position_name
+              p.name AS position_name,
+              COALESCE(eop.department_id, p.department_id) AS access_department_id
        FROM employee_other_positions eop
        JOIN users u ON u.id = eop.employee_id
        LEFT JOIN departments d ON d.id = eop.department_id
@@ -141,7 +155,14 @@ router.get('/', protect, async (req, res) => {
       params,
     );
 
-    res.json(result.rows.map(mapOtherPositionRow));
+    const visibleRows = await filterAssignmentRowsForAccess(pool, access, result.rows);
+    if (assignmentAccessDeniedForRows(access, result.rows, visibleRows)) {
+      return res.status(403).json({
+        error: 'You can only view additional positions within your supervised departments',
+      });
+    }
+
+    res.json(visibleRows.map(mapOtherPositionRow));
   } catch (err) {
     console.error('[employee-other-positions GET]', err);
     res.status(500).json({ error: 'Failed to fetch employee other positions' });

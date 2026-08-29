@@ -8,6 +8,11 @@ const {
 } = require('../services/employeePolicyAssignment');
 const { writeAssignmentHistoryAudit } = require('../services/assignmentHistory');
 const {
+  assignmentAccessDeniedForRows,
+  filterAssignmentRowsForAccess,
+  resolveAssignmentEmployeeAccess,
+} = require('../services/assignmentAccess');
+const {
   queueAssignmentReconciliation,
   rebuildAfterAssignmentCommit,
 } = require('../services/assignmentReconciliation');
@@ -24,8 +29,11 @@ function parseDate(val) {
 // GET /api/policy-assignments?employee_id=uuid&status=Active|Inactive|All
 router.get('/', protect, async (req, res) => {
   try {
-    const employeeId = req.query.employee_id;
-    if (!employeeId) return res.status(400).json({ error: 'employee_id is required' });
+    const access = resolveAssignmentEmployeeAccess(req.user, req.query.employee_id);
+    if (!access.allowed) {
+      return res.status(access.statusCode).json({ error: access.error });
+    }
+    const employeeId = access.employeeId;
     const status = req.query.status || 'Active';
     let statusWhere = '';
     if (status === 'Active') statusWhere = 'AND (pa.is_active IS NULL OR pa.is_active = true)';
@@ -42,8 +50,15 @@ router.get('/', protect, async (req, res) => {
       [employeeId]
     );
 
+    const visibleRows = await filterAssignmentRowsForAccess(pool, access, result.rows);
+    if (assignmentAccessDeniedForRows(access, result.rows, visibleRows)) {
+      return res.status(403).json({
+        error: 'You can only view policy assignments within your supervised departments',
+      });
+    }
+
     res.json(
-      result.rows.map((r) => ({
+      visibleRows.map((r) => ({
         id: r.id,
         attendance_policy_id: r.attendance_policy_id,
         employee_id: r.employee_id,

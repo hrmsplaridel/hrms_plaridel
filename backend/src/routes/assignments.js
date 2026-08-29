@@ -2,7 +2,11 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
-const { resolveAssignmentEmployeeAccess } = require('../services/assignmentAccess');
+const {
+  assignmentAccessDeniedForRows,
+  filterAssignmentRowsForAccess,
+  resolveAssignmentEmployeeAccess,
+} = require('../services/assignmentAccess');
 const {
   AssignmentTransitionError,
   createAssignmentTransition,
@@ -101,7 +105,14 @@ router.get('/', protect, async (req, res) => {
       [employeeId]
     );
 
-    res.json(result.rows.map((r) => {
+    const visibleRows = await filterAssignmentRowsForAccess(pool, access, result.rows);
+    if (assignmentAccessDeniedForRows(access, result.rows, visibleRows)) {
+      return res.status(403).json({
+        error: 'You can only view assignments within your supervised departments',
+      });
+    }
+
+    res.json(visibleRows.map((r) => {
       const wd = r.shift_working_days;
       const workingDays = Array.isArray(wd)
         ? wd.map((x) => (typeof x === 'number' ? x : parseInt(x, 10))).filter((x) => Number.isFinite(x))
