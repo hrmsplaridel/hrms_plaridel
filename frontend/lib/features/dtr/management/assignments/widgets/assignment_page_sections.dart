@@ -106,27 +106,7 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                     : Colors.transparent,
                 child: InkWell(
                   onTap: () {
-                    _updateAssignmentFormState(() {
-                      _selectedEmployeeId = e.id;
-                      _selectedEmployeeName = e.fullName;
-                      _selectedAssignment = null;
-                      _selectedDeptId = null;
-                      _selectedPositionId = null;
-                      _selectedShiftId = null;
-                      _selectedPolicyId = null;
-                      _effectiveFrom = null;
-                      _effectiveTo = null;
-                      _selectedDesignation = null;
-                      _designationDeptId = null;
-                      _designationPositionId = null;
-                      _designationEffectiveFrom = null;
-                      _designationEffectiveTo = null;
-                      _designationIsActive = true;
-                      _remarksController.clear();
-                      _designationRemarksController.clear();
-                    });
-                    _loadAssignments();
-                    _loadDesignations();
+                    _selectEmployee(e);
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
