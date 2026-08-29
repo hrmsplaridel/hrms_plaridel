@@ -66,6 +66,8 @@ async function validateAssignmentSelection(
        (u.id IS NOT NULL) AS employee_exists,
        COALESCE(u.is_active, false) AS employee_is_active,
        COALESCE(u.employment_status, 'active') AS employee_status,
+       u.date_hired::text AS employee_date_hired,
+       u.separation_date::text AS employee_separation_date,
        (d.id IS NOT NULL) AS department_exists,
        COALESCE(d.is_active, false) AS department_is_active,
        (p.id IS NOT NULL) AS position_exists,
@@ -127,7 +129,42 @@ async function validateAssignmentSelection(
     departmentId: department,
     positionId: position,
     shiftId: shift,
+    employeeIsActive: row.employee_is_active === true,
+    employeeStatus: String(row.employee_status || 'active').toLowerCase(),
+    employeeDateHired: row.employee_date_hired || null,
+    employeeSeparationDate: row.employee_separation_date || null,
   };
+}
+
+function validateEmployeeServiceCoverage(
+  selection,
+  { effectiveFrom, effectiveTo }
+) {
+  const hiredOn = selection.employeeDateHired;
+  const separatedOn = selection.employeeSeparationDate;
+
+  if (hiredOn && effectiveFrom < hiredOn) {
+    throw new AssignmentTransitionError(
+      `Assignment coverage cannot begin before the employee's hire date (${hiredOn})`,
+      409
+    );
+  }
+
+  if (separatedOn && (!effectiveTo || effectiveTo > separatedOn)) {
+    throw new AssignmentTransitionError(
+      `Assignment coverage cannot extend beyond the employee's separation date (${separatedOn})`,
+      409
+    );
+  }
+
+  const employeeIsActive =
+    selection.employeeIsActive && selection.employeeStatus === 'active';
+  if (!employeeIsActive && !separatedOn) {
+    throw new AssignmentTransitionError(
+      'Assignment coverage cannot be changed for an inactive employee without a separation date',
+      409
+    );
+  }
 }
 
 async function closeOverlappingPredecessor(
@@ -217,6 +254,12 @@ async function createAssignmentTransition(
     shiftId,
     requireActiveReferences: isActive === true,
   });
+  if (isActive) {
+    validateEmployeeServiceCoverage(selection, {
+      effectiveFrom: from,
+      effectiveTo: to,
+    });
+  }
 
   let closedPredecessor = null;
   if (isActive) {
@@ -307,15 +350,29 @@ async function updateAssignmentTransition(
     changes.positionId !== undefined ||
     changes.shiftId !== undefined;
   const reactivating = existing.is_active === false && isActive;
+  const coverageChanged =
+    from !== existing.effective_from || to !== existing.effective_to;
+  let validatedSelection = null;
   if (selectionChanged || reactivating) {
-    await validateAssignmentSelection(db, {
+    validatedSelection = await validateAssignmentSelection(db, {
       ...selection,
       requireActiveReferences: isActive,
+    });
+  } else if (isActive && coverageChanged) {
+    validatedSelection = await validateAssignmentSelection(db, {
+      ...selection,
+      requireActiveReferences: false,
     });
   } else if (isActive) {
     cleanRequiredSelectionId(selection.departmentId, 'Department');
     cleanRequiredSelectionId(selection.positionId, 'Position');
     cleanRequiredSelectionId(selection.shiftId, 'Shift');
+  }
+  if (isActive && validatedSelection) {
+    validateEmployeeServiceCoverage(validatedSelection, {
+      effectiveFrom: from,
+      effectiveTo: to,
+    });
   }
 
   let closedPredecessor = null;

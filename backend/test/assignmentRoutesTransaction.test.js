@@ -351,6 +351,25 @@ test('moving a future transfer later restores its predecessor in the update tran
       if (normalized.startsWith('SELECT id, employee_id')) {
         return { rowCount: 1, rows: [previous] };
       }
+      if (normalized.includes('AS employee_exists')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            employee_exists: true,
+            employee_is_active: true,
+            employee_status: 'active',
+            employee_date_hired: '2020-01-01',
+            employee_separation_date: null,
+            department_exists: true,
+            department_is_active: true,
+            position_exists: true,
+            position_is_active: true,
+            position_department_id: previous.department_id,
+            shift_exists: true,
+            shift_is_active: true,
+          }],
+        };
+      }
       if (normalized.startsWith('SELECT id, effective_from')) {
         return { rowCount: 0, rows: [] };
       }
