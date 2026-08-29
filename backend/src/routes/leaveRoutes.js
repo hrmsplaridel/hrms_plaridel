@@ -165,45 +165,7 @@ async function findAssignmentProfileByUserIdAtDate(db, userId, effectiveDate = n
   return result.rows[0] || null;
 }
 
-let ensureOtherPositionsPromise = null;
-
-async function ensureEmployeeOtherPositionsTable(db) {
-  if (!ensureOtherPositionsPromise) {
-    ensureOtherPositionsPromise = (async () => {
-      await db.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
-      await db.query(`
-        CREATE TABLE IF NOT EXISTS employee_other_positions (
-          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-          employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
-          position_id UUID NOT NULL REFERENCES positions(id) ON DELETE RESTRICT,
-          effective_from DATE NOT NULL,
-          effective_to DATE,
-          is_active BOOLEAN NOT NULL DEFAULT true,
-          remarks TEXT,
-          created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-      `);
-      await db.query(`
-        CREATE INDEX IF NOT EXISTS idx_employee_other_positions_employee
-          ON employee_other_positions(employee_id, effective_from DESC)
-      `);
-      await db.query(`
-        CREATE INDEX IF NOT EXISTS idx_employee_other_positions_position
-          ON employee_other_positions(position_id)
-      `);
-    })().catch((err) => {
-      ensureOtherPositionsPromise = null;
-      throw err;
-    });
-  }
-  return ensureOtherPositionsPromise;
-}
-
 async function findActiveEmployeeByPositionTitle(db, positionTitle) {
-  await ensureEmployeeOtherPositionsTable(db);
   const result = await db.query(
     `WITH candidates AS (
        SELECT u.id AS user_id,

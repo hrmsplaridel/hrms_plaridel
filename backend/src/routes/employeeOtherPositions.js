@@ -23,45 +23,6 @@ const {
 const router = express.Router();
 const protect = [authMiddleware];
 
-let ensurePromise = null;
-
-async function ensureEmployeeOtherPositionsTable() {
-  await pool.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS employee_other_positions (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
-      position_id UUID NOT NULL REFERENCES positions(id) ON DELETE RESTRICT,
-      effective_from DATE NOT NULL,
-      effective_to DATE,
-      is_active BOOLEAN NOT NULL DEFAULT true,
-      remarks TEXT,
-      created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_employee_other_positions_employee
-      ON employee_other_positions(employee_id, effective_from DESC)
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_employee_other_positions_position
-      ON employee_other_positions(position_id)
-  `);
-}
-
-function ensureTable() {
-  if (!ensurePromise) {
-    ensurePromise = ensureEmployeeOtherPositionsTable().catch((err) => {
-      ensurePromise = null;
-      throw err;
-    });
-  }
-  return ensurePromise;
-}
-
 function mapOtherPositionRow(row) {
   return {
     id: row.id,
@@ -98,8 +59,6 @@ router.get('/', protect, async (req, res) => {
     if (!access.allowed) {
       return res.status(access.statusCode).json({ error: access.error });
     }
-
-    await ensureTable();
 
     let statusWhere = '';
     if (status === 'Active') {
@@ -169,7 +128,6 @@ router.post('/', protect, requireAdmin, async (req, res) => {
   let client;
   let transactionStarted = false;
   try {
-    await ensureTable();
     const {
       employee_id,
       department_id,
@@ -228,7 +186,6 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
   let client;
   let transactionStarted = false;
   try {
-    await ensureTable();
     const { id } = req.params;
     const {
       department_id,
@@ -315,7 +272,6 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
   let client;
   try {
-    await ensureTable();
     client = await pool.connect();
     await client.query('BEGIN');
     try {
@@ -351,7 +307,6 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
 router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
   let client;
   try {
-    await ensureTable();
     client = await pool.connect();
     await client.query('BEGIN');
     try {

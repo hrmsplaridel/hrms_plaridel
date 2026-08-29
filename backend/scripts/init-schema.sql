@@ -294,6 +294,42 @@ CREATE INDEX IF NOT EXISTS idx_assignments_employee_effective_range
   WHERE is_active = true;
 
 -- =========================================
+-- EMPLOYEE OTHER POSITIONS / DESIGNATIONS
+-- =========================================
+CREATE TABLE IF NOT EXISTS employee_other_positions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  department_id UUID NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+  position_id UUID NOT NULL REFERENCES positions(id) ON DELETE RESTRICT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  remarks TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_employee_other_position_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_employee_other_positions_employee
+  ON employee_other_positions (employee_id, effective_from DESC);
+
+CREATE INDEX IF NOT EXISTS idx_employee_other_positions_position
+  ON employee_other_positions (position_id);
+
+CREATE INDEX IF NOT EXISTS idx_employee_other_positions_duplicate_lookup
+  ON employee_other_positions (
+    employee_id,
+    department_id,
+    position_id,
+    effective_from,
+    effective_to
+  )
+  WHERE is_active = true;
+
+-- =========================================
 -- POLICY ASSIGNMENTS
 -- =========================================
 CREATE TABLE IF NOT EXISTS policy_assignments (
