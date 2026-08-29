@@ -28,6 +28,12 @@ const {
   queueAssignmentReconciliation,
   rebuildAfterAssignmentCommit,
 } = require('../services/assignmentReconciliation');
+const {
+  AssignmentStatusError,
+  assignmentStatusContext,
+  assignmentStatusWhereSql,
+  computedAssignmentStatusSql,
+} = require('../services/assignmentStatus');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -72,7 +78,7 @@ function assignmentComputationChanged(before, after) {
   ].some((key) => String(before[key] ?? '') !== String(after[key] ?? ''));
 }
 
-// GET /api/assignments?employee_id=uuid - list assignments for employee (Schema v2: effective_from/to, override times)
+// GET /api/assignments?employee_id=uuid&status=Current|Upcoming|Expired|Archived|All
 router.get('/', protect, async (req, res) => {
   try {
     const access = resolveAssignmentEmployeeAccess(req.user, req.query.employee_id);
@@ -80,11 +86,12 @@ router.get('/', protect, async (req, res) => {
       return res.status(access.statusCode).json({ error: access.error });
     }
     const employeeId = access.employeeId;
-    const status = req.query.status || 'Active';
-
-    let statusWhere = '';
-    if (status === 'Active') statusWhere = 'AND (a.is_active IS NULL OR a.is_active = true)';
-    else if (status === 'Inactive') statusWhere = 'AND a.is_active = false';
+    const statusContext = assignmentStatusContext(req.query.status);
+    const statusWhere = assignmentStatusWhereSql(
+      'a',
+      statusContext.status,
+      '$2'
+    );
 
     const result = await pool.query(
       `SELECT a.id, a.employee_id, a.department_id, a.position_id, a.shift_id,
@@ -92,6 +99,7 @@ router.get('/', protect, async (req, res) => {
               a.effective_from::text AS effective_from,
               a.effective_to::text AS effective_to,
               a.is_active, a.remarks,
+              ${computedAssignmentStatusSql('a', '$2')} AS computed_status,
               d.name AS department_name, p.name AS position_name, s.name AS shift_name,
               s.start_time AS shift_start_time, s.end_time AS shift_end_time,
               s.break_end AS shift_break_end, s.punch_mode,
@@ -102,7 +110,7 @@ router.get('/', protect, async (req, res) => {
        LEFT JOIN shifts s ON a.shift_id = s.id
        WHERE a.employee_id = $1 ${statusWhere}
        ORDER BY a.effective_from DESC`,
-      [employeeId]
+      [employeeId, statusContext.today]
     );
 
     const visibleRows = await filterAssignmentRowsForAccess(pool, access, result.rows);
@@ -126,6 +134,7 @@ router.get('/', protect, async (req, res) => {
         effective_from: r.effective_from,
         effective_to: r.effective_to,
         is_active: r.is_active ?? true,
+        computed_status: r.computed_status,
         remarks: r.remarks,
         department_name: r.department_name,
         position_name: r.position_name,
@@ -139,6 +148,9 @@ router.get('/', protect, async (req, res) => {
       };
     }));
   } catch (err) {
+    if (err instanceof AssignmentStatusError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[assignments GET]', err);
     res.status(500).json({ error: 'Failed to fetch assignments' });
   }

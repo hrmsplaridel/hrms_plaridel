@@ -34,6 +34,7 @@ class _AssignmentRecord {
     required this.effectiveFrom,
     this.effectiveTo,
     required this.isActive,
+    required this.computedStatus,
     this.remarks,
   });
   final String id;
@@ -48,6 +49,7 @@ class _AssignmentRecord {
   final DateTime effectiveFrom;
   final DateTime? effectiveTo;
   final bool isActive;
+  final String computedStatus;
   final String? remarks;
 }
 
@@ -60,6 +62,7 @@ class _PolicyAssignmentRecord {
     required this.effectiveFrom,
     this.effectiveTo,
     required this.isActive,
+    required this.computedStatus,
   });
 
   final String id;
@@ -68,6 +71,7 @@ class _PolicyAssignmentRecord {
   final DateTime effectiveFrom;
   final DateTime? effectiveTo;
   final bool isActive;
+  final String computedStatus;
 }
 
 /// Extra role/designation record that can coexist with the primary assignment.
@@ -80,6 +84,7 @@ class _DesignationRecord {
     required this.effectiveFrom,
     this.effectiveTo,
     required this.isActive,
+    required this.computedStatus,
     this.remarks,
     this.departmentName,
     this.positionName,
@@ -92,6 +97,7 @@ class _DesignationRecord {
   final DateTime effectiveFrom;
   final DateTime? effectiveTo;
   final bool isActive;
+  final String computedStatus;
   final String? remarks;
   final String? departmentName;
   final String? positionName;

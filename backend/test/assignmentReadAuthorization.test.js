@@ -86,6 +86,7 @@ test('admin can read an inactive employee historical additional positions', asyn
           effective_from: '2026-01-01',
           effective_to: '2026-06-30',
           is_active: false,
+          computed_status: 'Archived',
           employee_name: 'Maria Santos',
           department_name: 'Human Resources',
           position_name: 'Acting Department Head',
@@ -101,7 +102,7 @@ test('admin can read an inactive employee historical additional positions', asyn
     const handler = getHandler(require(routePath));
     const req = {
       user: { id: '11111111-1111-4111-8111-111111111111', role: 'admin' },
-      query: { employee_id: employeeId, status: 'Inactive' },
+      query: { employee_id: employeeId, status: 'Archived' },
     };
     const res = responseRecorder();
 
@@ -110,7 +111,8 @@ test('admin can read an inactive employee historical additional positions', asyn
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.length, 1);
     assert.equal(res.body[0].position_name, 'Acting Department Head');
-    assert.match(executedSql, /eop\.is_active = false/i);
+    assert.equal(res.body[0].computed_status, 'Archived');
+    assert.match(executedSql, /= 'Archived'/i);
     assert.doesNotMatch(executedSql, /u\.is_active/i);
   } finally {
     clearModule(routePath);

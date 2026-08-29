@@ -49,7 +49,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   final _searchController = TextEditingController();
   String _employeeStatusFilter = 'All';
   String? _employeeDepartmentFilterId;
-  String _assignmentStatusFilter = 'Active';
+  String _assignmentStatusFilter = 'Current';
   String? _selectedEmployeeId;
   String? _selectedEmployeeName;
   List<_EmployeeSummary> _employees = [];
@@ -219,7 +219,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   Map<String, dynamic> _designationQueryContext() => <String, dynamic>{
     'employee_id': _selectedEmployeeId,
-    'status': 'All',
+    'status': _assignmentStatusFilter,
   };
 
   Future<void> _loadEmployees({bool clampPage = true}) async {
@@ -517,7 +517,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     try {
       final policyRes = await ApiClient.instance.get<List<dynamic>>(
         '/api/policy-assignments',
-        queryParameters: {'employee_id': employeeId, 'status': 'Active'},
+        queryParameters: {
+          'employee_id': employeeId,
+          'status': context['status'],
+        },
       );
       if (!mounted ||
           !_assignmentRequestGuard.accepts(
@@ -542,6 +545,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               ? DateTime.tryParse(toDate.toString())
               : null,
           isActive: m['is_active'] as bool? ?? true,
+          computedStatus: m['computed_status']?.toString() ?? 'Current',
         );
       }).toList();
 
@@ -583,6 +587,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               ? DateTime.tryParse(toDate.toString())
               : null,
           isActive: m['is_active'] as bool? ?? true,
+          computedStatus: m['computed_status']?.toString() ?? 'Current',
           remarks: m['remarks'] as String?,
         );
       }).toList();
@@ -630,7 +635,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employee-other-positions',
-        queryParameters: {'employee_id': employeeId, 'status': 'All'},
+        queryParameters: {
+          'employee_id': employeeId,
+          'status': context['status'],
+        },
       );
       if (!mounted ||
           !_designationRequestGuard.accepts(
@@ -656,6 +664,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               ? DateTime.tryParse(toDate.toString())
               : null,
           isActive: m['is_active'] as bool? ?? true,
+          computedStatus: m['computed_status']?.toString() ?? 'Current',
           remarks: m['remarks'] as String?,
           departmentName: m['department_name'] as String?,
           positionName: m['position_name'] as String?,
@@ -722,24 +731,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   String _policyPeriodStatus(_PolicyAssignmentRecord policy) {
-    if (!policy.isActive) return 'Inactive';
-    final today = DateTime.now();
-    final currentDay = DateTime(today.year, today.month, today.day);
-    final from = DateTime(
-      policy.effectiveFrom.year,
-      policy.effectiveFrom.month,
-      policy.effectiveFrom.day,
-    );
-    final to = policy.effectiveTo == null
-        ? null
-        : DateTime(
-            policy.effectiveTo!.year,
-            policy.effectiveTo!.month,
-            policy.effectiveTo!.day,
-          );
-    if (from.isAfter(currentDay)) return 'Upcoming';
-    if (to != null && to.isBefore(currentDay)) return 'Expired';
-    return 'Active';
+    return policy.computedStatus;
   }
 
   String _designationTitle(_DesignationRecord designation) {
@@ -749,24 +741,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   String _designationStatus(_DesignationRecord designation) {
-    if (!designation.isActive) return 'Inactive';
-    final today = DateTime.now();
-    final currentDay = DateTime(today.year, today.month, today.day);
-    final from = DateTime(
-      designation.effectiveFrom.year,
-      designation.effectiveFrom.month,
-      designation.effectiveFrom.day,
-    );
-    final to = designation.effectiveTo == null
-        ? null
-        : DateTime(
-            designation.effectiveTo!.year,
-            designation.effectiveTo!.month,
-            designation.effectiveTo!.day,
-          );
-    if (from.isAfter(currentDay)) return 'Upcoming';
-    if (to != null && to.isBefore(currentDay)) return 'Expired';
-    return 'Active';
+    return designation.computedStatus;
   }
 
   List<Map<String, dynamic>> get _positionsForSelectedDepartment {
@@ -1723,8 +1698,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   void _setAssignmentStatusFilter(String? value) {
-    setState(() => _assignmentStatusFilter = value ?? 'Active');
+    setState(() => _assignmentStatusFilter = value ?? 'Current');
     _loadAssignments();
+    _loadDesignations();
   }
 
   @override

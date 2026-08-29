@@ -16,6 +16,12 @@ const {
   queueAssignmentReconciliation,
   rebuildAfterAssignmentCommit,
 } = require('../services/assignmentReconciliation');
+const {
+  AssignmentStatusError,
+  assignmentStatusContext,
+  assignmentStatusWhereSql,
+  computedAssignmentStatusSql,
+} = require('../services/assignmentStatus');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -26,7 +32,7 @@ function parseDate(val) {
   return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
-// GET /api/policy-assignments?employee_id=uuid&status=Active|Inactive|All
+// GET /api/policy-assignments?employee_id=uuid&status=Current|Upcoming|Expired|Archived|All
 router.get('/', protect, async (req, res) => {
   try {
     const access = resolveAssignmentEmployeeAccess(req.user, req.query.employee_id);
@@ -34,20 +40,23 @@ router.get('/', protect, async (req, res) => {
       return res.status(access.statusCode).json({ error: access.error });
     }
     const employeeId = access.employeeId;
-    const status = req.query.status || 'Active';
-    let statusWhere = '';
-    if (status === 'Active') statusWhere = 'AND (pa.is_active IS NULL OR pa.is_active = true)';
-    else if (status === 'Inactive') statusWhere = 'AND pa.is_active = false';
+    const statusContext = assignmentStatusContext(req.query.status);
+    const statusWhere = assignmentStatusWhereSql(
+      'pa',
+      statusContext.status,
+      '$2'
+    );
 
     const result = await pool.query(
       `SELECT pa.id, pa.attendance_policy_id, pa.employee_id, pa.department_id, pa.shift_id,
               pa.effective_from, pa.effective_to, pa.is_active,
+              ${computedAssignmentStatusSql('pa', '$2')} AS computed_status,
               p.name AS policy_name
        FROM policy_assignments pa
        JOIN attendance_policies p ON p.id = pa.attendance_policy_id
        WHERE pa.employee_id = $1 ${statusWhere}
        ORDER BY pa.effective_from DESC, pa.created_at DESC`,
-      [employeeId]
+      [employeeId, statusContext.today]
     );
 
     const visibleRows = await filterAssignmentRowsForAccess(pool, access, result.rows);
@@ -67,10 +76,14 @@ router.get('/', protect, async (req, res) => {
         effective_from: r.effective_from,
         effective_to: r.effective_to,
         is_active: r.is_active ?? true,
+        computed_status: r.computed_status,
         policy_name: r.policy_name,
       }))
     );
   } catch (err) {
+    if (err instanceof AssignmentStatusError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[policy-assignments GET]', err);
     res.status(500).json({ error: 'Failed to fetch policy assignments' });
   }

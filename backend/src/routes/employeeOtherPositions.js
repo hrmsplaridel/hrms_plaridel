@@ -19,6 +19,12 @@ const {
   permanentlyDeleteFutureAssignment,
   writeAssignmentHistoryAudit,
 } = require('../services/assignmentHistory');
+const {
+  AssignmentStatusError,
+  assignmentStatusContext,
+  assignmentStatusWhereSql,
+  computedAssignmentStatusSql,
+} = require('../services/assignmentStatus');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -32,6 +38,7 @@ function mapOtherPositionRow(row) {
     effective_from: row.effective_from,
     effective_to: row.effective_to,
     is_active: row.is_active,
+    computed_status: row.computed_status,
     remarks: row.remarks,
     department_name: row.department_name,
     position_name: row.position_name,
@@ -41,13 +48,15 @@ function mapOtherPositionRow(row) {
   };
 }
 
-// GET /api/employee-other-positions?employee_id=uuid&status=Active|Inactive|All
-// GET /api/employee-other-positions?position_title=Title&status=Active
+// GET /api/employee-other-positions?employee_id=uuid&status=Current|Upcoming|Expired|Archived|All
+// GET /api/employee-other-positions?position_title=Title&status=Current
 router.get('/', protect, async (req, res) => {
   try {
     const employeeId = (req.query.employee_id || '').toString().trim();
     const positionTitle = (req.query.position_title || '').toString().trim();
-    const status = req.query.status || 'All';
+    const statusContext = assignmentStatusContext(req.query.status, {
+      fallback: 'All',
+    });
 
     if (!employeeId && !positionTitle) {
       return res.status(400).json({ error: 'employee_id or position_title is required' });
@@ -58,23 +67,6 @@ router.get('/', protect, async (req, res) => {
     });
     if (!access.allowed) {
       return res.status(access.statusCode).json({ error: access.error });
-    }
-
-    let statusWhere = '';
-    if (status === 'Active') {
-      statusWhere = `
-        AND eop.is_active = true
-        AND eop.effective_from <= CURRENT_DATE
-        AND (eop.effective_to IS NULL OR eop.effective_to >= CURRENT_DATE)
-      `;
-    } else if (status === 'Inactive') {
-      statusWhere = `
-        AND (
-          eop.is_active = false
-          OR eop.effective_from > CURRENT_DATE
-          OR eop.effective_to < CURRENT_DATE
-        )
-      `;
     }
 
     const whereParts = [];
@@ -88,6 +80,13 @@ router.get('/', protect, async (req, res) => {
       whereParts.push(`LOWER(p.name) = LOWER($${i++})`);
       params.push(positionTitle);
     }
+    const todayPlaceholder = `$${i++}`;
+    params.push(statusContext.today);
+    const statusWhere = assignmentStatusWhereSql(
+      'eop',
+      statusContext.status,
+      todayPlaceholder
+    );
     const where = whereParts.join(' AND ');
 
     const result = await pool.query(
@@ -95,6 +94,7 @@ router.get('/', protect, async (req, res) => {
               eop.effective_from::text AS effective_from,
               eop.effective_to::text AS effective_to,
               eop.is_active, eop.remarks, eop.created_at, eop.updated_at,
+              ${computedAssignmentStatusSql('eop', todayPlaceholder)} AS computed_status,
               u.full_name AS employee_name,
               d.name AS department_name,
               p.name AS position_name,
@@ -117,6 +117,9 @@ router.get('/', protect, async (req, res) => {
 
     res.json(visibleRows.map(mapOtherPositionRow));
   } catch (err) {
+    if (err instanceof AssignmentStatusError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[employee-other-positions GET]', err);
     res.status(500).json({ error: 'Failed to fetch employee other positions' });
   }

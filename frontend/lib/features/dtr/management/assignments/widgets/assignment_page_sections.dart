@@ -434,7 +434,7 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
         style: AppTheme.dashFieldTextStyle(context),
         underline: const SizedBox.shrink(),
         isDense: true,
-        items: ['Active', 'Inactive', 'All']
+        items: ['Current', 'Upcoming', 'Expired', 'Archived', 'All']
             .map(
               (o) => DropdownMenuItem(
                 value: o,
@@ -521,6 +521,10 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                     style: _tableHeaderStyle(context),
                   ),
                 ),
+                SizedBox(
+                  width: 92,
+                  child: Text('Status', style: _tableHeaderStyle(context)),
+                ),
               ],
             ),
           ),
@@ -591,6 +595,10 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                             _effectivePeriodStr(a),
                             style: _tableCellStyle(context),
                           ),
+                        ),
+                        SizedBox(
+                          width: 92,
+                          child: _buildDesignationStatusBadge(a.computedStatus),
                         ),
                       ],
                     ),
@@ -924,10 +932,11 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
 
   Widget _buildDesignationStatusBadge(String status) {
     final Color color = switch (status) {
-      'Active' => const Color(0xFF2E7D32),
+      'Current' => const Color(0xFF2E7D32),
       'Upcoming' => const Color(0xFF1565C0),
       'Expired' => const Color(0xFF6B7280),
-      _ => const Color(0xFFC62828),
+      'Archived' => const Color(0xFFC62828),
+      _ => const Color(0xFF6B7280),
     };
     return Align(
       alignment: Alignment.centerLeft,
