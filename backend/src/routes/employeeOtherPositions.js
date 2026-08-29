@@ -3,6 +3,11 @@ const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const {
+  AdditionalPositionTransitionError,
+  createAdditionalPositionTransition,
+  updateAdditionalPositionTransition,
+} = require('../services/additionalPositionTransition');
+const {
   assignmentAccessDeniedForRows,
   filterAssignmentRowsForAccess,
   resolveAssignmentEmployeeAccess,
@@ -19,16 +24,6 @@ const router = express.Router();
 const protect = [authMiddleware];
 
 let ensurePromise = null;
-
-function parseDate(val) {
-  if (!val) return null;
-  const d = new Date(val);
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-}
-
-function effectiveToBeforeFrom(ef, et) {
-  return ef != null && et != null && et < ef;
-}
 
 async function ensureEmployeeOtherPositionsTable() {
   await pool.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
@@ -171,6 +166,8 @@ router.get('/', protect, async (req, res) => {
 
 // POST /api/employee-other-positions - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
+  let client;
+  let transactionStarted = false;
   try {
     await ensureTable();
     const {
@@ -183,48 +180,46 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       remarks,
     } = req.body;
 
-    if (!employee_id || !position_id || !effective_from) {
-      return res.status(400).json({
-        error: 'employee_id, position_id, and effective_from are required',
-      });
-    }
-
-    const ef = parseDate(effective_from);
-    if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
-    const et = effective_to != null && effective_to !== '' ? parseDate(effective_to) : null;
-    if (effective_to != null && effective_to !== '' && !et) {
-      return res.status(400).json({ error: 'Invalid effective_to' });
-    }
-    if (effectiveToBeforeFrom(ef, et)) {
-      return res.status(400).json({ error: 'effective_to must be on or after effective_from' });
-    }
-
-    const result = await pool.query(
-      `INSERT INTO employee_other_positions (
-         employee_id, department_id, position_id,
-         effective_from, effective_to, is_active, remarks, created_by
-       )
-       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8)
-       RETURNING id, employee_id, department_id, position_id,
-                 effective_from::text AS effective_from,
-                 effective_to::text AS effective_to, is_active, remarks,
-                 created_at, updated_at`,
-      [
-        employee_id,
-        department_id || null,
-        position_id,
-        ef,
-        et,
-        !!is_active,
-        String(remarks || '').trim() || null,
-        req.user?.id || null,
-      ],
-    );
-
-    res.status(201).json(result.rows[0]);
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transactionStarted = true;
+    const position = await createAdditionalPositionTransition(client, {
+      employeeId: employee_id,
+      departmentId: department_id,
+      positionId: position_id,
+      effectiveFrom: effective_from,
+      effectiveTo: effective_to,
+      isActive: is_active === true,
+      remarks,
+      createdBy: req.user?.id,
+    });
+    await writeAssignmentHistoryAudit(client, {
+      actorId: req.user?.id,
+      recordType: 'additional',
+      recordId: position.id,
+      action: 'employee_other_position_created',
+      reason: String(remarks || '').trim() || 'Additional position created',
+      before: null,
+      after: position,
+    });
+    await client.query('COMMIT');
+    transactionStarted = false;
+    res.status(201).json(position);
   } catch (err) {
+    if (transactionStarted) await client.query('ROLLBACK');
+    if (err instanceof AdditionalPositionTransitionError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.code === '22P02' || err.code === '23503') {
+      return res.status(400).json({ error: 'Invalid additional position selection' });
+    }
+    if (err.code === '23505' || err.code === '23P01') {
+      return res.status(409).json({ error: 'Additional position conflicts with an existing record' });
+    }
     console.error('[employee-other-positions POST]', err);
     res.status(500).json({ error: 'Failed to create employee other position' });
+  } finally {
+    client?.release();
   }
 });
 
@@ -245,110 +240,69 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       change_reason,
     } = req.body;
 
-    const updates = [];
-    const values = [];
-    let i = 1;
-
-    if (department_id !== undefined) {
-      updates.push(`department_id = $${i++}`);
-      values.push(department_id || null);
+    if (
+      department_id === undefined &&
+      position_id === undefined &&
+      effective_from === undefined &&
+      effective_to === undefined &&
+      is_active === undefined &&
+      remarks === undefined
+    ) {
+      return res.status(400).json({ error: 'No fields to update' });
     }
-    if (position_id !== undefined) {
-      if (!position_id) return res.status(400).json({ error: 'position_id is required' });
-      updates.push(`position_id = $${i++}`);
-      values.push(position_id);
-    }
-    if (effective_from !== undefined) {
-      const ef = parseDate(effective_from);
-      if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
-      updates.push(`effective_from = $${i++}::date`);
-      values.push(ef);
-    }
-    if (effective_to !== undefined) {
-      const et = effective_to === null || effective_to === '' ? null : parseDate(effective_to);
-      if (effective_to !== null && effective_to !== '' && !et) {
-        return res.status(400).json({ error: 'Invalid effective_to' });
-      }
-      updates.push(`effective_to = $${i++}::date`);
-      values.push(et);
-    }
-    if (is_active !== undefined) {
-      updates.push(`is_active = $${i++}`);
-      values.push(!!is_active);
-    }
-    if (remarks !== undefined) {
-      updates.push(`remarks = $${i++}`);
-      values.push(String(remarks || '').trim() || null);
-    }
-
-    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
 
     client = await pool.connect();
     await client.query('BEGIN');
     transactionStarted = true;
-    const existing = await client.query(
-      `SELECT id, employee_id, department_id, position_id,
-              effective_from::text AS effective_from,
-              effective_to::text AS effective_to, is_active, remarks
-       FROM employee_other_positions
-       WHERE id = $1
-       FOR UPDATE`,
-      [id],
-    );
-    if (existing.rows.length === 0) {
-      throw new AssignmentHistoryError('Employee other position not found', 404);
-    }
-
-    const row = existing.rows[0];
-    const mergedEffectiveFrom =
-      effective_from !== undefined ? parseDate(effective_from) : row.effective_from;
-    const mergedEffectiveTo =
-      effective_to !== undefined
-        ? (effective_to === null || effective_to === '' ? null : parseDate(effective_to))
-        : row.effective_to;
-    if (effectiveToBeforeFrom(mergedEffectiveFrom, mergedEffectiveTo)) {
-      throw new AssignmentHistoryError(
-        'effective_to must be on or after effective_from'
-      );
-    }
-    const isDeactivating = is_active === false && row.is_active !== false;
+    const transition = await updateAdditionalPositionTransition(client, {
+      id,
+      changes: {
+        departmentId: department_id,
+        positionId: position_id,
+        effectiveFrom: effective_from,
+        effectiveTo: effective_to,
+        isActive: is_active,
+        remarks,
+      },
+    });
+    const isDeactivating = is_active === false && transition.before.is_active !== false;
     const deactivationReason = isDeactivating
       ? normalizeChangeReason(change_reason)
       : null;
-
-    updates.push('updated_at = now()');
-    values.push(id);
-    const result = await client.query(
-      `UPDATE employee_other_positions SET ${updates.join(', ')}
-       WHERE id = $${i}
-       RETURNING id, employee_id, department_id, position_id,
-                 effective_from::text AS effective_from,
-                 effective_to::text AS effective_to, is_active, remarks,
-                 created_at, updated_at`,
-      values,
-    );
-
-    if (isDeactivating) {
-      await writeAssignmentHistoryAudit(client, {
-        actorId: req.user?.id,
-        recordType: 'additional',
-        recordId: id,
-        action: 'employee_other_position_deactivated',
-        reason: deactivationReason,
-        before: row,
-        after: result.rows[0],
-      });
-    }
+    await writeAssignmentHistoryAudit(client, {
+      actorId: req.user?.id,
+      recordType: 'additional',
+      recordId: id,
+      action: isDeactivating
+        ? 'employee_other_position_deactivated'
+        : 'employee_other_position_updated',
+      reason:
+        deactivationReason ||
+        String(change_reason || '').trim() ||
+        String(remarks || '').trim() ||
+        'Additional position updated',
+      before: transition.before,
+      after: transition.after,
+    });
 
     await client.query('COMMIT');
     transactionStarted = false;
-    res.json(result.rows[0]);
+    res.json(transition.after);
   } catch (err) {
     if (transactionStarted) {
       await client.query('ROLLBACK');
     }
     if (err instanceof AssignmentHistoryError) {
       return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err instanceof AdditionalPositionTransitionError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.code === '22P02' || err.code === '23503') {
+      return res.status(400).json({ error: 'Invalid additional position selection' });
+    }
+    if (err.code === '23505' || err.code === '23P01') {
+      return res.status(409).json({ error: 'Additional position conflicts with an existing record' });
     }
     console.error('[employee-other-positions PUT]', err);
     res.status(500).json({ error: 'Failed to update employee other position' });
