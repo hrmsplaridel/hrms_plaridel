@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   AssignmentStatusError,
+  assignmentDatePickerContext,
   assignmentStatusContext,
   assignmentStatusWhereSql,
   computedAssignmentStatusSql,
@@ -59,4 +60,41 @@ test('status context calculates the business date in the configured HRMS timezon
     status: 'Current',
     today: `${values.year}-${values.month}-${values.day}`,
   });
+});
+
+test('assignment calendar begins with employee service history and uses a future horizon', () => {
+  const context = assignmentDatePickerContext({
+    dateHired: '2016-04-18',
+    earliestEffectiveDate: '2018-01-01',
+    now: new Date('2026-08-29T04:00:00.000Z'),
+    futureHorizonYears: 5,
+  });
+
+  assert.equal(context.firstDate, '2016-04-18');
+  assert.equal(context.lastDate, '2031-12-31');
+  assert.equal(context.futureHorizonYears, 5);
+});
+
+test('assignment calendar includes earlier recorded history and stops at separation', () => {
+  const context = assignmentDatePickerContext({
+    dateHired: '2016-04-18',
+    earliestEffectiveDate: '2015-12-01',
+    separationDate: '2024-06-30',
+    now: new Date('2026-08-29T04:00:00.000Z'),
+    futureHorizonYears: 10,
+  });
+
+  assert.equal(context.firstDate, '2015-12-01');
+  assert.equal(context.lastDate, '2024-06-30');
+});
+
+test('assignment calendar uses configured historical fallback for missing service dates', () => {
+  const context = assignmentDatePickerContext({
+    now: new Date('2026-08-29T04:00:00.000Z'),
+    historyStartDate: '1980-01-01',
+    futureHorizonYears: 10,
+  });
+
+  assert.equal(context.firstDate, '1980-01-01');
+  assert.equal(context.lastDate, '2036-12-31');
 });

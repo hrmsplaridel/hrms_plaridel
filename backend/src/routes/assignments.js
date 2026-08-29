@@ -30,6 +30,7 @@ const {
 } = require('../services/assignmentReconciliation');
 const {
   AssignmentStatusError,
+  assignmentDatePickerContext,
   assignmentStatusContext,
   assignmentStatusWhereSql,
   computedAssignmentStatusSql,
@@ -37,6 +38,53 @@ const {
 
 const router = express.Router();
 const protect = [authMiddleware];
+
+// GET /api/assignments/context?employee_id=uuid
+router.get('/context', protect, async (req, res) => {
+  try {
+    const access = resolveAssignmentEmployeeAccess(req.user, req.query.employee_id);
+    if (!access.allowed) {
+      return res.status(access.statusCode).json({ error: access.error });
+    }
+    const result = await pool.query(
+      `SELECT u.id,
+              u.date_hired::text AS date_hired,
+              u.separation_date::text AS separation_date,
+              history.earliest_effective_date
+         FROM users u
+         LEFT JOIN LATERAL (
+           SELECT MIN(period.effective_from)::text AS earliest_effective_date
+             FROM (
+               SELECT effective_from FROM assignments WHERE employee_id = u.id
+               UNION ALL
+               SELECT effective_from FROM policy_assignments WHERE employee_id = u.id
+               UNION ALL
+               SELECT effective_from FROM employee_other_positions WHERE employee_id = u.id
+             ) period
+         ) history ON true
+        WHERE u.id = $1::uuid`,
+      [access.employeeId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    const row = result.rows[0];
+    const context = assignmentDatePickerContext({
+      dateHired: row.date_hired,
+      separationDate: row.separation_date,
+      earliestEffectiveDate: row.earliest_effective_date,
+    });
+    res.json({
+      official_date: context.officialDate,
+      first_date: context.firstDate,
+      last_date: context.lastDate,
+      future_horizon_years: context.futureHorizonYears,
+    });
+  } catch (err) {
+    console.error('[assignments context GET]', err);
+    res.status(500).json({ error: 'Failed to load assignment date context' });
+  }
+});
 
 function parseDate(val) {
   if (!val) return null;
@@ -100,6 +148,25 @@ router.get('/', protect, async (req, res) => {
               a.effective_to::text AS effective_to,
               a.is_active, a.remarks,
               ${computedAssignmentStatusSql('a', '$2')} AS computed_status,
+              (
+                a.effective_from > $2::date
+                AND NOT EXISTS (
+                  SELECT 1 FROM dtr_daily_summary dtr
+                   WHERE dtr.assignment_id = a.id
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM leave_requests lr
+                   WHERE lr.employee_id = a.employee_id
+                     AND lr.end_date >= a.effective_from
+                     AND lr.start_date <= COALESCE(a.effective_to, 'infinity'::date)
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM locator_slips ls
+                   WHERE ls.employee_id = a.employee_id
+                     AND ls.slip_date >= a.effective_from
+                     AND ls.slip_date <= COALESCE(a.effective_to, 'infinity'::date)
+                )
+              ) AS can_permanently_delete,
               d.name AS department_name, p.name AS position_name, s.name AS shift_name,
               s.start_time AS shift_start_time, s.end_time AS shift_end_time,
               s.break_end AS shift_break_end, s.punch_mode,
@@ -135,6 +202,8 @@ router.get('/', protect, async (req, res) => {
         effective_to: r.effective_to,
         is_active: r.is_active ?? true,
         computed_status: r.computed_status,
+        official_date: statusContext.today,
+        can_permanently_delete: r.can_permanently_delete === true,
         remarks: r.remarks,
         department_name: r.department_name,
         position_name: r.position_name,

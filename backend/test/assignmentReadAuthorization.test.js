@@ -17,9 +17,9 @@ function responseRecorder() {
   };
 }
 
-function getHandler(router) {
+function getHandler(router, path = '/') {
   const layer = router.stack.find(
-    (entry) => entry.route?.path === '/' && entry.route.methods.get
+    (entry) => entry.route?.path === path && entry.route.methods.get
   );
   return layer.route.stack[layer.route.stack.length - 1].handle;
 }
@@ -63,6 +63,75 @@ test('employee cannot read another employee additional positions', async () => {
   await runDeniedEmployeeRead('../src/routes/employeeOtherPositions', {
     employee_id: '22222222-2222-4222-8222-222222222222',
   });
+});
+
+test('employee cannot read another employee assignment date context', async () => {
+  let queryCount = 0;
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      async query() {
+        queryCount += 1;
+        throw new Error('The database must not be queried for a denied request');
+      },
+    },
+  });
+  const routePath = '../src/routes/assignments';
+  clearModule(routePath);
+  try {
+    const handler = getHandler(require(routePath), '/context');
+    const req = {
+      user: { id: '11111111-1111-4111-8111-111111111111', role: 'employee' },
+      query: { employee_id: '22222222-2222-4222-8222-222222222222' },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(queryCount, 0);
+  } finally {
+    clearModule(routePath);
+    restoreDb();
+  }
+});
+
+test('admin receives employee-aware assignment date context', async () => {
+  const employeeId = '22222222-2222-4222-8222-222222222222';
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      async query() {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: employeeId,
+            date_hired: '2016-04-18',
+            separation_date: null,
+            earliest_effective_date: '2018-01-01',
+          }],
+        };
+      },
+    },
+  });
+  const routePath = '../src/routes/assignments';
+  clearModule(routePath);
+  try {
+    const handler = getHandler(require(routePath), '/context');
+    const req = {
+      user: { id: '11111111-1111-4111-8111-111111111111', role: 'admin' },
+      query: { employee_id: employeeId },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.first_date, '2016-04-18');
+    assert.match(res.body.official_date, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(res.body.last_date, /^\d{4}-12-31$/);
+  } finally {
+    clearModule(routePath);
+    restoreDb();
+  }
 });
 
 test('employee cannot search the additional-position employee directory', async () => {

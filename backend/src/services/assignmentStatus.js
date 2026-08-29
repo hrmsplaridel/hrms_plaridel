@@ -9,6 +9,8 @@ const ASSIGNMENT_STATUSES = Object.freeze([
   'Archived',
   'All',
 ]);
+const DEFAULT_ASSIGNMENT_HISTORY_START_DATE = '1900-01-01';
+const DEFAULT_ASSIGNMENT_FUTURE_HORIZON_YEARS = 10;
 
 class AssignmentStatusError extends Error {
   constructor(message) {
@@ -57,9 +59,55 @@ function assignmentStatusContext(value, { fallback = 'Current', now = new Date()
   };
 }
 
+function normalizeDateOnly(value) {
+  const match = String(value || '').match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function normalizeFutureHorizonYears(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100
+    ? parsed
+    : DEFAULT_ASSIGNMENT_FUTURE_HORIZON_YEARS;
+}
+
+function assignmentDatePickerContext({
+  dateHired = null,
+  separationDate = null,
+  earliestEffectiveDate = null,
+  now = new Date(),
+  historyStartDate = process.env.ASSIGNMENT_HISTORY_START_DATE,
+  futureHorizonYears = process.env.ASSIGNMENT_FUTURE_HORIZON_YEARS,
+} = {}) {
+  const officialDate = dateInTimeZone(now);
+  const fallbackFirstDate =
+    normalizeDateOnly(historyStartDate) || DEFAULT_ASSIGNMENT_HISTORY_START_DATE;
+  const firstCandidates = [dateHired, earliestEffectiveDate]
+    .map(normalizeDateOnly)
+    .filter(Boolean)
+    .sort();
+  const firstDate = firstCandidates[0] || fallbackFirstDate;
+  const horizonYears = normalizeFutureHorizonYears(futureHorizonYears);
+  const lastYear = Number(officialDate.slice(0, 4)) + horizonYears;
+  const horizonDate = `${String(lastYear).padStart(4, '0')}-12-31`;
+  const separatedOn = normalizeDateOnly(separationDate);
+  let lastDate = separatedOn && separatedOn < horizonDate
+    ? separatedOn
+    : horizonDate;
+  if (lastDate < firstDate) lastDate = firstDate;
+
+  return {
+    officialDate,
+    firstDate,
+    lastDate,
+    futureHorizonYears: horizonYears,
+  };
+}
+
 module.exports = {
   ASSIGNMENT_STATUSES,
   AssignmentStatusError,
+  assignmentDatePickerContext,
   assignmentStatusContext,
   assignmentStatusWhereSql,
   computedAssignmentStatusSql,

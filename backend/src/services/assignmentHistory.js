@@ -1,4 +1,5 @@
 const { addDays } = require('../utils/dateRangeParser');
+const { assignmentStatusContext } = require('./assignmentStatus');
 
 class AssignmentHistoryError extends Error {
   constructor(message, statusCode = 400) {
@@ -202,8 +203,8 @@ async function repairPrimaryPredecessorAfterFutureChange(
 ) {
   if (!previousRecord || previousRecord.is_active === false) return null;
   const futureCheck = await db.query(
-    `SELECT $1::date > (now() AT TIME ZONE 'Asia/Manila')::date AS is_future`,
-    [previousRecord.effective_from]
+    `SELECT $1::date > $2::date AS is_future`,
+    [previousRecord.effective_from, assignmentStatusContext('All').today]
   );
   if (futureCheck.rows[0]?.is_future !== true) return null;
 
@@ -238,8 +239,8 @@ async function permanentlyDeleteFutureAssignment(
 
   const record = existing.rows[0];
   const futureCheck = await db.query(
-    `SELECT $1::date > (now() AT TIME ZONE 'Asia/Manila')::date AS is_future`,
-    [record.effective_from]
+    `SELECT $1::date > $2::date AS is_future`,
+    [record.effective_from, assignmentStatusContext('All').today]
   );
   if (futureCheck.rows[0]?.is_future !== true) {
     throw new AssignmentHistoryError(
