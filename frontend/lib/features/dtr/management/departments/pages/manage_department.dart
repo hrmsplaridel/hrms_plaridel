@@ -91,6 +91,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   Map<String, dynamic>? _primaryReviewer;
   List<Map<String, dynamic>> _reviewerRoster = [];
   List<String> _backupReviewerIds = [];
+  int _departmentLoadGeneration = 0;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -131,6 +132,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
 
   @override
   void dispose() {
+    _departmentLoadGeneration++;
     _searchController.dispose();
     _nameController.dispose();
     _descriptionController.dispose();
@@ -138,6 +140,8 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   }
 
   Future<void> _loadDepartments() async {
+    final generation = ++_departmentLoadGeneration;
+    final requestedStatus = _statusFilter;
     setState(() {
       _loading = true;
       _page = 0;
@@ -145,10 +149,10 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/departments',
-        queryParameters: {'status': _statusFilter},
+        queryParameters: {'status': requestedStatus},
       );
       final data = res.data ?? [];
-      _departments = (data).map((e) {
+      final departments = data.map((e) {
         final m = e as Map<String, dynamic>;
         final numVal = m['department_number'];
         return _DepartmentRecord(
@@ -162,14 +166,33 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
         );
       }).toList();
+      if (!mounted ||
+          generation != _departmentLoadGeneration ||
+          requestedStatus != _statusFilter) {
+        return;
+      }
+      setState(() => _departments = departments);
     } on DioException catch (e) {
+      if (!mounted ||
+          generation != _departmentLoadGeneration ||
+          requestedStatus != _statusFilter) {
+        return;
+      }
       debugPrint('Load departments failed: ${e.response?.data ?? e.message}');
-      _departments = [];
+      setState(() => _departments = []);
     } catch (e) {
+      if (!mounted ||
+          generation != _departmentLoadGeneration ||
+          requestedStatus != _statusFilter) {
+        return;
+      }
       debugPrint('Load departments failed: $e');
-      _departments = [];
+      setState(() => _departments = []);
+    } finally {
+      if (mounted && generation == _departmentLoadGeneration) {
+        setState(() => _loading = false);
+      }
     }
-    if (mounted) setState(() => _loading = false);
   }
 
   void _selectDepartment(_DepartmentRecord d) {
