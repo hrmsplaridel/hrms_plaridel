@@ -8,7 +8,10 @@ const {
   departmentDependencyCountsSql,
   dependencyBlockers,
   dependencyCountsFromRow,
+  ensureDepartmentCanDeactivate,
+  previewDepartmentDeactivation,
 } = require('../services/departmentLifecycle');
+const { dateInTimeZone } = require('../services/assignmentReconciliation');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -52,6 +55,31 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
+// GET /api/departments/:id/deactivation-preview - show active blockers
+router.get('/:id/deactivation-preview', protect, requireAdmin, async (req, res) => {
+  try {
+    const officialDate = dateInTimeZone();
+    const preview = await previewDepartmentDeactivation(pool, {
+      departmentId: req.params.id,
+      officialDate,
+    });
+    return res.json({
+      department: preview.department,
+      official_date: officialDate,
+      can_deactivate: preview.canDeactivate,
+      blockers: preview.blockers,
+    });
+  } catch (err) {
+    if (err instanceof DepartmentLifecycleError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    console.error('[departments GET deactivation-preview]', err);
+    return res.status(500).json({
+      error: 'Failed to check whether the department can be deactivated',
+    });
+  }
+});
+
 // POST /api/departments - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
@@ -83,6 +111,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
 // PUT /api/departments/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     const { id } = req.params;
     const { name, description, is_active } = req.body;
@@ -111,19 +140,45 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     updates.push('updated_at = now()');
     values.push(id);
 
-    const result = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    if (is_active === false) {
+      await ensureDepartmentCanDeactivate(client, {
+        departmentId: id,
+        officialDate: dateInTimeZone(),
+      });
+    }
+
+    const result = await client.query(
       `UPDATE departments SET ${updates.join(', ')} WHERE id = $${i}
        RETURNING id, department_number, name, description, is_active`,
       values
     );
 
     if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Department not found' });
     }
+    await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[departments PUT rollback]', rollbackError);
+      }
+    }
+    if (err instanceof DepartmentLifecycleError) {
+      return res.status(err.statusCode).json({
+        error: err.message,
+        ...(err.blockers ? { blockers: err.blockers } : {}),
+      });
+    }
     console.error('[departments PUT]', err);
     res.status(500).json({ error: 'Failed to update department' });
+  } finally {
+    client?.release();
   }
 });
 

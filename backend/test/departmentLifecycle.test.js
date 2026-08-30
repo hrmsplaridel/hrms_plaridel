@@ -5,10 +5,14 @@ const assert = require('node:assert/strict');
 const { clearModule, withMockedModule } = require('./helpers/moduleMocks');
 
 const {
+  DEPARTMENT_DEACTIVATION_DEPENDENCIES,
   DEPARTMENT_DEPENDENCIES,
   DepartmentLifecycleError,
   deleteMistakenDepartment,
+  departmentDeactivationCountsSql,
   departmentDependencyCountsSql,
+  ensureDepartmentCanDeactivate,
+  previewDepartmentDeactivation,
 } = require('../src/services/departmentLifecycle');
 
 const IDS = {
@@ -37,6 +41,18 @@ function emptyDependencyRow(overrides = {}) {
   };
 }
 
+function emptyDeactivationRow(overrides = {}) {
+  return {
+    ...Object.fromEntries(
+      DEPARTMENT_DEACTIVATION_DEPENDENCIES.map(({ key }) => [
+        `deactivation_${key}`,
+        0,
+      ])
+    ),
+    ...overrides,
+  };
+}
+
 function responseRecorder() {
   return {
     statusCode: 200,
@@ -58,6 +74,111 @@ test('dependency projection covers every department foreign-key owner', () => {
     assert.match(sql, new RegExp(`FROM ${dependency.table}`));
     assert.match(sql, new RegExp(`${dependency.column} = d\\.id`));
   }
+});
+
+test('deactivation projection checks only operational department dependencies', () => {
+  const sql = departmentDeactivationCountsSql('$1', '$2');
+  assert.match(sql, /FROM assignments a/);
+  assert.match(sql, /a\.effective_to IS NULL OR a\.effective_to >= \$2::date/);
+  assert.doesNotMatch(sql, /a\.effective_from <= \$2::date/);
+  assert.match(sql, /FROM positions p/);
+  assert.match(sql, /FROM policy_assignments pa/);
+  assert.match(sql, /pending_department_head/);
+  assert.match(sql, /returned_for_correction/);
+  assert.match(sql, /FROM docutracker_workflow_steps ws/);
+  assert.match(sql, /FROM docutracker_escalation_configs dec/);
+});
+
+test('deactivation is rejected with current and future dependency blockers', async () => {
+  const calls = [];
+  const db = {
+    async query(sql, params = []) {
+      const text = String(sql).trim();
+      calls.push({ text, params });
+      if (text.includes('FROM departments') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [departmentRow()] };
+      }
+      if (text.includes('AS deactivation_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [
+            emptyDeactivationRow({
+              deactivation_primary_assignments: 3,
+              deactivation_pending_leave_requests: 2,
+            }),
+          ],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  await assert.rejects(
+    ensureDepartmentCanDeactivate(db, {
+      departmentId: IDS.department,
+      officialDate: '2026-08-30',
+    }),
+    (error) => {
+      assert.ok(error instanceof DepartmentLifecycleError);
+      assert.equal(error.statusCode, 409);
+      assert.deepEqual(error.blockers, [
+        {
+          key: 'primary_assignments',
+          label: 'current or future primary assignments',
+          count: 3,
+        },
+        {
+          key: 'pending_leave_requests',
+          label: 'unresolved leave requests',
+          count: 2,
+        },
+      ]);
+      return true;
+    }
+  );
+  assert.deepEqual(calls[1].params, [IDS.department, '2026-08-30']);
+});
+
+test('deactivation preview returns actionable blocker counts', async () => {
+  const db = {
+    async query(sql) {
+      const text = String(sql).trim();
+      if (text.includes('FROM departments') && !text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [departmentRow()] };
+      }
+      if (text.includes('AS deactivation_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [
+            emptyDeactivationRow({
+              deactivation_additional_positions: 1,
+              deactivation_workflow_steps: 2,
+            }),
+          ],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  const preview = await previewDepartmentDeactivation(db, {
+    departmentId: IDS.department,
+    officialDate: '2026-08-30',
+  });
+
+  assert.equal(preview.canDeactivate, false);
+  assert.deepEqual(preview.blockers, [
+    {
+      key: 'additional_positions',
+      label: 'current or future additional positions',
+      count: 1,
+    },
+    {
+      key: 'workflow_steps',
+      label: 'enabled DocuTracker workflow steps',
+      count: 2,
+    },
+  ]);
 });
 
 test('unused mistaken department is deleted and audited', async () => {
@@ -205,6 +326,74 @@ test('department delete route rolls back and returns blockers for a used departm
     assert.deepEqual(calls.slice(0, 2), ['BEGIN', calls[1]]);
     assert.equal(calls.at(-1), 'ROLLBACK');
     assert.equal(calls.includes('COMMIT'), false);
+    assert.equal(released, true);
+  } finally {
+    clearModule(routePath);
+    restoreDb();
+  }
+});
+
+test('department update route rolls back blocked deactivation', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM departments') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [departmentRow()] };
+      }
+      if (text.includes('AS deactivation_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [
+            emptyDeactivationRow({ deactivation_active_positions: 1 }),
+          ],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      async connect() {
+        return client;
+      },
+      async query() {
+        throw new Error('pool.query must not be used inside update transaction');
+      },
+    },
+  });
+  const routePath = '../src/routes/departments';
+  clearModule(routePath);
+  try {
+    const router = require(routePath);
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.put
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      params: { id: IDS.department },
+      body: { is_active: false },
+      user: { id: IDS.actor, role: 'admin' },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.deepEqual(res.body.blockers, [
+      { key: 'active_positions', label: 'active positions', count: 1 },
+    ]);
+    assert.equal(calls[0], 'BEGIN');
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(calls.some((text) => text.startsWith('UPDATE departments')), false);
     assert.equal(released, true);
   } finally {
     clearModule(routePath);
