@@ -5,11 +5,13 @@ const { requireAdmin } = require('../middleware/rbac');
 const {
   DepartmentLifecycleError,
   deleteMistakenDepartment,
+  departmentAuditAction,
   departmentDependencyCountsSql,
   dependencyBlockers,
   dependencyCountsFromRow,
   ensureDepartmentCanDeactivate,
   previewDepartmentDeactivation,
+  writeDepartmentAudit,
 } = require('../services/departmentLifecycle');
 const { dateInTimeZone } = require('../services/assignmentReconciliation');
 const { addDays } = require('../utils/dateRangeParser');
@@ -237,30 +239,51 @@ router.put('/:id/reviewer-backups', protect, requireAdmin, async (req, res) => {
 
 // POST /api/departments - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     const { name, description, is_active = true } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
     }
 
+    client = await pool.connect();
+    await client.query('BEGIN');
     // Assign next available number (fills gaps: 1,2,3... no skips)
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO departments (name, description, is_active, department_number)
        SELECT $1, $2, $3, COALESCE(
          (SELECT MIN(g.n) FROM generate_series(1, (SELECT COALESCE(MAX(department_number), 0) + 1 FROM departments)) AS g(n)
           WHERE NOT EXISTS (SELECT 1 FROM departments d2 WHERE d2.department_number = g.n)),
          1
        )
-       RETURNING id, department_number, name, description, is_active`,
+       RETURNING id, department_number, name, description, is_active,
+                 created_at, updated_at`,
       [name.trim(), description?.trim() || null, !!is_active]
     );
-    res.status(201).json(result.rows[0]);
+    const department = result.rows[0];
+    await writeDepartmentAudit(client, {
+      actorId: req.user?.id,
+      action: 'department_created',
+      departmentId: department.id,
+      after: department,
+    });
+    await client.query('COMMIT');
+    res.status(201).json(department);
   } catch (err) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[departments POST rollback]', rollbackError);
+      }
+    }
     if (err.code === '23505') {
       return res.status(409).json({ error: 'A department with this name already exists.' });
     }
     console.error('[departments POST]', err);
     res.status(500).json({ error: 'Failed to create department' });
+  } finally {
+    client?.release();
   }
 });
 
@@ -297,7 +320,21 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     client = await pool.connect();
     await client.query('BEGIN');
-    if (is_active === false) {
+    const existing = await client.query(
+      `SELECT id, department_number, name, description, is_active,
+              created_at, updated_at
+         FROM departments
+        WHERE id = $1::uuid
+        FOR UPDATE`,
+      [id]
+    );
+    if (existing.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Department not found' });
+    }
+    const before = existing.rows[0];
+
+    if (is_active === false && before.is_active !== false) {
       await ensureDepartmentCanDeactivate(client, {
         departmentId: id,
         officialDate: dateInTimeZone(),
@@ -306,16 +343,21 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await client.query(
       `UPDATE departments SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, department_number, name, description, is_active`,
+       RETURNING id, department_number, name, description, is_active,
+                 created_at, updated_at`,
       values
     );
 
-    if (result.rowCount === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Department not found' });
-    }
+    const after = result.rows[0];
+    await writeDepartmentAudit(client, {
+      actorId: req.user?.id,
+      action: departmentAuditAction(before, after),
+      departmentId: id,
+      before,
+      after,
+    });
     await client.query('COMMIT');
-    res.json(result.rows[0]);
+    res.json(after);
   } catch (err) {
     if (client) {
       try {

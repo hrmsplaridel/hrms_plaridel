@@ -9,10 +9,12 @@ const {
   DEPARTMENT_DEPENDENCIES,
   DepartmentLifecycleError,
   deleteMistakenDepartment,
+  departmentAuditAction,
   departmentDeactivationCountsSql,
   departmentDependencyCountsSql,
   ensureDepartmentCanDeactivate,
   previewDepartmentDeactivation,
+  writeDepartmentAudit,
 } = require('../src/services/departmentLifecycle');
 
 const IDS = {
@@ -67,6 +69,53 @@ function responseRecorder() {
     },
   };
 }
+
+test('department audit stores actor and before/after snapshots', async () => {
+  let recorded;
+  const db = {
+    async query(sql, params) {
+      recorded = { sql: String(sql), params };
+      return { rowCount: 1, rows: [] };
+    },
+  };
+  const before = departmentRow();
+  const after = { ...before, name: 'Administrative Services' };
+
+  await writeDepartmentAudit(db, {
+    actorId: IDS.actor,
+    action: 'department_updated',
+    departmentId: IDS.department,
+    before,
+    after,
+  });
+
+  assert.match(recorded.sql, /INSERT INTO audit_logs/);
+  assert.deepEqual(recorded.params.slice(0, 3), [
+    IDS.actor,
+    'department_updated',
+    IDS.department,
+  ]);
+  assert.deepEqual(JSON.parse(recorded.params[3]), {
+    reason: null,
+    before,
+    after,
+  });
+});
+
+test('department audit distinguishes updates and status transitions', () => {
+  assert.equal(
+    departmentAuditAction({ is_active: true }, { is_active: true }),
+    'department_updated'
+  );
+  assert.equal(
+    departmentAuditAction({ is_active: true }, { is_active: false }),
+    'department_deactivated'
+  );
+  assert.equal(
+    departmentAuditAction({ is_active: false }, { is_active: true }),
+    'department_reactivated'
+  );
+});
 
 test('dependency projection covers every department foreign-key owner', () => {
   const sql = departmentDependencyCountsSql('d');
@@ -217,10 +266,12 @@ test('unused mistaken department is deleted and audited', async () => {
   const audit = calls.find(({ text }) => text.startsWith('INSERT INTO audit_logs'));
   assert.ok(audit);
   assert.equal(audit.params[0], IDS.actor);
-  assert.equal(audit.params[1], IDS.department);
-  assert.deepEqual(JSON.parse(audit.params[2]), {
+  assert.equal(audit.params[1], 'department_mistake_deleted');
+  assert.equal(audit.params[2], IDS.department);
+  assert.deepEqual(JSON.parse(audit.params[3]), {
     reason: 'Created with the wrong office name',
     before: departmentRow(),
+    after: null,
   });
 });
 
@@ -396,6 +447,127 @@ test('department update route rolls back blocked deactivation', async () => {
     assert.equal(calls.some((text) => text.startsWith('UPDATE departments')), false);
     assert.equal(released, true);
   } finally {
+    clearModule(routePath);
+    restoreDb();
+  }
+});
+
+test('department creation commits its audit event in the same transaction', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql, params = []) {
+      const text = String(sql).trim();
+      calls.push({ text, params });
+      if (text === 'BEGIN' || text === 'COMMIT') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.startsWith('INSERT INTO departments')) {
+        return { rowCount: 1, rows: [departmentRow()] };
+      }
+      if (text.startsWith('INSERT INTO audit_logs')) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      async connect() {
+        return client;
+      },
+    },
+  });
+  const routePath = '../src/routes/departments';
+  clearModule(routePath);
+  try {
+    const router = require(routePath);
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      body: { name: 'Administrative Services', description: 'Operations' },
+      user: { id: IDS.actor, role: 'admin' },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(calls[0].text, 'BEGIN');
+    assert.equal(calls.at(-1).text, 'COMMIT');
+    const audit = calls.find(({ text }) => text.startsWith('INSERT INTO audit_logs'));
+    assert.ok(audit);
+    assert.deepEqual(audit.params.slice(0, 3), [
+      IDS.actor,
+      'department_created',
+      IDS.department,
+    ]);
+    assert.equal(JSON.parse(audit.params[3]).before, null);
+    assert.equal(released, true);
+  } finally {
+    clearModule(routePath);
+    restoreDb();
+  }
+});
+
+test('department creation rolls back when its audit event fails', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.startsWith('INSERT INTO departments')) {
+        return { rowCount: 1, rows: [departmentRow()] };
+      }
+      if (text.startsWith('INSERT INTO audit_logs')) {
+        throw new Error('audit unavailable');
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      async connect() {
+        return client;
+      },
+    },
+  });
+  const routePath = '../src/routes/departments';
+  clearModule(routePath);
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const router = require(routePath);
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      body: { name: 'Administrative Services' },
+      user: { id: IDS.actor, role: 'admin' },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 500);
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(calls.includes('COMMIT'), false);
+    assert.equal(released, true);
+  } finally {
+    console.error = originalError;
     clearModule(routePath);
     restoreDb();
   }

@@ -9,6 +9,33 @@ class DepartmentLifecycleError extends Error {
   }
 }
 
+async function writeDepartmentAudit(
+  db,
+  { actorId, action, departmentId, before = null, after = null, reason = null }
+) {
+  await db.query(
+    `INSERT INTO audit_logs (
+       user_id, action, entity_type, entity_id, details
+     ) VALUES ($1::uuid, $2, 'department', $3::uuid, $4)`,
+    [
+      actorId || null,
+      action,
+      departmentId,
+      JSON.stringify({ reason, before, after }),
+    ]
+  );
+}
+
+function departmentAuditAction(before, after) {
+  if (before?.is_active !== false && after?.is_active === false) {
+    return 'department_deactivated';
+  }
+  if (before?.is_active === false && after?.is_active !== false) {
+    return 'department_reactivated';
+  }
+  return 'department_updated';
+}
+
 const DEPARTMENT_DEPENDENCIES = Object.freeze([
   { key: 'positions', label: 'positions', table: 'positions', column: 'department_id' },
   { key: 'assignments', label: 'employee assignments', table: 'assignments', column: 'department_id' },
@@ -322,16 +349,13 @@ async function deleteMistakenDepartment(
   }
 
   await db.query('DELETE FROM departments WHERE id = $1::uuid', [departmentId]);
-  await db.query(
-    `INSERT INTO audit_logs (
-       user_id, action, entity_type, entity_id, details
-     ) VALUES ($1::uuid, 'department_mistake_deleted', 'department', $2::uuid, $3)`,
-    [
-      actorId || null,
-      departmentId,
-      JSON.stringify({ reason: normalizedReason, before: department }),
-    ]
-  );
+  await writeDepartmentAudit(db, {
+    actorId,
+    action: 'department_mistake_deleted',
+    departmentId,
+    reason: normalizedReason,
+    before: department,
+  });
 
   return { department, reason: normalizedReason };
 }
@@ -344,6 +368,7 @@ module.exports = {
   deactivationBlockers,
   deactivationCountsFromRow,
   deleteMistakenDepartment,
+  departmentAuditAction,
   departmentDeactivationCountsSql,
   departmentDependencyCountsSql,
   dependencyBlockers,
@@ -352,4 +377,5 @@ module.exports = {
   loadDepartmentDeactivationCounts,
   loadDepartmentDependencyCounts,
   previewDepartmentDeactivation,
+  writeDepartmentAudit,
 };
