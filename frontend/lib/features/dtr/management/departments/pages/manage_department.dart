@@ -551,6 +551,65 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     }
   }
 
+  Future<bool> _reactivateDepartment() async {
+    final department = _selectedDepartment;
+    if (department == null || department.isActive) return false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reactivate department?'),
+        content: Text(
+          'This will restore "${department.name}" to active department lists.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.restore_rounded, size: 18),
+            label: const Text('Reactivate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+
+    try {
+      await ApiClient.instance.put(
+        '/api/departments/${department.id}',
+        data: {'is_active': true},
+      );
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${department.name} has been reactivated.')),
+      );
+      _clearForm();
+      _loadDepartments();
+      return true;
+    } on DioException catch (error) {
+      if (mounted) {
+        final message =
+            (error.response?.data as Map?)?['error'] ??
+            error.message ??
+            'Failed to reactivate department';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to reactivate: $message')),
+        );
+      }
+      return false;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to reactivate: $error')));
+      }
+      return false;
+    }
+  }
+
   Future<String?> _requestMistakenDeleteReason(
     _DepartmentRecord department,
   ) async {
@@ -785,9 +844,22 @@ class _ManageDepartmentState extends State<ManageDepartment> {
                 side: const BorderSide(color: Colors.red),
               ),
             ),
-          if (department != null &&
-              department.isActive &&
-              department.canPermanentlyDelete)
+          if (department != null && !department.isActive)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _reactivateDepartment();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.restore_rounded, size: 18),
+              label: const Text('Reactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.green,
+                side: const BorderSide(color: Colors.green),
+              ),
+            ),
+          if (department != null && department.canPermanentlyDelete)
             const SizedBox(width: 12),
           if (department != null && department.canPermanentlyDelete)
             OutlinedButton.icon(
