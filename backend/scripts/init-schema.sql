@@ -127,12 +127,16 @@ CREATE TABLE IF NOT EXISTS auth_password_reset_otps (
 CREATE TABLE IF NOT EXISTS departments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   department_number INT UNIQUE DEFAULT nextval('departments_department_number_seq'),
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   description TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_departments_name_not_blank CHECK (BTRIM(name) <> '')
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_departments_name_ci
+  ON departments (LOWER(BTRIM(name)));
 
 -- =========================================
 -- OFFICES (branch / site; DocuTracker office routing + users.office_id)

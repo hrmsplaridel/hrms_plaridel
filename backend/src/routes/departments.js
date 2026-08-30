@@ -18,6 +18,10 @@ const { addDays } = require('../utils/dateRangeParser');
 const {
   resolveDepartmentReviewers,
 } = require('../services/departmentReviewerService');
+const {
+  DepartmentValidationError,
+  normalizeDepartmentWrite,
+} = require('../services/departmentValidation');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -241,10 +245,10 @@ router.put('/:id/reviewer-backups', protect, requireAdmin, async (req, res) => {
 router.post('/', protect, requireAdmin, async (req, res) => {
   let client;
   try {
-    const { name, description, is_active = true } = req.body;
-    if (!name || !name.trim()) {
-      return res.status(400).json({ error: 'Name is required' });
-    }
+    const { name, description, is_active } = normalizeDepartmentWrite(
+      req.body,
+      { creating: true }
+    );
 
     client = await pool.connect();
     await client.query('BEGIN');
@@ -253,7 +257,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
        VALUES ($1, $2, $3)
        RETURNING id, department_number, name, description, is_active,
                  created_at, updated_at`,
-      [name.trim(), description?.trim() || null, !!is_active]
+      [name, description, is_active]
     );
     const department = result.rows[0];
     await writeDepartmentAudit(client, {
@@ -272,7 +276,13 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         console.error('[departments POST rollback]', rollbackError);
       }
     }
-    if (err.code === '23505' && err.constraint === 'departments_name_key') {
+    if (err instanceof DepartmentValidationError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (
+      err.code === '23505' &&
+      ['departments_name_key', 'uq_departments_name_ci'].includes(err.constraint)
+    ) {
       return res.status(409).json({ error: 'A department with this name already exists.' });
     }
     if (
@@ -295,7 +305,8 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
   let client;
   try {
     const { id } = req.params;
-    const { name, description, is_active } = req.body;
+    const normalized = normalizeDepartmentWrite(req.body);
+    const { name, description, is_active } = normalized;
 
     const updates = [];
     const values = [];
@@ -303,15 +314,15 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     if (name !== undefined) {
       updates.push(`name = $${i++}`);
-      values.push(name.trim());
+      values.push(name);
     }
     if (description !== undefined) {
       updates.push(`description = $${i++}`);
-      values.push(description?.trim() || null);
+      values.push(description);
     }
     if (is_active !== undefined) {
       updates.push(`is_active = $${i++}`);
-      values.push(!!is_active);
+      values.push(is_active);
     }
 
     if (updates.length === 0) {
@@ -373,6 +384,17 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       return res.status(err.statusCode).json({
         error: err.message,
         ...(err.blockers ? { blockers: err.blockers } : {}),
+      });
+    }
+    if (err instanceof DepartmentValidationError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (
+      err.code === '23505' &&
+      ['departments_name_key', 'uq_departments_name_ci'].includes(err.constraint)
+    ) {
+      return res.status(409).json({
+        error: 'A department with this name already exists.',
       });
     }
     console.error('[departments PUT]', err);
