@@ -27,7 +27,8 @@ router.get('/', protect, async (req, res) => {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
-      `SELECT p.id, p.position_number, p.name, p.description, p.department_id, p.is_active,
+      `SELECT p.id, p.position_number, p.name, p.description, p.department_id,
+              p.is_department_head, p.is_active,
               d.name AS department_name
        FROM positions p
        LEFT JOIN departments d ON p.department_id = d.id
@@ -43,6 +44,7 @@ router.get('/', protect, async (req, res) => {
       description: r.description,
       department_id: r.department_id,
       department_name: r.department_name,
+      is_department_head: r.is_department_head === true,
       is_active: r.is_active ?? true,
       departments: r.department_name ? { name: r.department_name } : null,
     }));
@@ -56,16 +58,35 @@ router.get('/', protect, async (req, res) => {
 // POST /api/positions - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { name, description, department_id, is_active = true } = req.body;
+    const {
+      name,
+      description,
+      department_id,
+      is_department_head = false,
+      is_active = true,
+    } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
     }
+    if (is_department_head === true && !department_id) {
+      return res.status(400).json({
+        error: 'An official Department Head position must belong to a department',
+      });
+    }
 
     const result = await pool.query(
-      `INSERT INTO positions (name, description, department_id, is_active)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, position_number, name, description, department_id, is_active`,
-      [name.trim(), description?.trim() || null, department_id || null, !!is_active]
+      `INSERT INTO positions (
+         name, description, department_id, is_department_head, is_active
+       ) VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, position_number, name, description, department_id,
+                 is_department_head, is_active`,
+      [
+        name.trim(),
+        description?.trim() || null,
+        department_id || null,
+        is_department_head === true,
+        !!is_active,
+      ]
     );
     const r = result.rows[0];
     res.status(201).json({
@@ -74,10 +95,26 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       name: r.name,
       description: r.description,
       department_id: r.department_id,
+      is_department_head: r.is_department_head === true,
       is_active: r.is_active ?? true,
     });
   } catch (err) {
     console.error('[positions POST]', err);
+    if (err.code === '23505' && err.constraint === 'uq_positions_department_head_per_department') {
+      return res.status(409).json({
+        error: 'This department already has an official Department Head position',
+      });
+    }
+    if (err.code === '23505' && err.constraint === 'uq_positions_name_department') {
+      return res.status(409).json({
+        error: 'A position with this name already exists in the selected department',
+      });
+    }
+    if (err.code === '23514') {
+      return res.status(400).json({
+        error: 'An official Department Head position must belong to a department',
+      });
+    }
     res.status(500).json({ error: 'Failed to create position' });
   }
 });
@@ -86,7 +123,13 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, department_id, is_active } = req.body;
+    const { name, description, department_id, is_department_head, is_active } = req.body;
+
+    if (is_department_head === true && department_id === null) {
+      return res.status(400).json({
+        error: 'An official Department Head position must belong to a department',
+      });
+    }
 
     const updates = [];
     const values = [];
@@ -95,6 +138,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (name !== undefined) { updates.push(`name = $${i++}`); values.push(name.trim()); }
     if (description !== undefined) { updates.push(`description = $${i++}`); values.push(description?.trim() || null); }
     if (department_id !== undefined) { updates.push(`department_id = $${i++}`); values.push(department_id || null); }
+    if (is_department_head !== undefined) { updates.push(`is_department_head = $${i++}`); values.push(is_department_head === true); }
     if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(!!is_active); }
 
     if (updates.length === 0) {
@@ -105,7 +149,8 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE positions SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, position_number, name, description, department_id, is_active`,
+       RETURNING id, position_number, name, description, department_id,
+                 is_department_head, is_active`,
       values
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Position not found' });
@@ -116,10 +161,26 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       name: r.name,
       description: r.description,
       department_id: r.department_id,
+      is_department_head: r.is_department_head === true,
       is_active: r.is_active ?? true,
     });
   } catch (err) {
     console.error('[positions PUT]', err);
+    if (err.code === '23505' && err.constraint === 'uq_positions_department_head_per_department') {
+      return res.status(409).json({
+        error: 'This department already has an official Department Head position',
+      });
+    }
+    if (err.code === '23505' && err.constraint === 'uq_positions_name_department') {
+      return res.status(409).json({
+        error: 'A position with this name already exists in the selected department',
+      });
+    }
+    if (err.code === '23514') {
+      return res.status(400).json({
+        error: 'An official Department Head position must belong to a department',
+      });
+    }
     res.status(500).json({ error: 'Failed to update position' });
   }
 });

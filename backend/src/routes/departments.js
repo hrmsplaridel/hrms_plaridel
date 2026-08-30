@@ -12,6 +12,10 @@ const {
   previewDepartmentDeactivation,
 } = require('../services/departmentLifecycle');
 const { dateInTimeZone } = require('../services/assignmentReconciliation');
+const { addDays } = require('../utils/dateRangeParser');
+const {
+  resolveDepartmentReviewers,
+} = require('../services/departmentReviewerService');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -77,6 +81,157 @@ router.get('/:id/deactivation-preview', protect, requireAdmin, async (req, res) 
     return res.status(500).json({
       error: 'Failed to check whether the department can be deactivated',
     });
+  }
+});
+
+// GET /api/departments/:id/reviewer-config - current Head, backups, and roster
+router.get('/:id/reviewer-config', protect, requireAdmin, async (req, res) => {
+  try {
+    const effectiveDate = String(req.query.effective_date || dateInTimeZone());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
+      return res.status(400).json({ error: 'effective_date must use YYYY-MM-DD' });
+    }
+    const department = await pool.query(
+      `SELECT id, name FROM departments WHERE id = $1::uuid`,
+      [req.params.id]
+    );
+    if (department.rowCount === 0) {
+      return res.status(404).json({ error: 'Department not found' });
+    }
+    const reviewers = await resolveDepartmentReviewers(pool, {
+      departmentId: req.params.id,
+      effectiveDate,
+    });
+    const roster = await pool.query(
+      `SELECT DISTINCT ON (u.id)
+              u.id, COALESCE(NULLIF(btrim(u.full_name), ''), u.email) AS name
+       FROM assignments a
+       JOIN users u ON u.id = a.employee_id
+       WHERE a.department_id = $1::uuid
+         AND a.effective_from <= $2::date
+         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+         AND (u.is_active IS NULL OR u.is_active = true)
+       ORDER BY u.id, a.effective_from DESC, a.created_at DESC`,
+      [req.params.id, effectiveDate]
+    );
+    return res.json({
+      department: department.rows[0],
+      effective_date: effectiveDate,
+      primary: reviewers.primary,
+      backups: reviewers.backups,
+      eligible_employees: roster.rows,
+    });
+  } catch (err) {
+    console.error('[departments GET reviewer-config]', err);
+    return res.status(500).json({ error: 'Failed to load department reviewers' });
+  }
+});
+
+// PUT /api/departments/:id/reviewer-backups - replace backups from a date onward
+router.put('/:id/reviewer-backups', protect, requireAdmin, async (req, res) => {
+  const effectiveFrom = String(req.body?.effective_from || dateInTimeZone());
+  const employeeIds = Array.isArray(req.body?.employee_ids)
+    ? [...new Set(req.body.employee_ids.map(String).map((id) => id.trim()).filter(Boolean))]
+    : [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
+    return res.status(400).json({ error: 'effective_from must use YYYY-MM-DD' });
+  }
+  if (employeeIds.length > 5) {
+    return res.status(400).json({ error: 'A department can have at most five backup reviewers' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const department = await client.query(
+      `SELECT id FROM departments WHERE id = $1::uuid FOR UPDATE`,
+      [req.params.id]
+    );
+    if (department.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Department not found' });
+    }
+
+    const resolved = await resolveDepartmentReviewers(client, {
+      departmentId: req.params.id,
+      effectiveDate: effectiveFrom,
+    });
+    if (resolved.primary && employeeIds.includes(String(resolved.primary.reviewerId))) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'The official Department Head cannot also be a backup reviewer' });
+    }
+
+    if (employeeIds.length > 0) {
+      const eligible = await client.query(
+        `SELECT DISTINCT u.id::text AS id
+         FROM assignments a
+         JOIN users u ON u.id = a.employee_id
+         WHERE a.department_id = $1::uuid
+           AND u.id = ANY($2::uuid[])
+           AND a.effective_from <= $3::date
+           AND (a.effective_to IS NULL OR a.effective_to >= $3::date)
+           AND (u.is_active IS NULL OR u.is_active = true)`,
+        [req.params.id, employeeIds, effectiveFrom]
+      );
+      const eligibleIds = new Set(eligible.rows.map((row) => row.id));
+      const invalidIds = employeeIds.filter((id) => !eligibleIds.has(id));
+      if (invalidIds.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'Every backup reviewer must be assigned to this department on the effective date',
+          invalid_employee_ids: invalidIds,
+        });
+      }
+    }
+
+    const previousDay = addDays(effectiveFrom, -1);
+    await client.query(
+      `UPDATE department_reviewer_backups
+       SET effective_to = $2::date, updated_at = now()
+       WHERE department_id = $1::uuid
+         AND is_active = true
+         AND effective_from < $3::date
+         AND (effective_to IS NULL OR effective_to >= $3::date)`,
+      [req.params.id, previousDay, effectiveFrom]
+    );
+    await client.query(
+      `UPDATE department_reviewer_backups
+       SET is_active = false, updated_at = now()
+       WHERE department_id = $1::uuid
+         AND is_active = true
+         AND effective_from >= $2::date`,
+      [req.params.id, effectiveFrom]
+    );
+    for (let index = 0; index < employeeIds.length; index += 1) {
+      await client.query(
+        `INSERT INTO department_reviewer_backups (
+           department_id, employee_id, backup_rank, effective_from, created_by
+         ) VALUES ($1::uuid, $2::uuid, $3, $4::date, $5::uuid)`,
+        [req.params.id, employeeIds[index], index + 1, effectiveFrom, req.user?.id || null]
+      );
+    }
+    await client.query('COMMIT');
+    const updated = await resolveDepartmentReviewers(pool, {
+      departmentId: req.params.id,
+      effectiveDate: effectiveFrom,
+    });
+    return res.json({
+      effective_date: effectiveFrom,
+      primary: updated.primary,
+      backups: updated.backups,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { }
+    if (err.code === '23P01') {
+      return res.status(409).json({ error: 'Backup reviewer periods overlap an existing configuration' });
+    }
+    if (err.code === '22P02') {
+      return res.status(400).json({ error: 'Invalid employee selection' });
+    }
+    console.error('[departments PUT reviewer-backups]', err);
+    return res.status(500).json({ error: 'Failed to save department reviewers' });
+  } finally {
+    client.release();
   }
 });
 

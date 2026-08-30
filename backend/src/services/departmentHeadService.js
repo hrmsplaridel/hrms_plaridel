@@ -1,8 +1,11 @@
-// Department Head detection service.
-//
-// Determines whether a user is a department head by inspecting their
-// assignment effective today + position name. Uses EXACT match against known
-// position names first, then falls back to case-insensitive LIKE.
+// Compatibility facade for the shared, assignment-based reviewer service.
+
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const {
+  getEmployeeDepartmentForDate,
+  getEmployeeReviewSnapshot,
+  resolveDepartmentReviewers,
+} = require('./departmentReviewerService');
 
 /**
  * Known exact position names that indicate "Department Head".
@@ -20,58 +23,17 @@ const DEPARTMENT_HEAD_POSITION_NAMES = [
  * @returns {Promise<{departmentId: string, departmentName: string|null} | null>}
  */
 async function getEmployeeDepartment(client, employeeUserId) {
-  const q = await client.query(
-    `SELECT a.department_id, d.name AS department_name
-     FROM assignments a
-     LEFT JOIN departments d ON d.id = a.department_id
-     WHERE a.employee_id = $1
-       AND a.department_id IS NOT NULL
-       AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
-       AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
-     ORDER BY a.effective_from DESC NULLS LAST,
-              a.created_at DESC NULLS LAST,
-              a.id DESC
-     LIMIT 1`,
-    [employeeUserId]
+  return getEmployeeDepartmentForDate(
+    client,
+    employeeUserId,
+    todayInHrmsTimezone()
   );
-  if (q.rows.length === 0) return null;
-  return {
-    departmentId: q.rows[0].department_id,
-    departmentName: q.rows[0].department_name || null,
-  };
 }
 
 /**
  * Resolve the employee department that was effective on a historical date.
  * Closed assignments remain valid history and must not be filtered by is_active.
  */
-async function getEmployeeDepartmentForDate(
-  client,
-  employeeUserId,
-  effectiveDate
-) {
-  if (!effectiveDate) return null;
-  const q = await client.query(
-    `SELECT a.department_id, d.name AS department_name
-     FROM assignments a
-     LEFT JOIN departments d ON d.id = a.department_id
-     WHERE a.employee_id = $1
-       AND a.department_id IS NOT NULL
-       AND a.effective_from <= $2::date
-       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
-     ORDER BY a.effective_from DESC NULLS LAST,
-              a.created_at DESC NULLS LAST,
-              a.id DESC
-     LIMIT 1`,
-    [employeeUserId, effectiveDate]
-  );
-  if (q.rows.length === 0) return null;
-  return {
-    departmentId: q.rows[0].department_id,
-    departmentName: q.rows[0].department_name || null,
-  };
-}
-
 /**
  * Find the department head for a given department.
  *
@@ -83,47 +45,16 @@ async function getEmployeeDepartmentForDate(
  * @param {string} departmentId
  * @returns {Promise<string|null>} employee (user) ID of the department head, or null.
  */
-async function findDepartmentHeadUserId(client, departmentId) {
-  // 1. Exact match against known names
-  if (DEPARTMENT_HEAD_POSITION_NAMES.length > 0) {
-    const lowerNames = DEPARTMENT_HEAD_POSITION_NAMES.map((n) => n.toLowerCase());
-    const exact = await client.query(
-      `SELECT a.employee_id
-       FROM assignments a
-       JOIN positions p ON a.position_id = p.id
-       WHERE a.department_id = $1
-          AND (p.is_active IS NULL OR p.is_active = true)
-          AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
-          AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
-          AND LOWER(p.name) = ANY($2::text[])
-        ORDER BY a.effective_from DESC NULLS LAST,
-                 a.created_at DESC NULLS LAST,
-                 a.id DESC
-        LIMIT 1`,
-      [departmentId, lowerNames]
-    );
-    if (exact.rows.length > 0) return exact.rows[0].employee_id;
-  }
-
-  // 2. Fallback: ILIKE pattern
-  const fallback = await client.query(
-    `SELECT a.employee_id
-     FROM assignments a
-     JOIN positions p ON a.position_id = p.id
-     WHERE a.department_id = $1
-       AND (p.is_active IS NULL OR p.is_active = true)
-       AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
-       AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
-       AND p.name ILIKE '%department head%'
-     ORDER BY a.effective_from DESC NULLS LAST,
-              a.created_at DESC NULLS LAST,
-              a.id DESC
-     LIMIT 1`,
-    [departmentId]
-  );
-  if (fallback.rows.length > 0) return fallback.rows[0].employee_id;
-
-  return null;
+async function findDepartmentHeadUserId(
+  client,
+  departmentId,
+  effectiveDate = todayInHrmsTimezone()
+) {
+  const resolved = await resolveDepartmentReviewers(client, {
+    departmentId,
+    effectiveDate,
+  });
+  return resolved.primary?.reviewerId || null;
 }
 
 /**
@@ -149,18 +80,10 @@ async function getDepartmentHeadForEmployee(client, employeeUserId) {
  * department has no designated head so HR-only routing is still auditable.
  */
 async function getDepartmentReviewSnapshot(client, employeeUserId) {
-  const dept = await getEmployeeDepartment(client, employeeUserId);
-  if (!dept) return null;
-
-  const headUserId = await findDepartmentHeadUserId(client, dept.departmentId);
-  const departmentHeadUserId =
-    headUserId && headUserId !== employeeUserId ? headUserId : null;
-
-  return {
-    departmentHeadUserId,
-    departmentId: dept.departmentId,
-    departmentName: dept.departmentName,
-  };
+  return getEmployeeReviewSnapshot(client, {
+    employeeUserId,
+    effectiveDate: todayInHrmsTimezone(),
+  });
 }
 
 /**
@@ -172,22 +95,10 @@ async function getDepartmentReviewSnapshotForDate(
   employeeUserId,
   effectiveDate
 ) {
-  const dept = await getEmployeeDepartmentForDate(
-    client,
+  return getEmployeeReviewSnapshot(client, {
     employeeUserId,
-    effectiveDate
-  );
-  if (!dept) return null;
-
-  const headUserId = await findDepartmentHeadUserId(client, dept.departmentId);
-  const departmentHeadUserId =
-    headUserId && headUserId !== employeeUserId ? headUserId : null;
-
-  return {
-    departmentHeadUserId,
-    departmentId: dept.departmentId,
-    departmentName: dept.departmentName,
-  };
+    effectiveDate,
+  });
 }
 
 /**
@@ -197,48 +108,20 @@ async function getDepartmentReviewSnapshotForDate(
  * @returns {Promise<{isDeptHead: boolean, departmentId: string|null, departmentName: string|null}>}
  */
 async function isDepartmentHead(client, userId) {
-  // 1. Exact match
-  const lowerNames = DEPARTMENT_HEAD_POSITION_NAMES.map((n) => n.toLowerCase());
-  let q = await client.query(
+  const q = await client.query(
     `SELECT a.department_id, d.name AS department_name
      FROM assignments a
      JOIN positions p ON a.position_id = p.id
      LEFT JOIN departments d ON d.id = a.department_id
-     WHERE a.employee_id = $1
-       AND (p.is_active IS NULL OR p.is_active = true)
-       AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
-       AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
-       AND LOWER(p.name) = ANY($2::text[])
+     WHERE a.employee_id = $1::uuid
+       AND p.is_department_head = true
+       AND a.effective_from <= $2::date
+       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
      ORDER BY a.effective_from DESC NULLS LAST,
               a.created_at DESC NULLS LAST,
               a.id DESC
      LIMIT 1`,
-    [userId, lowerNames]
-  );
-  if (q.rows.length > 0) {
-    return {
-      isDeptHead: true,
-      departmentId: q.rows[0].department_id,
-      departmentName: q.rows[0].department_name || null,
-    };
-  }
-
-  // 2. Fallback ILIKE
-  q = await client.query(
-    `SELECT a.department_id, d.name AS department_name
-     FROM assignments a
-     JOIN positions p ON a.position_id = p.id
-     LEFT JOIN departments d ON d.id = a.department_id
-     WHERE a.employee_id = $1
-       AND (p.is_active IS NULL OR p.is_active = true)
-       AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
-       AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
-       AND p.name ILIKE '%department head%'
-     ORDER BY a.effective_from DESC NULLS LAST,
-              a.created_at DESC NULLS LAST,
-              a.id DESC
-     LIMIT 1`,
-    [userId]
+    [userId, todayInHrmsTimezone()]
   );
   if (q.rows.length > 0) {
     return {

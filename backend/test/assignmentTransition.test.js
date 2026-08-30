@@ -3,11 +3,45 @@ const assert = require('node:assert/strict');
 
 const {
   AssignmentTransitionError,
+  assertNoOverlappingDepartmentHeadAssignment,
   validateAssignmentSelection,
   createAssignmentTransition,
   updateAssignmentTransition,
   endEmployeeAssignmentsFromDate,
 } = require('../src/services/assignmentTransition');
+
+test('overlapping Department Head assignments are rejected for one department', async () => {
+  const calls = [];
+  const db = {
+    async query(sql) {
+      const text = String(sql);
+      calls.push(text);
+      if (text.includes('SELECT id FROM departments')) {
+        return { rows: [{ id: IDS.department }], rowCount: 1 };
+      }
+      if (text.includes('FROM assignments a') && text.includes('p.is_department_head')) {
+        return {
+          rows: [{ id: IDS.current, employee_id: IDS.employee }],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  await assert.rejects(
+    assertNoOverlappingDepartmentHeadAssignment(db, {
+      departmentId: IDS.department,
+      positionId: IDS.position,
+      effectiveFrom: '2026-08-01',
+      effectiveTo: null,
+      isDepartmentHead: true,
+    }),
+    (error) =>
+      error instanceof AssignmentTransitionError && error.statusCode === 409
+  );
+  assert.equal(calls.some((sql) => sql.includes('FOR UPDATE')), true);
+});
 
 const IDS = {
   employee: '11111111-1111-4111-8111-111111111111',

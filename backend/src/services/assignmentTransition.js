@@ -72,6 +72,7 @@ async function validateAssignmentSelection(
        COALESCE(d.is_active, false) AS department_is_active,
        (p.id IS NOT NULL) AS position_exists,
        COALESCE(p.is_active, false) AS position_is_active,
+       COALESCE(p.is_department_head, false) AS position_is_department_head,
        p.department_id::text AS position_department_id,
        (s.id IS NOT NULL) AS shift_exists,
        COALESCE(s.is_active, false) AS shift_is_active
@@ -133,6 +134,7 @@ async function validateAssignmentSelection(
     employeeStatus: String(row.employee_status || 'active').toLowerCase(),
     employeeDateHired: row.employee_date_hired || null,
     employeeSeparationDate: row.employee_separation_date || null,
+    positionIsDepartmentHead: row.position_is_department_head === true,
   };
 }
 
@@ -223,6 +225,59 @@ async function findOverlappingAssignment(
   return result.rows[0] || null;
 }
 
+async function assertNoOverlappingDepartmentHeadAssignment(
+  db,
+  {
+    departmentId,
+    positionId,
+    effectiveFrom,
+    effectiveTo,
+    excludeAssignmentId = null,
+    isDepartmentHead = null,
+  }
+) {
+  if (isDepartmentHead === false) return;
+  if (isDepartmentHead !== true) {
+    const positionResult = await db.query(
+      `SELECT is_department_head
+       FROM positions
+       WHERE id = $1::uuid
+         AND department_id = $2::uuid`,
+      [positionId, departmentId]
+    );
+    if (positionResult.rows[0]?.is_department_head !== true) return;
+  }
+
+  // Serialize Head changes by department before checking effective periods.
+  await db.query(
+    `SELECT id FROM departments WHERE id = $1::uuid FOR UPDATE`,
+    [departmentId]
+  );
+  const conflict = await db.query(
+    `SELECT a.id, a.employee_id,
+            a.effective_from::text AS effective_from,
+            a.effective_to::text AS effective_to
+     FROM assignments a
+     JOIN positions p ON p.id = a.position_id
+     WHERE a.department_id = $1::uuid
+       AND p.is_department_head = true
+       AND a.is_active = true
+       AND a.effective_from <= COALESCE($3::date, 'infinity'::date)
+       AND COALESCE(a.effective_to, 'infinity'::date) >= $2::date
+       AND ($4::uuid IS NULL OR a.id <> $4::uuid)
+     ORDER BY a.effective_from, a.created_at, a.id
+     LIMIT 1
+     FOR UPDATE OF a`,
+    [departmentId, effectiveFrom, effectiveTo, excludeAssignmentId]
+  );
+  if (conflict.rowCount > 0) {
+    throw new AssignmentTransitionError(
+      'This department already has a Department Head assignment during the selected effective period',
+      409
+    );
+  }
+}
+
 function overlapMessage(row) {
   const range = row?.effective_to
     ? `${row.effective_from} to ${row.effective_to}`
@@ -275,6 +330,13 @@ async function createAssignmentTransition(
     if (conflict) {
       throw new AssignmentTransitionError(overlapMessage(conflict), 409);
     }
+    await assertNoOverlappingDepartmentHeadAssignment(db, {
+      departmentId: selection.departmentId,
+      positionId: selection.positionId,
+      effectiveFrom: from,
+      effectiveTo: to,
+      isDepartmentHead: selection.positionIsDepartmentHead,
+    });
   }
 
   const result = await db.query(
@@ -308,6 +370,8 @@ async function updateAssignmentTransition(
 ) {
   const existingResult = await db.query(
     `SELECT id, employee_id, department_id, position_id, shift_id,
+            (SELECT p.is_department_head FROM positions p
+             WHERE p.id = assignments.position_id) AS position_is_department_head,
             effective_from::text AS effective_from,
             effective_to::text AS effective_to, is_active, remarks
      FROM assignments
@@ -391,6 +455,16 @@ async function updateAssignmentTransition(
     if (conflict) {
       throw new AssignmentTransitionError(overlapMessage(conflict), 409);
     }
+    await assertNoOverlappingDepartmentHeadAssignment(db, {
+      departmentId: selection.departmentId,
+      positionId: selection.positionId,
+      effectiveFrom: from,
+      effectiveTo: to,
+      excludeAssignmentId: assignmentId,
+      isDepartmentHead: validatedSelection
+        ? validatedSelection.positionIsDepartmentHead === true
+        : existing.position_is_department_head === true,
+    });
   }
 
   const result = await db.query(
@@ -459,6 +533,7 @@ async function endEmployeeAssignmentsFromDate(db, { employeeId, effectiveFrom })
 module.exports = {
   AssignmentTransitionError,
   validateAssignmentSelection,
+  assertNoOverlappingDepartmentHeadAssignment,
   createAssignmentTransition,
   updateAssignmentTransition,
   endEmployeeAssignmentsFromDate,

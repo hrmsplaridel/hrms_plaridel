@@ -17,6 +17,7 @@ const DEPARTMENT_DEPENDENCIES = Object.freeze([
   { key: 'leave_requests', label: 'leave requests', table: 'leave_requests', column: 'review_department_id' },
   { key: 'locator_slips', label: 'locator requests', table: 'locator_slips', column: 'department_id' },
   { key: 'workflow_steps', label: 'DocuTracker workflow steps', table: 'docutracker_workflow_steps', column: 'department_id' },
+  { key: 'reviewer_backups', label: 'department reviewer backups', table: 'department_reviewer_backups', column: 'department_id' },
   { key: 'escalation_configs', label: 'DocuTracker escalation rules', table: 'docutracker_escalation_configs', column: 'department_id' },
 ]);
 
@@ -80,6 +81,16 @@ const DEPARTMENT_DEACTIVATION_DEPENDENCIES = Object.freeze([
            'pending', 'pending_department_head', 'pending_hr',
            'returned_for_correction'
          )`,
+  },
+  {
+    key: 'reviewer_backups',
+    label: 'current or future department reviewer backups',
+    countSql: (departmentPlaceholder, datePlaceholder) => `
+      SELECT COUNT(*)::int
+        FROM department_reviewer_backups drb
+       WHERE drb.department_id = ${departmentPlaceholder}::uuid
+         AND drb.is_active = true
+         AND (drb.effective_to IS NULL OR drb.effective_to >= ${datePlaceholder}::date)`,
   },
   {
     key: 'workflow_steps',

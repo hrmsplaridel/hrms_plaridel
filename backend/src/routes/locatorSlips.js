@@ -10,6 +10,9 @@ const {
   getDepartmentReviewSnapshotForDate,
   isDepartmentHead,
 } = require('../services/departmentHeadService');
+const {
+  replaceRequestReviewerSnapshot,
+} = require('../services/departmentReviewerService');
 const locatorNotifications = require('../services/locatorNotifications');
 const {
   recordLocatorAttachmentAccess,
@@ -697,6 +700,7 @@ const locatorSubmissionService = createLocatorSubmissionService({
   notifyAfterSubmit: locatorNotifications.notifyAfterSubmit,
   broadcastSubmitted: (row) => broadcastLocatorUpdated('submitted', row),
   recordHistory: recordLocatorWorkflowEvent,
+  snapshotReviewers: replaceRequestReviewerSnapshot,
 });
 
 function isValidStatus(status) {
@@ -724,7 +728,14 @@ router.get('/department-head/check', protect, async (req, res) => {
       `SELECT ls.department_id, d.name AS department_name
        FROM locator_slips ls
        LEFT JOIN departments d ON d.id = ls.department_id
-       WHERE ls.assigned_department_head_id = $1::uuid
+       WHERE (
+           ls.assigned_department_head_id = $1::uuid
+           OR EXISTS (
+             SELECT 1 FROM locator_slip_department_reviewers lsr
+             WHERE lsr.locator_slip_id = ls.id
+               AND lsr.reviewer_id = $1::uuid
+           )
+         )
          AND ls.status = 'pending_department_head'
        ORDER BY ls.updated_at DESC
        LIMIT 1`,
@@ -1427,6 +1438,12 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         departmentHeadUserId,
       ]
     );
+    await replaceRequestReviewerSnapshot(client, {
+      requestType: 'locator',
+      requestId: id,
+      departmentId: reviewSnapshot?.departmentId || null,
+      reviewers: reviewSnapshot?.reviewers || [],
+    });
     await recordLocatorWorkflowEvent(client, {
       locatorSlipId: id,
       action: 'resubmitted',
@@ -1450,6 +1467,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         pmOut: row.pm_out,
         requestType: row.request_type,
         departmentHeadUserId,
+        departmentReviewerUserIds: reviewSnapshot?.reviewerUserIds || [],
       })
     );
 
@@ -1541,11 +1559,16 @@ router.get('/:id/history', protect, async (req, res) => {
   const client = await pool.connect();
   try {
     const current = await client.query(
-      `SELECT id, employee_id, department_id, assigned_department_head_id,
-              dept_head_reviewer_id, status
-       FROM locator_slips
-       WHERE id = $1::uuid`,
-      [req.params.id]
+      `SELECT ls.id, ls.employee_id, ls.department_id,
+              ls.assigned_department_head_id, ls.dept_head_reviewer_id, ls.status,
+              EXISTS (
+                SELECT 1 FROM locator_slip_department_reviewers lsr
+                WHERE lsr.locator_slip_id = ls.id
+                  AND lsr.reviewer_id = $2::uuid
+              ) AS is_snapshotted_reviewer
+       FROM locator_slips ls
+       WHERE ls.id = $1::uuid`,
+      [req.params.id, userId]
     );
     const row = current.rows[0];
     if (!row) return res.status(404).json({ error: 'Locator slip not found' });
@@ -1555,7 +1578,8 @@ router.get('/:id/history', protect, async (req, res) => {
     const isHrOrAdmin = normalizedRole === 'hr' || normalizedRole === 'admin';
     let canReadAsDepartmentHead =
       String(row.assigned_department_head_id || '') === String(userId) ||
-      String(row.dept_head_reviewer_id || '') === String(userId);
+      String(row.dept_head_reviewer_id || '') === String(userId) ||
+      row.is_snapshotted_reviewer === true;
 
     if (
       !isOwner &&
@@ -1592,18 +1616,23 @@ router.get('/:id/attachment', protect, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const current = await pool.query(
-      `SELECT id,
-              employee_id,
-              department_id,
-              assigned_department_head_id,
-              status,
-              dept_head_reviewer_id,
-              attachment_name,
-              attachment_path,
-              attachment_mime_type
-       FROM locator_slips
-       WHERE id = $1::uuid`,
-      [req.params.id]
+      `SELECT ls.id,
+              ls.employee_id,
+              ls.department_id,
+              ls.assigned_department_head_id,
+              ls.status,
+              ls.dept_head_reviewer_id,
+              ls.attachment_name,
+              ls.attachment_path,
+              ls.attachment_mime_type,
+              EXISTS (
+                SELECT 1 FROM locator_slip_department_reviewers lsr
+                WHERE lsr.locator_slip_id = ls.id
+                  AND lsr.reviewer_id = $2::uuid
+              ) AS is_snapshotted_reviewer
+       FROM locator_slips ls
+       WHERE ls.id = $1::uuid`,
+      [req.params.id, userId]
     );
     const row = current.rows[0];
     if (!row) return res.status(404).json({ error: 'Locator slip not found' });
@@ -1612,7 +1641,7 @@ router.get('/:id/attachment', protect, async (req, res) => {
     const isOwner = String(row.employee_id) === String(userId);
     const isHrOrAdmin = normalizedRole === 'hr' || normalizedRole === 'admin';
     let assignedDepartmentHeadId =
-      row.assigned_department_head_id || null;
+      (row.is_snapshotted_reviewer ? userId : row.assigned_department_head_id) || null;
     if (
       !assignedDepartmentHeadId &&
       !isOwner &&
@@ -1714,6 +1743,11 @@ router.get('/department-head', protect, async (req, res) => {
              ls.status = 'pending_department_head'
              AND (
                ls.assigned_department_head_id = $1::uuid
+               OR EXISTS (
+                 SELECT 1 FROM locator_slip_department_reviewers lsr
+                 WHERE lsr.locator_slip_id = ls.id
+                   AND lsr.reviewer_id = $1::uuid
+               )
                OR (
                  ls.assigned_department_head_id IS NULL
                  AND ls.department_id = $2::uuid
@@ -1765,6 +1799,11 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
        WHERE ls.id = $1::uuid
          AND (
            ls.assigned_department_head_id = $2::uuid
+           OR EXISTS (
+             SELECT 1 FROM locator_slip_department_reviewers lsr
+             WHERE lsr.locator_slip_id = ls.id
+               AND lsr.reviewer_id = $2::uuid
+           )
            OR (
              ls.assigned_department_head_id IS NULL
              AND ls.department_id = $3::uuid
@@ -1875,6 +1914,11 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
        WHERE id = $1::uuid
          AND (
            assigned_department_head_id = $2::uuid
+           OR EXISTS (
+             SELECT 1 FROM locator_slip_department_reviewers lsr
+             WHERE lsr.locator_slip_id = locator_slips.id
+               AND lsr.reviewer_id = $2::uuid
+           )
            OR (
              assigned_department_head_id IS NULL
              AND department_id = $3::uuid
@@ -1983,6 +2027,11 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
        WHERE id = $1::uuid
          AND (
            assigned_department_head_id = $2::uuid
+           OR EXISTS (
+             SELECT 1 FROM locator_slip_department_reviewers lsr
+             WHERE lsr.locator_slip_id = locator_slips.id
+               AND lsr.reviewer_id = $2::uuid
+           )
            OR (
              assigned_department_head_id IS NULL
              AND department_id = $3::uuid
