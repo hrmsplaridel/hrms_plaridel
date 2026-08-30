@@ -25,6 +25,45 @@ class _DepartmentRecord {
       : '—';
 }
 
+class _DepartmentDeactivationBlocker {
+  const _DepartmentDeactivationBlocker({
+    required this.label,
+    required this.count,
+  });
+
+  final String label;
+  final int count;
+}
+
+class _DepartmentDeactivationPreview {
+  const _DepartmentDeactivationPreview({
+    required this.canDeactivate,
+    required this.blockers,
+  });
+
+  factory _DepartmentDeactivationPreview.fromJson(Map<String, dynamic> json) {
+    final rawBlockers = json['blockers'];
+    final blockers = rawBlockers is List
+        ? rawBlockers.whereType<Map>().map((item) {
+            final countValue = item['count'];
+            return _DepartmentDeactivationBlocker(
+              label: item['label']?.toString() ?? 'active dependencies',
+              count: countValue is num
+                  ? countValue.toInt()
+                  : int.tryParse(countValue?.toString() ?? '') ?? 0,
+            );
+          }).toList()
+        : <_DepartmentDeactivationBlocker>[];
+    return _DepartmentDeactivationPreview(
+      canDeactivate: json['can_deactivate'] == true,
+      blockers: blockers,
+    );
+  }
+
+  final bool canDeactivate;
+  final List<_DepartmentDeactivationBlocker> blockers;
+}
+
 /// Department management screen: list with search/status filter + form for Add/Update/Deactivate.
 class ManageDepartment extends StatefulWidget {
   const ManageDepartment({super.key});
@@ -253,6 +292,80 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       );
       return false;
     }
+    late final _DepartmentDeactivationPreview preview;
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/departments/${d.id}/deactivation-preview',
+      );
+      preview = _DepartmentDeactivationPreview.fromJson(response.data ?? {});
+    } on DioException catch (e) {
+      if (mounted) {
+        final msg =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to check department dependencies';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg.toString())));
+      }
+      return false;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to check department dependencies: $e'),
+          ),
+        );
+      }
+      return false;
+    }
+    if (!mounted) return false;
+
+    if (!preview.canDeactivate) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Department is still in use'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Resolve the following items before deactivating "${d.name}":',
+              ),
+              const SizedBox(height: 16),
+              ...preview.blockers.map(
+                (blocker) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.warning_amber_rounded,
+                        size: 20,
+                        color: Colors.orange,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text('${blocker.count} ${blocker.label}'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
