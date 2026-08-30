@@ -500,6 +500,13 @@ test('department creation commits its audit event in the same transaction', asyn
     assert.equal(res.statusCode, 201);
     assert.equal(calls[0].text, 'BEGIN');
     assert.equal(calls.at(-1).text, 'COMMIT');
+    const insert = calls.find(({ text }) =>
+      text.startsWith('INSERT INTO departments')
+    );
+    assert.match(
+      insert.text,
+      /INSERT INTO departments \(name, description, is_active\)\s+VALUES/
+    );
     const audit = calls.find(({ text }) => text.startsWith('INSERT INTO audit_logs'));
     assert.ok(audit);
     assert.deepEqual(audit.params.slice(0, 3), [
@@ -568,6 +575,62 @@ test('department creation rolls back when its audit event fails', async () => {
     assert.equal(released, true);
   } finally {
     console.error = originalError;
+    clearModule(routePath);
+    restoreDb();
+  }
+});
+
+test('department number collisions are not reported as duplicate names', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.startsWith('INSERT INTO departments')) {
+        const error = new Error('duplicate department number');
+        error.code = '23505';
+        error.constraint = 'departments_department_number_key';
+        throw error;
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      async connect() {
+        return client;
+      },
+    },
+  });
+  const routePath = '../src/routes/departments';
+  clearModule(routePath);
+  try {
+    const router = require(routePath);
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      body: { name: 'Tourism' },
+      user: { id: IDS.actor, role: 'admin' },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.error, /department number conflict/i);
+    assert.doesNotMatch(res.body.error, /name already exists/i);
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(released, true);
+  } finally {
     clearModule(routePath);
     restoreDb();
   }

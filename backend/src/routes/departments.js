@@ -248,14 +248,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
     client = await pool.connect();
     await client.query('BEGIN');
-    // Assign next available number (fills gaps: 1,2,3... no skips)
     const result = await client.query(
-      `INSERT INTO departments (name, description, is_active, department_number)
-       SELECT $1, $2, $3, COALESCE(
-         (SELECT MIN(g.n) FROM generate_series(1, (SELECT COALESCE(MAX(department_number), 0) + 1 FROM departments)) AS g(n)
-          WHERE NOT EXISTS (SELECT 1 FROM departments d2 WHERE d2.department_number = g.n)),
-         1
-       )
+      `INSERT INTO departments (name, description, is_active)
+       VALUES ($1, $2, $3)
        RETURNING id, department_number, name, description, is_active,
                  created_at, updated_at`,
       [name.trim(), description?.trim() || null, !!is_active]
@@ -277,8 +272,16 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         console.error('[departments POST rollback]', rollbackError);
       }
     }
-    if (err.code === '23505') {
+    if (err.code === '23505' && err.constraint === 'departments_name_key') {
       return res.status(409).json({ error: 'A department with this name already exists.' });
+    }
+    if (
+      err.code === '23505' &&
+      err.constraint === 'departments_department_number_key'
+    ) {
+      return res.status(409).json({
+        error: 'Department number conflict. Please retry the operation.',
+      });
     }
     console.error('[departments POST]', err);
     res.status(500).json({ error: 'Failed to create department' });
