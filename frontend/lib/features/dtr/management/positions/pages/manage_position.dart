@@ -11,6 +11,7 @@ class _PositionRecord {
     this.description,
     this.departmentId,
     this.departmentName,
+    required this.isDepartmentHead,
     required this.isActive,
     this.positionNumber,
   });
@@ -19,6 +20,7 @@ class _PositionRecord {
   final String? description;
   final String? departmentId;
   final String? departmentName;
+  final bool isDepartmentHead;
   final bool isActive;
   final int? positionNumber;
 
@@ -51,6 +53,7 @@ class _ManagePositionState extends State<ManagePosition> {
   bool _loading = false;
   _PositionRecord? _selectedPosition;
   String? _selectedDepartmentId;
+  bool _isDepartmentHead = false;
   StateSetter? _drawerSetState;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
@@ -60,6 +63,16 @@ class _ManagePositionState extends State<ManagePosition> {
 
   Color _mutedColor(BuildContext context) =>
       AppTheme.dashTextSecondaryOf(context);
+
+  String _apiErrorMessage(DioException error, String fallback) {
+    final data = error.response?.data;
+    if (data is Map && data['error'] != null) {
+      final message = data['error'].toString().trim();
+      if (message.isNotEmpty) return message;
+    }
+    final message = error.message?.trim();
+    return message == null || message.isEmpty ? fallback : message;
+  }
 
   BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
     color: _isDark(context)
@@ -150,6 +163,7 @@ class _ManagePositionState extends State<ManagePosition> {
           description: m['description'] as String?,
           departmentId: m['department_id'] as String?,
           departmentName: deptName,
+          isDepartmentHead: m['is_department_head'] as bool? ?? false,
           isActive: m['is_active'] as bool? ?? true,
           positionNumber: posNum is int
               ? posNum
@@ -169,6 +183,7 @@ class _ManagePositionState extends State<ManagePosition> {
       _titleController.text = p.name;
       _descriptionController.text = p.description ?? '';
       _selectedDepartmentId = p.departmentId;
+      _isDepartmentHead = p.isDepartmentHead;
     });
   }
 
@@ -178,6 +193,7 @@ class _ManagePositionState extends State<ManagePosition> {
       _titleController.clear();
       _descriptionController.clear();
       _selectedDepartmentId = null;
+      _isDepartmentHead = false;
     });
   }
 
@@ -186,6 +202,16 @@ class _ManagePositionState extends State<ManagePosition> {
     if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a position title.')),
+      );
+      return false;
+    }
+    if (_isDepartmentHead && _selectedDepartmentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Select a department for the official Department Head position.',
+          ),
+        ),
       );
       return false;
     }
@@ -198,6 +224,7 @@ class _ManagePositionState extends State<ManagePosition> {
               ? null
               : _descriptionController.text.trim(),
           'department_id': _selectedDepartmentId,
+          'is_department_head': _isDepartmentHead,
           'is_active': true,
         },
       );
@@ -213,7 +240,7 @@ class _ManagePositionState extends State<ManagePosition> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to add: ${e.response?.data ?? e.message}'),
+            content: Text(_apiErrorMessage(e, 'Failed to add position')),
           ),
         );
       }
@@ -236,6 +263,16 @@ class _ManagePositionState extends State<ManagePosition> {
       );
       return false;
     }
+    if (_isDepartmentHead && _selectedDepartmentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Select a department for the official Department Head position.',
+          ),
+        ),
+      );
+      return false;
+    }
     try {
       await ApiClient.instance.put(
         '/api/positions/${p.id}',
@@ -245,6 +282,7 @@ class _ManagePositionState extends State<ManagePosition> {
               ? null
               : _descriptionController.text.trim(),
           'department_id': _selectedDepartmentId,
+          'is_department_head': _isDepartmentHead,
         },
       );
       if (mounted) {
@@ -259,7 +297,7 @@ class _ManagePositionState extends State<ManagePosition> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to update: ${e.response?.data ?? e.message}'),
+            content: Text(_apiErrorMessage(e, 'Failed to update position')),
           ),
         );
       }
@@ -313,9 +351,7 @@ class _ManagePositionState extends State<ManagePosition> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'Failed to deactivate: ${e.response?.data ?? e.message}',
-            ),
+            content: Text(_apiErrorMessage(e, 'Failed to deactivate position')),
           ),
         );
       }
@@ -919,8 +955,27 @@ class _ManagePositionState extends State<ManagePosition> {
               ),
             ),
           ],
-          onChanged: (v) =>
-              _updatePositionFormState(() => _selectedDepartmentId = v),
+          onChanged: (v) => _updatePositionFormState(() {
+            _selectedDepartmentId = v;
+            if (v == null) _isDepartmentHead = false;
+          }),
+        ),
+        const SizedBox(height: 14),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          value: _isDepartmentHead,
+          onChanged: _selectedDepartmentId == null
+              ? null
+              : (value) =>
+                    _updatePositionFormState(() => _isDepartmentHead = value),
+          title: Text(
+            'Official Department Head',
+            style: AppTheme.dashFieldTextStyle(context),
+          ),
+          subtitle: Text(
+            'The employee assigned to this position becomes the primary reviewer.',
+            style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+          ),
         ),
         const SizedBox(height: 20),
         Text(

@@ -85,6 +85,12 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   bool _loading = false;
   _DepartmentRecord? _selectedDepartment;
   StateSetter? _drawerSetState;
+  bool _reviewersLoading = false;
+  bool _reviewersSaving = false;
+  String? _reviewerEffectiveDate;
+  Map<String, dynamic>? _primaryReviewer;
+  List<Map<String, dynamic>> _reviewerRoster = [];
+  List<String> _backupReviewerIds = [];
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -172,6 +178,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       _nameController.text = d.name;
       _descriptionController.text = d.description ?? '';
     });
+    _loadReviewerConfig(d.id);
   }
 
   void _clearForm() {
@@ -179,7 +186,107 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       _selectedDepartment = null;
       _nameController.clear();
       _descriptionController.clear();
+      _reviewerEffectiveDate = null;
+      _primaryReviewer = null;
+      _reviewerRoster = [];
+      _backupReviewerIds = [];
     });
+  }
+
+  Future<void> _loadReviewerConfig(
+    String departmentId, {
+    String? effectiveDate,
+  }) async {
+    _updateDepartmentFormState(() => _reviewersLoading = true);
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/departments/$departmentId/reviewer-config',
+        queryParameters: {
+          if (effectiveDate != null) 'effective_date': effectiveDate,
+        },
+      );
+      final data = response.data ?? const <String, dynamic>{};
+      final rawRoster = data['eligible_employees'];
+      final rawBackups = data['backups'];
+      _updateDepartmentFormState(() {
+        _reviewerEffectiveDate = data['effective_date']?.toString();
+        _primaryReviewer = data['primary'] is Map
+            ? Map<String, dynamic>.from(data['primary'] as Map)
+            : null;
+        _reviewerRoster = rawRoster is List
+            ? rawRoster
+                  .whereType<Map>()
+                  .map((item) => Map<String, dynamic>.from(item))
+                  .toList()
+            : [];
+        _backupReviewerIds = rawBackups is List
+            ? rawBackups
+                  .whereType<Map>()
+                  .map((item) => item['reviewerId']?.toString() ?? '')
+                  .where((id) => id.isNotEmpty)
+                  .toList()
+            : [];
+      });
+    } on DioException catch (error) {
+      if (mounted) {
+        final message =
+            (error.response?.data as Map?)?['error'] ?? error.message;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load reviewers: $message')),
+        );
+      }
+    } finally {
+      _updateDepartmentFormState(() => _reviewersLoading = false);
+    }
+  }
+
+  Future<void> _pickReviewerEffectiveDate() async {
+    final initial =
+        DateTime.tryParse(_reviewerEffectiveDate ?? '') ?? DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (selected == null || _selectedDepartment == null) return;
+    final value =
+        '${selected.year.toString().padLeft(4, '0')}-'
+        '${selected.month.toString().padLeft(2, '0')}-'
+        '${selected.day.toString().padLeft(2, '0')}';
+    await _loadReviewerConfig(_selectedDepartment!.id, effectiveDate: value);
+  }
+
+  Future<void> _saveReviewerBackups() async {
+    final department = _selectedDepartment;
+    final effectiveDate = _reviewerEffectiveDate;
+    if (department == null || effectiveDate == null || _reviewersSaving) return;
+    _updateDepartmentFormState(() => _reviewersSaving = true);
+    try {
+      await ApiClient.instance.put(
+        '/api/departments/${department.id}/reviewer-backups',
+        data: {
+          'effective_from': effectiveDate,
+          'employee_ids': _backupReviewerIds,
+        },
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Department reviewer backups saved.')),
+        );
+      }
+      await _loadReviewerConfig(department.id, effectiveDate: effectiveDate);
+    } on DioException catch (error) {
+      if (mounted) {
+        final message =
+            (error.response?.data as Map?)?['error'] ?? error.message;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save reviewers: $message')),
+        );
+      }
+    } finally {
+      _updateDepartmentFormState(() => _reviewersSaving = false);
+    }
   }
 
   Future<bool> _addDepartment() async {
@@ -1035,6 +1142,171 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           decoration: _inputDecoration('Description'),
           maxLines: 4,
         ),
+        if (_selectedDepartment != null) ...[
+          const SizedBox(height: 28),
+          Divider(color: AppTheme.dashHairlineOf(context)),
+          const SizedBox(height: 18),
+          Text(
+            'Department Reviewers',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: _headingColor(context),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'The official Head is automatic. Selected backups can review the same requests.',
+            style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Effective date',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _mutedColor(context),
+            ),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _reviewersLoading ? null : _pickReviewerEffectiveDate,
+              icon: const Icon(Icons.calendar_month_rounded, size: 18),
+              label: Text(
+                _reviewerEffectiveDate ?? 'Select effective date',
+                overflow: TextOverflow.ellipsis,
+              ),
+              style: OutlinedButton.styleFrom(
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 14,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          if (_reviewersLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 28),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            )
+          else ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.verified_user_outlined,
+                  size: 20,
+                  color: _mutedColor(context),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Primary reviewer',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _mutedColor(context),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _primaryReviewer?['reviewerName'] ??
+                            'No official Department Head assigned',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: _headingColor(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'Backup reviewers',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _mutedColor(context),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Selection order sets the review rank.',
+              style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+            ),
+            const SizedBox(height: 8),
+            if (_reviewerRoster.where((employee) {
+              return employee['id']?.toString() !=
+                  _primaryReviewer?['reviewerId']?.toString();
+            }).isEmpty)
+              Text(
+                'No other active employees are assigned to this department on this date.',
+                style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _reviewerRoster
+                    .where((employee) {
+                      return employee['id']?.toString() !=
+                          _primaryReviewer?['reviewerId']?.toString();
+                    })
+                    .map((employee) {
+                      final id = employee['id']?.toString() ?? '';
+                      final selected = _backupReviewerIds.contains(id);
+                      final rank = selected
+                          ? _backupReviewerIds.indexOf(id) + 1
+                          : null;
+                      return FilterChip(
+                        selected: selected,
+                        avatar: rank == null
+                            ? null
+                            : CircleAvatar(child: Text('$rank')),
+                        label: Text(employee['name']?.toString() ?? id),
+                        onSelected: (value) {
+                          _updateDepartmentFormState(() {
+                            if (value) {
+                              if (_backupReviewerIds.length < 5) {
+                                _backupReviewerIds.add(id);
+                              }
+                            } else {
+                              _backupReviewerIds.remove(id);
+                            }
+                          });
+                        },
+                      );
+                    })
+                    .toList(),
+              ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _reviewersSaving ? null : _saveReviewerBackups,
+                icon: _reviewersSaving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_rounded, size: 18),
+                label: const Text('Save Reviewers'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                ),
+              ),
+            ),
+          ],
+        ],
         if (showActions) ...[
           const SizedBox(height: 28),
           Wrap(

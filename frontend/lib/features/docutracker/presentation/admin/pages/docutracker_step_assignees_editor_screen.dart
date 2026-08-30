@@ -36,6 +36,7 @@ class _DocStep {
     required this.workflowVersion,
     required this.stepOrder,
     required this.departmentId,
+    required this.assigneeSource,
     required this.label,
     required this.enabled,
     required this.assignees,
@@ -46,6 +47,7 @@ class _DocStep {
   final int workflowVersion;
   final int stepOrder;
   final String? departmentId;
+  final String assigneeSource;
   final String? label;
   final bool enabled;
   final List<_Assignee> assignees;
@@ -325,6 +327,8 @@ class _DocuTrackerStepAssigneesEditorScreenState
             workflowVersion: (r['workflow_version'] as num?)?.toInt() ?? v,
             stepOrder: (r['step_order'] as num?)?.toInt() ?? 0,
             departmentId: r['department_id']?.toString(),
+            assigneeSource:
+                r['assignee_source']?.toString() ?? 'specific_users',
             label: r['label']?.toString(),
             enabled: r['enabled'] != false,
             assignees: assignees,
@@ -349,6 +353,16 @@ class _DocuTrackerStepAssigneesEditorScreenState
   }
 
   Future<void> _editAssignees(_DocStep step) async {
+    if (step.assigneeSource == 'department_reviewers') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This step uses the official Department Head and backups from Department Management.',
+          ),
+        ),
+      );
+      return;
+    }
     final draft = step.assignees.map((a) => a).toList();
 
     void normalizePrimaryAndRanks(List<_Assignee> list) {
@@ -802,7 +816,9 @@ class _DocuTrackerStepAssigneesEditorScreenState
                             .toList();
                         final p = primary.isEmpty ? null : primary.first;
                         final primaryLine = p == null
-                            ? '—'
+                            ? (s.assigneeSource == 'department_reviewers'
+                                  ? 'Automatic department reviewers'
+                                  : '—')
                             : (p.departmentName != null &&
                                   p.departmentName!.trim().isNotEmpty)
                             ? '${p.fullName} · ${p.departmentName}'
@@ -896,7 +912,10 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                             Expanded(
                                               child: Text(
                                                 p == null
-                                                    ? 'No primary assignee'
+                                                    ? (s.assigneeSource ==
+                                                              'department_reviewers'
+                                                          ? 'Official Head and configured backups'
+                                                          : 'No primary assignee')
                                                     : primaryLine,
                                                 style: TextStyle(
                                                   color: AppTheme.textSecondary,
