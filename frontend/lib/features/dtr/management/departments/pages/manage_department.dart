@@ -11,12 +11,14 @@ class _DepartmentRecord {
     this.departmentNumber,
     this.description,
     required this.isActive,
+    required this.canPermanentlyDelete,
   });
   final String id;
   final String name;
   final int? departmentNumber;
   final String? description;
   final bool isActive;
+  final bool canPermanentlyDelete;
 
   String get displayDepartmentNo => departmentNumber != null
       ? 'DEPT-${departmentNumber!.toString().padLeft(3, '0')}'
@@ -112,6 +114,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
               : (numVal != null ? int.tryParse(numVal.toString()) : null),
           description: m['description'] as String?,
           isActive: m['is_active'] as bool? ?? true,
+          canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
         );
       }).toList();
     } on DioException catch (e) {
@@ -305,6 +308,111 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     }
   }
 
+  Future<String?> _requestMistakenDeleteReason(
+    _DepartmentRecord department,
+  ) async {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete mistaken department?'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This permanently removes "${department.name}". This is allowed only because the department has no dependent records.',
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 1000,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Reason',
+                  hintText: 'Why was this department created by mistake?',
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'A reason is required.'
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              if (formKey.currentState?.validate() != true) return;
+              Navigator.of(dialogContext).pop(controller.text.trim());
+            },
+            icon: const Icon(Icons.delete_forever_rounded, size: 18),
+            label: const Text('Delete permanently'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return reason;
+  }
+
+  Future<bool> _deleteMistakenDepartment() async {
+    final department = _selectedDepartment;
+    if (department == null || !department.canPermanentlyDelete) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This department is already in use and cannot be permanently deleted.',
+          ),
+        ),
+      );
+      return false;
+    }
+
+    final reason = await _requestMistakenDeleteReason(department);
+    if (reason == null || !mounted) return false;
+    try {
+      await ApiClient.instance.delete(
+        '/api/departments/${department.id}',
+        data: {'reason': reason},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mistaken department deleted.')),
+        );
+        _clearForm();
+        _loadDepartments();
+      }
+      return true;
+    } on DioException catch (e) {
+      if (mounted) {
+        final message =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to delete department';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message.toString())));
+      }
+      return false;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete department: $e')),
+        );
+      }
+      return false;
+    }
+  }
+
   Future<void> _openDepartmentDrawer({_DepartmentRecord? department}) async {
     _drawerSetState = null;
     if (department == null) {
@@ -408,6 +516,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
 
   Widget _buildDrawerFooter(BuildContext drawerContext) {
     final isEditing = _selectedDepartment != null;
+    final department = _selectedDepartment;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -416,16 +525,9 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           top: BorderSide(color: AppTheme.dashHairlineOf(context)),
         ),
       ),
-      child: Wrap(
-        spacing: 12,
-        runSpacing: 8,
-        alignment: WrapAlignment.end,
+      child: Row(
         children: [
-          TextButton(
-            onPressed: () => Navigator.of(drawerContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          if (isEditing)
+          if (department != null && department.isActive)
             OutlinedButton.icon(
               onPressed: () async {
                 final ok = await _deactivateDepartment();
@@ -440,6 +542,26 @@ class _ManageDepartmentState extends State<ManageDepartment> {
                 side: const BorderSide(color: Colors.red),
               ),
             ),
+          if (department != null &&
+              department.isActive &&
+              department.canPermanentlyDelete)
+            const SizedBox(width: 12),
+          if (department != null && department.canPermanentlyDelete)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deleteMistakenDepartment();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.delete_forever_rounded, size: 18),
+              label: const Text('Delete Mistake'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          const Spacer(),
           FilledButton.icon(
             onPressed: () async {
               final ok = isEditing
