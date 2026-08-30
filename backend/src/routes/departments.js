@@ -10,6 +10,7 @@ const {
   dependencyBlockers,
   dependencyCountsFromRow,
   ensureDepartmentCanDeactivate,
+  loadDepartmentDependencyCounts,
   previewDepartmentDeactivation,
   writeDepartmentAudit,
 } = require('../services/departmentLifecycle');
@@ -306,7 +307,12 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const normalized = normalizeDepartmentWrite(req.body);
-    const { name, description, is_active } = normalized;
+    const {
+      name,
+      description,
+      is_active,
+      confirm_historical_label_change: renameConfirmed,
+    } = normalized;
 
     const updates = [];
     const values = [];
@@ -347,6 +353,22 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Department not found' });
     }
     const before = existing.rows[0];
+
+    if (
+      name !== undefined &&
+      name !== before.name &&
+      renameConfirmed !== true
+    ) {
+      const dependencyCounts = await loadDepartmentDependencyCounts(client, id);
+      const renameBlockers = dependencyBlockers(dependencyCounts);
+      if (renameBlockers.length > 0) {
+        throw new DepartmentLifecycleError(
+          'Renaming this department will update its label across historical records. Confirm the historical label change, or deactivate this department and create a new one for an organizational restructuring.',
+          409,
+          renameBlockers
+        );
+      }
+    }
 
     if (is_active === false && before.is_active !== false) {
       await ensureDepartmentCanDeactivate(client, {

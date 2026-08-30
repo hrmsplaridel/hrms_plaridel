@@ -45,6 +45,16 @@ function normalizeDepartmentWrite(body, { creating = false } = {}) {
     normalized.is_active = true;
   }
 
+  if (hasOwn(input, 'confirm_historical_label_change')) {
+    if (typeof input.confirm_historical_label_change !== 'boolean') {
+      throw new DepartmentValidationError(
+        'confirm_historical_label_change must be a Boolean value'
+      );
+    }
+    normalized.confirm_historical_label_change =
+      input.confirm_historical_label_change;
+  }
+
   return normalized;
 }
 

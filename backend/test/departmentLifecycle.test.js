@@ -452,6 +452,72 @@ test('department update route rolls back blocked deactivation', async () => {
   }
 });
 
+test('department update route blocks unconfirmed rename of a used department', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM departments') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [departmentRow()] };
+      }
+      if (text.includes('AS dependency_positions')) {
+        return {
+          rowCount: 1,
+          rows: [emptyDependencyRow({ dependency_assignments: 2 })],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      async connect() {
+        return client;
+      },
+    },
+  });
+  const routePath = '../src/routes/departments';
+  clearModule(routePath);
+  try {
+    const router = require(routePath);
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.put
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      params: { id: IDS.department },
+      body: { name: 'Administrative Services' },
+      user: { id: IDS.actor, role: 'admin' },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.error, /historical records/i);
+    assert.deepEqual(res.body.blockers, [
+      { key: 'assignments', label: 'employee assignments', count: 2 },
+    ]);
+    assert.equal(
+      calls.some((text) => text.startsWith('UPDATE departments')),
+      false
+    );
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(released, true);
+  } finally {
+    clearModule(routePath);
+    restoreDb();
+  }
+});
+
 test('department creation commits its audit event in the same transaction', async () => {
   const calls = [];
   let released = false;

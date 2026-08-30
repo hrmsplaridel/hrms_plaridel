@@ -375,6 +375,32 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       );
       return false;
     }
+    final isRename = name != d.name;
+    var renameConfirmed = false;
+    if (isRename && !d.canPermanentlyDelete) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Rename department?'),
+          content: Text(
+            'Renaming "${d.name}" will update the department label shown across its historical records.\n\nFor an organizational restructuring, deactivate this department and create a new one instead.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.edit_rounded, size: 18),
+              label: const Text('Rename anyway'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return false;
+      renameConfirmed = true;
+    }
     try {
       await ApiClient.instance.put(
         '/api/departments/${d.id}',
@@ -383,6 +409,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           'description': _descriptionController.text.trim().isEmpty
               ? null
               : _descriptionController.text.trim(),
+          if (renameConfirmed) 'confirm_historical_label_change': true,
         },
       );
       if (mounted) {

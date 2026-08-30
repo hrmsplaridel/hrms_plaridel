@@ -63,3 +63,15 @@ test('department description accepts only text or null', () => {
     /Description must be a text value/
   );
 });
+
+test('historical label confirmation accepts only a real Boolean', () => {
+  assert.deepEqual(
+    normalizeDepartmentWrite({ confirm_historical_label_change: true }),
+    { confirm_historical_label_change: true }
+  );
+  assert.throws(
+    () =>
+      normalizeDepartmentWrite({ confirm_historical_label_change: 'true' }),
+    /confirm_historical_label_change must be a Boolean value/
+  );
+});
