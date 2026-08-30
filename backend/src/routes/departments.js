@@ -2,6 +2,13 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  DepartmentLifecycleError,
+  deleteMistakenDepartment,
+  departmentDependencyCountsSql,
+  dependencyBlockers,
+  dependencyCountsFromRow,
+} = require('../services/departmentLifecycle');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -10,26 +17,34 @@ const protect = [authMiddleware];
 router.get('/', protect, async (req, res) => {
   try {
     const status = req.query.status || 'Active';
-    let query =
-      'SELECT id, department_number, name, description, is_active, created_at FROM departments';
+    let query = `SELECT d.id, d.department_number, d.name, d.description,
+                        d.is_active, d.created_at,
+                        ${departmentDependencyCountsSql('d')}
+                   FROM departments d`;
     const params = [];
 
     if (status === 'Active') {
-      query += ' WHERE (is_active IS NULL OR is_active = true)';
+      query += ' WHERE (d.is_active IS NULL OR d.is_active = true)';
     } else if (status === 'Inactive') {
-      query += ' WHERE is_active = false';
+      query += ' WHERE d.is_active = false';
     }
 
-    query += ' ORDER BY name';
+    query += ' ORDER BY d.name';
 
     const result = await pool.query(query, params);
-    const rows = result.rows.map((r) => ({
-      id: r.id,
-      department_number: r.department_number,
-      name: r.name,
-      description: r.description,
-      is_active: r.is_active ?? true,
-    }));
+    const rows = result.rows.map((r) => {
+      const dependencyCounts = dependencyCountsFromRow(r);
+      const blockers = dependencyBlockers(dependencyCounts);
+      return {
+        id: r.id,
+        department_number: r.department_number,
+        name: r.name,
+        description: r.description,
+        is_active: r.is_active ?? true,
+        can_permanently_delete: blockers.length === 0,
+        delete_blockers: blockers,
+      };
+    });
     res.json(rows);
   } catch (err) {
     console.error('[departments GET]', err);
@@ -114,16 +129,36 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
 // DELETE /api/departments/:id (admin only) - optional, can use PUT to deactivate
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
-    const { id } = req.params;
-    const result = await pool.query('DELETE FROM departments WHERE id = $1 RETURNING id', [id]);
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Department not found' });
+    client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      const result = await deleteMistakenDepartment(client, {
+        actorId: req.user?.id,
+        departmentId: req.params.id,
+        reason: req.body?.reason,
+      });
+      await client.query('COMMIT');
+      return res.json({
+        message: 'Mistaken department permanently deleted',
+        department: result.department,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     }
-    res.status(204).send();
   } catch (err) {
+    if (err instanceof DepartmentLifecycleError) {
+      return res.status(err.statusCode).json({
+        error: err.message,
+        ...(err.blockers ? { blockers: err.blockers } : {}),
+      });
+    }
     console.error('[departments DELETE]', err);
     res.status(500).json({ error: 'Failed to delete department' });
+  } finally {
+    client?.release();
   }
 });
 
