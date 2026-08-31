@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/departments/data/department_request_guard.dart';
+import 'package:hrms_plaridel/features/dtr/management/departments/widgets/department_lifecycle_button.dart';
 
 /// Department record for display/CRUD.
 class _DepartmentRecord {
@@ -91,7 +93,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   Map<String, dynamic>? _primaryReviewer;
   List<Map<String, dynamic>> _reviewerRoster = [];
   List<String> _backupReviewerIds = [];
-  int _departmentLoadGeneration = 0;
+  final _departmentRequestGuard = DepartmentRequestGuard();
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -132,7 +134,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
 
   @override
   void dispose() {
-    _departmentLoadGeneration++;
+    _departmentRequestGuard.invalidate();
     _searchController.dispose();
     _nameController.dispose();
     _descriptionController.dispose();
@@ -140,8 +142,8 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   }
 
   Future<void> _loadDepartments() async {
-    final generation = ++_departmentLoadGeneration;
     final requestedStatus = _statusFilter;
+    final request = _departmentRequestGuard.begin(requestedStatus);
     setState(() {
       _loading = true;
       _page = 0;
@@ -167,29 +169,26 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         );
       }).toList();
       if (!mounted ||
-          generation != _departmentLoadGeneration ||
-          requestedStatus != _statusFilter) {
+          !_departmentRequestGuard.accepts(request, _statusFilter)) {
         return;
       }
       setState(() => _departments = departments);
     } on DioException catch (e) {
       if (!mounted ||
-          generation != _departmentLoadGeneration ||
-          requestedStatus != _statusFilter) {
+          !_departmentRequestGuard.accepts(request, _statusFilter)) {
         return;
       }
       debugPrint('Load departments failed: ${e.response?.data ?? e.message}');
       setState(() => _departments = []);
     } catch (e) {
       if (!mounted ||
-          generation != _departmentLoadGeneration ||
-          requestedStatus != _statusFilter) {
+          !_departmentRequestGuard.accepts(request, _statusFilter)) {
         return;
       }
       debugPrint('Load departments failed: $e');
       setState(() => _departments = []);
     } finally {
-      if (mounted && generation == _departmentLoadGeneration) {
+      if (mounted && _departmentRequestGuard.accepts(request, _statusFilter)) {
         setState(() => _loading = false);
       }
     }
@@ -856,35 +855,21 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       ),
       child: Row(
         children: [
-          if (department != null && department.isActive)
-            OutlinedButton.icon(
-              onPressed: () async {
+          if (department != null)
+            DepartmentLifecycleButton(
+              isActive: department.isActive,
+              onDeactivate: () async {
                 final ok = await _deactivateDepartment();
                 if (ok && drawerContext.mounted) {
                   Navigator.of(drawerContext).pop();
                 }
               },
-              icon: const Icon(Icons.person_off_rounded, size: 18),
-              label: const Text('Deactivate'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red,
-                side: const BorderSide(color: Colors.red),
-              ),
-            ),
-          if (department != null && !department.isActive)
-            OutlinedButton.icon(
-              onPressed: () async {
+              onReactivate: () async {
                 final ok = await _reactivateDepartment();
                 if (ok && drawerContext.mounted) {
                   Navigator.of(drawerContext).pop();
                 }
               },
-              icon: const Icon(Icons.restore_rounded, size: 18),
-              label: const Text('Reactivate'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.green,
-                side: const BorderSide(color: Colors.green),
-              ),
             ),
           if (department != null && department.canPermanentlyDelete)
             const SizedBox(width: 12),

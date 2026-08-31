@@ -5,6 +5,7 @@ const {
   getDepartmentReviewSnapshot,
   getDepartmentReviewSnapshotForDate,
 } = require('../src/services/departmentHeadService');
+const { todayInHrmsTimezone } = require('../src/utils/dateRangeParser');
 
 const EMPLOYEE_ID = '00000000-0000-0000-0000-000000000101';
 const DEPARTMENT_ID = '00000000-0000-0000-0000-000000000201';
@@ -101,4 +102,20 @@ test('a backup becomes the routing reviewer when the requester is the Head', asy
 
   assert.equal(snapshot.departmentHeadUserId, BACKUP_ID);
   assert.deepEqual(snapshot.reviewerUserIds, [BACKUP_ID]);
+});
+
+test('Department Head resolution uses the Manila date across the UTC boundary', async () => {
+  const instant = new Date('2026-08-29T16:30:00.000Z');
+  const manilaDate = todayInHrmsTimezone(instant, 'Asia/Manila');
+  const utcDate = todayInHrmsTimezone(instant, 'UTC');
+  assert.equal(manilaDate, '2026-08-30');
+  assert.equal(utcDate, '2026-08-29');
+
+  const client = reviewerClient();
+  await getDepartmentReviewSnapshot(client, EMPLOYEE_ID, manilaDate);
+
+  assert.equal(
+    client.calls.every(({ params }) => params[1] === '2026-08-30'),
+    true
+  );
 });

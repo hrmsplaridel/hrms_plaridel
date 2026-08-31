@@ -79,10 +79,14 @@ async function getDepartmentHeadForEmployee(client, employeeUserId) {
  * Unlike getDepartmentHeadForEmployee, the department is retained when the
  * department has no designated head so HR-only routing is still auditable.
  */
-async function getDepartmentReviewSnapshot(client, employeeUserId) {
+async function getDepartmentReviewSnapshot(
+  client,
+  employeeUserId,
+  effectiveDate = todayInHrmsTimezone()
+) {
   return getEmployeeReviewSnapshot(client, {
     employeeUserId,
-    effectiveDate: todayInHrmsTimezone(),
+    effectiveDate,
   });
 }
 

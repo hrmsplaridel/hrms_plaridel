@@ -1,8 +1,8 @@
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 
-function todayInHrmsTimezone(now = new Date()) {
+function todayInHrmsTimezone(now = new Date(), timeZone = HRMS_TIMEZONE) {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: HRMS_TIMEZONE,
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
