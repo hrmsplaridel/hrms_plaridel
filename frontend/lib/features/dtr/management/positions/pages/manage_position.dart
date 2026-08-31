@@ -13,6 +13,7 @@ class _PositionRecord {
     this.departmentName,
     required this.isDepartmentHead,
     required this.isActive,
+    required this.canPermanentlyDelete,
     this.positionNumber,
   });
   final String id;
@@ -22,6 +23,7 @@ class _PositionRecord {
   final String? departmentName;
   final bool isDepartmentHead;
   final bool isActive;
+  final bool canPermanentlyDelete;
   final int? positionNumber;
 
   /// Display as POS-001, POS-002, etc., or "—" if null.
@@ -165,6 +167,7 @@ class _ManagePositionState extends State<ManagePosition> {
           departmentName: deptName,
           isDepartmentHead: m['is_department_head'] as bool? ?? false,
           isActive: m['is_active'] as bool? ?? true,
+          canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
           positionNumber: posNum is int
               ? posNum
               : (posNum != null ? int.tryParse(posNum.toString()) : null),
@@ -359,8 +362,97 @@ class _ManagePositionState extends State<ManagePosition> {
     }
   }
 
+  Future<String?> _requestMistakenDeleteReason(_PositionRecord position) async {
+    final formKey = GlobalKey<FormState>();
+    var enteredReason = '';
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete unused position?'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This permanently removes "${position.name}". This is allowed only because the position has no assignment history.',
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                autofocus: true,
+                maxLength: 1000,
+                maxLines: 3,
+                onChanged: (value) => enteredReason = value,
+                decoration: const InputDecoration(
+                  labelText: 'Reason',
+                  hintText: 'Why should this unused position be deleted?',
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'A reason is required.'
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              if (formKey.currentState?.validate() != true) return;
+              Navigator.of(dialogContext).pop(enteredReason.trim());
+            },
+            icon: const Icon(Icons.delete_forever_rounded, size: 18),
+            label: const Text('Delete permanently'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          ),
+        ],
+      ),
+    );
+    return reason;
+  }
+
+  Future<bool> _deleteMistakenPosition() async {
+    final position = _selectedPosition;
+    if (position == null || !position.canPermanentlyDelete) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This position has assignment history and cannot be permanently deleted.',
+          ),
+        ),
+      );
+      return false;
+    }
+
+    final reason = await _requestMistakenDeleteReason(position);
+    if (reason == null || !mounted) return false;
+    try {
+      await ApiClient.instance.delete(
+        '/api/positions/${position.id}',
+        data: {'reason': reason},
+      );
+      return true;
+    } on DioException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _apiErrorMessage(e, 'Failed to delete mistaken position'),
+            ),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
   Future<void> _openPositionDrawer({_PositionRecord? position}) async {
     _drawerSetState = null;
+    var positionDeleted = false;
     if (position == null) {
       _clearForm();
     } else {
@@ -368,7 +460,7 @@ class _ManagePositionState extends State<ManagePosition> {
     }
 
     try {
-      await showGeneralDialog<void>(
+      final result = await showGeneralDialog<bool>(
         context: context,
         barrierDismissible: true,
         barrierLabel: MaterialLocalizations.of(
@@ -412,8 +504,18 @@ class _ManagePositionState extends State<ManagePosition> {
           );
         },
       );
+      positionDeleted = result ?? false;
     } finally {
       _drawerSetState = null;
+    }
+    if (positionDeleted && mounted) {
+      _clearForm();
+      await _loadPositions();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unused position deleted.')),
+        );
+      }
     }
   }
 
@@ -475,10 +577,6 @@ class _ManagePositionState extends State<ManagePosition> {
         runSpacing: 8,
         alignment: WrapAlignment.end,
         children: [
-          TextButton(
-            onPressed: () => Navigator.of(drawerContext).pop(),
-            child: const Text('Cancel'),
-          ),
           if (isEditing)
             OutlinedButton.icon(
               onPressed: () async {
@@ -489,6 +587,21 @@ class _ManagePositionState extends State<ManagePosition> {
               },
               icon: const Icon(Icons.person_off_rounded, size: 18),
               label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          if (_selectedPosition?.canPermanentlyDelete == true)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deleteMistakenPosition();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop(true);
+                }
+              },
+              icon: const Icon(Icons.delete_forever_rounded, size: 18),
+              label: const Text('Delete Unused Position'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),

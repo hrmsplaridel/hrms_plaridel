@@ -2,6 +2,14 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  PositionLifecycleError,
+  deleteMistakenPosition,
+  ensurePositionDepartmentChangeAllowed,
+  positionDependencyBlockers,
+  positionDependencyCountsFromRow,
+  positionDependencyCountsSql,
+} = require('../services/positionLifecycle');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -29,7 +37,8 @@ router.get('/', protect, async (req, res) => {
     const result = await pool.query(
       `SELECT p.id, p.position_number, p.name, p.description, p.department_id,
               p.is_department_head, p.is_active,
-              d.name AS department_name
+              d.name AS department_name,
+              ${positionDependencyCountsSql('p')}
        FROM positions p
        LEFT JOIN departments d ON p.department_id = d.id
        ${where}
@@ -37,17 +46,23 @@ router.get('/', protect, async (req, res) => {
       params
     );
 
-    const rows = result.rows.map((r) => ({
-      id: r.id,
-      position_number: r.position_number,
-      name: r.name,
-      description: r.description,
-      department_id: r.department_id,
-      department_name: r.department_name,
-      is_department_head: r.is_department_head === true,
-      is_active: r.is_active ?? true,
-      departments: r.department_name ? { name: r.department_name } : null,
-    }));
+    const rows = result.rows.map((r) => {
+      const dependencyCounts = positionDependencyCountsFromRow(r);
+      const blockers = positionDependencyBlockers(dependencyCounts);
+      return {
+        id: r.id,
+        position_number: r.position_number,
+        name: r.name,
+        description: r.description,
+        department_id: r.department_id,
+        department_name: r.department_name,
+        is_department_head: r.is_department_head === true,
+        is_active: r.is_active ?? true,
+        can_permanently_delete: blockers.length === 0,
+        delete_blockers: blockers,
+        departments: r.department_name ? { name: r.department_name } : null,
+      };
+    });
     res.json(rows);
   } catch (err) {
     console.error('[positions GET]', err);
@@ -121,6 +136,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
 // PUT /api/positions/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     const { id } = req.params;
     const { name, description, department_id, is_department_head, is_active } = req.body;
@@ -147,13 +163,31 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     updates.push('updated_at = now()');
     values.push(id);
 
-    const result = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    if (department_id !== undefined) {
+      await ensurePositionDepartmentChangeAllowed(client, {
+        positionId: id,
+        nextDepartmentId: department_id,
+      });
+    } else {
+      const existing = await client.query(
+        'SELECT id FROM positions WHERE id = $1::uuid FOR UPDATE',
+        [id]
+      );
+      if (existing.rowCount === 0) {
+        throw new PositionLifecycleError('Position not found', 404);
+      }
+    }
+
+    const result = await client.query(
       `UPDATE positions SET ${updates.join(', ')} WHERE id = $${i}
        RETURNING id, position_number, name, description, department_id,
                  is_department_head, is_active`,
       values
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Position not found' });
+    await client.query('COMMIT');
     const r = result.rows[0];
     res.json({
       id: r.id,
@@ -165,7 +199,20 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       is_active: r.is_active ?? true,
     });
   } catch (err) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[positions PUT rollback]', rollbackError);
+      }
+    }
     console.error('[positions PUT]', err);
+    if (err instanceof PositionLifecycleError) {
+      return res.status(err.statusCode).json({
+        error: err.message,
+        ...(err.details || {}),
+      });
+    }
     if (err.code === '23505' && err.constraint === 'uq_positions_department_head_per_department') {
       return res.status(409).json({
         error: 'This department already has an official Department Head position',
@@ -182,18 +229,45 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       });
     }
     res.status(500).json({ error: 'Failed to update position' });
+  } finally {
+    client?.release();
   }
 });
 
 // DELETE /api/positions/:id (admin only)
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
-    const result = await pool.query('DELETE FROM positions WHERE id = $1 RETURNING id', [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Position not found' });
-    res.status(204).send();
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const result = await deleteMistakenPosition(client, {
+      actorId: req.user?.id,
+      positionId: req.params.id,
+      reason: req.body?.reason,
+    });
+    await client.query('COMMIT');
+    return res.json({
+      message: 'Unused position permanently deleted',
+      position: result.position,
+    });
   } catch (err) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[positions DELETE rollback]', rollbackError);
+      }
+    }
+    if (err instanceof PositionLifecycleError) {
+      return res.status(err.statusCode).json({
+        error: err.message,
+        ...(err.details || {}),
+      });
+    }
     console.error('[positions DELETE]', err);
     res.status(500).json({ error: 'Failed to delete position' });
+  } finally {
+    client?.release();
   }
 });
 
