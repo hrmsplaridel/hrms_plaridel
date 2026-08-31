@@ -1,5 +1,4 @@
 const ORGANIZATION_ASSIGNMENT_ROLES = new Set(['admin', 'hr']);
-const DEPARTMENT_HEAD_POSITION_NAMES = ['department head'];
 
 function normalizeId(value) {
   const normalized = value == null ? '' : String(value).trim();
@@ -130,12 +129,9 @@ async function loadReviewerDepartmentPeriods(db, reviewerId) {
         AND a.department_id IS NOT NULL
         AND a.is_active = true
         AND (p.is_active IS NULL OR p.is_active = true)
-        AND (
-          LOWER(p.name) = ANY($2::text[])
-          OR p.name ILIKE '%department head%'
-        )
+        AND p.is_department_head = true
       ORDER BY a.effective_from, a.created_at, a.id`,
-    [reviewerId, DEPARTMENT_HEAD_POSITION_NAMES]
+    [reviewerId]
   );
   return result.rows.map(assignmentPeriod);
 }

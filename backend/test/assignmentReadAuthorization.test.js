@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { clearModule, withMockedModule } = require('./helpers/moduleMocks');
+const {
+  filterAssignmentRowsForAccess,
+} = require('../src/services/assignmentAccess');
 
 function responseRecorder() {
   return {
@@ -239,4 +242,83 @@ test('supervisor cannot read a primary assignment outside their department', asy
     clearModule(routePath);
     restoreDb();
   }
+});
+
+test('supervised assignment access uses the official Head flag instead of the position title', async () => {
+  const supervisorId = '11111111-1111-4111-8111-111111111111';
+  const targetId = '22222222-2222-4222-8222-222222222222';
+  const departmentId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let reviewerSql = '';
+  let reviewerParams;
+  const db = {
+    async query(sql, params) {
+      const text = String(sql);
+      if (text.includes('JOIN positions p')) {
+        reviewerSql = text;
+        reviewerParams = params;
+        return {
+          rows: [{
+            employee_id: supervisorId,
+            department_id: departmentId,
+            effective_from: '2026-01-01',
+            effective_to: null,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+  const rows = [{
+    employee_id: targetId,
+    access_department_id: departmentId,
+    effective_from: '2026-08-01',
+    effective_to: null,
+  }];
+
+  const visible = await filterAssignmentRowsForAccess(
+    db,
+    {
+      allowed: true,
+      scope: 'supervised_departments',
+      requesterId: supervisorId,
+      employeeId: targetId,
+    },
+    rows
+  );
+
+  assert.equal(visible.length, 1);
+  assert.match(reviewerSql, /p\.is_department_head = true/);
+  assert.doesNotMatch(reviewerSql, /p\.name|department head%|LOWER\(/i);
+  assert.deepEqual(reviewerParams, [supervisorId]);
+});
+
+test('a supervisor has no assignment scope without an official Head position', async () => {
+  const supervisorId = '11111111-1111-4111-8111-111111111111';
+  let reviewerSql = '';
+  const db = {
+    async query(sql) {
+      reviewerSql = String(sql);
+      return { rows: [] };
+    },
+  };
+
+  const visible = await filterAssignmentRowsForAccess(
+    db,
+    {
+      allowed: true,
+      scope: 'supervised_departments',
+      requesterId: supervisorId,
+      employeeId: '22222222-2222-4222-8222-222222222222',
+    },
+    [{
+      employee_id: '22222222-2222-4222-8222-222222222222',
+      access_department_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      effective_from: '2026-08-01',
+      effective_to: null,
+    }]
+  );
+
+  assert.deepEqual(visible, []);
+  assert.match(reviewerSql, /p\.is_department_head = true/);
+  assert.doesNotMatch(reviewerSql, /ILIKE|p\.name/i);
 });

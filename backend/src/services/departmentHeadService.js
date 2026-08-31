@@ -8,15 +8,6 @@ const {
 } = require('./departmentReviewerService');
 
 /**
- * Known exact position names that indicate "Department Head".
- * Add entries here as your organisation's position catalog grows.
- * Checked case-insensitively (lowered before comparison).
- */
-const DEPARTMENT_HEAD_POSITION_NAMES = [
-  'department head',
-];
-
-/**
  * Get the department_id effective today for an employee.
  * @param {import('pg').PoolClient} client
  * @param {string} employeeUserId
@@ -37,9 +28,7 @@ async function getEmployeeDepartment(client, employeeUserId) {
 /**
  * Find the department head for a given department.
  *
- * Strategy:
- *  1. Try exact match (case-insensitive) against DEPARTMENT_HEAD_POSITION_NAMES.
- *  2. Fallback: ILIKE '%department head%' on position name.
+ * Authority comes from the position catalog's explicit official Head flag.
  *
  * @param {import('pg').PoolClient} client
  * @param {string} departmentId
@@ -139,7 +128,6 @@ async function isDepartmentHead(client, userId) {
 }
 
 module.exports = {
-  DEPARTMENT_HEAD_POSITION_NAMES,
   getEmployeeDepartment,
   getEmployeeDepartmentForDate,
   getDepartmentReviewSnapshot,
