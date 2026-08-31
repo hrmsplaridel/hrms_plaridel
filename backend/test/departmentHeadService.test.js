@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   getDepartmentReviewSnapshot,
   getDepartmentReviewSnapshotForDate,
+  isDepartmentHead,
 } = require('../src/services/departmentHeadService');
 const { todayInHrmsTimezone } = require('../src/utils/dateRangeParser');
 
@@ -63,6 +64,32 @@ test('review snapshot resolves the explicit Head and effective backups', async (
     client.calls.every(({ text }) => !/LOWER\(p\.name\)|ILIKE/i.test(text)),
     true
   );
+  const primaryQuery = client.calls.find(({ text }) =>
+    text.includes('p.is_department_head = true')
+  );
+  assert.match(primaryQuery.text, /a\.is_active = true/);
+  assert.match(primaryQuery.text, /p\.is_active = true/);
+});
+
+test('direct Department Head authority excludes archived assignments and inactive positions', async () => {
+  let authorityQuery = '';
+  const client = {
+    async query(sql) {
+      authorityQuery = String(sql);
+      return { rows: [] };
+    },
+  };
+
+  const result = await isDepartmentHead(client, HEAD_ID);
+
+  assert.deepEqual(result, {
+    isDeptHead: false,
+    departmentId: null,
+    departmentName: null,
+  });
+  assert.match(authorityQuery, /p\.is_department_head = true/);
+  assert.match(authorityQuery, /a\.is_active = true/);
+  assert.match(authorityQuery, /p\.is_active = true/);
 });
 
 test('review snapshot retains the department when no reviewers are configured', async () => {

@@ -108,6 +108,8 @@ async function isDepartmentHead(client, userId) {
      LEFT JOIN departments d ON d.id = a.department_id
      WHERE a.employee_id = $1::uuid
        AND p.is_department_head = true
+       AND a.is_active = true
+       AND p.is_active = true
        AND a.effective_from <= $2::date
        AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
      ORDER BY a.effective_from DESC NULLS LAST,

@@ -22,10 +22,12 @@ test('DocuTracker preserves the department reviewer source in routing JSON', () 
 });
 
 test('DocuTracker resolves the effective Head and backups for an automatic step', async () => {
+  let primaryQuery = '';
   const client = {
     async query(sql) {
       const text = String(sql);
       if (text.includes('p.is_department_head = true')) {
+        primaryQuery = text;
         return {
           rows: [{ reviewer_id: HEAD_ID, reviewer_name: 'Department Head' }],
         };
@@ -57,4 +59,6 @@ test('DocuTracker resolves the effective Head and backups for an automatic step'
   });
 
   assert.deepEqual(reviewers, [HEAD_ID, BACKUP_ID]);
+  assert.match(primaryQuery, /a\.is_active = true/);
+  assert.match(primaryQuery, /p\.is_active = true/);
 });
