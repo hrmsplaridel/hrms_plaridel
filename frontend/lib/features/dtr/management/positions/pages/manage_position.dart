@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -59,10 +61,13 @@ class _ManagePositionState extends State<ManagePosition> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _positionRequestGuard = PositionRequestGuard();
+  Timer? _searchDebounce;
 
   String? _departmentFilterId;
   String _statusFilter = 'Active';
   int _page = 0;
+  int _totalPositions = 0;
+  int _pageCount = 1;
   List<_PositionRecord> _positions = [];
   List<Map<String, dynamic>> _departments = [];
   bool _loading = false;
@@ -168,6 +173,7 @@ class _ManagePositionState extends State<ManagePosition> {
   @override
   void dispose() {
     _positionRequestGuard.invalidate();
+    _searchDebounce?.cancel();
     _searchController.dispose();
     _titleController.dispose();
     _descriptionController.dispose();
@@ -221,30 +227,41 @@ class _ManagePositionState extends State<ManagePosition> {
   Map<String, dynamic> _positionQuery() => <String, dynamic>{
     'status': _statusFilter,
     'department_id': _departmentFilterId,
+    'page': _page + 1,
+    'limit': _rowsPerPage,
+    'search': _searchController.text.trim(),
   };
 
   Future<void> _loadPositions() async {
     if (!mounted) return;
     final requestedQuery = _positionQuery();
     final request = _positionRequestGuard.begin(requestedQuery);
-    setState(() {
-      _loading = true;
-      _page = 0;
-    });
+    setState(() => _loading = true);
     try {
       final params = <String, String>{
+        'paginated': 'true',
         'status': requestedQuery['status'] as String,
+        'page': (requestedQuery['page'] as int).toString(),
+        'limit': (requestedQuery['limit'] as int).toString(),
       };
       final requestedDepartmentId = requestedQuery['department_id'] as String?;
       if (requestedDepartmentId != null) {
         params['department_id'] = requestedDepartmentId;
       }
-      final res = await ApiClient.instance.get<List<dynamic>>(
+      final requestedSearch = requestedQuery['search'] as String;
+      if (requestedSearch.isNotEmpty) {
+        params['search'] = requestedSearch;
+      }
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/positions',
         queryParameters: params,
       );
-      final data = res.data ?? [];
-      final positions = (data).map((e) {
+      final response = res.data ?? const <String, dynamic>{};
+      final data = response['items'] as List<dynamic>? ?? const [];
+      final pagination =
+          response['pagination'] as Map<String, dynamic>? ??
+          const <String, dynamic>{};
+      final positions = data.map((e) {
         final m = e as Map<String, dynamic>;
         final dept = m['departments'];
         final deptName =
@@ -286,21 +303,37 @@ class _ManagePositionState extends State<ManagePosition> {
           !_positionRequestGuard.accepts(request, _positionQuery())) {
         return;
       }
-      setState(() => _positions = positions);
+      final total = int.tryParse('${pagination['total'] ?? 0}') ?? 0;
+      final pageCount = int.tryParse('${pagination['page_count'] ?? 1}') ?? 1;
+      final returnedPage = int.tryParse('${pagination['page'] ?? 1}') ?? 1;
+      setState(() {
+        _positions = positions;
+        _totalPositions = total;
+        _pageCount = pageCount < 1 ? 1 : pageCount;
+        _page = returnedPage < 1 ? 0 : returnedPage - 1;
+      });
     } on DioException catch (e) {
       if (!mounted ||
           !_positionRequestGuard.accepts(request, _positionQuery())) {
         return;
       }
       debugPrint('Load positions failed: ${e.response?.data ?? e.message}');
-      setState(() => _positions = []);
+      setState(() {
+        _positions = [];
+        _totalPositions = 0;
+        _pageCount = 1;
+      });
     } catch (e) {
       if (!mounted ||
           !_positionRequestGuard.accepts(request, _positionQuery())) {
         return;
       }
       debugPrint('Load positions failed: $e');
-      setState(() => _positions = []);
+      setState(() {
+        _positions = [];
+        _totalPositions = 0;
+        _pageCount = 1;
+      });
     } finally {
       if (mounted && _positionRequestGuard.accepts(request, _positionQuery())) {
         setState(() => _loading = false);
@@ -930,29 +963,12 @@ class _ManagePositionState extends State<ManagePosition> {
   Widget _buildLeftPanel() {
     final dark = _isDark(context);
     final showStatus = _statusFilter == 'All';
-    final search = _searchController.text.toLowerCase();
-    final filtered = search.isEmpty
-        ? _positions
-        : _positions.where((p) {
-            final n = p.name.toLowerCase();
-            final desc = (p.description ?? '').toLowerCase();
-            final dept = (p.departmentName ?? '').toLowerCase();
-            return n.contains(search) ||
-                desc.contains(search) ||
-                dept.contains(search);
-          }).toList();
-    final total = filtered.length;
-    final pageCount = total == 0
-        ? 1
-        : ((total + _rowsPerPage - 1) ~/ _rowsPerPage);
-    final page = _page >= pageCount ? pageCount - 1 : _page;
+    final total = _totalPositions;
+    final pageCount = _pageCount;
+    final page = _page;
     final pageStart = page * _rowsPerPage;
-    final pageEnd = pageStart + _rowsPerPage > total
-        ? total
-        : pageStart + _rowsPerPage;
-    final paged = total == 0
-        ? <_PositionRecord>[]
-        : filtered.sublist(pageStart, pageEnd);
+    final returnedEnd = pageStart + _positions.length;
+    final pageEnd = returnedEnd > total ? total : returnedEnd;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1046,7 +1062,7 @@ class _ManagePositionState extends State<ManagePosition> {
               padding: EdgeInsets.all(32),
               child: Center(child: CircularProgressIndicator()),
             )
-          else if (filtered.isEmpty)
+          else if (_positions.isEmpty)
             Container(
               constraints: const BoxConstraints(minHeight: 120),
               alignment: Alignment.center,
@@ -1069,7 +1085,7 @@ class _ManagePositionState extends State<ManagePosition> {
                     3: FlexColumnWidth(2),
                     if (showStatus) 4: const FixedColumnWidth(100),
                   },
-                  children: paged.map((p) {
+                  children: _positions.map((p) {
                     final isSelected = _selectedPosition?.id == p.id;
                     return TableRow(
                       decoration: BoxDecoration(
@@ -1148,14 +1164,20 @@ class _ManagePositionState extends State<ManagePosition> {
             const SizedBox(width: 12),
             OutlinedButton(
               onPressed: page > 0
-                  ? () => setState(() => _page = page - 1)
+                  ? () {
+                      setState(() => _page = page - 1);
+                      _loadPositions();
+                    }
                   : null,
               child: const Text('Previous'),
             ),
             const SizedBox(width: 8),
             OutlinedButton(
               onPressed: page < pageCount - 1
-                  ? () => setState(() => _page = page + 1)
+                  ? () {
+                      setState(() => _page = page + 1);
+                      _loadPositions();
+                    }
                   : null,
               child: const Text('Next'),
             ),
@@ -1225,7 +1247,14 @@ class _ManagePositionState extends State<ManagePosition> {
   Widget _buildSearchField() {
     return TextField(
       controller: _searchController,
-      onChanged: (_) => setState(() => _page = 0),
+      onChanged: (_) {
+        _searchDebounce?.cancel();
+        setState(() => _page = 0);
+        _searchDebounce = Timer(
+          const Duration(milliseconds: 300),
+          _loadPositions,
+        );
+      },
       style: AppTheme.dashFieldTextStyle(context),
       decoration: AppTheme.dashInputDecoration(
         context,

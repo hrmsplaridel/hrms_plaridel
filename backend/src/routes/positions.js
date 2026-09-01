@@ -29,50 +29,97 @@ const {
   PositionValidationError,
   normalizePositionWrite,
 } = require('../services/positionValidation');
+const {
+  parsePositionListFilters,
+} = require('../services/positionListFilters');
 
 const router = express.Router();
 const protect = [authMiddleware];
 
-// GET /api/positions - list all (?status=Active|Inactive|All, ?department_id=uuid)
+// GET /api/positions - bounded legacy list or paginated management response
 router.get('/', protect, async (req, res) => {
   try {
-    const { status = 'Active', department_id } = req.query;
+    const filters = parsePositionListFilters(req.query);
+    if (!filters.ok) {
+      return res.status(400).json({ error: filters.error });
+    }
     const today = todayInHrmsTimezone();
-    const params = [today];
+    const filterParams = [];
     const conditions = [];
-    let i = 2;
+    let i = 1;
 
-    if (status === 'Active') {
+    if (filters.status === 'Active') {
       conditions.push('(p.is_active IS NULL OR p.is_active = true)');
-    } else if (status === 'Inactive') {
+    } else if (filters.status === 'Inactive') {
       conditions.push('p.is_active = false');
     }
-    if (department_id) {
-      conditions.push(`p.department_id = $${i++}`);
-      params.push(department_id);
+    if (filters.departmentId) {
+      conditions.push(`p.department_id = $${i++}::uuid`);
+      filterParams.push(filters.departmentId);
+    }
+    if (filters.search) {
+      conditions.push(`(
+        p.name ILIKE $${i}
+        OR COALESCE(p.description, '') ILIKE $${i}
+        OR COALESCE(d.name, '') ILIKE $${i}
+        OR COALESCE(p.position_number::text, '') ILIKE $${i}
+      )`);
+      filterParams.push(`%${filters.search}%`);
+      i += 1;
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    let total = null;
+    let effectivePage = 1;
+    let pageCount = 1;
+    if (filters.paginated) {
+      const countResult = await pool.query(
+        `SELECT COUNT(*)::int AS total
+           FROM positions p
+           LEFT JOIN departments d ON d.id = p.department_id
+           ${where}`,
+        filterParams
+      );
+      total = Number(countResult.rows[0]?.total || 0);
+      pageCount = Math.max(1, Math.ceil(total / filters.limit));
+      effectivePage = Math.min(filters.page, pageCount);
+    }
+
+    const limit = filters.responseLimit;
+    const offset = filters.paginated ? (effectivePage - 1) * limit : 0;
+    const todayPlaceholder = `$${i++}`;
+    const limitPlaceholder = `$${i++}`;
+    const offsetPlaceholder = `$${i++}`;
+    const params = [...filterParams, today, limit, offset];
 
     const result = await pool.query(
-      `SELECT p.id, p.position_number, p.name, p.description, p.department_id,
-              (managed_period.id IS NOT NULL) AS is_department_head, p.is_active,
+      `WITH selected_positions AS (
+         SELECT p.id, p.position_number, p.name, p.description,
+                p.department_id, p.is_active
+           FROM positions p
+           LEFT JOIN departments d ON d.id = p.department_id
+           ${where}
+          ORDER BY LOWER(BTRIM(p.name)), p.position_number NULLS LAST, p.id
+          LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}
+       )
+       SELECT p.id, p.position_number, p.name, p.description, p.department_id,
+               (managed_period.id IS NOT NULL) AS is_department_head, p.is_active,
               managed_period.id AS department_head_period_id,
               managed_period.effective_from::text AS department_head_effective_from,
               managed_period.effective_to::text AS department_head_effective_to,
-              COALESCE(period_history.periods, '[]'::jsonb) AS department_head_periods,
-              d.name AS department_name,
-              ${positionDependencyCountsSql('p')},
-              ${positionDeactivationCountsSql('p.id', '$1')}
-       FROM positions p
+               COALESCE(period_history.periods, '[]'::jsonb) AS department_head_periods,
+               d.name AS department_name,
+               ${positionDependencyCountsSql('p')},
+               ${positionDeactivationCountsSql('p.id', todayPlaceholder)}
+       FROM selected_positions p
        LEFT JOIN departments d ON p.department_id = d.id
        LEFT JOIN LATERAL (
          SELECT period.id, period.effective_from, period.effective_to
          FROM position_department_head_periods period
          WHERE period.position_id = p.id
            AND period.is_active = true
-           AND (period.effective_to IS NULL OR period.effective_to >= $1::date)
-         ORDER BY (period.effective_from <= $1::date) DESC,
+           AND (period.effective_to IS NULL OR period.effective_to >= ${todayPlaceholder}::date)
+         ORDER BY (period.effective_from <= ${todayPlaceholder}::date) DESC,
                   period.effective_from
          LIMIT 1
        ) managed_period ON true
@@ -88,8 +135,7 @@ router.get('/', protect, async (req, res) => {
          FROM position_department_head_periods period
          WHERE period.position_id = p.id
        ) period_history ON true
-       ${where}
-       ORDER BY p.name`,
+       ORDER BY LOWER(BTRIM(p.name)), p.position_number NULLS LAST, p.id`,
       params
     );
 
@@ -122,7 +168,19 @@ router.get('/', protect, async (req, res) => {
         departments: r.department_name ? { name: r.department_name } : null,
       };
     });
-    res.json(rows);
+    if (!filters.paginated) {
+      return res.json(rows);
+    }
+    return res.json({
+      items: rows,
+      pagination: {
+        page: effectivePage,
+        limit: filters.limit,
+        page_size: filters.limit,
+        total,
+        page_count: pageCount,
+      },
+    });
   } catch (err) {
     console.error('[positions GET]', err);
     res.status(500).json({ error: 'Failed to fetch positions' });
