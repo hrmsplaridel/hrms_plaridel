@@ -56,6 +56,7 @@ router.post(
         intent: req.body?.intent,
         modelProfile: req.body?.modelProfile,
         conversationId: req.body?.conversationId,
+        externalConsentVersion: req.body?.externalConsentVersion,
       });
       res.json(result);
     } catch (err) {

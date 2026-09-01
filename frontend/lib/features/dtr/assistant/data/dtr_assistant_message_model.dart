@@ -225,6 +225,10 @@ class DtrAssistantModelProfile {
     this.available = true,
     this.recommended = false,
     this.unavailableReason,
+    this.external = false,
+    this.requiresConsent = false,
+    this.consentVersion,
+    this.dataDisclosure,
   });
 
   final String id;
@@ -236,6 +240,10 @@ class DtrAssistantModelProfile {
   final bool available;
   final bool recommended;
   final String? unavailableReason;
+  final bool external;
+  final bool requiresConsent;
+  final String? consentVersion;
+  final String? dataDisclosure;
 
   factory DtrAssistantModelProfile.fromJson(Map<String, dynamic> json) {
     return DtrAssistantModelProfile(
@@ -248,6 +256,10 @@ class DtrAssistantModelProfile {
       available: json['available'] != false,
       recommended: json['recommended'] == true,
       unavailableReason: json['unavailableReason']?.toString(),
+      external: json['external'] == true,
+      requiresConsent: json['requiresConsent'] == true,
+      consentVersion: json['consentVersion']?.toString(),
+      dataDisclosure: json['dataDisclosure']?.toString(),
     );
   }
 }

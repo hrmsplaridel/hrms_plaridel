@@ -16,7 +16,7 @@
     "test:department-management": "node -r dotenv/config --test test/departmentLifecycle.test.js test/departmentValidation.test.js test/departmentHeadService.test.js test/assignmentTransition.test.js test/departmentPostgres.integration.test.js",
     "test:position-management": "node --test test/positionLifecycle.test.js test/positionValidation.test.js test/positionPagination.test.js test/positionPaginationPostgres.integration.test.js test/positionDepartmentHeadPeriods.test.js test/assignmentReadAuthorization.test.js test/assignmentTransition.test.js test/departmentHeadService.test.js test/docutrackerDepartmentReviewers.test.js",
     "llm:smoke": "node scripts/test-llm.js",
-    "test:dtr-assistant": "node --test test/dtrAssistantRegression.test.js test/dtrAssistantApi.test.js test/dtrAssistantIntegration.test.js test/dtrAssistantDataService.test.js test/dtrAssistantProviders.test.js test/dtrAssistantDateAndExport.test.js test/dtrAssistantIntelligence.test.js test/dtrAssistantActionPrefill.test.js",
+    "test:dtr-assistant": "node --test test/dtrAssistantRegression.test.js test/dtrAssistantApi.test.js test/dtrAssistantIntegration.test.js test/dtrAssistantDataService.test.js test/dtrAssistantProviders.test.js test/dtrAssistantDateAndExport.test.js test/dtrAssistantIntelligence.test.js test/dtrAssistantActionPrefill.test.js test/dtrAssistantPrivacy.test.js",
     "test:dtr-assistant:regression": "node --test test/dtrAssistantRegression.test.js",
     "eval:intents": "node scripts/eval-intents.js",
     "eval:export-feedback": "node scripts/export-feedback.js"

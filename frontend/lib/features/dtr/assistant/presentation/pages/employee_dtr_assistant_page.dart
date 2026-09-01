@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_api.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_leave_prefill.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_privacy_consent_storage.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_session_storage.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_input_bar.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_message_bubble.dart';
@@ -70,6 +71,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     ),
   ];
   String _selectedModelProfile = 'tools_ollama';
+  String? _selectedExternalConsentVersion;
   bool _sending = false;
   bool _resettingChat = false;
   bool _sessionLoaded = false;
@@ -212,6 +214,84 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     setState(() => _sending = false);
   }
 
+  Future<void> _handleModelChanged(String id) async {
+    final profile = _modelProfiles.cast<DtrAssistantModelProfile?>().firstWhere(
+      (item) => item?.id == id,
+      orElse: () => null,
+    );
+    if (profile == null || !profile.available) return;
+
+    if (!profile.external || !profile.requiresConsent) {
+      if (!mounted) return;
+      setState(() {
+        _selectedModelProfile = profile.id;
+        _selectedExternalConsentVersion = null;
+      });
+      return;
+    }
+
+    final userId = context.read<AuthProvider>().user?.id ?? '';
+    final consentVersion = profile.consentVersion?.trim() ?? '';
+    final alreadyConsented = await DtrAssistantPrivacyConsentStorage.hasConsent(
+      userId: userId,
+      provider: profile.provider,
+      version: consentVersion,
+    );
+    if (!mounted) return;
+
+    var accepted = alreadyConsented;
+    if (!accepted) {
+      accepted = await _showExternalAiConsentDialog(profile);
+      if (!accepted || !mounted) return;
+      await DtrAssistantPrivacyConsentStorage.grantConsent(
+        userId: userId,
+        provider: profile.provider,
+        version: consentVersion,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _selectedModelProfile = profile.id;
+      _selectedExternalConsentVersion = consentVersion;
+    });
+  }
+
+  Future<bool> _showExternalAiConsentDialog(
+    DtrAssistantModelProfile profile,
+  ) async {
+    final disclosure =
+        profile.dataDisclosure ??
+        'Your question and the minimum HRMS records needed to answer it will be processed by ${profile.provider}.';
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        key: const ValueKey('dtr-assistant-external-ai-consent-dialog'),
+        icon: const Icon(Icons.cloud_outlined),
+        title: Text('Use ${profile.label}?'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Text(
+            '$disclosure\n\nThe local Qwen model remains available if you do not agree.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            key: const ValueKey('dtr-assistant-external-ai-consent-accept'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.cloud_done_outlined),
+            label: const Text('Agree and use cloud AI'),
+          ),
+        ],
+      ),
+    );
+    return accepted == true;
+  }
+
   Future<void> _runPresentationAction(FutureOr<void> Function()? action) async {
     if (action == null || _sending || _resettingChat) return;
     await _persistSession();
@@ -221,6 +301,19 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
 
   Future<void> _send(String text, {String? intent}) async {
     if (_sending) return;
+    final selectedProfile = _modelProfiles.firstWhere(
+      (item) => item.id == _selectedModelProfile,
+      orElse: () => _modelProfiles.first,
+    );
+    if (selectedProfile.external &&
+        selectedProfile.requiresConsent &&
+        _selectedExternalConsentVersion != selectedProfile.consentVersion) {
+      await _handleModelChanged(selectedProfile.id);
+      if (!mounted ||
+          _selectedExternalConsentVersion != selectedProfile.consentVersion) {
+        return;
+      }
+    }
     setState(() {
       _messages.add(DtrAssistantMessage.user(text));
       _sending = true;
@@ -235,6 +328,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         intent: intent,
         modelProfile: _selectedModelProfile,
         conversationId: _conversationId,
+        externalConsentVersion: _selectedExternalConsentVersion,
         cancelToken: _cancelToken,
       );
       if (!mounted) return;
@@ -764,8 +858,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
               sending: _sending,
               modelProfiles: _modelProfiles,
               selectedModelProfile: _selectedModelProfile,
-              onModelChanged: (id) =>
-                  setState(() => _selectedModelProfile = id),
+              onModelChanged: (id) => unawaited(_handleModelChanged(id)),
               onSend: _send,
               onStop: _stop,
               controller: _inputController,

@@ -54,6 +54,13 @@ const {
 } = require('./dtrAssistantPrompt');
 const { createDtrExportAttachment } = require('./dtrAssistantExportService');
 const {
+  EXTERNAL_AI_CONSENT_VERSION,
+  assertExternalConsent,
+  buildExternalDirectContext,
+  buildExternalToolData,
+  logExternalDisclosure,
+} = require('./dtrAssistantExternalDataPolicy');
+const {
   addDays,
   parseAssistantDateRange,
   todayInHrmsTimezone,
@@ -69,10 +76,17 @@ function allowDirectLlm(env = process.env) {
   return /^(1|true|yes)$/i.test(String(env.DTR_ASSISTANT_ALLOW_DIRECT_LLM || ''));
 }
 
+function allowExternalLlm(env = process.env) {
+  return /^(1|true|yes)$/i.test(
+    String(env.DTR_ASSISTANT_ALLOW_EXTERNAL_LLM || '')
+  );
+}
+
 function buildModelProfiles(env = process.env) {
   const config = getLlmConfig(env);
   const groqConfigured = !!config.groq.apiKey;
-  const directEnabled = groqConfigured && allowDirectLlm(env);
+  const externalEnabled = groqConfigured && allowExternalLlm(env);
+  const directEnabled = externalEnabled && allowDirectLlm(env);
 
   return [
     {
@@ -84,6 +98,8 @@ function buildModelProfiles(env = process.env) {
       model: config.ollama.model,
       available: true,
       recommended: true,
+      external: false,
+      requiresConsent: false,
     },
     {
       id: 'tools_groq',
@@ -92,9 +108,18 @@ function buildModelProfiles(env = process.env) {
       engine: 'tools',
       provider: 'groq',
       model: config.groq.model,
-      available: groqConfigured,
+      available: externalEnabled,
       recommended: false,
-      unavailableReason: groqConfigured ? null : 'Set GROQ_API_KEY in backend/.env.',
+      external: true,
+      requiresConsent: true,
+      consentVersion: EXTERNAL_AI_CONSENT_VERSION,
+      dataDisclosure:
+        'Your question and the minimum HRMS records needed for it are processed by Groq.',
+      unavailableReason: externalEnabled
+        ? null
+        : groqConfigured
+          ? 'External AI is disabled by the HRMS administrator.'
+          : 'Set GROQ_API_KEY in backend/.env.',
     },
     {
       id: 'direct_groq',
@@ -105,10 +130,17 @@ function buildModelProfiles(env = process.env) {
       model: config.groq.model,
       available: directEnabled,
       recommended: false,
+      external: true,
+      requiresConsent: true,
+      consentVersion: EXTERNAL_AI_CONSENT_VERSION,
+      dataDisclosure:
+        'Your question and a restricted HRMS policy context are processed by Groq.',
       unavailableReason: directEnabled
         ? null
-        : groqConfigured
+        : externalEnabled
           ? 'Set DTR_ASSISTANT_ALLOW_DIRECT_LLM=true to enable direct mode.'
+          : groqConfigured
+            ? 'External AI is disabled by the HRMS administrator.'
           : 'Set GROQ_API_KEY in backend/.env.',
     },
   ];
@@ -2451,10 +2483,18 @@ async function generateDirectAnswerWithAi({ text, context, profile }) {
 
 async function chatWithDtrAssistant(
   pool,
-  { user, message, intent, modelProfile, conversationId }
+  {
+    user,
+    message,
+    intent,
+    modelProfile,
+    conversationId,
+    externalConsentVersion,
+  }
 ) {
   const text = normalizeMessage(message);
   const profile = resolveModelProfile(modelProfile);
+  assertExternalConsent(profile, externalConsentVersion);
   const scope = getEmployeeSelfScope(user);
   const conversationKey = normalizeConversationId(conversationId);
   const readMemory = () => getAssistantMemory(scope.userId, conversationKey);
@@ -2637,6 +2677,13 @@ async function chatWithDtrAssistant(
     intentConfidence,
     intentNeedsAiPlan,
   })) {
+    logExternalDisclosure({
+      userId: scope.userId,
+      profile,
+      purpose: 'tool_plan',
+      intent: resolvedIntent,
+      data: { employeeQuestion: true },
+    });
     const planned = await planToolWithLocalAi(effectiveText, profile);
     if (planned.intent) {
       if (!resolvedIntent || intentNeedsAiPlan || intentConfidence < 0.72) {
@@ -2687,6 +2734,13 @@ async function chatWithDtrAssistant(
   context.assistant_memory = extractionMemory;
 
   if (!resolvedIntent) {
+    logExternalDisclosure({
+      userId: scope.userId,
+      profile,
+      purpose: 'intent_classification',
+      intent: null,
+      data: { employeeQuestion: true },
+    });
     const classified = await classifyIntentWithLocalAi(plannedText, profile);
     resolvedIntent = classified.intent;
     if (resolvedIntent) {
@@ -2698,9 +2752,17 @@ async function chatWithDtrAssistant(
   }
 
   if (profile.engine === 'direct' && !resolvedIntent) {
+    const externalContext = buildExternalDirectContext(context);
+    logExternalDisclosure({
+      userId: scope.userId,
+      profile,
+      purpose: 'direct_answer',
+      intent: 'direct_ai',
+      data: externalContext,
+    });
     const direct = await generateDirectAnswerWithAi({
       text: plannedText,
-      context,
+      context: externalContext,
       profile,
     });
 
@@ -2843,8 +2905,19 @@ async function chatWithDtrAssistant(
     resolvedIntent
   );
   if (fastReply) {
-    const toolData = buildToolData(resolvedIntent, context);
+    const toolData = profile.external
+      ? buildExternalToolData(resolvedIntent, context)
+      : buildToolData(resolvedIntent, context);
     const attachments = buildAttachments(resolvedIntent, context, scope.userId);
+    if (!shouldSkipToolRefinement(resolvedIntent)) {
+      logExternalDisclosure({
+        userId: scope.userId,
+        profile,
+        purpose: 'tool_answer_refinement',
+        intent: resolvedIntent,
+        data: toolData,
+      });
+    }
     const refined = shouldSkipToolRefinement(resolvedIntent)
       ? null
       : await refineToolAnswerWithLocalAi({
@@ -2926,6 +2999,7 @@ module.exports = {
   resetDtrAssistantChat,
   getDtrAssistantModelProfiles,
   __test: {
+    allowExternalLlm,
     assistantReplyCharLimit,
     adaptAssistantContentToDepth,
     buildActions,

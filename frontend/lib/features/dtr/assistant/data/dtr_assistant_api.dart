@@ -15,6 +15,7 @@ class DtrAssistantApi {
     String? intent,
     String? modelProfile,
     String? conversationId,
+    String? externalConsentVersion,
     CancelToken? cancelToken,
   }) async {
     final res = await _client.post<Map<String, dynamic>>(
@@ -24,6 +25,8 @@ class DtrAssistantApi {
         if (intent != null) 'intent': intent,
         if (modelProfile != null) 'modelProfile': modelProfile,
         if (conversationId != null) 'conversationId': conversationId,
+        if (externalConsentVersion != null)
+          'externalConsentVersion': externalConsentVersion,
       },
       cancelToken: cancelToken,
       // Ollama can take up to 90s to generate a free-form answer locally.
