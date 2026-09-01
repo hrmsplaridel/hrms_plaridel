@@ -28,7 +28,7 @@ function reviewerClient({ primary = true, backup = true, excludePrimary = false 
           }],
         };
       }
-      if (text.includes('p.is_department_head = true')) {
+      if (text.includes('JOIN position_department_head_periods head_period')) {
         return primary && !excludePrimary
           ? { rows: [{ reviewer_id: HEAD_ID, reviewer_name: 'HR Head' }] }
           : { rows: [] };
@@ -65,8 +65,10 @@ test('review snapshot resolves the explicit Head and effective backups', async (
     true
   );
   const primaryQuery = client.calls.find(({ text }) =>
-    text.includes('p.is_department_head = true')
+    text.includes('JOIN position_department_head_periods head_period')
   );
+  assert.match(primaryQuery.text, /head_period\.effective_from <= \$2::date/);
+  assert.match(primaryQuery.text, /head_period\.effective_to/);
   assert.match(primaryQuery.text, /a\.is_active = true/);
   assert.match(primaryQuery.text, /p\.is_active = true/);
 });
@@ -87,7 +89,8 @@ test('direct Department Head authority excludes archived assignments and inactiv
     departmentId: null,
     departmentName: null,
   });
-  assert.match(authorityQuery, /p\.is_department_head = true/);
+  assert.match(authorityQuery, /JOIN position_department_head_periods head_period/);
+  assert.match(authorityQuery, /head_period\.effective_from <= \$2::date/);
   assert.match(authorityQuery, /a\.is_active = true/);
   assert.match(authorityQuery, /p\.is_active = true/);
 });

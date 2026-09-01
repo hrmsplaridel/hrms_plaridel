@@ -244,7 +244,7 @@ test('supervisor cannot read a primary assignment outside their department', asy
   }
 });
 
-test('supervised assignment access uses the official Head flag instead of the position title', async () => {
+test('supervised assignment access uses effective Head periods instead of the position title', async () => {
   const supervisorId = '11111111-1111-4111-8111-111111111111';
   const targetId = '22222222-2222-4222-8222-222222222222';
   const departmentId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -287,7 +287,8 @@ test('supervised assignment access uses the official Head flag instead of the po
   );
 
   assert.equal(visible.length, 1);
-  assert.match(reviewerSql, /p\.is_department_head = true/);
+  assert.match(reviewerSql, /JOIN position_department_head_periods head_period/);
+  assert.match(reviewerSql, /head_period\.effective_from/);
   assert.doesNotMatch(reviewerSql, /p\.name|department head%|LOWER\(/i);
   assert.deepEqual(reviewerParams, [supervisorId]);
 });
@@ -319,6 +320,6 @@ test('a supervisor has no assignment scope without an official Head position', a
   );
 
   assert.deepEqual(visible, []);
-  assert.match(reviewerSql, /p\.is_department_head = true/);
+  assert.match(reviewerSql, /JOIN position_department_head_periods head_period/);
   assert.doesNotMatch(reviewerSql, /ILIKE|p\.name/i);
 });

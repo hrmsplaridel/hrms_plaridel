@@ -14,6 +14,10 @@ class _PositionRecord {
     required this.isDepartmentHead,
     required this.isActive,
     required this.canPermanentlyDelete,
+    this.departmentHeadPeriodId,
+    this.departmentHeadEffectiveFrom,
+    this.departmentHeadEffectiveTo,
+    this.departmentHeadPeriods = const [],
     this.positionNumber,
   });
   final String id;
@@ -24,6 +28,10 @@ class _PositionRecord {
   final bool isDepartmentHead;
   final bool isActive;
   final bool canPermanentlyDelete;
+  final String? departmentHeadPeriodId;
+  final DateTime? departmentHeadEffectiveFrom;
+  final DateTime? departmentHeadEffectiveTo;
+  final List<Map<String, dynamic>> departmentHeadPeriods;
   final int? positionNumber;
 
   /// Display as POS-001, POS-002, etc., or "—" if null.
@@ -56,6 +64,10 @@ class _ManagePositionState extends State<ManagePosition> {
   _PositionRecord? _selectedPosition;
   String? _selectedDepartmentId;
   bool _isDepartmentHead = false;
+  String? _departmentHeadPeriodId;
+  DateTime? _departmentHeadEffectiveFrom;
+  DateTime? _departmentHeadEffectiveTo;
+  List<Map<String, dynamic>> _departmentHeadPeriods = [];
   StateSetter? _drawerSetState;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
@@ -74,6 +86,46 @@ class _ManagePositionState extends State<ManagePosition> {
     }
     final message = error.message?.trim();
     return message == null || message.isEmpty ? fallback : message;
+  }
+
+  DateTime? _parseDate(dynamic value) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isEmpty) return null;
+    return DateTime.tryParse(text.length >= 10 ? text.substring(0, 10) : text);
+  }
+
+  String? _apiDate(DateTime? value) {
+    if (value == null) return null;
+    return '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';
+  }
+
+  String _displayDate(DateTime? value) =>
+      _apiDate(value) ?? 'Official HRMS date';
+
+  Future<void> _pickDepartmentHeadDate({required bool isStart}) async {
+    final current = isStart
+        ? _departmentHeadEffectiveFrom
+        : _departmentHeadEffectiveTo;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current ?? _departmentHeadEffectiveFrom ?? DateTime.now(),
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null) return;
+    _updatePositionFormState(() {
+      if (isStart) {
+        _departmentHeadEffectiveFrom = picked;
+        if (_departmentHeadEffectiveTo != null &&
+            _departmentHeadEffectiveTo!.isBefore(picked)) {
+          _departmentHeadEffectiveTo = null;
+        }
+      } else {
+        _departmentHeadEffectiveTo = picked;
+      }
+    });
   }
 
   BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
@@ -166,6 +218,18 @@ class _ManagePositionState extends State<ManagePosition> {
           departmentId: m['department_id'] as String?,
           departmentName: deptName,
           isDepartmentHead: m['is_department_head'] as bool? ?? false,
+          departmentHeadPeriodId: m['department_head_period_id'] as String?,
+          departmentHeadEffectiveFrom: _parseDate(
+            m['department_head_effective_from'],
+          ),
+          departmentHeadEffectiveTo: _parseDate(
+            m['department_head_effective_to'],
+          ),
+          departmentHeadPeriods:
+              (m['department_head_periods'] as List<dynamic>? ?? const [])
+                  .whereType<Map>()
+                  .map((period) => Map<String, dynamic>.from(period))
+                  .toList(),
           isActive: m['is_active'] as bool? ?? true,
           canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
           positionNumber: posNum is int
@@ -187,6 +251,10 @@ class _ManagePositionState extends State<ManagePosition> {
       _descriptionController.text = p.description ?? '';
       _selectedDepartmentId = p.departmentId;
       _isDepartmentHead = p.isDepartmentHead;
+      _departmentHeadPeriodId = p.departmentHeadPeriodId;
+      _departmentHeadEffectiveFrom = p.departmentHeadEffectiveFrom;
+      _departmentHeadEffectiveTo = p.departmentHeadEffectiveTo;
+      _departmentHeadPeriods = p.departmentHeadPeriods;
     });
   }
 
@@ -197,6 +265,10 @@ class _ManagePositionState extends State<ManagePosition> {
       _descriptionController.clear();
       _selectedDepartmentId = null;
       _isDepartmentHead = false;
+      _departmentHeadPeriodId = null;
+      _departmentHeadEffectiveFrom = null;
+      _departmentHeadEffectiveTo = null;
+      _departmentHeadPeriods = [];
     });
   }
 
@@ -218,6 +290,19 @@ class _ManagePositionState extends State<ManagePosition> {
       );
       return false;
     }
+    if (_isDepartmentHead &&
+        _departmentHeadEffectiveFrom != null &&
+        _departmentHeadEffectiveTo != null &&
+        _departmentHeadEffectiveTo!.isBefore(_departmentHeadEffectiveFrom!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The Department Head end date cannot precede its start date.',
+          ),
+        ),
+      );
+      return false;
+    }
     try {
       await ApiClient.instance.post(
         '/api/positions',
@@ -228,6 +313,12 @@ class _ManagePositionState extends State<ManagePosition> {
               : _descriptionController.text.trim(),
           'department_id': _selectedDepartmentId,
           'is_department_head': _isDepartmentHead,
+          'department_head_effective_from': _isDepartmentHead
+              ? _apiDate(_departmentHeadEffectiveFrom)
+              : null,
+          'department_head_effective_to': _isDepartmentHead
+              ? _apiDate(_departmentHeadEffectiveTo)
+              : null,
           'is_active': true,
         },
       );
@@ -276,6 +367,19 @@ class _ManagePositionState extends State<ManagePosition> {
       );
       return false;
     }
+    if (_isDepartmentHead &&
+        _departmentHeadEffectiveFrom != null &&
+        _departmentHeadEffectiveTo != null &&
+        _departmentHeadEffectiveTo!.isBefore(_departmentHeadEffectiveFrom!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The Department Head end date cannot precede its start date.',
+          ),
+        ),
+      );
+      return false;
+    }
     try {
       await ApiClient.instance.put(
         '/api/positions/${p.id}',
@@ -286,6 +390,13 @@ class _ManagePositionState extends State<ManagePosition> {
               : _descriptionController.text.trim(),
           'department_id': _selectedDepartmentId,
           'is_department_head': _isDepartmentHead,
+          'department_head_period_id': _departmentHeadPeriodId,
+          'department_head_effective_from': _isDepartmentHead
+              ? _apiDate(_departmentHeadEffectiveFrom)
+              : null,
+          'department_head_effective_to': _isDepartmentHead
+              ? _apiDate(_departmentHeadEffectiveTo)
+              : null,
         },
       );
       if (mounted) {
@@ -1079,8 +1190,13 @@ class _ManagePositionState extends State<ManagePosition> {
           value: _isDepartmentHead,
           onChanged: _selectedDepartmentId == null
               ? null
-              : (value) =>
-                    _updatePositionFormState(() => _isDepartmentHead = value),
+              : (value) => _updatePositionFormState(() {
+                  _isDepartmentHead = value;
+                  if (value && _departmentHeadPeriodId == null) {
+                    _departmentHeadEffectiveFrom = null;
+                    _departmentHeadEffectiveTo = null;
+                  }
+                }),
           title: Text(
             'Official Department Head',
             style: AppTheme.dashFieldTextStyle(context),
@@ -1090,6 +1206,67 @@ class _ManagePositionState extends State<ManagePosition> {
             style: TextStyle(fontSize: 12, color: _mutedColor(context)),
           ),
         ),
+        if (_isDepartmentHead) ...[
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildDepartmentHeadDateField(
+                  label: 'Effective from',
+                  value: _departmentHeadEffectiveFrom,
+                  onTap: () => _pickDepartmentHeadDate(isStart: true),
+                  allowClear: _departmentHeadEffectiveFrom != null,
+                  onClear: () => _updatePositionFormState(
+                    () => _departmentHeadEffectiveFrom = null,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildDepartmentHeadDateField(
+                  label: 'Effective to (optional)',
+                  value: _departmentHeadEffectiveTo,
+                  onTap: () => _pickDepartmentHeadDate(isStart: false),
+                  allowClear: _departmentHeadEffectiveTo != null,
+                  onClear: () => _updatePositionFormState(
+                    () => _departmentHeadEffectiveTo = null,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+        if (_departmentHeadPeriods.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Text(
+            'Designation history',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _mutedColor(context),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _departmentHeadPeriods.map((period) {
+              final from = period['effective_from']?.toString() ?? 'Unknown';
+              final to = period['effective_to']?.toString() ?? 'Onward';
+              final active = period['is_active'] == true;
+              return Chip(
+                avatar: Icon(
+                  active
+                      ? Icons.event_available_rounded
+                      : Icons.event_busy_rounded,
+                  size: 16,
+                ),
+                label: Text('$from to $to'),
+                visualDensity: VisualDensity.compact,
+              );
+            }).toList(),
+          ),
+        ],
         const SizedBox(height: 20),
         Text(
           'Description',
@@ -1189,4 +1366,48 @@ class _ManagePositionState extends State<ManagePosition> {
     radius: 8,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
   );
+
+  Widget _buildDepartmentHeadDateField({
+    required String label,
+    required DateTime? value,
+    required VoidCallback onTap,
+    required bool allowClear,
+    required VoidCallback onClear,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _mutedColor(context),
+          ),
+        ),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: InputDecorator(
+            decoration: _inputDecoration(label).copyWith(
+              prefixIcon: const Icon(Icons.calendar_today_rounded, size: 18),
+              suffixIcon: allowClear
+                  ? IconButton(
+                      tooltip: 'Clear date',
+                      onPressed: onClear,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    )
+                  : null,
+            ),
+            child: Text(
+              _displayDate(value),
+              style: AppTheme.dashFieldTextStyle(context),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }

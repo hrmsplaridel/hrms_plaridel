@@ -14,7 +14,7 @@
     "test:leave-month-end": "node --test test/leaveMonthlyAccrual.test.js test/leaveAttendanceDeduction.test.js test/dtrMonthEndReconciliation.test.js test/locatorCoverage.test.js",
     "test:leave-management": "node --test test/departmentHeadService.test.js test/leaveApprovalAllocation.test.js test/leaveAttachmentAccess.test.js test/leaveAttachmentPolicy.test.js test/leaveBalanceLedger.test.js test/leaveDtrCoverage.test.js test/leaveEntitlementPolicy.test.js test/leaveRequestDetailsPolicy.test.js test/leaveMonthlyAccrual.test.js test/leaveAttendanceDeduction.test.js",
     "test:department-management": "node -r dotenv/config --test test/departmentLifecycle.test.js test/departmentValidation.test.js test/departmentHeadService.test.js test/assignmentTransition.test.js test/departmentPostgres.integration.test.js",
-    "test:position-management": "node --test test/positionLifecycle.test.js test/assignmentReadAuthorization.test.js test/departmentHeadService.test.js test/docutrackerDepartmentReviewers.test.js",
+    "test:position-management": "node --test test/positionLifecycle.test.js test/positionDepartmentHeadPeriods.test.js test/assignmentReadAuthorization.test.js test/assignmentTransition.test.js test/departmentHeadService.test.js test/docutrackerDepartmentReviewers.test.js",
     "llm:smoke": "node scripts/test-llm.js",
     "test:dtr-assistant": "node --test test/dtrAssistantRegression.test.js test/dtrAssistantApi.test.js test/dtrAssistantIntegration.test.js test/dtrAssistantDataService.test.js test/dtrAssistantProviders.test.js test/dtrAssistantDateAndExport.test.js test/dtrAssistantIntelligence.test.js test/dtrAssistantActionPrefill.test.js",
     "test:dtr-assistant:regression": "node --test test/dtrAssistantRegression.test.js",

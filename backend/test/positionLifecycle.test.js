@@ -234,6 +234,9 @@ test('position route commits a department correction for an unused position', as
       if (text.startsWith('UPDATE positions')) {
         return { rowCount: 1, rows: [updated] };
       }
+      if (text.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
+      }
       throw new Error(`Unexpected SQL: ${text}`);
     },
     release() {

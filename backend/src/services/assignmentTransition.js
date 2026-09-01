@@ -72,7 +72,6 @@ async function validateAssignmentSelection(
        COALESCE(d.is_active, false) AS department_is_active,
        (p.id IS NOT NULL) AS position_exists,
        COALESCE(p.is_active, false) AS position_is_active,
-       COALESCE(p.is_department_head, false) AS position_is_department_head,
        p.department_id::text AS position_department_id,
        (s.id IS NOT NULL) AS shift_exists,
        COALESCE(s.is_active, false) AS shift_is_active
@@ -134,7 +133,6 @@ async function validateAssignmentSelection(
     employeeStatus: String(row.employee_status || 'active').toLowerCase(),
     employeeDateHired: row.employee_date_hired || null,
     employeeSeparationDate: row.employee_separation_date || null,
-    positionIsDepartmentHead: row.position_is_department_head === true,
   };
 }
 
@@ -233,20 +231,20 @@ async function assertNoOverlappingDepartmentHeadAssignment(
     effectiveFrom,
     effectiveTo,
     excludeAssignmentId = null,
-    isDepartmentHead = null,
   }
 ) {
-  if (isDepartmentHead === false) return;
-  if (isDepartmentHead !== true) {
-    const positionResult = await db.query(
-      `SELECT is_department_head
-       FROM positions
-       WHERE id = $1::uuid
-         AND department_id = $2::uuid`,
-      [positionId, departmentId]
-    );
-    if (positionResult.rows[0]?.is_department_head !== true) return;
-  }
+  const selectedPeriod = await db.query(
+    `SELECT id
+       FROM position_department_head_periods
+      WHERE position_id = $1::uuid
+        AND department_id = $2::uuid
+        AND is_active = true
+        AND effective_from <= COALESCE($4::date, 'infinity'::date)
+        AND COALESCE(effective_to, 'infinity'::date) >= $3::date
+      LIMIT 1`,
+    [positionId, departmentId, effectiveFrom, effectiveTo]
+  );
+  if (selectedPeriod.rowCount === 0) return;
 
   // Serialize Head changes by department before checking effective periods.
   await db.query(
@@ -257,18 +255,32 @@ async function assertNoOverlappingDepartmentHeadAssignment(
     `SELECT a.id, a.employee_id,
             a.effective_from::text AS effective_from,
             a.effective_to::text AS effective_to
-     FROM assignments a
-     JOIN positions p ON p.id = a.position_id
-     WHERE a.department_id = $1::uuid
-       AND p.is_department_head = true
+     FROM position_department_head_periods selected_period
+     JOIN assignments a
+       ON a.department_id = selected_period.department_id
+     JOIN position_department_head_periods head_period
+       ON head_period.position_id = a.position_id
+      AND head_period.department_id = a.department_id
+      AND head_period.is_active = true
+     WHERE selected_period.position_id = $5::uuid
+       AND selected_period.department_id = $1::uuid
+       AND selected_period.is_active = true
        AND a.is_active = true
+       AND selected_period.effective_from <= COALESCE($3::date, 'infinity'::date)
+       AND COALESCE(selected_period.effective_to, 'infinity'::date) >= $2::date
        AND a.effective_from <= COALESCE($3::date, 'infinity'::date)
        AND COALESCE(a.effective_to, 'infinity'::date) >= $2::date
+       AND head_period.effective_from <= COALESCE($3::date, 'infinity'::date)
+       AND COALESCE(head_period.effective_to, 'infinity'::date) >= $2::date
+       AND head_period.effective_from <= COALESCE(a.effective_to, 'infinity'::date)
+       AND COALESCE(head_period.effective_to, 'infinity'::date) >= a.effective_from
+       AND head_period.effective_from <= COALESCE(selected_period.effective_to, 'infinity'::date)
+       AND COALESCE(head_period.effective_to, 'infinity'::date) >= selected_period.effective_from
        AND ($4::uuid IS NULL OR a.id <> $4::uuid)
      ORDER BY a.effective_from, a.created_at, a.id
      LIMIT 1
      FOR UPDATE OF a`,
-    [departmentId, effectiveFrom, effectiveTo, excludeAssignmentId]
+    [departmentId, effectiveFrom, effectiveTo, excludeAssignmentId, positionId]
   );
   if (conflict.rowCount > 0) {
     throw new AssignmentTransitionError(
@@ -335,7 +347,6 @@ async function createAssignmentTransition(
       positionId: selection.positionId,
       effectiveFrom: from,
       effectiveTo: to,
-      isDepartmentHead: selection.positionIsDepartmentHead,
     });
   }
 
@@ -370,8 +381,6 @@ async function updateAssignmentTransition(
 ) {
   const existingResult = await db.query(
     `SELECT id, employee_id, department_id, position_id, shift_id,
-            (SELECT p.is_department_head FROM positions p
-             WHERE p.id = assignments.position_id) AS position_is_department_head,
             effective_from::text AS effective_from,
             effective_to::text AS effective_to, is_active, remarks
      FROM assignments
@@ -461,9 +470,6 @@ async function updateAssignmentTransition(
       effectiveFrom: from,
       effectiveTo: to,
       excludeAssignmentId: assignmentId,
-      isDepartmentHead: validatedSelection
-        ? validatedSelection.positionIsDepartmentHead === true
-        : existing.position_is_department_head === true,
     });
   }
 

@@ -16,10 +16,13 @@ test('overlapping Department Head assignments are rejected for one department', 
     async query(sql) {
       const text = String(sql);
       calls.push(text);
+      if (text.includes('WHERE position_id = $1::uuid')) {
+        return { rows: [{ id: IDS.current }], rowCount: 1 };
+      }
       if (text.includes('SELECT id FROM departments')) {
         return { rows: [{ id: IDS.department }], rowCount: 1 };
       }
-      if (text.includes('FROM assignments a') && text.includes('p.is_department_head')) {
+      if (text.includes('FROM position_department_head_periods selected_period')) {
         return {
           rows: [{ id: IDS.current, employee_id: IDS.employee }],
           rowCount: 1,
@@ -35,7 +38,6 @@ test('overlapping Department Head assignments are rejected for one department', 
       positionId: IDS.position,
       effectiveFrom: '2026-08-01',
       effectiveTo: null,
-      isDepartmentHead: true,
     }),
     (error) =>
       error instanceof AssignmentTransitionError && error.statusCode === 409
@@ -154,6 +156,9 @@ test('future transfer closes the current assignment on the previous day', async 
         };
       }
       if (sql.includes("COALESCE($3::date, 'infinity'::date)")) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('FROM position_department_head_periods')) {
         return { rowCount: 0, rows: [] };
       }
       if (sql.includes('INSERT INTO assignments')) {
@@ -280,6 +285,9 @@ test('date edit cannot reopen assignment coverage after employee separation', as
           }],
         };
       }
+      if (sql.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
+      }
       if (sql.includes('AS employee_exists')) {
         return {
           rowCount: 1,
@@ -344,6 +352,9 @@ test('historical date correction is allowed within employee service dates', asyn
       if (sql.includes("COALESCE($3::date, 'infinity'::date)")) {
         return { rowCount: 0, rows: [] };
       }
+      if (sql.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
+      }
       if (sql.startsWith('UPDATE assignments')) {
         return {
           rowCount: 1,
@@ -355,6 +366,9 @@ test('historical date correction is allowed within employee service dates', asyn
             is_active: true,
           }],
         };
+      }
+      if (sql.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
       }
       throw new Error(`Unexpected SQL: ${sql}`);
     },
@@ -401,6 +415,9 @@ test('remarks-only correction does not revalidate separated employee coverage', 
           rowCount: 1,
           rows: [{ id: IDS.current, remarks: 'Corrected note' }],
         };
+      }
+      if (sql.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
       }
       throw new Error(`Unexpected SQL: ${sql}`);
     },

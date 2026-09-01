@@ -105,9 +105,14 @@ async function isDepartmentHead(client, userId) {
     `SELECT a.department_id, d.name AS department_name
      FROM assignments a
      JOIN positions p ON a.position_id = p.id
+     JOIN position_department_head_periods head_period
+       ON head_period.position_id = p.id
+      AND head_period.department_id = a.department_id
+      AND head_period.is_active = true
+      AND head_period.effective_from <= $2::date
+      AND (head_period.effective_to IS NULL OR head_period.effective_to >= $2::date)
      LEFT JOIN departments d ON d.id = a.department_id
      WHERE a.employee_id = $1::uuid
-       AND p.is_department_head = true
        AND a.is_active = true
        AND p.is_active = true
        AND a.effective_from <= $2::date

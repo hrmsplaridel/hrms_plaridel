@@ -175,9 +175,36 @@ CREATE TABLE IF NOT EXISTS positions (
     CHECK (is_department_head = false OR department_id IS NOT NULL)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_positions_department_head_per_department
-  ON positions (department_id)
-  WHERE is_department_head = true AND department_id IS NOT NULL;
+-- Effective-dated official Department Head designations. Position rows retain
+-- is_department_head as a compatibility indicator; authority is resolved here.
+CREATE TABLE IF NOT EXISTS position_department_head_periods (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_id UUID NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
+  department_id UUID NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_position_department_head_period_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+
+ALTER TABLE position_department_head_periods
+  DROP CONSTRAINT IF EXISTS position_department_head_period_no_overlap;
+ALTER TABLE position_department_head_periods
+  ADD CONSTRAINT position_department_head_period_no_overlap
+  EXCLUDE USING gist (
+    department_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (is_active = true);
+
+CREATE INDEX IF NOT EXISTS idx_position_department_head_periods_effective
+  ON position_department_head_periods
+    (position_id, department_id, effective_from, effective_to)
+  WHERE is_active = true;
 
 -- =========================================
 -- SHIFTS / SCHEDULES
