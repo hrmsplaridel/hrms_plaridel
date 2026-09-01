@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/positions/widgets/position_lifecycle_button.dart';
 
 /// Position record for display/CRUD.
 class _PositionRecord {
@@ -530,6 +531,60 @@ class _ManagePositionState extends State<ManagePosition> {
     }
   }
 
+  Future<bool> _reactivatePosition() async {
+    final p = _selectedPosition;
+    if (p == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a position to reactivate.')),
+      );
+      return false;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reactivate position?'),
+        content: Text(
+          'This will restore "${p.name}" to active position lists.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            icon: const Icon(Icons.restore_rounded, size: 18),
+            label: const Text('Reactivate'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return false;
+    try {
+      await ApiClient.instance.put(
+        '/api/positions/${p.id}',
+        data: {'is_active': true},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${p.name} has been reactivated.')),
+        );
+        _clearForm();
+        await _loadPositions();
+      }
+      return true;
+    } on DioException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_apiErrorMessage(e, 'Failed to reactivate position')),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
   Future<String?> _requestMistakenDeleteReason(_PositionRecord position) async {
     final formKey = GlobalKey<FormState>();
     var enteredReason = '';
@@ -732,6 +787,7 @@ class _ManagePositionState extends State<ManagePosition> {
 
   Widget _buildDrawerFooter(BuildContext drawerContext) {
     final isEditing = _selectedPosition != null;
+    final position = _selectedPosition;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -745,20 +801,21 @@ class _ManagePositionState extends State<ManagePosition> {
         runSpacing: 8,
         alignment: WrapAlignment.end,
         children: [
-          if (isEditing)
-            OutlinedButton.icon(
-              onPressed: () async {
+          if (position != null)
+            PositionLifecycleButton(
+              isActive: position.isActive,
+              onDeactivate: () async {
                 final ok = await _deactivatePosition();
                 if (ok && drawerContext.mounted) {
                   Navigator.of(drawerContext).pop();
                 }
               },
-              icon: const Icon(Icons.person_off_rounded, size: 18),
-              label: const Text('Deactivate'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red,
-                side: const BorderSide(color: Colors.red),
-              ),
+              onReactivate: () async {
+                final ok = await _reactivatePosition();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
             ),
           if (_selectedPosition?.canPermanentlyDelete == true)
             OutlinedButton.icon(
@@ -839,6 +896,7 @@ class _ManagePositionState extends State<ManagePosition> {
 
   Widget _buildLeftPanel() {
     final dark = _isDark(context);
+    final showStatus = _statusFilter == 'All';
     final search = _searchController.text.toLowerCase();
     final filtered = search.isEmpty
         ? _positions
@@ -934,6 +992,18 @@ class _ManagePositionState extends State<ManagePosition> {
                     ),
                   ),
                 ),
+                if (showStatus)
+                  SizedBox(
+                    width: 100,
+                    child: Text(
+                      'Status',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: _headingColor(context),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -959,11 +1029,12 @@ class _ManagePositionState extends State<ManagePosition> {
             Column(
               children: [
                 Table(
-                  columnWidths: const {
+                  columnWidths: {
                     0: FixedColumnWidth(88),
                     1: FlexColumnWidth(),
                     2: FlexColumnWidth(),
                     3: FlexColumnWidth(2),
+                    if (showStatus) 4: const FixedColumnWidth(100),
                   },
                   children: paged.map((p) {
                     final isSelected = _selectedPosition?.id == p.id;
@@ -997,6 +1068,7 @@ class _ManagePositionState extends State<ManagePosition> {
                           onTap: () => _openPositionDrawer(position: p),
                           secondary: true,
                         ),
+                        if (showStatus) _statusTableCell(p),
                       ],
                     );
                   }).toList(),
@@ -1079,6 +1151,38 @@ class _ManagePositionState extends State<ManagePosition> {
             ),
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _statusTableCell(_PositionRecord position) {
+    final color = position.isActive ? Colors.green : _mutedColor(context);
+    return TableCell(
+      verticalAlignment: TableCellVerticalAlignment.middle,
+      child: InkWell(
+        onTap: () => _openPositionDrawer(position: position),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: color.withValues(alpha: 0.5)),
+              ),
+              child: Text(
+                position.isActive ? 'Active' : 'Inactive',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -1382,25 +1486,12 @@ class _ManagePositionState extends State<ManagePosition> {
                   ),
                 ),
               ),
-              FilledButton.icon(
-                onPressed: _selectedPosition != null
-                    ? () => _deactivatePosition()
-                    : null,
-                icon: const Icon(Icons.person_off_rounded, size: 18),
-                label: const Text('Deactivate'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFE53935),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  elevation: 0,
+              if (_selectedPosition case final position?)
+                PositionLifecycleButton(
+                  isActive: position.isActive,
+                  onDeactivate: () => _deactivatePosition(),
+                  onReactivate: () => _reactivatePosition(),
                 ),
-              ),
             ],
           ),
         ],
