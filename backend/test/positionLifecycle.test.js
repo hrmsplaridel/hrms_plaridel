@@ -11,6 +11,8 @@ const {
   ensureActivePositionDepartmentAllowed,
   ensurePositionDeactivationAllowed,
   ensurePositionDepartmentChangeAllowed,
+  positionAuditAction,
+  positionAuditSnapshot,
   positionDeactivationCountsSql,
   positionDependencyCountsSql,
 } = require('../src/services/positionLifecycle');
@@ -48,6 +50,66 @@ function responseRecorder() {
     },
   };
 }
+
+test('position audit snapshot includes the managed Department Head period', () => {
+  const period = {
+    id: '55555555-5555-4555-8555-555555555555',
+    position_id: IDS.position,
+    department_id: IDS.oldDepartment,
+    effective_from: '2026-08-01',
+    effective_to: null,
+    is_active: true,
+  };
+
+  assert.deepEqual(positionAuditSnapshot(positionRow(), period), {
+    id: IDS.position,
+    position_number: 12,
+    name: 'HR Officer',
+    description: null,
+    department_id: IDS.oldDepartment,
+    is_department_head: true,
+    department_head_period: {
+      id: period.id,
+      department_id: IDS.oldDepartment,
+      effective_from: '2026-08-01',
+      effective_to: null,
+      is_active: true,
+    },
+    is_active: true,
+  });
+});
+
+test('position audit distinguishes lifecycle and authority changes', () => {
+  const before = positionAuditSnapshot(positionRow());
+  const headPeriod = {
+    id: '55555555-5555-4555-8555-555555555555',
+    department_id: IDS.oldDepartment,
+    effective_from: '2026-08-01',
+    effective_to: null,
+    is_active: true,
+  };
+
+  assert.equal(
+    positionAuditAction(before, { ...before, name: 'HR Management Officer' }),
+    'position_updated'
+  );
+  assert.equal(
+    positionAuditAction(before, { ...before, department_id: IDS.newDepartment }),
+    'position_department_changed'
+  );
+  assert.equal(
+    positionAuditAction(before, positionAuditSnapshot(positionRow(), headPeriod)),
+    'position_department_head_changed'
+  );
+  assert.equal(
+    positionAuditAction(before, { ...before, is_active: false }),
+    'position_deactivated'
+  );
+  assert.equal(
+    positionAuditAction({ ...before, is_active: false }, before),
+    'position_reactivated'
+  );
+});
 
 test('used position cannot be moved to another department', async () => {
   const calls = [];
@@ -333,10 +395,11 @@ test('position route rolls back and returns 409 when assignment history blocks m
 
 test('position route commits a department correction for an unused position', async () => {
   const clientCalls = [];
+  let auditParams;
   let released = false;
   const updated = { ...positionRow(), department_id: IDS.newDepartment };
   const client = {
-    async query(sql) {
+    async query(sql, params) {
       const text = String(sql).trim();
       clientCalls.push(text);
       if (text === 'BEGIN' || text === 'COMMIT') {
@@ -365,6 +428,10 @@ test('position route commits a department correction for an unused position', as
       }
       if (text.includes('FROM position_department_head_periods')) {
         return { rowCount: 0, rows: [] };
+      }
+      if (text.startsWith('INSERT INTO audit_logs')) {
+        auditParams = params;
+        return { rowCount: 1, rows: [] };
       }
       throw new Error(`Unexpected SQL: ${text}`);
     },
@@ -401,6 +468,10 @@ test('position route commits a department correction for an unused position', as
     assert.equal(clientCalls[0], 'BEGIN');
     assert.equal(clientCalls.at(-1), 'COMMIT');
     assert.equal(clientCalls.some((sql) => sql === 'ROLLBACK'), false);
+    assert.equal(auditParams[1], 'position_department_changed');
+    const auditDetails = JSON.parse(auditParams[3]);
+    assert.equal(auditDetails.before.department_id, IDS.oldDepartment);
+    assert.equal(auditDetails.after.department_id, IDS.newDepartment);
     assert.equal(released, true);
   } finally {
     delete require.cache[routePath];
@@ -595,6 +666,114 @@ test('position reactivation rejects an inactive department and rolls back', asyn
     assert.equal(calls[0], 'BEGIN');
     assert.equal(calls.at(-1), 'ROLLBACK');
     assert.equal(calls.some((sql) => sql.startsWith('UPDATE positions')), false);
+    assert.equal(released, true);
+  } finally {
+    console.error = originalConsoleError;
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('position creation is audited before commit', async () => {
+  const calls = [];
+  let auditParams;
+  let released = false;
+  const created = { ...positionRow(), department_id: null };
+  const client = {
+    async query(sql, params) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'COMMIT') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.startsWith('INSERT INTO positions')) {
+        return { rowCount: 1, rows: [created] };
+      }
+      if (text.startsWith('INSERT INTO audit_logs')) {
+        auditParams = params;
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = { connect: async () => client };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      user: { id: IDS.actor, role: 'admin' },
+      body: { name: 'HR Officer', is_active: true },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(auditParams[1], 'position_created');
+    assert.equal(JSON.parse(auditParams[3]).after.name, 'HR Officer');
+    assert.equal(calls.at(-1), 'COMMIT');
+    assert.equal(released, true);
+  } finally {
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('position creation rolls back when its audit event fails', async () => {
+  const calls = [];
+  let released = false;
+  const created = { ...positionRow(), department_id: null };
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.startsWith('INSERT INTO positions')) {
+        return { rowCount: 1, rows: [created] };
+      }
+      if (text.startsWith('INSERT INTO audit_logs')) {
+        throw new Error('audit unavailable');
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = { connect: async () => client };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      user: { id: IDS.actor, role: 'admin' },
+      body: { name: 'HR Officer', is_active: true },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 500);
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(calls.includes('COMMIT'), false);
     assert.equal(released, true);
   } finally {
     console.error = originalConsoleError;

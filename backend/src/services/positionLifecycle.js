@@ -148,6 +148,48 @@ async function writePositionAudit(
   );
 }
 
+function positionAuditSnapshot(position, departmentHeadPeriod = null) {
+  if (!position) return null;
+  return {
+    id: position.id,
+    position_number: position.position_number ?? null,
+    name: position.name,
+    description: position.description ?? null,
+    department_id: nullableId(position.department_id),
+    is_department_head: departmentHeadPeriod !== null,
+    department_head_period: departmentHeadPeriod
+      ? {
+          id: departmentHeadPeriod.id,
+          department_id: nullableId(departmentHeadPeriod.department_id),
+          effective_from: departmentHeadPeriod.effective_from,
+          effective_to: departmentHeadPeriod.effective_to ?? null,
+          is_active: departmentHeadPeriod.is_active !== false,
+        }
+      : null,
+    is_active: position.is_active !== false,
+  };
+}
+
+function positionAuditAction(before, after) {
+  if (before?.is_active !== false && after?.is_active === false) {
+    return 'position_deactivated';
+  }
+  if (before?.is_active === false && after?.is_active !== false) {
+    return 'position_reactivated';
+  }
+  if (nullableId(before?.department_id) !== nullableId(after?.department_id)) {
+    return 'position_department_changed';
+  }
+  if (
+    before?.is_department_head !== after?.is_department_head ||
+    JSON.stringify(before?.department_head_period ?? null) !==
+      JSON.stringify(after?.department_head_period ?? null)
+  ) {
+    return 'position_department_head_changed';
+  }
+  return 'position_updated';
+}
+
 async function positionAssignmentDependencyCounts(db, positionId) {
   const result = await db.query(
     `SELECT ${POSITION_DEPENDENCIES.map(
@@ -294,5 +336,7 @@ module.exports = {
   positionDeactivationBlockers,
   positionDeactivationCountsFromRow,
   positionDeactivationCountsSql,
+  positionAuditAction,
+  positionAuditSnapshot,
   writePositionAudit,
 };

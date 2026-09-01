@@ -15,6 +15,9 @@ const {
   positionDeactivationBlockers,
   positionDeactivationCountsFromRow,
   positionDeactivationCountsSql,
+  positionAuditAction,
+  positionAuditSnapshot,
+  writePositionAudit,
 } = require('../services/positionLifecycle');
 const {
   endDepartmentHeadPeriod,
@@ -173,6 +176,13 @@ router.post('/', protect, requireAdmin, async (req, res) => {
           effectiveTo: department_head_effective_to,
         })
       : null;
+    const after = positionAuditSnapshot(r, period);
+    await writePositionAudit(client, {
+      actorId: req.user?.id,
+      action: 'position_created',
+      positionId: r.id,
+      after,
+    });
     await client.query('COMMIT');
     res.status(201).json({
       id: r.id,
@@ -286,6 +296,8 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       positionIsActive:
         is_active === undefined ? existing.is_active !== false : !!is_active,
     });
+    const beforePeriod = await getManagedDepartmentHeadPeriod(client, id);
+    const before = positionAuditSnapshot(existing, beforePeriod);
 
     let result = { rows: [existing] };
     if (updates.length > 0) {
@@ -316,6 +328,14 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       });
     }
     period = await getManagedDepartmentHeadPeriod(client, id);
+    const after = positionAuditSnapshot(r, period);
+    await writePositionAudit(client, {
+      actorId: req.user?.id,
+      action: positionAuditAction(before, after),
+      positionId: id,
+      before,
+      after,
+    });
     await client.query('COMMIT');
     res.json({
       id: r.id,
