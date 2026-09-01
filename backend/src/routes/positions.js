@@ -5,6 +5,7 @@ const { requireAdmin } = require('../middleware/rbac');
 const {
   PositionLifecycleError,
   deleteMistakenPosition,
+  ensureActivePositionDepartmentAllowed,
   ensurePositionDeactivationAllowed,
   ensurePositionDepartmentChangeAllowed,
   lockPositionForUpdate,
@@ -145,6 +146,10 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
     client = await pool.connect();
     await client.query('BEGIN');
+    await ensureActivePositionDepartmentAllowed(client, {
+      departmentId: department_id,
+      positionIsActive: !!is_active,
+    });
     const result = await client.query(
       `INSERT INTO positions (
          name, description, department_id, is_department_head, is_active
@@ -191,7 +196,10 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     }
     console.error('[positions POST]', err);
     if (err instanceof PositionLifecycleError) {
-      return res.status(err.statusCode).json({ error: err.message });
+      return res.status(err.statusCode).json({
+        error: err.message,
+        ...(err.details || {}),
+      });
     }
     if (err.code === '23P01' && err.constraint === 'position_department_head_period_no_overlap') {
       return res.status(409).json({
@@ -271,6 +279,13 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         lockedPosition: existing,
       });
     }
+
+    await ensureActivePositionDepartmentAllowed(client, {
+      departmentId:
+        department_id === undefined ? existing.department_id : department_id,
+      positionIsActive:
+        is_active === undefined ? existing.is_active !== false : !!is_active,
+    });
 
     let result = { rows: [existing] };
     if (updates.length > 0) {

@@ -186,6 +186,37 @@ async function ensurePositionDeactivationAllowed(
   return position;
 }
 
+async function ensureActivePositionDepartmentAllowed(
+  db,
+  { departmentId, positionIsActive }
+) {
+  const normalizedDepartmentId = nullableId(departmentId);
+  if (!positionIsActive || normalizedDepartmentId === null) return null;
+
+  const result = await db.query(
+    `SELECT id, name, is_active
+       FROM departments
+      WHERE id = $1::uuid
+      FOR SHARE`,
+    [normalizedDepartmentId]
+  );
+  const department = result.rows[0] || null;
+  if (!department) {
+    throw new PositionLifecycleError('Selected department not found', 400);
+  }
+  if (department.is_active !== true) {
+    throw new PositionLifecycleError(
+      `Active positions cannot be assigned to the inactive ${department.name || 'selected'} department. Reactivate the department or select an active department.`,
+      409,
+      {
+        department_id: normalizedDepartmentId,
+        department_name: department.name || null,
+      }
+    );
+  }
+  return department;
+}
+
 async function ensurePositionDepartmentChangeAllowed(
   db,
   { positionId, nextDepartmentId }
@@ -252,6 +283,7 @@ module.exports = {
   PositionLifecycleError,
   cleanPositionDeleteReason,
   deleteMistakenPosition,
+  ensureActivePositionDepartmentAllowed,
   ensurePositionDeactivationAllowed,
   ensurePositionDepartmentChangeAllowed,
   lockPositionForUpdate,

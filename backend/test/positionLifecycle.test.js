@@ -8,6 +8,7 @@ const { todayInHrmsTimezone } = require('../src/utils/dateRangeParser');
 const {
   PositionLifecycleError,
   deleteMistakenPosition,
+  ensureActivePositionDepartmentAllowed,
   ensurePositionDeactivationAllowed,
   ensurePositionDepartmentChangeAllowed,
   positionDeactivationCountsSql,
@@ -135,6 +136,53 @@ test('unchanged department does not require a dependency scan', async () => {
   });
 
   assert.equal(queryCount, 1);
+});
+
+test('active position requires an active department', async () => {
+  const db = {
+    async query(sql, params) {
+      const text = String(sql).trim();
+      assert.match(text, /FROM departments/);
+      assert.match(text, /FOR SHARE/);
+      assert.deepEqual(params, [IDS.oldDepartment]);
+      return {
+        rowCount: 1,
+        rows: [{ id: IDS.oldDepartment, name: 'Human Resources', is_active: false }],
+      };
+    },
+  };
+
+  await assert.rejects(
+    ensureActivePositionDepartmentAllowed(db, {
+      departmentId: IDS.oldDepartment,
+      positionIsActive: true,
+    }),
+    (error) => {
+      assert.ok(error instanceof PositionLifecycleError);
+      assert.equal(error.statusCode, 409);
+      assert.match(error.message, /inactive Human Resources department/i);
+      assert.equal(error.details.department_id, IDS.oldDepartment);
+      return true;
+    }
+  );
+});
+
+test('inactive position does not require an active department', async () => {
+  let queryCount = 0;
+  const db = {
+    async query() {
+      queryCount += 1;
+      throw new Error('Department lookup must be skipped');
+    },
+  };
+
+  const result = await ensureActivePositionDepartmentAllowed(db, {
+    departmentId: IDS.oldDepartment,
+    positionIsActive: false,
+  });
+
+  assert.equal(result, null);
+  assert.equal(queryCount, 0);
 });
 
 test('expired assignment history does not block position deactivation', async () => {
@@ -306,6 +354,12 @@ test('position route commits a department correction for an unused position', as
           }],
         };
       }
+      if (text.includes('FROM departments') && text.includes('FOR SHARE')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: IDS.newDepartment, name: 'Finance', is_active: true }],
+        };
+      }
       if (text.startsWith('UPDATE positions')) {
         return { rowCount: 1, rows: [updated] };
       }
@@ -423,6 +477,124 @@ test('position route rolls back blocked deactivation', async () => {
     assert.equal(res.body.official_date, todayInHrmsTimezone());
     assert.equal(calls.some((sql) => sql.startsWith('UPDATE positions')), false);
     assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(released, true);
+  } finally {
+    console.error = originalConsoleError;
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('position create route rejects an inactive department and rolls back', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM departments') && text.includes('FOR SHARE')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: IDS.oldDepartment, name: 'Human Resources', is_active: false }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = { connect: async () => client };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      user: { id: IDS.actor, role: 'admin' },
+      body: {
+        name: 'HR Analyst',
+        department_id: IDS.oldDepartment,
+        is_active: true,
+      },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.error, /inactive Human Resources department/i);
+    assert.equal(calls[0], 'BEGIN');
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(calls.some((sql) => sql.startsWith('INSERT INTO positions')), false);
+    assert.equal(released, true);
+  } finally {
+    console.error = originalConsoleError;
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('position reactivation rejects an inactive department and rolls back', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [{ ...positionRow(), is_active: false }] };
+      }
+      if (text.includes('FROM departments') && text.includes('FOR SHARE')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: IDS.oldDepartment, name: 'Human Resources', is_active: false }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = { connect: async () => client };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.put
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      params: { id: IDS.position },
+      user: { id: IDS.actor, role: 'admin' },
+      body: { is_active: true },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.error, /inactive Human Resources department/i);
+    assert.equal(calls[0], 'BEGIN');
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(calls.some((sql) => sql.startsWith('UPDATE positions')), false);
     assert.equal(released, true);
   } finally {
     console.error = originalConsoleError;

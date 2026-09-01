@@ -179,7 +179,11 @@ class _ManagePositionState extends State<ManagePosition> {
       final data = res.data ?? [];
       _departments = data.map((e) {
         final m = e as Map<String, dynamic>;
-        return {'id': m['id'], 'name': m['name'] as String? ?? ''};
+        return {
+          'id': m['id'],
+          'name': m['name'] as String? ?? '',
+          'is_active': m['is_active'] as bool? ?? true,
+        };
       }).toList();
     } on DioException catch (e) {
       debugPrint('Load departments failed: ${e.response?.data ?? e.message}');
@@ -189,6 +193,25 @@ class _ManagePositionState extends State<ManagePosition> {
       _departments = [];
     }
     _updatePositionFormState(() {});
+  }
+
+  bool _departmentIsActive(Map<String, dynamic> department) =>
+      department['is_active'] as bool? ?? true;
+
+  String _departmentLabel(Map<String, dynamic> department) {
+    final name = department['name'] as String? ?? '';
+    return _departmentIsActive(department) ? name : '$name (Inactive)';
+  }
+
+  List<Map<String, dynamic>> get _formDepartments {
+    final existingDepartmentId = _selectedPosition?.departmentId;
+    return _departments
+        .where(
+          (department) =>
+              _departmentIsActive(department) ||
+              department['id'] == existingDepartmentId,
+        )
+        .toList();
   }
 
   Future<void> _loadPositions() async {
@@ -1103,7 +1126,7 @@ class _ManagePositionState extends State<ManagePosition> {
             (d) => DropdownMenuItem(
               value: d['id'] as String?,
               child: Text(
-                d['name'] as String? ?? '',
+                _departmentLabel(d),
                 style: AppTheme.dashFieldTextStyle(context),
               ),
             ),
@@ -1180,7 +1203,7 @@ class _ManagePositionState extends State<ManagePosition> {
         DropdownButtonFormField<String?>(
           key: ValueKey(_selectedDepartmentId),
           initialValue:
-              _departments.any((d) => d['id'] == _selectedDepartmentId)
+              _formDepartments.any((d) => d['id'] == _selectedDepartmentId)
               ? _selectedDepartmentId
               : null,
           dropdownColor: AppTheme.dashPanelOf(context),
@@ -1203,11 +1226,12 @@ class _ManagePositionState extends State<ManagePosition> {
                 style: AppTheme.dashFieldTextStyle(context),
               ),
             ),
-            ..._departments.map(
+            ..._formDepartments.map(
               (d) => DropdownMenuItem<String?>(
                 value: d['id'] as String?,
+                enabled: _departmentIsActive(d),
                 child: Text(
-                  d['name'] as String? ?? '',
+                  _departmentLabel(d),
                   style: AppTheme.dashFieldTextStyle(context),
                 ),
               ),
