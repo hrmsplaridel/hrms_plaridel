@@ -2,6 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  MAX_ASSISTANT_DATE_RANGE_DAYS,
+  assertAssistantDateRange,
+  isValidIsoCalendarDate,
   parseAssistantDateRange,
 } = require('../src/utils/dateRangeParser');
 const {
@@ -9,6 +12,9 @@ const {
   dtrExportRows,
   getDtrExport,
 } = require('../src/services/dtrAssistant/dtrAssistantExportService');
+const {
+  __test: assistantServiceTest,
+} = require('../src/services/dtrAssistant/dtrAssistantService');
 
 test('DTR assistant date parser handles payroll, boundaries, and natural ranges', () => {
   const cases = [
@@ -64,6 +70,73 @@ test('DTR assistant date parser handles payroll, boundaries, and natural ranges'
     assert.equal(actual.startDate, expected.startDate, message);
     assert.equal(actual.endDate, expected.endDate, message);
   }
+});
+
+test('DTR assistant date validation accepts real dates and a complete leap year', () => {
+  assert.equal(isValidIsoCalendarDate('2024-02-29'), true);
+  assert.equal(isValidIsoCalendarDate('2026-02-29'), false);
+  assert.deepEqual(
+    assertAssistantDateRange({
+      label: '2024',
+      startDate: '2024-01-01',
+      endDate: '2024-12-31',
+    }),
+    {
+      label: '2024',
+      startDate: '2024-01-01',
+      endDate: '2024-12-31',
+    }
+  );
+  assert.equal(MAX_ASSISTANT_DATE_RANGE_DAYS, 366);
+});
+
+test('DTR assistant rejects invalid, reversed, and excessive explicit ranges', () => {
+  assert.throws(
+    () => parseAssistantDateRange('show 2026-99-99'),
+    (error) => error.statusCode === 400 && error.code === 'ASSISTANT_DATE_INVALID'
+  );
+  assert.throws(
+    () => parseAssistantDateRange('show 2026-08-31 to 2026-08-01'),
+    (error) =>
+      error.statusCode === 400 &&
+      error.code === 'ASSISTANT_DATE_RANGE_REVERSED'
+  );
+  assert.throws(
+    () => parseAssistantDateRange('show 2000-01-01 to 9999-12-31'),
+    (error) =>
+      error.statusCode === 400 &&
+      error.code === 'ASSISTANT_DATE_RANGE_TOO_LARGE' &&
+      /up to 366 days/i.test(error.message)
+  );
+});
+
+test('DTR assistant rejects invalid or excessive AI-planned ranges', () => {
+  assert.equal(
+    assistantServiceTest.normalizePlannedDateRange({
+      startDate: '2026-02-30',
+      endDate: '2026-02-30',
+    }),
+    null
+  );
+  assert.equal(
+    assistantServiceTest.normalizePlannedDateRange({
+      startDate: '2000-01-01',
+      endDate: '9999-12-31',
+    }),
+    null
+  );
+  assert.deepEqual(
+    assistantServiceTest.normalizePlannedDateRange({
+      label: 'August 2026',
+      startDate: '2026-08-01',
+      endDate: '2026-08-31',
+    }),
+    {
+      label: 'August 2026',
+      startDate: '2026-08-01',
+      endDate: '2026-08-31',
+    }
+  );
 });
 
 test('DTR exports include no-record workdays and generate owned CSV/XLS files', () => {

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   loadEmployeeAssistantContext,
+  __test: dataServiceTest,
 } = require('../src/services/dtrAssistant/dtrAssistantDataService');
 
 function resultForSql(sql) {
@@ -170,8 +171,14 @@ test('DTR assistant data loader scopes every employee query and normalizes rows'
   const calls = [];
   const userId = '55555555-5555-4555-8555-555555555555';
   const pool = {
-    query: async (sql, params = []) => {
-      calls.push({ sql, params });
+    query: async (query, params = []) => {
+      const sql = typeof query === 'string' ? query : query.text;
+      const values = typeof query === 'string' ? params : query.values || [];
+      calls.push({
+        sql,
+        params: values,
+        queryTimeout: typeof query === 'string' ? null : query.query_timeout,
+      });
       return resultForSql(sql);
     },
   };
@@ -196,7 +203,14 @@ test('DTR assistant data loader scopes every employee query and normalizes rows'
   assert.equal(globalQueries.length, 2);
   for (const call of employeeQueries) {
     assert.equal(call.params[0], userId, call.sql.slice(0, 60));
+    assert.equal(call.queryTimeout, 10000, call.sql.slice(0, 60));
   }
+  for (const call of globalQueries) {
+    assert.equal(call.queryTimeout, 10000, call.sql.slice(0, 60));
+  }
+  const calendarQuery = calls.find(({ sql }) => /FROM generate_series/i.test(sql));
+  assert.match(calendarQuery.sql, /LEAST\s*\(/i);
+  assert.equal(calendarQuery.params[3], 366);
 
   assert.equal(context.scope, 'employee_self');
   assert.equal(context.employee.id, 'employee-1');
@@ -227,6 +241,46 @@ test('DTR assistant data loader scopes every employee query and normalizes rows'
   assert.ok(context.leave_guideline_catalog.length > 0);
   assert.ok(context.dtr_policies.length > 0);
   assert.ok(context.locator_policies.length > 0);
+});
+
+test('DTR assistant data loader validates ranges before issuing queries', async () => {
+  let queryCount = 0;
+  const pool = {
+    query: async () => {
+      queryCount += 1;
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(
+    loadEmployeeAssistantContext(pool, {
+      userId: '88888888-8888-4888-8888-888888888888',
+      message: 'show my DTR',
+      dateRange: {
+        label: 'invalid',
+        startDate: '2026-02-30',
+        endDate: '2026-02-30',
+      },
+    }),
+    (error) => error.statusCode === 400 && error.code === 'ASSISTANT_DATE_INVALID'
+  );
+  assert.equal(queryCount, 0);
+});
+
+test('DTR assistant query timeout is configurable and bounded', () => {
+  assert.equal(dataServiceTest.assistantQueryTimeoutMs({}), 10000);
+  assert.equal(
+    dataServiceTest.assistantQueryTimeoutMs({ DTR_ASSISTANT_QUERY_TIMEOUT_MS: '250' }),
+    1000
+  );
+  assert.equal(
+    dataServiceTest.assistantQueryTimeoutMs({ DTR_ASSISTANT_QUERY_TIMEOUT_MS: '120000' }),
+    60000
+  );
+  assert.equal(
+    dataServiceTest.assistantQueryTimeoutMs({ DTR_ASSISTANT_QUERY_TIMEOUT_MS: '8000' }),
+    8000
+  );
 });
 
 test('DTR assistant data loader returns safe empty collections when records are absent', async () => {

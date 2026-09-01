@@ -61,6 +61,7 @@ const {
   logExternalDisclosure,
 } = require('./dtrAssistantExternalDataPolicy');
 const {
+  assertAssistantDateRange,
   addDays,
   parseAssistantDateRange,
   todayInHrmsTimezone,
@@ -1251,12 +1252,15 @@ function normalizePlannedDateRange(dateRange) {
   const startDate = String(dateRange.startDate || '').slice(0, 10);
   const endDate = String(dateRange.endDate || startDate).slice(0, 10);
   if (!isIsoDate(startDate) || !isIsoDate(endDate)) return null;
-  if (startDate > endDate) return null;
-  return {
-    label: String(dateRange.label || (startDate === endDate ? startDate : `${startDate} to ${endDate}`)).trim(),
-    startDate,
-    endDate,
-  };
+  try {
+    return assertAssistantDateRange({
+      label: dateRange.label,
+      startDate,
+      endDate,
+    });
+  } catch (_) {
+    return null;
+  }
 }
 
 function parseToolPlanResponse(content) {
@@ -3011,6 +3015,7 @@ module.exports = {
     enrichMessageWithMemory,
     isAmbiguousFilingQuestion,
     isAmbiguousStatusQuestion,
+    normalizePlannedDateRange,
     resolveIntentFromMemory,
     selectAssistantResponseDepth,
     topicForIntent,

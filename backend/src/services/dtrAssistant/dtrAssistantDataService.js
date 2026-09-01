@@ -1,4 +1,8 @@
-const { parseAssistantDateRange } = require('../../utils/dateRangeParser');
+const {
+  MAX_ASSISTANT_DATE_RANGE_DAYS,
+  assertAssistantDateRange,
+  parseAssistantDateRange,
+} = require('../../utils/dateRangeParser');
 const {
   buildDtrPolicyKnowledge,
   buildLocatorPolicyKnowledge,
@@ -30,6 +34,23 @@ function compactText(value, max = 360) {
   return `${text.slice(0, max - 1)}...`;
 }
 
+function assistantQueryTimeoutMs(env = process.env) {
+  const parsed = Number.parseInt(
+    String(env.DTR_ASSISTANT_QUERY_TIMEOUT_MS || '10000'),
+    10
+  );
+  if (!Number.isFinite(parsed)) return 10000;
+  return Math.max(1000, Math.min(parsed, 60000));
+}
+
+function runAssistantQuery(pool, text, values = []) {
+  return pool.query({
+    text,
+    values,
+    query_timeout: assistantQueryTimeoutMs(),
+  });
+}
+
 function parseJsonArray(value) {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -45,7 +66,8 @@ function parseJsonArray(value) {
 }
 
 async function loadEmployeeProfile(pool, userId) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT id, full_name, role, sex, civil_status, date_of_birth::text AS date_of_birth
      FROM users
      WHERE id = $1::uuid
@@ -66,7 +88,8 @@ async function loadEmployeeProfile(pool, userId) {
 }
 
 async function loadDtrRecords(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `WITH active_leave_coverage AS (
        SELECT c.*
        FROM dtr_leave_coverage c
@@ -128,7 +151,8 @@ async function loadDtrRecords(pool, userId, dateRange) {
 }
 
 async function loadDtrCalendarDays(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT day.day::date::text AS attendance_date,
             assignment.id AS assignment_id,
             shift.id AS shift_id,
@@ -143,7 +167,14 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
             holiday.name AS holiday_name,
             holiday.holiday_type,
             holiday.coverage AS holiday_coverage
-     FROM generate_series($2::date, $3::date, interval '1 day') AS day(day)
+     FROM generate_series(
+       $2::date,
+       LEAST(
+         $3::date,
+         $2::date + (($4::int - 1) * interval '1 day')
+       ),
+       interval '1 day'
+     ) AS day(day)
      LEFT JOIN LATERAL (
        SELECT a.*
        FROM assignments a
@@ -166,7 +197,12 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
        LIMIT 1
      ) holiday ON true
      ORDER BY day.day ASC`,
-    [userId, dateRange.startDate, dateRange.endDate]
+    [
+      userId,
+      dateRange.startDate,
+      dateRange.endDate,
+      MAX_ASSISTANT_DATE_RANGE_DAYS,
+    ]
   );
 
   return result.rows.map((row) => ({
@@ -188,7 +224,8 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
 }
 
 async function loadLeaveBalances(pool, userId) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT leave_type,
             earned_days,
             used_days,
@@ -222,7 +259,8 @@ async function loadLeaveBalances(pool, userId) {
 }
 
 async function loadRecentLeaveRequests(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT lr.id,
             lr.start_date::text AS start_date,
             lr.end_date::text AS end_date,
@@ -348,7 +386,8 @@ async function loadAnnualLeaveUsage(pool, userId, dateRange) {
   const year = parseInt(String(dateRange?.startDate || '').slice(0, 4), 10);
   if (!Number.isInteger(year)) return [];
   const trackedTypes = ['specialPrivilegeLeave', 'soloParentLeave', 'tenDayVawcLeave'];
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT lt.name AS leave_type_key,
             COALESCE(SUM(COALESCE(lr.number_of_days, lr.total_days, 0)), 0)::float8 AS days,
             COUNT(*)::int AS request_count
@@ -394,7 +433,8 @@ async function loadAnnualLeaveUsage(pool, userId, dateRange) {
 }
 
 async function loadLeaveTypes(pool) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT id,
             name,
             display_name,
@@ -442,7 +482,8 @@ async function loadLeaveTypes(pool) {
 }
 
 async function loadRecentLocatorSlips(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT ls.id,
             ls.slip_date::text AS slip_date,
             ls.request_type,
@@ -534,7 +575,8 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
 }
 
 async function loadLocatorTypes(pool) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT code,
             label,
             short_label,
@@ -568,7 +610,9 @@ async function loadLocatorTypes(pool) {
 }
 
 async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: dateRangeOverride }) {
-  const dateRange = dateRangeOverride || parseAssistantDateRange(message);
+  const dateRange = assertAssistantDateRange(
+    dateRangeOverride || parseAssistantDateRange(message)
+  );
   const [
     employee,
     dtrRecords,
@@ -611,4 +655,9 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
   };
 }
 
-module.exports = { loadEmployeeAssistantContext };
+module.exports = {
+  loadEmployeeAssistantContext,
+  __test: {
+    assistantQueryTimeoutMs,
+  },
+};
