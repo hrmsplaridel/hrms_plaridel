@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/positions/data/position_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/management/positions/widgets/position_lifecycle_button.dart';
 
 /// Position record for display/CRUD.
@@ -57,6 +58,7 @@ class _ManagePositionState extends State<ManagePosition> {
   final _searchController = TextEditingController();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _positionRequestGuard = PositionRequestGuard();
 
   String? _departmentFilterId;
   String _statusFilter = 'Active';
@@ -165,6 +167,7 @@ class _ManagePositionState extends State<ManagePosition> {
 
   @override
   void dispose() {
+    _positionRequestGuard.invalidate();
     _searchController.dispose();
     _titleController.dispose();
     _descriptionController.dispose();
@@ -215,22 +218,33 @@ class _ManagePositionState extends State<ManagePosition> {
         .toList();
   }
 
+  Map<String, dynamic> _positionQuery() => <String, dynamic>{
+    'status': _statusFilter,
+    'department_id': _departmentFilterId,
+  };
+
   Future<void> _loadPositions() async {
+    if (!mounted) return;
+    final requestedQuery = _positionQuery();
+    final request = _positionRequestGuard.begin(requestedQuery);
     setState(() {
       _loading = true;
       _page = 0;
     });
     try {
-      final params = <String, String>{'status': _statusFilter};
-      if (_departmentFilterId != null) {
-        params['department_id'] = _departmentFilterId!;
+      final params = <String, String>{
+        'status': requestedQuery['status'] as String,
+      };
+      final requestedDepartmentId = requestedQuery['department_id'] as String?;
+      if (requestedDepartmentId != null) {
+        params['department_id'] = requestedDepartmentId;
       }
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/positions',
         queryParameters: params,
       );
       final data = res.data ?? [];
-      _positions = (data).map((e) {
+      final positions = (data).map((e) {
         final m = e as Map<String, dynamic>;
         final dept = m['departments'];
         final deptName =
@@ -268,11 +282,30 @@ class _ManagePositionState extends State<ManagePosition> {
               : (posNum != null ? int.tryParse(posNum.toString()) : null),
         );
       }).toList();
+      if (!mounted ||
+          !_positionRequestGuard.accepts(request, _positionQuery())) {
+        return;
+      }
+      setState(() => _positions = positions);
     } on DioException catch (e) {
+      if (!mounted ||
+          !_positionRequestGuard.accepts(request, _positionQuery())) {
+        return;
+      }
       debugPrint('Load positions failed: ${e.response?.data ?? e.message}');
-      _positions = [];
+      setState(() => _positions = []);
+    } catch (e) {
+      if (!mounted ||
+          !_positionRequestGuard.accepts(request, _positionQuery())) {
+        return;
+      }
+      debugPrint('Load positions failed: $e');
+      setState(() => _positions = []);
+    } finally {
+      if (mounted && _positionRequestGuard.accepts(request, _positionQuery())) {
+        setState(() => _loading = false);
+      }
     }
-    if (mounted) setState(() => _loading = false);
   }
 
   void _selectPosition(_PositionRecord p) {
