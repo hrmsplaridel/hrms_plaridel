@@ -25,6 +25,10 @@ const {
   saveDepartmentHeadPeriod,
 } = require('../services/positionDepartmentHeadPeriods');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const {
+  PositionValidationError,
+  normalizePositionWrite,
+} = require('../services/positionValidation');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -136,11 +140,8 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       is_department_head = false,
       department_head_effective_from,
       department_head_effective_to,
-      is_active = true,
-    } = req.body;
-    if (!name || !name.trim()) {
-      return res.status(400).json({ error: 'Name is required' });
-    }
+      is_active,
+    } = normalizePositionWrite(req.body, { creating: true });
     if (is_department_head === true && !department_id) {
       return res.status(400).json({
         error: 'An official Department Head position must belong to a department',
@@ -151,7 +152,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     await client.query('BEGIN');
     await ensureActivePositionDepartmentAllowed(client, {
       departmentId: department_id,
-      positionIsActive: !!is_active,
+      positionIsActive: is_active,
     });
     const result = await client.query(
       `INSERT INTO positions (
@@ -160,10 +161,10 @@ router.post('/', protect, requireAdmin, async (req, res) => {
        RETURNING id, position_number, name, description, department_id,
                  is_department_head, is_active`,
       [
-        name.trim(),
-        description?.trim() || null,
-        department_id || null,
-        !!is_active,
+        name,
+        description,
+        department_id,
+        is_active,
       ]
     );
     const r = result.rows[0];
@@ -204,7 +205,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         console.error('[positions POST rollback]', rollbackError);
       }
     }
-    console.error('[positions POST]', err);
+    if (err instanceof PositionValidationError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     if (err instanceof PositionLifecycleError) {
       return res.status(err.statusCode).json({
         error: err.message,
@@ -216,7 +219,11 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         error: 'This department already has an official Department Head during the selected effective period',
       });
     }
-    if (err.code === '23505' && err.constraint === 'uq_positions_name_department') {
+    if (
+      err.code === '23505' &&
+      ['uq_positions_name_department', 'uq_positions_name_department_ci']
+        .includes(err.constraint)
+    ) {
       return res.status(409).json({
         error: 'A position with this name already exists in the selected department',
       });
@@ -226,6 +233,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         error: 'An official Department Head position must belong to a department',
       });
     }
+    console.error('[positions POST]', err);
     res.status(500).json({ error: 'Failed to create position' });
   } finally {
     client?.release();
@@ -246,7 +254,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       department_head_period_id,
       department_head_effective_from,
       department_head_effective_to,
-    } = req.body;
+    } = normalizePositionWrite(req.body);
 
     if (is_department_head === true && department_id === null) {
       return res.status(400).json({
@@ -258,10 +266,10 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const values = [];
     let i = 1;
 
-    if (name !== undefined) { updates.push(`name = $${i++}`); values.push(name.trim()); }
-    if (description !== undefined) { updates.push(`description = $${i++}`); values.push(description?.trim() || null); }
-    if (department_id !== undefined) { updates.push(`department_id = $${i++}`); values.push(department_id || null); }
-    if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(!!is_active); }
+    if (name !== undefined) { updates.push(`name = $${i++}`); values.push(name); }
+    if (description !== undefined) { updates.push(`description = $${i++}`); values.push(description); }
+    if (department_id !== undefined) { updates.push(`department_id = $${i++}`); values.push(department_id); }
+    if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(is_active); }
 
     if (updates.length === 0 && is_department_head === undefined) {
       return res.status(400).json({ error: 'No fields to update' });
@@ -294,7 +302,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       departmentId:
         department_id === undefined ? existing.department_id : department_id,
       positionIsActive:
-        is_active === undefined ? existing.is_active !== false : !!is_active,
+        is_active === undefined ? existing.is_active !== false : is_active,
     });
     const beforePeriod = await getManagedDepartmentHeadPeriod(client, id);
     const before = positionAuditSnapshot(existing, beforePeriod);
@@ -357,7 +365,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         console.error('[positions PUT rollback]', rollbackError);
       }
     }
-    console.error('[positions PUT]', err);
+    if (err instanceof PositionValidationError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     if (err instanceof PositionLifecycleError) {
       return res.status(err.statusCode).json({
         error: err.message,
@@ -369,7 +379,11 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         error: 'This department already has an official Department Head during the selected effective period',
       });
     }
-    if (err.code === '23505' && err.constraint === 'uq_positions_name_department') {
+    if (
+      err.code === '23505' &&
+      ['uq_positions_name_department', 'uq_positions_name_department_ci']
+        .includes(err.constraint)
+    ) {
       return res.status(409).json({
         error: 'A position with this name already exists in the selected department',
       });
@@ -379,6 +393,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         error: 'An official Department Head position must belong to a department',
       });
     }
+    console.error('[positions PUT]', err);
     res.status(500).json({ error: 'Failed to update position' });
   } finally {
     client?.release();

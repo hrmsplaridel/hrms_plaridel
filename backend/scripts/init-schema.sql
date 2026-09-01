@@ -170,10 +170,16 @@ CREATE TABLE IF NOT EXISTS positions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  CONSTRAINT uq_positions_name_department UNIQUE (name, department_id),
+  CONSTRAINT chk_positions_name_not_blank CHECK (BTRIM(name) <> ''),
   CONSTRAINT chk_position_department_head_department
     CHECK (is_department_head = false OR department_id IS NOT NULL)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_positions_name_department_ci
+  ON positions (
+    LOWER(BTRIM(name)),
+    (COALESCE(department_id, '00000000-0000-0000-0000-000000000000'::uuid))
+  );
 
 -- Effective-dated official Department Head designations. Position rows retain
 -- is_department_head as a compatibility indicator; authority is resolved here.
