@@ -18,6 +18,7 @@ class _PositionRecord {
     this.departmentHeadEffectiveFrom,
     this.departmentHeadEffectiveTo,
     this.departmentHeadPeriods = const [],
+    this.deactivationBlockers = const [],
     this.positionNumber,
   });
   final String id;
@@ -32,6 +33,7 @@ class _PositionRecord {
   final DateTime? departmentHeadEffectiveFrom;
   final DateTime? departmentHeadEffectiveTo;
   final List<Map<String, dynamic>> departmentHeadPeriods;
+  final List<Map<String, dynamic>> deactivationBlockers;
   final int? positionNumber;
 
   /// Display as POS-001, POS-002, etc., or "—" if null.
@@ -230,6 +232,11 @@ class _ManagePositionState extends State<ManagePosition> {
                   .whereType<Map>()
                   .map((period) => Map<String, dynamic>.from(period))
                   .toList(),
+          deactivationBlockers:
+              (m['deactivation_blockers'] as List<dynamic>? ?? const [])
+                  .whereType<Map>()
+                  .map((blocker) => Map<String, dynamic>.from(blocker))
+                  .toList(),
           isActive: m['is_active'] as bool? ?? true,
           canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
           positionNumber: posNum is int
@@ -424,6 +431,33 @@ class _ManagePositionState extends State<ManagePosition> {
     if (p == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a position to deactivate.')),
+      );
+      return false;
+    }
+    if (p.deactivationBlockers.isNotEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Position is still in use'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: p.deactivationBlockers.map((blocker) {
+              final count = blocker['count'] ?? 0;
+              final label = blocker['label']?.toString() ?? 'active records';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text('$count $label'),
+              );
+            }).toList(),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
       );
       return false;
     }
