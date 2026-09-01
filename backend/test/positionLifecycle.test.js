@@ -3,11 +3,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { withMockedModule } = require('./helpers/moduleMocks');
+const { todayInHrmsTimezone } = require('../src/utils/dateRangeParser');
 
 const {
   PositionLifecycleError,
   deleteMistakenPosition,
+  ensurePositionDeactivationAllowed,
   ensurePositionDepartmentChangeAllowed,
+  positionDeactivationCountsSql,
   positionDependencyCountsSql,
 } = require('../src/services/positionLifecycle');
 
@@ -132,6 +135,78 @@ test('unchanged department does not require a dependency scan', async () => {
   });
 
   assert.equal(queryCount, 1);
+});
+
+test('expired assignment history does not block position deactivation', async () => {
+  const calls = [];
+  const db = {
+    async query(sql, params) {
+      const text = String(sql).trim();
+      calls.push({ text, params });
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.startsWith('SELECT (') && text.includes('deactivation_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            deactivation_primary_assignments: 0,
+            deactivation_additional_positions: 0,
+            deactivation_department_head_periods: 0,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  const result = await ensurePositionDeactivationAllowed(db, {
+    positionId: IDS.position,
+    effectiveDate: '2026-09-01',
+  });
+
+  assert.equal(result.id, IDS.position);
+  assert.deepEqual(calls.at(-1).params, [IDS.position, '2026-09-01']);
+});
+
+test('current and future position periods block deactivation', async () => {
+  const db = {
+    async query(sql) {
+      const text = String(sql).trim();
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.startsWith('SELECT (') && text.includes('deactivation_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            deactivation_primary_assignments: 2,
+            deactivation_additional_positions: 1,
+            deactivation_department_head_periods: 1,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  await assert.rejects(
+    ensurePositionDeactivationAllowed(db, {
+      positionId: IDS.position,
+      effectiveDate: '2026-09-01',
+    }),
+    (error) => {
+      assert.ok(error instanceof PositionLifecycleError);
+      assert.equal(error.statusCode, 409);
+      assert.equal(error.details.official_date, '2026-09-01');
+      assert.deepEqual(error.details.dependencies, {
+        primary_assignments: 2,
+        additional_positions: 1,
+        department_head_periods: 1,
+      });
+      return true;
+    }
+  );
 });
 
 test('position route rolls back and returns 409 when assignment history blocks movement', async () => {
@@ -283,6 +358,77 @@ test('position dependency projection covers primary and additional assignments',
   const sql = positionDependencyCountsSql('p');
   assert.match(sql, /FROM assignments WHERE position_id = p\.id/);
   assert.match(sql, /FROM employee_other_positions WHERE position_id = p\.id/);
+});
+
+test('position deactivation projection ignores expired history', () => {
+  const sql = positionDeactivationCountsSql('p.id', '$1');
+  assert.match(sql, /FROM assignments a/);
+  assert.match(sql, /FROM employee_other_positions other_position/);
+  assert.match(sql, /FROM position_department_head_periods head_period/);
+  assert.equal((sql.match(/effective_to >= \$1::date/g) || []).length, 3);
+});
+
+test('position route rolls back blocked deactivation', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.startsWith('SELECT (') && text.includes('deactivation_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            deactivation_primary_assignments: 1,
+            deactivation_additional_positions: 0,
+            deactivation_department_head_periods: 0,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = { connect: async () => client };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.put
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      params: { id: IDS.position },
+      user: { id: IDS.actor, role: 'admin' },
+      body: { is_active: false },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.error, /cannot be deactivated/i);
+    assert.equal(res.body.official_date, todayInHrmsTimezone());
+    assert.equal(calls.some((sql) => sql.startsWith('UPDATE positions')), false);
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(released, true);
+  } finally {
+    console.error = originalConsoleError;
+    delete require.cache[routePath];
+    restoreDb();
+  }
 });
 
 test('unused mistaken position deletion preserves an audit snapshot', async () => {

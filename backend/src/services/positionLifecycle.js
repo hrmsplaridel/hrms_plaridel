@@ -24,6 +24,12 @@ const POSITION_DEPENDENCIES = Object.freeze([
   },
 ]);
 
+const POSITION_DEACTIVATION_DEPENDENCIES = Object.freeze([
+  { key: 'primary_assignments', label: 'current or future primary assignments' },
+  { key: 'additional_positions', label: 'current or future additional positions' },
+  { key: 'department_head_periods', label: 'current or future Department Head designations' },
+]);
+
 function nullableId(value) {
   if (value === null || value === undefined || value === '') return null;
   return String(value);
@@ -48,6 +54,36 @@ function positionDependencyCountsSql(positionAlias = 'p') {
   ).join(',\n       ');
 }
 
+function positionDeactivationCountsSql(positionIdExpression = 'p.id', todayPlaceholder = '$1') {
+  return `(
+            SELECT COUNT(*)::int
+            FROM assignments a
+            WHERE a.position_id = ${positionIdExpression}
+              AND a.is_active = true
+              AND (a.effective_to IS NULL OR a.effective_to >= ${todayPlaceholder}::date)
+          ) AS deactivation_primary_assignments,
+          (
+            SELECT COUNT(*)::int
+            FROM employee_other_positions other_position
+            WHERE other_position.position_id = ${positionIdExpression}
+              AND other_position.is_active = true
+              AND (
+                other_position.effective_to IS NULL
+                OR other_position.effective_to >= ${todayPlaceholder}::date
+              )
+          ) AS deactivation_additional_positions,
+          (
+            SELECT COUNT(*)::int
+            FROM position_department_head_periods head_period
+            WHERE head_period.position_id = ${positionIdExpression}
+              AND head_period.is_active = true
+              AND (
+                head_period.effective_to IS NULL
+                OR head_period.effective_to >= ${todayPlaceholder}::date
+              )
+          ) AS deactivation_department_head_periods`;
+}
+
 function positionDependencyCountsFromRow(row = {}) {
   return Object.fromEntries(
     POSITION_DEPENDENCIES.map(({ key }) => [
@@ -59,6 +95,21 @@ function positionDependencyCountsFromRow(row = {}) {
 
 function positionDependencyBlockers(counts = {}) {
   return POSITION_DEPENDENCIES
+    .map(({ key, label }) => ({ key, label, count: Number(counts[key] || 0) }))
+    .filter((item) => item.count > 0);
+}
+
+function positionDeactivationCountsFromRow(row = {}) {
+  return Object.fromEntries(
+    POSITION_DEACTIVATION_DEPENDENCIES.map(({ key }) => [
+      key,
+      Number(row[`deactivation_${key}`] || 0),
+    ])
+  );
+}
+
+function positionDeactivationBlockers(counts = {}) {
+  return POSITION_DEACTIVATION_DEPENDENCIES
     .map(({ key, label }) => ({ key, label, count: Number(counts[key] || 0) }))
     .filter((item) => item.count > 0);
 }
@@ -106,6 +157,33 @@ async function positionAssignmentDependencyCounts(db, positionId) {
     [positionId]
   );
   return positionDependencyCountsFromRow(result.rows[0]);
+}
+
+async function ensurePositionDeactivationAllowed(
+  db,
+  { positionId, effectiveDate, lockedPosition = null }
+) {
+  const position = lockedPosition || await lockPositionForUpdate(db, positionId);
+  if (!position) {
+    throw new PositionLifecycleError('Position not found', 404);
+  }
+  const result = await db.query(
+    `SELECT ${positionDeactivationCountsSql('$1::uuid', '$2')}`,
+    [positionId, effectiveDate]
+  );
+  const dependencies = positionDeactivationCountsFromRow(result.rows[0]);
+  const blockers = positionDeactivationBlockers(dependencies);
+  if (blockers.length > 0) {
+    const details = blockers
+      .map((item) => `${item.count} ${item.label}`)
+      .join(', ');
+    throw new PositionLifecycleError(
+      `Position cannot be deactivated because it has ${details}. End or transfer these periods first.`,
+      409,
+      { blockers, dependencies, official_date: effectiveDate }
+    );
+  }
+  return position;
 }
 
 async function ensurePositionDepartmentChangeAllowed(
@@ -169,15 +247,20 @@ async function deleteMistakenPosition(
 }
 
 module.exports = {
+  POSITION_DEACTIVATION_DEPENDENCIES,
   POSITION_DEPENDENCIES,
   PositionLifecycleError,
   cleanPositionDeleteReason,
   deleteMistakenPosition,
+  ensurePositionDeactivationAllowed,
   ensurePositionDepartmentChangeAllowed,
   lockPositionForUpdate,
   positionAssignmentDependencyCounts,
   positionDependencyBlockers,
   positionDependencyCountsFromRow,
   positionDependencyCountsSql,
+  positionDeactivationBlockers,
+  positionDeactivationCountsFromRow,
+  positionDeactivationCountsSql,
   writePositionAudit,
 };

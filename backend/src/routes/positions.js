@@ -5,11 +5,15 @@ const { requireAdmin } = require('../middleware/rbac');
 const {
   PositionLifecycleError,
   deleteMistakenPosition,
+  ensurePositionDeactivationAllowed,
   ensurePositionDepartmentChangeAllowed,
   lockPositionForUpdate,
   positionDependencyBlockers,
   positionDependencyCountsFromRow,
   positionDependencyCountsSql,
+  positionDeactivationBlockers,
+  positionDeactivationCountsFromRow,
+  positionDeactivationCountsSql,
 } = require('../services/positionLifecycle');
 const {
   endDepartmentHeadPeriod,
@@ -50,7 +54,8 @@ router.get('/', protect, async (req, res) => {
               managed_period.effective_to::text AS department_head_effective_to,
               COALESCE(period_history.periods, '[]'::jsonb) AS department_head_periods,
               d.name AS department_name,
-              ${positionDependencyCountsSql('p')}
+              ${positionDependencyCountsSql('p')},
+              ${positionDeactivationCountsSql('p.id', '$1')}
        FROM positions p
        LEFT JOIN departments d ON p.department_id = d.id
        LEFT JOIN LATERAL (
@@ -83,6 +88,10 @@ router.get('/', protect, async (req, res) => {
     const rows = result.rows.map((r) => {
       const dependencyCounts = positionDependencyCountsFromRow(r);
       const blockers = positionDependencyBlockers(dependencyCounts);
+      const deactivationCounts = positionDeactivationCountsFromRow(r);
+      const deactivationBlockers = positionDeactivationBlockers(
+        deactivationCounts
+      );
       return {
         id: r.id,
         position_number: r.position_number,
@@ -100,6 +109,8 @@ router.get('/', protect, async (req, res) => {
         is_active: r.is_active ?? true,
         can_permanently_delete: blockers.length === 0,
         delete_blockers: blockers,
+        can_deactivate: deactivationBlockers.length === 0,
+        deactivation_blockers: deactivationBlockers,
         departments: r.department_name ? { name: r.department_name } : null,
       };
     });
@@ -251,6 +262,14 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       if (!existing) {
         throw new PositionLifecycleError('Position not found', 404);
       }
+    }
+
+    if (is_active === false && existing.is_active !== false) {
+      await ensurePositionDeactivationAllowed(client, {
+        positionId: id,
+        effectiveDate: todayInHrmsTimezone(),
+        lockedPosition: existing,
+      });
     }
 
     let result = { rows: [existing] };
