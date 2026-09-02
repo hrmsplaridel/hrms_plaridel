@@ -152,10 +152,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       // Local reset still helps even if the backend reset fails.
     }
     if (userId != null && userId.isNotEmpty) {
-      await DtrAssistantSessionStorage.clearMessages(
-        userId,
-        previousConversationId,
-      );
+      await DtrAssistantSessionStorage.clearAllForUser(userId);
       final nextConversationId =
           DtrAssistantSessionStorage.createConversationId();
       await DtrAssistantSessionStorage.saveConversationId(
@@ -177,6 +174,34 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       _resettingChat = false;
     });
     _scrollToBottom();
+  }
+
+  Future<void> _confirmClearChatHistory() async {
+    if (_sending || _resettingChat) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear chat history?'),
+        content: const Text(
+          'This permanently removes your saved HRMS Assistant conversation '
+          'from this device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep history'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.delete_outline_rounded),
+            label: const Text('Clear history'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _startNewChat();
+    }
   }
 
   @override
@@ -753,9 +778,11 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
               icon: const Icon(Icons.picture_in_picture_alt_rounded),
             ),
           IconButton(
-            tooltip: 'New chat',
-            onPressed: (_sending || _resettingChat) ? null : _startNewChat,
-            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Clear chat history',
+            onPressed: (_sending || _resettingChat)
+                ? null
+                : _confirmClearChatHistory,
+            icon: const Icon(Icons.delete_outline_rounded),
           ),
           if (floating && widget.onExpand != null)
             IconButton(
