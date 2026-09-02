@@ -5,6 +5,9 @@ const {
   loadEmployeeAssistantContext,
   __test: dataServiceTest,
 } = require('../src/services/dtrAssistant/dtrAssistantDataService');
+const {
+  dtrExportRows,
+} = require('../src/services/dtrAssistant/dtrAssistantExportService');
 
 function resultForSql(sql) {
   if (/FROM users\s+WHERE id/i.test(sql)) {
@@ -265,6 +268,78 @@ test('DTR assistant data loader validates ranges before issuing queries', async 
     (error) => error.statusCode === 400 && error.code === 'ASSISTANT_DATE_INVALID'
   );
   assert.equal(queryCount, 0);
+});
+
+test('DTR assistant loads and exports more than 70 saved rows without truncation', async () => {
+  const dates = Array.from({ length: 80 }, (_, index) =>
+    new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10)
+  );
+  const calls = [];
+  const pool = {
+    query: async (query) => {
+      const sql = typeof query === 'string' ? query : query.text;
+      calls.push(sql);
+
+      if (/FROM dtr_daily_summary/i.test(sql)) {
+        return {
+          rows: [...dates].reverse().map((attendanceDate, index) => ({
+            id: `dtr-${index + 1}`,
+            attendance_date: attendanceDate,
+            time_in: `${attendanceDate}T08:00:00+08:00`,
+            time_out: `${attendanceDate}T17:00:00+08:00`,
+            total_hours: 8,
+            late_minutes: 0,
+            undertime_minutes: 0,
+            overtime_minutes: 0,
+            status: 'present',
+            source: 'biometric',
+          })),
+        };
+      }
+
+      if (/FROM generate_series/i.test(sql)) {
+        return {
+          rows: dates.map((attendanceDate) => ({
+            attendance_date: attendanceDate,
+            assignment_id: 'assignment-1',
+            shift_id: 'shift-1',
+            shift_name: 'Morning Shift',
+            start_time: '08:00:00',
+            end_time: '17:00:00',
+            punch_mode: 'four_punch',
+            working_days: [1, 2, 3, 4, 5],
+          })),
+        };
+      }
+
+      return { rows: [] };
+    },
+  };
+
+  const context = await loadEmployeeAssistantContext(pool, {
+    userId: '99999999-9999-4999-8999-999999999999',
+    message: 'export my DTR from January 1 to March 21, 2026',
+    dateRange: {
+      label: 'January 1 to March 21, 2026',
+      startDate: '2026-01-01',
+      endDate: '2026-03-21',
+    },
+  });
+
+  const savedDtrSql = calls.find((sql) => /FROM dtr_daily_summary/i.test(sql));
+  assert.doesNotMatch(savedDtrSql, /LIMIT\s+70/i);
+  assert.equal(context.dtr_records.length, 80);
+  assert.equal(context.data_completeness.dtr_records.complete, true);
+  assert.equal(context.data_completeness.dtr_records.capped, false);
+  assert.equal(context.data_completeness.dtr_records.returned_count, 80);
+  assert.equal(context.data_completeness.dtr_calendar_days.returned_count, 80);
+  assert.equal(context.data_completeness.dtr_export.complete, true);
+
+  const exported = dtrExportRows(context);
+  const statusIndex = exported.header.indexOf('Status');
+  assert.equal(exported.rows.length, 80);
+  assert.equal(exported.rows[0][0], '2026-01-01');
+  assert.equal(exported.rows[0][statusIndex], 'present');
 });
 
 test('DTR assistant query timeout is configurable and bounded', () => {

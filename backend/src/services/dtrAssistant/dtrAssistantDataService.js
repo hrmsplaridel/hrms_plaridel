@@ -124,8 +124,7 @@ async function loadDtrRecords(pool, userId, dateRange) {
      WHERE COALESCE(d.employee_id, coverage.employee_id) = $1::uuid
        AND COALESCE(d.attendance_date, coverage.attendance_date)
          BETWEEN $2::date AND $3::date
-     ORDER BY COALESCE(d.attendance_date, coverage.attendance_date) DESC
-     LIMIT 70`,
+     ORDER BY COALESCE(d.attendance_date, coverage.attendance_date) DESC`,
     [userId, dateRange.startDate, dateRange.endDate]
   );
 
@@ -639,6 +638,21 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
   return {
     scope: 'employee_self',
     date_range: dateRange,
+    data_completeness: {
+      dtr_records: {
+        complete: true,
+        capped: false,
+        returned_count: dtrRecords.length,
+      },
+      dtr_calendar_days: {
+        complete: true,
+        capped: false,
+        returned_count: dtrCalendarDays.length,
+      },
+      dtr_export: {
+        complete: true,
+      },
+    },
     employee,
     dtr_records: dtrRecords,
     dtr_calendar_days: dtrCalendarDays,

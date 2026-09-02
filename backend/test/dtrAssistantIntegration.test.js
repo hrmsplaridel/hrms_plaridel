@@ -20,6 +20,11 @@ function assistantContext(dateRange, userId) {
   return {
     scope: 'employee_self',
     date_range: dateRange,
+    data_completeness: {
+      dtr_records: { complete: true, capped: false, returned_count: 2 },
+      dtr_calendar_days: { complete: true, capped: false, returned_count: 4 },
+      dtr_export: { complete: true },
+    },
     employee: {
       id: userId,
       full_name: 'Test Employee',

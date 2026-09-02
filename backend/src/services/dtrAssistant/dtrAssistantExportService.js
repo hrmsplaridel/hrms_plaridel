@@ -18,7 +18,24 @@ function xmlCell(value) {
     .replace(/'/g, '&apos;');
 }
 
+function assertCompleteDtrExportContext(context) {
+  const completeness = context?.data_completeness;
+  const recordsComplete = completeness?.dtr_records?.complete === true;
+  const calendarComplete = completeness?.dtr_calendar_days?.complete === true;
+  const exportComplete = completeness?.dtr_export?.complete === true;
+
+  if (recordsComplete && calendarComplete && exportComplete) return;
+
+  const error = new Error(
+    'The selected DTR data is incomplete. Refresh the records before generating an export.'
+  );
+  error.statusCode = 409;
+  error.code = 'DTR_ASSISTANT_EXPORT_INCOMPLETE';
+  throw error;
+}
+
 function dtrExportRows(context) {
+  assertCompleteDtrExportContext(context);
   const recordsByDate = new Map(
     (context.dtr_records || []).map((record) => [
       String(record.attendance_date).slice(0, 10),
@@ -167,4 +184,5 @@ module.exports = {
   createDtrExportAttachment,
   getDtrExport,
   dtrExportRows,
+  assertCompleteDtrExportContext,
 };

@@ -1807,6 +1807,11 @@ test('DTR assistant regression: DTR export rows include no-record scheduled days
       startDate: '2026-06-01',
       endDate: '2026-06-02',
     },
+    data_completeness: {
+      dtr_records: { complete: true, capped: false, returned_count: 1 },
+      dtr_calendar_days: { complete: true, capped: false, returned_count: 2 },
+      dtr_export: { complete: true },
+    },
     dtr_records: [
       {
         attendance_date: '2026-06-01',

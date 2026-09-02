@@ -146,6 +146,11 @@ test('DTR exports include no-record workdays and generate owned CSV/XLS files', 
       startDate: '2026-06-22',
       endDate: '2026-06-24',
     },
+    data_completeness: {
+      dtr_records: { complete: true, capped: false, returned_count: 1 },
+      dtr_calendar_days: { complete: true, capped: false, returned_count: 3 },
+      dtr_export: { complete: true },
+    },
     dtr_records: [
       {
         attendance_date: '2026-06-22',
@@ -206,4 +211,27 @@ test('DTR exports include no-record workdays and generate owned CSV/XLS files', 
   assert.match(xls.filename, /\.xls$/);
   assert.match(xls.buffer.toString('utf8'), /<Workbook/);
   assert.match(xls.buffer.toString('utf8'), /2026-06-23/);
+});
+
+test('DTR exports reject missing or incomplete source data', () => {
+  assert.throws(
+    () => dtrExportRows({ dtr_records: [], dtr_calendar_days: [] }),
+    (error) =>
+      error.statusCode === 409 &&
+      error.code === 'DTR_ASSISTANT_EXPORT_INCOMPLETE'
+  );
+
+  assert.throws(
+    () =>
+      dtrExportRows({
+        data_completeness: {
+          dtr_records: { complete: false, capped: true, returned_count: 70 },
+          dtr_calendar_days: { complete: true, capped: false, returned_count: 365 },
+          dtr_export: { complete: false },
+        },
+        dtr_records: [],
+        dtr_calendar_days: [],
+      }),
+    (error) => error.code === 'DTR_ASSISTANT_EXPORT_INCOMPLETE'
+  );
 });
