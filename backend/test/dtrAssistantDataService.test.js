@@ -270,6 +270,29 @@ test('DTR assistant data loader validates ranges before issuing queries', async 
   assert.equal(queryCount, 0);
 });
 
+test('DTR assistant data loader rejects an aborted request before querying', async () => {
+  let queryCount = 0;
+  const pool = {
+    query: async () => {
+      queryCount += 1;
+      return { rows: [] };
+    },
+  };
+  const controller = new AbortController();
+  controller.abort();
+
+  await assert.rejects(
+    loadEmployeeAssistantContext(pool, {
+      userId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      message: 'show my DTR today',
+      signal: controller.signal,
+    }),
+    (error) =>
+      error.statusCode === 499 && error.code === 'ASSISTANT_REQUEST_ABORTED'
+  );
+  assert.equal(queryCount, 0);
+});
+
 test('DTR assistant loads and exports more than 70 saved rows without truncation', async () => {
   const dates = Array.from({ length: 80 }, (_, index) =>
     new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10)

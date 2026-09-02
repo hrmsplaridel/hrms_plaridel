@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_leave_pr
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_privacy_consent_storage.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_session_storage.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/dtr_assistant_turn_guard.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_input_bar.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_message_bubble.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_prompt_chips.dart';
@@ -77,6 +78,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   bool _sessionLoaded = false;
   String _conversationId = DtrAssistantSessionStorage.createConversationId();
   final _inputController = TextEditingController();
+  final _turnGuard = DtrAssistantTurnGuard();
   CancelToken? _cancelToken;
 
   @override
@@ -210,8 +212,11 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   }
 
   void _stop() {
+    if (!_sending) return;
+    _turnGuard.invalidate();
     _cancelToken?.cancel('Cancelled by user');
-    setState(() => _sending = false);
+    _cancelToken = null;
+    if (mounted) setState(() => _sending = false);
   }
 
   Future<void> _handleModelChanged(String id) async {
@@ -318,9 +323,11 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       _messages.add(DtrAssistantMessage.user(text));
       _sending = true;
     });
+    final turnGeneration = _turnGuard.begin();
     _scrollToBottom();
     unawaited(_persistSession());
-    _cancelToken = CancelToken();
+    final cancelToken = CancelToken();
+    _cancelToken = cancelToken;
 
     try {
       final reply = await _api.sendMessage(
@@ -329,9 +336,9 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         modelProfile: _selectedModelProfile,
         conversationId: _conversationId,
         externalConsentVersion: _selectedExternalConsentVersion,
-        cancelToken: _cancelToken,
+        cancelToken: cancelToken,
       );
-      if (!mounted) return;
+      if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       setState(() {
         _messages.add(reply);
         final replyId = reply.id;
@@ -342,7 +349,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       await _persistSession();
       _runAutoAction(reply);
     } on DioException catch (e) {
-      if (!mounted) return;
+      if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       if (CancelToken.isCancel(e)) return;
       setState(
         () => _messages.add(
@@ -354,7 +361,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ),
       );
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       setState(
         () => _messages.add(
           DtrAssistantMessage(
@@ -365,7 +372,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ),
       );
     } finally {
-      if (mounted) {
+      if (mounted && _turnGuard.isCurrent(turnGeneration)) {
+        if (identical(_cancelToken, cancelToken)) _cancelToken = null;
         setState(() => _sending = false);
         await _persistSession();
         _scrollToBottom();

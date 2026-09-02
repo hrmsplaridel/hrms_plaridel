@@ -232,6 +232,15 @@ function assistantContext(dateRange, userId) {
 test('DTR assistant service uses employee-self data for real HRMS scenarios', async (t) => {
   const loaded = [];
   let llmMode = 'throw';
+  let delayNextContext = false;
+  let signalDelayedContextStarted;
+  let releaseDelayedContext;
+  const delayedContextStarted = new Promise((resolve) => {
+    signalDelayedContextStarted = resolve;
+  });
+  const delayedContextRelease = new Promise((resolve) => {
+    releaseDelayedContext = resolve;
+  });
   const restoreData = withMockedModule(
     '../src/services/dtrAssistant/dtrAssistantDataService',
     {
@@ -240,6 +249,11 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
         { userId, message, dateRange }
       ) => {
         loaded.push({ userId, message, dateRange });
+        if (delayNextContext) {
+          delayNextContext = false;
+          signalDelayedContextStarted();
+          await delayedContextRelease;
+        }
         return assistantContext(dateRange, userId);
       },
     }
@@ -394,6 +408,30 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
   });
   assert.equal(malformedFallback.provider, 'hrms');
   assert.match(malformedFallback.message.content, /not sure|help/i);
+
+  const {
+    getAssistantMemory,
+  } = require('../src/services/dtrAssistant/dtrAssistantMemoryService');
+  const turnUser = { ...user, id: `${user.id}-turn-order` };
+  const turnConversation = 'integration-turn-order';
+  delayNextContext = true;
+  const delayedFirst = chatWithDtrAssistant(pool, {
+    user: turnUser,
+    conversationId: turnConversation,
+    message: 'what is my sick leave balance?',
+  });
+  await delayedContextStarted;
+  const newerSecond = await chatWithDtrAssistant(pool, {
+    user: turnUser,
+    conversationId: turnConversation,
+    message: 'show my DTR today',
+  });
+  releaseDelayedContext();
+  const olderFirst = await delayedFirst;
+
+  const orderedMemory = getAssistantMemory(turnUser.id, turnConversation);
+  assert.equal(orderedMemory.intent, newerSecond.intent);
+  assert.notEqual(orderedMemory.intent, olderFirst.intent);
 });
 
 test('DTR assistant full chat pipeline preserves a long mixed-topic conversation', async (t) => {
@@ -651,4 +689,5 @@ test('DTR assistant locator prompts yield to new locator and DTR questions', asy
     )
   );
   assert.doesNotMatch(statusQuestion.message.content, /destination\/office/i);
+
 });

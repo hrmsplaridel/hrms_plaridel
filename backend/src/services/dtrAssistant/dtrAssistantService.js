@@ -13,6 +13,7 @@ const {
   getAssistantMemory,
   setAssistantMemory,
   clearAssistantMemory,
+  beginAssistantTurn,
   normalizeConversationId,
 } = require('./dtrAssistantMemoryService');
 const { contextGate } = require('./dtrAssistantContextGate');
@@ -72,6 +73,17 @@ const MAX_LONG_FORM_ASSISTANT_REPLY_CHARS = 12000;
 const MAX_MEMORY_TURNS = 6;
 
 const DEFAULT_MODEL_PROFILE_ID = 'tools_ollama';
+
+function assistantRequestAbortedError() {
+  const error = new Error('Assistant request was cancelled.');
+  error.statusCode = 499;
+  error.code = 'ASSISTANT_REQUEST_ABORTED';
+  return error;
+}
+
+function throwIfAssistantRequestAborted(signal) {
+  if (signal?.aborted) throw assistantRequestAbortedError();
+}
 
 function allowDirectLlm(env = process.env) {
   return /^(1|true|yes)$/i.test(String(env.DTR_ASSISTANT_ALLOW_DIRECT_LLM || ''));
@@ -2364,7 +2376,14 @@ function buildToolData(intent, context) {
   return {};
 }
 
-async function refineToolAnswerWithLocalAi({ text, intent, toolAnswer, toolData, profile }) {
+async function refineToolAnswerWithLocalAi({
+  text,
+  intent,
+  toolAnswer,
+  toolData,
+  profile,
+  signal,
+}) {
   try {
     const result = await chatCompletion({
       provider: profile?.provider,
@@ -2381,7 +2400,9 @@ async function refineToolAnswerWithLocalAi({ text, intent, toolAnswer, toolData,
         num_predict: 140,
         num_ctx: 1024,
       },
+      signal,
     });
+    throwIfAssistantRequestAborted(signal);
     const content = compactAssistantContent(result.content);
     if (!content) return null;
     return {
@@ -2390,6 +2411,7 @@ async function refineToolAnswerWithLocalAi({ text, intent, toolAnswer, toolData,
       model: result.model,
     };
   } catch (err) {
+    throwIfAssistantRequestAborted(signal);
     console.warn(
       '[dtr-assistant] Tool-answer refinement failed:',
       err.code || err.message
@@ -2398,7 +2420,7 @@ async function refineToolAnswerWithLocalAi({ text, intent, toolAnswer, toolData,
   }
 }
 
-async function classifyIntentWithLocalAi(text, profile) {
+async function classifyIntentWithLocalAi(text, profile, signal) {
   try {
     const result = await chatCompletion({
       provider: profile?.provider,
@@ -2410,13 +2432,16 @@ async function classifyIntentWithLocalAi(text, profile) {
         num_predict: 32,
         num_ctx: 512,
       },
+      signal,
     });
+    throwIfAssistantRequestAborted(signal);
     return {
       intent: parseIntentClassifierResponse(result.content),
       provider: result.provider,
       model: result.model,
     };
   } catch (err) {
+    throwIfAssistantRequestAborted(signal);
     return {
       intent: null,
       provider: err.provider || 'ollama',
@@ -2426,7 +2451,7 @@ async function classifyIntentWithLocalAi(text, profile) {
   }
 }
 
-async function planToolWithLocalAi(text, profile) {
+async function planToolWithLocalAi(text, profile, signal) {
   try {
     const result = await chatCompletion({
       provider: profile?.provider,
@@ -2442,7 +2467,9 @@ async function planToolWithLocalAi(text, profile) {
         num_ctx: 1024,
       },
       maxTokens: 140,
+      signal,
     });
+    throwIfAssistantRequestAborted(signal);
     const plan = parseToolPlanResponse(result.content);
     return {
       intent: plan?.intent || null,
@@ -2453,6 +2480,7 @@ async function planToolWithLocalAi(text, profile) {
       model: result.model,
     };
   } catch (err) {
+    throwIfAssistantRequestAborted(signal);
     return {
       intent: null,
       dateRange: null,
@@ -2464,7 +2492,7 @@ async function planToolWithLocalAi(text, profile) {
   }
 }
 
-async function generateDirectAnswerWithAi({ text, context, profile }) {
+async function generateDirectAnswerWithAi({ text, context, profile, signal }) {
   const result = await chatCompletion({
     provider: profile.provider,
     model: profile.model,
@@ -2476,7 +2504,9 @@ async function generateDirectAnswerWithAi({ text, context, profile }) {
       num_ctx: 2048,
     },
     maxTokens: 240,
+    signal,
   });
+  throwIfAssistantRequestAborted(signal);
 
   return {
     content: compactAssistantContent(result.content),
@@ -2494,16 +2524,25 @@ async function chatWithDtrAssistant(
     modelProfile,
     conversationId,
     externalConsentVersion,
+    signal,
   }
 ) {
+  throwIfAssistantRequestAborted(signal);
   const text = normalizeMessage(message);
   const profile = resolveModelProfile(modelProfile);
   assertExternalConsent(profile, externalConsentVersion);
   const scope = getEmployeeSelfScope(user);
   const conversationKey = normalizeConversationId(conversationId);
+  const turnGeneration = beginAssistantTurn(scope.userId, conversationKey);
   const readMemory = () => getAssistantMemory(scope.userId, conversationKey);
   const saveMemory = (value) =>
-    setAssistantMemory(scope.userId, value, undefined, conversationKey);
+    setAssistantMemory(
+      scope.userId,
+      value,
+      undefined,
+      conversationKey,
+      turnGeneration
+    );
   const memory = readMemory();
   const normalizedTextForRules = normalizeAssistantMessageForRules(text);
   const forcedIntent = normalizeIntent(intent);
@@ -2688,7 +2727,8 @@ async function chatWithDtrAssistant(
       intent: resolvedIntent,
       data: { employeeQuestion: true },
     });
-    const planned = await planToolWithLocalAi(effectiveText, profile);
+    const planned = await planToolWithLocalAi(effectiveText, profile, signal);
+    throwIfAssistantRequestAborted(signal);
     if (planned.intent) {
       if (!resolvedIntent || intentNeedsAiPlan || intentConfidence < 0.72) {
         resolvedIntent = planned.intent;
@@ -2716,7 +2756,9 @@ async function chatWithDtrAssistant(
     userId: scope.userId,
     message: plannedText,
     dateRange: plannedDateRange,
+    signal,
   });
+  throwIfAssistantRequestAborted(signal);
   context.assistant_context_gate = contextDecision;
 
   const mergedExtraction = mergePlannerExtraction(
@@ -2745,7 +2787,12 @@ async function chatWithDtrAssistant(
       intent: null,
       data: { employeeQuestion: true },
     });
-    const classified = await classifyIntentWithLocalAi(plannedText, profile);
+    const classified = await classifyIntentWithLocalAi(
+      plannedText,
+      profile,
+      signal
+    );
+    throwIfAssistantRequestAborted(signal);
     resolvedIntent = classified.intent;
     if (resolvedIntent) {
       intentConfidence = 0.76;
@@ -2768,7 +2815,9 @@ async function chatWithDtrAssistant(
       text: plannedText,
       context: externalContext,
       profile,
+      signal,
     });
+    throwIfAssistantRequestAborted(signal);
 
     saveMemory(buildNextAssistantMemory(routingMemory, {
       intent: 'direct_ai',
@@ -2930,7 +2979,9 @@ async function chatWithDtrAssistant(
           toolAnswer: fastReply,
           toolData,
           profile,
+          signal,
         });
+    throwIfAssistantRequestAborted(signal);
 
     saveMemory(buildNextAssistantMemory(extractionMemory, {
       intent: resolvedIntent,

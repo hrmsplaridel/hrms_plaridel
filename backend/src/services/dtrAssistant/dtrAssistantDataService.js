@@ -43,6 +43,14 @@ function assistantQueryTimeoutMs(env = process.env) {
   return Math.max(1000, Math.min(parsed, 60000));
 }
 
+function throwIfAssistantQueryAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('Assistant request was cancelled.');
+  error.statusCode = 499;
+  error.code = 'ASSISTANT_REQUEST_ABORTED';
+  throw error;
+}
+
 function runAssistantQuery(pool, text, values = []) {
   return pool.query({
     text,
@@ -608,7 +616,11 @@ async function loadLocatorTypes(pool) {
   }));
 }
 
-async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: dateRangeOverride }) {
+async function loadEmployeeAssistantContext(
+  pool,
+  { userId, message, dateRange: dateRangeOverride, signal }
+) {
+  throwIfAssistantQueryAborted(signal);
   const dateRange = assertAssistantDateRange(
     dateRangeOverride || parseAssistantDateRange(message)
   );
@@ -634,6 +646,7 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
       loadRecentLocatorSlips(pool, userId, dateRange),
       loadLocatorTypes(pool),
     ]);
+  throwIfAssistantQueryAborted(signal);
 
   return {
     scope: 'employee_self',

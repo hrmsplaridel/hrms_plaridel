@@ -280,6 +280,7 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
   assert.equal(captured[0].user.id, employeeId);
   assert.equal(captured[0].targetUserId, undefined);
   assert.equal(captured[0].conversationId, 'chat-api-contract');
+  assert.ok(captured[0].signal instanceof AbortSignal);
 
   const timeout = await requestJson(server, {
     method: 'POST',

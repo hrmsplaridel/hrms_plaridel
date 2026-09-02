@@ -49,6 +49,13 @@ router.post(
   dtrAssistantChatBurstLimiter,
   dtrAssistantChatHourlyLimiter,
   async (req, res) => {
+    const controller = new AbortController();
+    const abortRequest = () => controller.abort();
+    const abortDisconnectedResponse = () => {
+      if (!res.writableEnded) controller.abort();
+    };
+    req.once('aborted', abortRequest);
+    res.once('close', abortDisconnectedResponse);
     try {
       const result = await chatWithDtrAssistant(pool, {
         user: req.user,
@@ -57,12 +64,17 @@ router.post(
         modelProfile: req.body?.modelProfile,
         conversationId: req.body?.conversationId,
         externalConsentVersion: req.body?.externalConsentVersion,
+        signal: controller.signal,
       });
+      if (controller.signal.aborted || res.destroyed) return;
       res.json(result);
     } catch (err) {
+      if (controller.signal.aborted || res.destroyed) return;
       const status =
         err.statusCode ||
-        (err.code === 'AI_PROVIDER_TIMEOUT'
+        (err.code === 'ASSISTANT_REQUEST_ABORTED'
+          ? 499
+          : err.code === 'AI_PROVIDER_TIMEOUT'
           ? 504
           : err.code === 'AI_LOCAL_UNAVAILABLE'
             ? 503
@@ -81,6 +93,9 @@ router.post(
           'Failed to generate DTR assistant response',
         code: err.code || null,
       });
+    } finally {
+      req.off('aborted', abortRequest);
+      res.off('close', abortDisconnectedResponse);
     }
   }
 );
