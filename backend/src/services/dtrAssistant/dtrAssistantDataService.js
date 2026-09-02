@@ -59,6 +59,181 @@ function runAssistantQuery(pool, text, values = []) {
   });
 }
 
+const ASSISTANT_CONTEXT_SOURCES = [
+  'employee',
+  'dtrRecords',
+  'dtrCalendarDays',
+  'leaveBalances',
+  'leaveRequests',
+  'leaveAnnualUsage',
+  'leaveTypes',
+  'locatorSlips',
+  'locatorTypes',
+];
+
+const DTR_RECORD_INTENTS = new Set([
+  'today_dtr',
+  'missing_logs',
+  'dtr_daily_record',
+  'dtr_range_summary',
+  'dtr_missing_logs',
+  'dtr_missing_log_reason',
+  'dtr_late_summary',
+  'dtr_late_reason',
+  'dtr_undertime_summary',
+  'dtr_overtime_summary',
+  'dtr_absent_summary',
+  'dtr_status_explanation',
+  'dtr_correction_guidance',
+  'dtr_export_guidance',
+  'dtr_hours_summary',
+]);
+
+const LEAVE_REQUEST_INTENTS = new Set([
+  'latest_leave_request',
+  'pending_leave_requests',
+  'approved_leave_requests',
+  'rejected_leave_requests',
+  'leave_history',
+  'leave_overlap_check',
+  'leave_request_summary',
+  'leave_request_lookup',
+  'leave_rejection_reason',
+  'leave_approval_tracker',
+  'leave_approval_history',
+]);
+
+const LEAVE_BALANCE_INTENTS = new Set([
+  'leave_balance',
+  'leave_pending_days_explanation',
+  'leave_balance_after_filing',
+  'leave_balance_projection',
+]);
+
+const LEAVE_FILING_CHECK_INTENTS = new Set([
+  'leave_availability_check',
+  'leave_guided_filing',
+]);
+
+const LOCATOR_HISTORY_INTENTS = new Set([
+  'latest_locator_request',
+  'locator_status',
+  'locator_summary',
+  'locator_rejection_reason',
+  'locator_approval_tracker',
+]);
+
+function allAssistantContextSources() {
+  return Object.fromEntries(
+    ASSISTANT_CONTEXT_SOURCES.map((source) => [source, true])
+  );
+}
+
+function assistantContextLoadPlan(intents) {
+  const normalized = [...new Set(
+    (Array.isArray(intents) ? intents : [intents])
+      .map((intent) => String(intent || '').trim())
+      .filter(Boolean)
+  )];
+  if (
+    normalized.length === 0 ||
+    normalized.some((intent) => intent === 'unknown' || intent === 'direct_ai')
+  ) {
+    return allAssistantContextSources();
+  }
+
+  const plan = Object.fromEntries(
+    ASSISTANT_CONTEXT_SOURCES.map((source) => [source, false])
+  );
+  plan.employee = true;
+
+  for (const intent of normalized) {
+    if (DTR_RECORD_INTENTS.has(intent)) {
+      plan.dtrRecords = true;
+      plan.dtrCalendarDays = true;
+      continue;
+    }
+    if (intent === 'dtr_holiday_check' || intent === 'dtr_schedule_context') {
+      plan.dtrCalendarDays = true;
+      continue;
+    }
+    if (intent === 'dtr_leave_coverage_check') {
+      plan.leaveRequests = true;
+      plan.leaveTypes = true;
+      continue;
+    }
+    if (intent === 'dtr_locator_coverage_check') {
+      plan.dtrCalendarDays = true;
+      plan.locatorSlips = true;
+      plan.locatorTypes = true;
+      continue;
+    }
+    if (intent === 'dtr_policy_guidance') continue;
+
+    if (intent.startsWith('leave_') || LEAVE_REQUEST_INTENTS.has(intent)) {
+      plan.leaveTypes = true;
+      if (LEAVE_REQUEST_INTENTS.has(intent)) plan.leaveRequests = true;
+      if (LEAVE_BALANCE_INTENTS.has(intent)) plan.leaveBalances = true;
+      if (intent === 'leave_pending_days_explanation') {
+        plan.leaveRequests = true;
+      }
+      if (LEAVE_FILING_CHECK_INTENTS.has(intent)) {
+        plan.leaveBalances = true;
+        plan.leaveRequests = true;
+        plan.leaveAnnualUsage = true;
+      }
+      continue;
+    }
+
+    if (intent.startsWith('locator_') || LOCATOR_HISTORY_INTENTS.has(intent)) {
+      plan.locatorTypes = true;
+      if (LOCATOR_HISTORY_INTENTS.has(intent)) plan.locatorSlips = true;
+      if (intent === 'locator_availability_check') {
+        plan.dtrCalendarDays = true;
+        plan.locatorSlips = true;
+      }
+      continue;
+    }
+
+    return allAssistantContextSources();
+  }
+
+  return plan;
+}
+
+const catalogCacheByPool = new WeakMap();
+
+function assistantCatalogCacheMs(env = process.env) {
+  const parsed = Number.parseInt(
+    String(env.DTR_ASSISTANT_CATALOG_CACHE_MS || '60000'),
+    10
+  );
+  if (!Number.isFinite(parsed)) return 60000;
+  return Math.max(0, Math.min(parsed, 5 * 60 * 1000));
+}
+
+async function loadCachedAssistantCatalog(pool, key, loader) {
+  const ttlMs = assistantCatalogCacheMs();
+  if (ttlMs <= 0 || !pool || typeof pool !== 'object') return loader();
+  const now = Date.now();
+  const poolCache = catalogCacheByPool.get(pool) || new Map();
+  const cached = poolCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise || cached.value;
+  }
+  const promise = Promise.resolve().then(loader);
+  poolCache.set(key, { promise, expiresAt: now + ttlMs });
+  catalogCacheByPool.set(pool, poolCache);
+  try {
+    const value = await promise;
+    poolCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    return value;
+  } catch (error) {
+    if (poolCache.get(key)?.promise === promise) poolCache.delete(key);
+    throw error;
+  }
+}
+
 function parseJsonArray(value) {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -439,7 +614,7 @@ async function loadAnnualLeaveUsage(pool, userId, dateRange) {
   );
 }
 
-async function loadLeaveTypes(pool) {
+async function queryLeaveTypes(pool) {
   const result = await runAssistantQuery(
     pool,
     `SELECT id,
@@ -486,6 +661,12 @@ async function loadLeaveTypes(pool) {
     ),
     is_active: row.is_active !== false,
   }));
+}
+
+function loadLeaveTypes(pool) {
+  return loadCachedAssistantCatalog(pool, 'leaveTypes', () =>
+    queryLeaveTypes(pool)
+  );
 }
 
 async function loadRecentLocatorSlips(pool, userId, dateRange) {
@@ -581,7 +762,7 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
   }));
 }
 
-async function loadLocatorTypes(pool) {
+async function queryLocatorTypes(pool) {
   const result = await runAssistantQuery(
     pool,
     `SELECT code,
@@ -616,14 +797,21 @@ async function loadLocatorTypes(pool) {
   }));
 }
 
+function loadLocatorTypes(pool) {
+  return loadCachedAssistantCatalog(pool, 'locatorTypes', () =>
+    queryLocatorTypes(pool)
+  );
+}
+
 async function loadEmployeeAssistantContext(
   pool,
-  { userId, message, dateRange: dateRangeOverride, signal }
+  { userId, message, dateRange: dateRangeOverride, intents, signal }
 ) {
   throwIfAssistantQueryAborted(signal);
   const dateRange = assertAssistantDateRange(
     dateRangeOverride || parseAssistantDateRange(message)
   );
+  const loadPlan = assistantContextLoadPlan(intents);
   const [
     employee,
     dtrRecords,
@@ -636,34 +824,46 @@ async function loadEmployeeAssistantContext(
     locatorTypes,
   ] =
     await Promise.all([
-      loadEmployeeProfile(pool, userId),
-      loadDtrRecords(pool, userId, dateRange),
-      loadDtrCalendarDays(pool, userId, dateRange),
-      loadLeaveBalances(pool, userId),
-      loadRecentLeaveRequests(pool, userId, dateRange),
-      loadAnnualLeaveUsage(pool, userId, dateRange),
-      loadLeaveTypes(pool),
-      loadRecentLocatorSlips(pool, userId, dateRange),
-      loadLocatorTypes(pool),
+      loadPlan.employee ? loadEmployeeProfile(pool, userId) : null,
+      loadPlan.dtrRecords ? loadDtrRecords(pool, userId, dateRange) : [],
+      loadPlan.dtrCalendarDays
+        ? loadDtrCalendarDays(pool, userId, dateRange)
+        : [],
+      loadPlan.leaveBalances ? loadLeaveBalances(pool, userId) : [],
+      loadPlan.leaveRequests
+        ? loadRecentLeaveRequests(pool, userId, dateRange)
+        : [],
+      loadPlan.leaveAnnualUsage
+        ? loadAnnualLeaveUsage(pool, userId, dateRange)
+        : [],
+      loadPlan.leaveTypes ? loadLeaveTypes(pool) : [],
+      loadPlan.locatorSlips
+        ? loadRecentLocatorSlips(pool, userId, dateRange)
+        : [],
+      loadPlan.locatorTypes ? loadLocatorTypes(pool) : [],
     ]);
   throwIfAssistantQueryAborted(signal);
 
   return {
     scope: 'employee_self',
     date_range: dateRange,
+    context_sources: {
+      intents: Array.isArray(intents) ? intents : intents ? [intents] : [],
+      loaded: ASSISTANT_CONTEXT_SOURCES.filter((source) => loadPlan[source]),
+    },
     data_completeness: {
       dtr_records: {
-        complete: true,
+        complete: loadPlan.dtrRecords,
         capped: false,
         returned_count: dtrRecords.length,
       },
       dtr_calendar_days: {
-        complete: true,
+        complete: loadPlan.dtrCalendarDays,
         capped: false,
         returned_count: dtrCalendarDays.length,
       },
       dtr_export: {
-        complete: true,
+        complete: loadPlan.dtrRecords && loadPlan.dtrCalendarDays,
       },
     },
     employee,
@@ -686,5 +886,7 @@ module.exports = {
   loadEmployeeAssistantContext,
   __test: {
     assistantQueryTimeoutMs,
+    assistantCatalogCacheMs,
+    assistantContextLoadPlan,
   },
 };

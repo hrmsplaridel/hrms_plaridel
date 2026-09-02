@@ -246,6 +246,103 @@ test('DTR assistant data loader scopes every employee query and normalizes rows'
   assert.ok(context.locator_policies.length > 0);
 });
 
+test('DTR assistant data loader uses intent-specific query plans', async () => {
+  async function loadFor(intents) {
+    const calls = [];
+    const pool = {
+      query: async (query, params = []) => {
+        const sql = typeof query === 'string' ? query : query.text;
+        calls.push(sql);
+        return resultForSql(sql, params);
+      },
+    };
+    const context = await loadEmployeeAssistantContext(pool, {
+      userId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      message: 'assistant query plan test',
+      intents,
+      dateRange: {
+        label: 'June 24, 2026',
+        startDate: '2026-06-24',
+        endDate: '2026-06-24',
+      },
+    });
+    return { calls, context };
+  }
+
+  const leave = await loadFor(['leave_balance']);
+  assert.equal(leave.calls.length, 3);
+  assert.deepEqual(leave.context.context_sources.loaded, [
+    'employee',
+    'leaveBalances',
+    'leaveTypes',
+  ]);
+  assert.deepEqual(leave.context.dtr_records, []);
+  assert.deepEqual(leave.context.recent_locator_slips, []);
+
+  const dtr = await loadFor(['dtr_range_summary']);
+  assert.equal(dtr.calls.length, 3);
+  assert.deepEqual(dtr.context.context_sources.loaded, [
+    'employee',
+    'dtrRecords',
+    'dtrCalendarDays',
+  ]);
+  assert.equal(dtr.context.data_completeness.dtr_export.complete, true);
+
+  const locator = await loadFor(['locator_status']);
+  assert.equal(locator.calls.length, 3);
+  assert.deepEqual(locator.context.context_sources.loaded, [
+    'employee',
+    'locatorSlips',
+    'locatorTypes',
+  ]);
+
+  const mixed = await loadFor(['leave_balance', 'locator_status']);
+  assert.equal(mixed.calls.length, 5);
+  assert.deepEqual(mixed.context.context_sources.loaded, [
+    'employee',
+    'leaveBalances',
+    'leaveTypes',
+    'locatorSlips',
+    'locatorTypes',
+  ]);
+});
+
+test('DTR assistant reuses static catalogs within a bounded cache window', async () => {
+  const calls = [];
+  const pool = {
+    query: async (query, params = []) => {
+      const sql = typeof query === 'string' ? query : query.text;
+      calls.push(sql);
+      return resultForSql(sql, params);
+    },
+  };
+  const input = {
+    userId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    message: 'what is my leave balance?',
+    intents: ['leave_balance'],
+    dateRange: {
+      label: 'today',
+      startDate: '2026-06-24',
+      endDate: '2026-06-24',
+    },
+  };
+
+  await Promise.all([
+    loadEmployeeAssistantContext(pool, input),
+    loadEmployeeAssistantContext(pool, input),
+  ]);
+
+  assert.equal(calls.length, 5);
+  assert.equal(calls.filter((sql) => /FROM leave_types/i.test(sql)).length, 1);
+  assert.equal(dataServiceTest.assistantCatalogCacheMs({}), 60000);
+  assert.equal(
+    dataServiceTest.assistantCatalogCacheMs({
+      DTR_ASSISTANT_CATALOG_CACHE_MS: '999999',
+    }),
+    300000
+  );
+});
+
 test('DTR assistant data loader validates ranges before issuing queries', async () => {
   let queryCount = 0;
   const pool = {

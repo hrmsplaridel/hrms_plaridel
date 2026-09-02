@@ -2752,10 +2752,18 @@ async function chatWithDtrAssistant(
     }
   }
 
+  const detectedMultiIntent = detectMultipleIntents(effectiveText, {
+    explicitIntent: intent,
+  });
+  const contextIntents = detectedMultiIntent.isMulti
+    ? detectedMultiIntent.intents.map((item) => item.intent)
+    : [resolvedIntent].filter(Boolean);
+
   const context = await loadEmployeeAssistantContext(pool, {
     userId: scope.userId,
     message: plannedText,
     dateRange: plannedDateRange,
+    intents: contextIntents,
     signal,
   });
   throwIfAssistantRequestAborted(signal);
@@ -2899,7 +2907,7 @@ async function chatWithDtrAssistant(
     });
   }
 
-  const multi = detectMultipleIntents(effectiveText, { explicitIntent: intent });
+  const multi = detectedMultiIntent;
   if (multi.isMulti && multi.intents.length >= 2 && !routingMemory?.pendingClarification) {
     const multiReplies = [];
     for (const item of multi.intents) {

@@ -246,9 +246,9 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
     {
       loadEmployeeAssistantContext: async (
         _pool,
-        { userId, message, dateRange }
+        { userId, message, dateRange, intents }
       ) => {
-        loaded.push({ userId, message, dateRange });
+        loaded.push({ userId, message, dateRange, intents });
         if (delayNextContext) {
           delayNextContext = false;
           signalDelayedContextStarted();
@@ -298,11 +298,22 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
   });
   assert.equal(malicious.mode, 'employee_self');
   assert.equal(loaded.at(-1).userId, user.id);
+  assert.deepEqual(loaded.at(-1).intents, ['leave_balance']);
   assert.match(malicious.message.content, /0\.75/);
   assert.deepEqual(malicious.sources.leaveRequestIds, [
     'leave-rejected',
     'leave-pending',
   ]);
+
+  const combined = await chatWithDtrAssistant(pool, {
+    user: { ...user, id: `${user.id}-context-union` },
+    message: 'what is my leave balance and show my missing DTR logs?',
+  });
+  assert.equal(combined.intent, 'leave_balance');
+  assert.deepEqual(
+    new Set(loaded.at(-1).intents),
+    new Set(['leave_balance', 'dtr_missing_logs'])
+  );
 
   const absence = await chatWithDtrAssistant(pool, {
     user: { ...user, id: `${user.id}-absence` },
