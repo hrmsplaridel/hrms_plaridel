@@ -333,6 +333,9 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
     token: otherToken,
   });
   assert.equal(foreignExport.status, 404);
+  assert.equal(foreignExport.json.code, 'DTR_ASSISTANT_EXPORT_UNAVAILABLE');
+  assert.equal(foreignExport.json.action.type, 'send_prompt');
+  assert.equal(foreignExport.json.action.intent, 'dtr_export_guidance');
 
   const feedback = await requestJson(server, {
     method: 'POST',

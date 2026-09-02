@@ -31,16 +31,34 @@ router.get(
   protect,
   dtrAssistantExportLimiter,
   async (req, res) => {
-    const file = getDtrExport(req.params.token, req.user.id);
-    if (!file) {
-      return res.status(404).json({ error: 'Export expired or not found.' });
+    try {
+      const file = getDtrExport(req.params.token, req.user.id);
+      if (!file) {
+        return res.status(404).json({
+          error: 'Export expired or not found.',
+          code: 'DTR_ASSISTANT_EXPORT_UNAVAILABLE',
+          action: {
+            id: 'regenerate_dtr_export',
+            label: 'Regenerate DTR export',
+            type: 'send_prompt',
+            intent: 'dtr_export_guidance',
+            prompt: 'Generate my DTR export again.',
+          },
+        });
+      }
+      res.setHeader('Content-Type', file.mimeType);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${file.filename.replace(/"/g, '')}"`
+      );
+      return res.send(file.buffer);
+    } catch (error) {
+      console.error('[dtr-assistant GET /exports/:token]', error);
+      return res.status(500).json({
+        error: 'The export store is temporarily unavailable.',
+        code: 'DTR_ASSISTANT_EXPORT_STORE_UNAVAILABLE',
+      });
     }
-    res.setHeader('Content-Type', file.mimeType);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${file.filename.replace(/"/g, '')}"`
-    );
-    res.send(file.buffer);
   }
 );
 

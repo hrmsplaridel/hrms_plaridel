@@ -560,10 +560,41 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       ], subject: attachment.filename);
     } catch (e) {
       if (!mounted) return;
+      final unavailable = e is DioException && e.response?.statusCode == 404;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not prepare ${attachment.filename}: $e')),
+        SnackBar(
+          content: Text(
+            unavailable
+                ? 'This export is no longer available.'
+                : 'Could not prepare ${attachment.filename}: $e',
+          ),
+          action: unavailable
+              ? SnackBarAction(
+                  label: 'Regenerate',
+                  onPressed: () => unawaited(
+                    _send(
+                      _regenerateExportPrompt(attachment),
+                      intent: 'dtr_export_guidance',
+                    ),
+                  ),
+                )
+              : null,
+        ),
       );
     }
+  }
+
+  String _regenerateExportPrompt(DtrAssistantAttachment attachment) {
+    final match = RegExp(
+      r'dtr_export_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.',
+    ).firstMatch(attachment.filename);
+    if (match == null) return 'Generate my DTR export again.';
+    final startDate = match.group(1);
+    final endDate = match.group(2);
+    if (startDate == endDate) {
+      return 'Generate my DTR export for $startDate.';
+    }
+    return 'Generate my DTR export from $startDate to $endDate.';
   }
 
   Future<void> _executeAction(
