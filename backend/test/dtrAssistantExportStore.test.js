@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const exportDirectory = fs.mkdtempSync(
   path.join(os.tmpdir(), 'hrms-dtr-assistant-export-test-')
@@ -82,6 +83,61 @@ test('DTR export store survives a service reload and enforces ownership', () => 
   assert.ok(restored);
   assert.match(restored.buffer.toString('utf8'), /2026-08-01/);
   assert.equal(exportService.getDtrExport(attachment.id, 'employee-2'), null);
+});
+
+test('separate backend processes share the configured export directory', () => {
+  const childEnvironment = {
+    ...process.env,
+    DTR_ASSISTANT_EXPORT_DIR: exportDirectory,
+    DTR_ASSISTANT_EXPORT_TTL_MS: String(15 * 60 * 1000),
+  };
+  const createScript = `
+    const service = require(process.env.EXPORT_SERVICE_PATH);
+    const context = JSON.parse(process.env.EXPORT_CONTEXT);
+    const attachment = service.createDtrExportAttachment(
+      context,
+      'employee-process-test',
+      'csv'
+    );
+    process.stdout.write(JSON.stringify(attachment));
+  `;
+  const created = spawnSync(process.execPath, ['-e', createScript], {
+    cwd: __dirname,
+    encoding: 'utf8',
+    env: {
+      ...childEnvironment,
+      EXPORT_SERVICE_PATH: exportServicePath,
+      EXPORT_CONTEXT: JSON.stringify(completeContext),
+    },
+  });
+  assert.equal(created.status, 0, created.stderr);
+  const attachment = JSON.parse(created.stdout);
+
+  const readScript = `
+    const service = require(process.env.EXPORT_SERVICE_PATH);
+    const stored = service.getDtrExport(
+      process.env.EXPORT_TOKEN,
+      'employee-process-test'
+    );
+    process.stdout.write(JSON.stringify({
+      found: Boolean(stored),
+      content: stored ? stored.buffer.toString('utf8') : null,
+    }));
+  `;
+  const restored = spawnSync(process.execPath, ['-e', readScript], {
+    cwd: __dirname,
+    encoding: 'utf8',
+    env: {
+      ...childEnvironment,
+      EXPORT_SERVICE_PATH: exportServicePath,
+      EXPORT_TOKEN: attachment.id,
+    },
+  });
+  assert.equal(restored.status, 0, restored.stderr);
+  const result = JSON.parse(restored.stdout);
+
+  assert.equal(result.found, true);
+  assert.match(result.content, /2026-08-01/);
 });
 
 test('DTR export store evicts the oldest per-user and global entries', async () => {

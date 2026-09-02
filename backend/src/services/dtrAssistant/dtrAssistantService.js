@@ -3067,6 +3067,7 @@ module.exports = {
     adaptAssistantContentToDepth,
     buildActions,
     buildNextAssistantMemory,
+    buildToolData,
     clarificationContent,
     clarificationIntentForMessage,
     compactAssistantContent,

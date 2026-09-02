@@ -78,6 +78,60 @@ void main() {
     expect(secureValues.keys.any((key) => key.contains('employee-2')), isTrue);
   });
 
+  test('restores controls without storing export credentials', () async {
+    final message = DtrAssistantMessage(
+      role: 'assistant',
+      content: 'Your DTR export is ready.',
+      createdAt: DateTime.utc(2026, 9, 3),
+      suggestions: const [
+        DtrAssistantSuggestion(text: 'Show August attendance'),
+      ],
+      attachments: const [
+        DtrAssistantAttachment(
+          id: 'secret-export-token',
+          filename: 'dtr_export_2026-08-01_2026-08-31.pdf',
+          mimeType: 'application/pdf',
+          downloadUrl: '/api/dtr/assistant/exports/secret-export-token',
+        ),
+      ],
+      actions: const [
+        DtrAssistantAction(
+          id: 'download_dtr_export',
+          label: 'Download DTR export',
+          type: 'download_attachment',
+          payload: {'attachmentId': 'secret-export-token'},
+        ),
+        DtrAssistantAction(
+          id: 'open_dtr_reports',
+          label: 'Open my DTR report',
+          type: 'open_dtr_reports',
+        ),
+      ],
+    );
+
+    await DtrAssistantSessionStorage.saveMessages('employee-1', 'chat-1', [
+      message,
+    ]);
+    final restored = await DtrAssistantSessionStorage.loadMessages(
+      'employee-1',
+      'chat-1',
+    );
+    final secureValues = await secureStorage.readAll();
+    final persisted = secureValues.values.join();
+
+    expect(persisted, isNot(contains('secret-export-token')));
+    expect(restored.single.suggestions.single.text, 'Show August attendance');
+    expect(restored.single.attachments.single.isExpired, isTrue);
+    expect(
+      restored.single.actions.any((item) => item.id == 'open_dtr_reports'),
+      isTrue,
+    );
+    expect(
+      restored.single.actions.any((item) => item.id == 'regenerate_dtr_export'),
+      isTrue,
+    );
+  });
+
   test('deletes expired encrypted history', () async {
     final expiredAt = DateTime.now()
         .toUtc()

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_api.dart';
@@ -51,6 +52,7 @@ class _PrivacyAssistantApi extends DtrAssistantApi {
 
 void main() {
   setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
     SharedPreferences.setMockInitialValues({});
   });
 
@@ -135,10 +137,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    await tester.tap(find.byTooltip('AI model'));
+    tester
+        .widget<PopupMenuButton<String>>(find.byType(PopupMenuButton<String>))
+        .onSelected
+        ?.call('tools_groq');
     await tester.pump();
-    await tester.tap(find.text('Groq + HRMS tools'));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(
       find.byKey(const ValueKey('dtr-assistant-external-ai-consent-dialog')),
@@ -150,10 +154,12 @@ void main() {
     await tester.pump();
     expect(find.text('Qwen'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('AI model'));
+    tester
+        .widget<PopupMenuButton<String>>(find.byType(PopupMenuButton<String>))
+        .onSelected
+        ?.call('tools_groq');
     await tester.pump();
-    await tester.tap(find.text('Groq + HRMS tools'));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(
       find.byKey(const ValueKey('dtr-assistant-external-ai-consent-accept')),
     );

@@ -79,7 +79,7 @@ void main() {
     expect(after.bottom, lessThanOrEqualTo(1000 - 16));
   });
 
-  testWidgets('mobile assistant uses a contained bottom sheet layout', (
+  testWidgets('mobile assistant uses a contained movable panel layout', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
@@ -104,12 +104,13 @@ void main() {
 
     expect(
       find.byKey(const ValueKey('hrms-assistant-floating-drag-handle')),
-      findsNothing,
+      findsOneWidget,
     );
-    expect(rect.left, closeTo(8, 0.1));
-    expect(rect.right, closeTo(382, 0.1));
-    expect(rect.bottom, closeTo(836, 0.1));
-    expect(rect.top, greaterThanOrEqualTo(8));
+    expect(rect.width, closeTo(320, 0.1));
+    expect(rect.left, greaterThanOrEqualTo(12));
+    expect(rect.right, lessThanOrEqualTo(378));
+    expect(rect.bottom, lessThanOrEqualTo(832));
+    expect(rect.top, greaterThanOrEqualTo(12));
   });
 
   testWidgets('assistant page exposes minimize and floating window controls', (

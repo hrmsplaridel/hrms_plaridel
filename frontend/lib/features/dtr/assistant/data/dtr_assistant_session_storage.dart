@@ -132,12 +132,14 @@ class DtrAssistantSessionStorage {
       _conversationKey(normalizedUserId),
     ))?.trim();
     final allValues = await _safeReadAll();
-    final keys = allValues.keys.where(
-      (key) =>
-          key == _conversationKey(normalizedUserId) ||
-          key == _legacyStorageKey(normalizedUserId) ||
-          key.startsWith(_storagePrefix(normalizedUserId)),
-    );
+    final keys = allValues.keys
+        .where(
+          (key) =>
+              key == _conversationKey(normalizedUserId) ||
+              key == _legacyStorageKey(normalizedUserId) ||
+              key.startsWith(_storagePrefix(normalizedUserId)),
+        )
+        .toList(growable: false);
     await Future.wait(keys.map(_safeDelete));
     if (activeConversationId != null && activeConversationId.isNotEmpty) {
       await _safeDelete(_storageKey(normalizedUserId, activeConversationId));
@@ -148,12 +150,15 @@ class DtrAssistantSessionStorage {
 
   static Future<void> _removeLegacyPlaintext(String userId) async {
     final prefs = await SharedPreferences.getInstance();
-    final keys = prefs.getKeys().where(
-      (key) =>
-          key == _conversationKey(userId) ||
-          key == _legacyStorageKey(userId) ||
-          key.startsWith(_storagePrefix(userId)),
-    );
+    final keys = prefs
+        .getKeys()
+        .where(
+          (key) =>
+              key == _conversationKey(userId) ||
+              key == _legacyStorageKey(userId) ||
+              key.startsWith(_storagePrefix(userId)),
+        )
+        .toList(growable: false);
     await Future.wait(keys.map(prefs.remove));
   }
 

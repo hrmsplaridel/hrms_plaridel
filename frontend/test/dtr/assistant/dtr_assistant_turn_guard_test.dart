@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_api.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/dtr_assistant_turn_guard.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/pages/employee_dtr_assistant_page.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_input_bar.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -64,6 +66,7 @@ class _TurnAssistantApi extends DtrAssistantApi {
 
 void main() {
   setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
     SharedPreferences.setMockInitialValues({});
   });
 
@@ -97,8 +100,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     Future<void> send(String text) async {
-      await tester.enterText(find.byType(TextField).last, text);
-      await tester.tap(find.byTooltip('Send'));
+      tester
+          .widget<DtrAssistantInputBar>(find.byType(DtrAssistantInputBar))
+          .onSend(text);
       await tester.pump();
     }
 
@@ -118,6 +122,7 @@ void main() {
       ),
     );
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
     api.pending[0].completer.complete(
       DtrAssistantMessage(
@@ -127,6 +132,7 @@ void main() {
       ),
     );
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('second answer'), findsOneWidget);
     expect(find.text('stale first answer'), findsNothing);

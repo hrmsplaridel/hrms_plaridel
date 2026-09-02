@@ -3,7 +3,11 @@ const assert = require('node:assert/strict');
 
 const {
   getDtrAssistantModelProfiles,
+  __test: assistantServiceTest,
 } = require('../src/services/dtrAssistant/dtrAssistantService');
+const {
+  buildDtrAssistantToolAnswerMessages,
+} = require('../src/services/dtrAssistant/dtrAssistantPrompt');
 const {
   EXTERNAL_AI_CONSENT_VERSION,
   assertExternalConsent,
@@ -103,6 +107,34 @@ function contextFixture() {
   };
 }
 
+function dataSentToModel(toolData) {
+  const messages = buildDtrAssistantToolAnswerMessages({
+    message: 'Test question',
+    intent: 'test_intent',
+    toolAnswer: 'Test answer',
+    toolData,
+  });
+  const payload = JSON.parse(
+    messages[1].content.replace(/\n\/no_think$/, '')
+  );
+  return payload.HRMS_TOOL_RESULT.data;
+}
+
+function assertIntentContracts(builder, groups) {
+  const context = contextFixture();
+  for (const group of groups) {
+    for (const intent of group.intents) {
+      const sent = dataSentToModel(builder(intent, context));
+      assert.deepEqual(
+        Object.keys(sent).sort(),
+        [...group.keys].sort(),
+        `${intent} sent an unexpected data category`
+      );
+    }
+  }
+  assert.deepEqual(dataSentToModel(builder('unknown', context)), {});
+}
+
 test('external model profiles require both administrator policy and consent metadata', () => {
   const disabled = getDtrAssistantModelProfiles({
     GROQ_API_KEY: 'configured-test-key',
@@ -189,4 +221,281 @@ test('external disclosure audit metadata contains categories, not raw HR values'
   assert.deepEqual(event.dataCategories, ['balances']);
   assert.match(event.subjectHash, /^[a-f0-9]{16}$/);
   assert.doesNotMatch(serialized, /employee-1|available_days|\"7\"/);
+});
+
+test('local tool profiles send the exact data categories for every intent family', () => {
+  assertIntentContracts(assistantServiceTest.buildToolData, [
+    { intents: ['today_dtr'], keys: ['dateRange', 'record'] },
+    {
+      intents: [
+        'missing_logs',
+        'dtr_daily_record',
+        'dtr_range_summary',
+        'dtr_missing_logs',
+        'dtr_missing_log_reason',
+        'dtr_late_summary',
+        'dtr_late_reason',
+        'dtr_undertime_summary',
+        'dtr_overtime_summary',
+        'dtr_absent_summary',
+        'dtr_status_explanation',
+        'dtr_correction_guidance',
+        'dtr_leave_coverage_check',
+        'dtr_locator_coverage_check',
+        'dtr_holiday_check',
+        'dtr_schedule_context',
+        'dtr_export_guidance',
+        'dtr_policy_guidance',
+      ],
+      keys: [
+        'dateRange',
+        'records',
+        'calendarDays',
+        'leaveRequests',
+        'locatorSlips',
+        'dtrPolicies',
+        'locatorPolicies',
+      ],
+    },
+    {
+      intents: ['leave_balance', 'leave_balance_projection'],
+      keys: ['balances'],
+    },
+    {
+      intents: ['dtr_hours_summary'],
+      keys: ['dateRange', 'records'],
+    },
+    {
+      intents: [
+        'pending_leave_requests',
+        'approved_leave_requests',
+        'rejected_leave_requests',
+        'leave_history',
+        'leave_overlap_check',
+        'leave_pending_days_explanation',
+        'leave_request_summary',
+        'leave_rejection_reason',
+        'leave_approval_tracker',
+        'leave_approval_history',
+        'leave_request_lookup',
+      ],
+      keys: ['dateRange', 'requests'],
+    },
+    {
+      intents: ['leave_availability_check', 'leave_balance_after_filing'],
+      keys: [
+        'employee',
+        'balances',
+        'requests',
+        'annualUsage',
+        'leaveTypes',
+        'leaveGuidelines',
+        'leaveGuidelineCatalog',
+        'extraction',
+      ],
+    },
+    {
+      intents: [
+        'leave_types',
+        'leave_attachment_requirement',
+        'leave_filing_policy',
+        'leave_form_guidance',
+        'leave_form_field_help',
+        'leave_eligibility_check',
+        'leave_dtr_impact',
+        'leave_guideline_section',
+        'leave_type_compare',
+        'leave_guided_filing',
+      ],
+      keys: [
+        'employee',
+        'balances',
+        'requests',
+        'leaveTypes',
+        'leaveGuidelines',
+        'leaveGuidelineCatalog',
+      ],
+    },
+    {
+      intents: ['leave_requirements'],
+      keys: ['leaveTypes', 'leaveGuidelines', 'leaveGuidelineCatalog'],
+    },
+    { intents: ['latest_leave_request'], keys: ['request'] },
+    {
+      intents: ['latest_locator_request'],
+      keys: ['slip', 'locatorTypes'],
+    },
+    {
+      intents: [
+        'locator_status',
+        'locator_summary',
+        'locator_types',
+        'locator_requirements',
+        'locator_form_field_help',
+        'locator_guided_filing',
+        'locator_availability_check',
+        'locator_rejection_reason',
+        'locator_approval_tracker',
+      ],
+      keys: [
+        'dateRange',
+        'slips',
+        'locatorTypes',
+        'locatorPolicies',
+        'dtrRecords',
+        'calendarDays',
+        'dtrPolicies',
+      ],
+    },
+  ]);
+});
+
+test('cloud tool profiles send the exact allowlisted categories for every intent family', () => {
+  assertIntentContracts(buildExternalToolData, [
+    { intents: ['today_dtr'], keys: ['dateRange', 'record'] },
+    {
+      intents: ['dtr_policy_guidance', 'dtr_export_guidance'],
+      keys: ['dateRange', 'dtrPolicies'],
+    },
+    {
+      intents: ['dtr_holiday_check', 'dtr_schedule_context'],
+      keys: ['dateRange', 'calendarDays', 'dtrPolicies'],
+    },
+    {
+      intents: ['dtr_leave_coverage_check'],
+      keys: ['dateRange', 'records', 'calendarDays', 'leaveRequests'],
+    },
+    {
+      intents: ['dtr_locator_coverage_check'],
+      keys: [
+        'dateRange',
+        'records',
+        'calendarDays',
+        'locatorSlips',
+        'locatorPolicies',
+      ],
+    },
+    {
+      intents: [
+        'missing_logs',
+        'dtr_daily_record',
+        'dtr_range_summary',
+        'dtr_missing_logs',
+        'dtr_missing_log_reason',
+        'dtr_late_summary',
+        'dtr_late_reason',
+        'dtr_undertime_summary',
+        'dtr_overtime_summary',
+        'dtr_absent_summary',
+        'dtr_status_explanation',
+        'dtr_correction_guidance',
+        'dtr_hours_summary',
+      ],
+      keys: ['dateRange', 'records', 'calendarDays', 'dtrPolicies'],
+    },
+    {
+      intents: ['leave_balance', 'leave_balance_projection'],
+      keys: ['balances'],
+    },
+    {
+      intents: [
+        'leave_rejection_reason',
+        'leave_approval_tracker',
+        'leave_approval_history',
+      ],
+      keys: ['dateRange', 'requests'],
+    },
+    {
+      intents: [
+        'pending_leave_requests',
+        'approved_leave_requests',
+        'rejected_leave_requests',
+        'leave_history',
+        'leave_overlap_check',
+        'leave_pending_days_explanation',
+        'leave_request_summary',
+        'leave_request_lookup',
+        'latest_leave_request',
+      ],
+      keys: ['dateRange', 'requests'],
+    },
+    {
+      intents: ['leave_availability_check', 'leave_balance_after_filing'],
+      keys: [
+        'balances',
+        'requests',
+        'annualUsage',
+        'leaveTypes',
+        'leaveGuidelines',
+        'extraction',
+      ],
+    },
+    {
+      intents: [
+        'leave_types',
+        'leave_attachment_requirement',
+        'leave_filing_policy',
+        'leave_form_guidance',
+        'leave_form_field_help',
+        'leave_eligibility_check',
+        'leave_dtr_impact',
+        'leave_guideline_section',
+        'leave_type_compare',
+        'leave_guided_filing',
+        'leave_requirements',
+      ],
+      keys: [
+        'balances',
+        'leaveTypes',
+        'leaveGuidelines',
+        'leaveGuidelineCatalog',
+      ],
+    },
+    {
+      intents: ['locator_rejection_reason', 'locator_approval_tracker'],
+      keys: [
+        'dateRange',
+        'slips',
+        'locatorTypes',
+        'locatorPolicies',
+      ],
+    },
+    {
+      intents: [
+        'latest_locator_request',
+        'locator_status',
+        'locator_summary',
+        'locator_types',
+        'locator_requirements',
+        'locator_form_field_help',
+        'locator_guided_filing',
+        'locator_availability_check',
+      ],
+      keys: [
+        'dateRange',
+        'slips',
+        'locatorTypes',
+        'locatorPolicies',
+      ],
+    },
+  ]);
+});
+
+test('cloud nested records exclude fields outside the allowlist before prompt creation', () => {
+  const sent = dataSentToModel(
+    buildExternalToolData('dtr_leave_coverage_check', contextFixture())
+  );
+  assert.deepEqual(Object.keys(sent.records[0]).sort(), [
+    'attendance_date',
+    'status',
+    'time_in',
+    'time_out',
+  ]);
+  assert.deepEqual(Object.keys(sent.leaveRequests[0]).sort(), [
+    'days',
+    'end_date',
+    'leave_type',
+    'start_date',
+    'status',
+  ]);
 });
