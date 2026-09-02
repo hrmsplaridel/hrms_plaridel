@@ -11,6 +11,7 @@ class DtrAssistantMessage {
     this.model,
     this.modelProfile,
     this.promptPreview,
+    this.feedbackToken,
     this.suggestions = const <DtrAssistantSuggestion>[],
     this.attachments = const <DtrAssistantAttachment>[],
     this.actions = const <DtrAssistantAction>[],
@@ -27,6 +28,7 @@ class DtrAssistantMessage {
   final String? model;
   final String? modelProfile;
   final String? promptPreview;
+  final String? feedbackToken;
   final List<DtrAssistantSuggestion> suggestions;
   final List<DtrAssistantAttachment> attachments;
   final List<DtrAssistantAction> actions;
@@ -46,6 +48,7 @@ class DtrAssistantMessage {
       if (model != null) 'model': model,
       if (modelProfile != null) 'modelProfile': modelProfile,
       if (promptPreview != null) 'promptPreview': promptPreview,
+      if (feedbackToken != null) 'feedbackToken': feedbackToken,
     };
   }
 
@@ -79,6 +82,7 @@ class DtrAssistantMessage {
       model: json['model']?.toString(),
       modelProfile: json['modelProfile']?.toString(),
       promptPreview: json['promptPreview']?.toString(),
+      feedbackToken: json['feedbackToken']?.toString(),
       suggestions: rawSuggestions is List
           ? rawSuggestions
                 .whereType<Map>()

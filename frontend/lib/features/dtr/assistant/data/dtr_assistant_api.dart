@@ -99,25 +99,15 @@ class DtrAssistantApi {
   Future<void> submitFeedback({
     required DtrAssistantMessage message,
     required String rating,
-    required String modelProfile,
-    String? promptPreview,
     String? comment,
   }) async {
-    final id = message.id;
-    if (id == null || id.isEmpty) return;
+    final feedbackToken = message.feedbackToken;
+    if (feedbackToken == null || feedbackToken.isEmpty) return;
     await _client.post<Map<String, dynamic>>(
       '/api/dtr-assistant/feedback',
       data: {
-        'messageId': id,
+        'feedbackToken': feedbackToken,
         'rating': rating,
-        'intent': message.intent,
-        'provider': message.provider,
-        'model': message.model,
-        'modelProfile': message.modelProfile ?? modelProfile,
-        'promptPreview': promptPreview ?? message.promptPreview,
-        'intentConfidence': message.intentConfidence,
-        'intentSource': message.intentSource,
-        'contentPreview': message.content,
         if (comment != null && comment.trim().isNotEmpty)
           'comment': comment.trim(),
       },

@@ -117,7 +117,9 @@ class DtrAssistantMessageBubble extends StatelessWidget {
                 if (isUser && onEdit != null) const SizedBox(width: 8),
                 if (!isUser &&
                     message.id != null &&
-                    message.id!.isNotEmpty) ...[
+                    message.id!.isNotEmpty &&
+                    message.feedbackToken != null &&
+                    message.feedbackToken!.isNotEmpty) ...[
                   IconButton(
                     icon: Icon(
                       feedback == 'up'

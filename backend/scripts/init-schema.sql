@@ -1212,6 +1212,7 @@ CREATE TABLE IF NOT EXISTS dtr_assistant_feedback (
   model_profile TEXT,
   prompt_preview TEXT,
   prompt_hash TEXT,
+  response_hash TEXT,
   intent_confidence NUMERIC(5,4),
   intent_source TEXT,
   content_preview TEXT,
@@ -1226,6 +1227,9 @@ CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_user_created
 
 CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_rating_created
   ON dtr_assistant_feedback(rating, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_created
+  ON dtr_assistant_feedback(created_at);
 
 CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_prompt_hash
   ON dtr_assistant_feedback(prompt_hash)

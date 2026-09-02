@@ -8,6 +8,7 @@ const {
 } = require('../services/dtrAssistant/dtrAssistantService');
 const { getDtrExport } = require('../services/dtrAssistant/dtrAssistantExportService');
 const {
+  issueDtrAssistantFeedbackToken,
   submitDtrAssistantFeedback,
 } = require('../services/dtrAssistant/dtrAssistantFeedbackService');
 const {
@@ -67,6 +68,20 @@ router.post(
         signal: controller.signal,
       });
       if (controller.signal.aborted || res.destroyed) return;
+      if (result?.message?.id) {
+        result.message.feedbackToken = issueDtrAssistantFeedbackToken({
+          userId: req.user.id,
+          messageId: result.message.id,
+          intent: result.message.intent,
+          provider: result.message.provider,
+          model: result.message.model,
+          modelProfile: result.message.modelProfile,
+          intentConfidence: result.message.intentConfidence,
+          intentSource: result.message.intentSource,
+          prompt: result.message.promptPreview,
+          response: result.message.content,
+        });
+      }
       res.json(result);
     } catch (err) {
       if (controller.signal.aborted || res.destroyed) return;
@@ -122,16 +137,8 @@ router.post(
     try {
       const saved = await submitDtrAssistantFeedback(pool, {
         userId: req.user.id,
-        messageId: req.body?.messageId,
+        feedbackToken: req.body?.feedbackToken,
         rating: req.body?.rating,
-        intent: req.body?.intent,
-        provider: req.body?.provider,
-        model: req.body?.model,
-        modelProfile: req.body?.modelProfile,
-        promptPreview: req.body?.promptPreview,
-        intentConfidence: req.body?.intentConfidence,
-        intentSource: req.body?.intentSource,
-        contentPreview: req.body?.contentPreview,
         comment: req.body?.comment,
       });
       res.json({ ok: true, feedback: saved });
@@ -142,6 +149,7 @@ router.post(
       }
       res.status(status).json({
         error: err.message || 'Failed to save assistant feedback',
+        code: err.code || null,
       });
     }
   }

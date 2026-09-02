@@ -58,7 +58,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   final _scrollController = ScrollController();
   final _messages = <DtrAssistantMessage>[];
   final _feedbackByMessageId = <String, String>{};
-  final _promptByMessageId = <String, String>{};
   final _autoExecutedActionKeys = <String>{};
   List<DtrAssistantModelProfile> _modelProfiles = const [
     DtrAssistantModelProfile(
@@ -169,7 +168,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ..clear()
         ..add(_welcomeMessage());
       _feedbackByMessageId.clear();
-      _promptByMessageId.clear();
       _autoExecutedActionKeys.clear();
       _resettingChat = false;
     });
@@ -366,10 +364,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       setState(() {
         _messages.add(reply);
-        final replyId = reply.id;
-        if (replyId != null && replyId.isNotEmpty) {
-          _promptByMessageId[replyId] = text;
-        }
       });
       await _persistSession();
       _runAutoAction(reply);
@@ -431,8 +425,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       await _api.submitFeedback(
         message: message,
         rating: rating,
-        modelProfile: _selectedModelProfile,
-        promptPreview: _promptByMessageId[id],
         comment: comment,
       );
       if (!mounted) return;
@@ -853,7 +845,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
                                           _feedbackByMessageId.remove(
                                             removedId,
                                           );
-                                          _promptByMessageId.remove(removedId);
                                         }
                                       }
                                       _messages.removeRange(

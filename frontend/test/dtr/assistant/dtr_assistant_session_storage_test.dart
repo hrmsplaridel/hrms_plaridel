@@ -22,6 +22,7 @@ void main() {
         role: 'user',
         content: 'Why was my sick leave rejected?',
         createdAt: DateTime.utc(2026, 9, 2),
+        feedbackToken: 'server-signed-feedback-token',
       );
 
       await DtrAssistantSessionStorage.saveConversationId(
@@ -40,6 +41,7 @@ void main() {
       final preferences = await SharedPreferences.getInstance();
 
       expect(restored.single.content, message.content);
+      expect(restored.single.feedbackToken, message.feedbackToken);
       expect(
         secureValues.values.any((value) => value.contains(message.content)),
         isTrue,
