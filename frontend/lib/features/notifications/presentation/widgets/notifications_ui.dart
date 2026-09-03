@@ -7,23 +7,21 @@ import 'package:hrms_plaridel/features/notifications/models/app_notification.dar
 class NotificationsUi {
   NotificationsUi._();
 
-  static const double radiusLg = 18;
-  static const double radiusMd = 14;
+  static const double radiusLg = 20;
+  static const double radiusMd = 16;
   static const Color accent = Color(0xFFE85D04);
+  static const Color accentSoft = Color(0xFFFFF4EC);
 
   static BoxDecoration screenCanvas(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
     return BoxDecoration(
       gradient: LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          AppTheme.dashIsDark(context)
-              ? const Color(0xFF1A2030)
-              : const Color(0xFFF4F6FA),
-          AppTheme.dashIsDark(context)
-              ? const Color(0xFF151A24)
-              : const Color(0xFFECEFF4),
-        ],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: dark
+            ? const [Color(0xFF171C28), Color(0xFF12161F), Color(0xFF1A1520)]
+            : const [Color(0xFFF7F8FC), Color(0xFFF0F2F7), Color(0xFFFFF8F3)],
+        stops: const [0.0, 0.55, 1.0],
       ),
     );
   }
@@ -31,7 +29,19 @@ class NotificationsUi {
   static PreferredSizeWidget appBarBottomDivider() {
     return PreferredSize(
       preferredSize: const Size.fromHeight(1),
-      child: Container(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+      child: Container(
+        height: 1,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Colors.transparent,
+              NotificationsUi.accent.withValues(alpha: 0.35),
+              AppTheme.primaryNavy.withValues(alpha: 0.2),
+              Colors.transparent,
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -50,54 +60,143 @@ class NotificationsSummaryStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final secondary = AppTheme.dashTextSecondaryOf(context);
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final readCount = (totalCount - unreadCount).clamp(0, totalCount);
+
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(NotificationsUi.radiusMd),
         border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: Colors.black.withValues(alpha: 0.045),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Row(
         children: [
-          Icon(Icons.inbox_rounded, size: 20, color: NotificationsUi.accent),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              unreadCount > 0
-                  ? '$unreadCount unread · $totalCount total'
-                  : '$totalCount notification${totalCount == 1 ? '' : 's'}',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: secondary,
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  NotificationsUi.accent.withValues(alpha: 0.2),
+                  AppTheme.primaryNavy.withValues(alpha: 0.1),
+                ],
               ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: NotificationsUi.accent.withValues(alpha: 0.28),
+              ),
+            ),
+            child: Icon(
+              unreadCount > 0
+                  ? Icons.mark_email_unread_rounded
+                  : Icons.mark_email_read_outlined,
+              color: NotificationsUi.accent,
+              size: 22,
             ),
           ),
-          if (unreadCount > 0)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: NotificationsUi.accent.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '$unreadCount',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: NotificationsUi.accent,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  unreadCount > 0 ? 'You have new updates' : 'Inbox is clear',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: primary,
+                    letterSpacing: -0.2,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 3),
+                Text(
+                  unreadCount > 0
+                      ? '$unreadCount unread · $totalCount total'
+                      : '$totalCount notification${totalCount == 1 ? '' : 's'}',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: secondary,
+                  ),
+                ),
+              ],
             ),
+          ),
+          _MetricPill(
+            label: 'Unread',
+            value: '$unreadCount',
+            emphasize: unreadCount > 0,
+          ),
+          const SizedBox(width: 8),
+          _MetricPill(label: 'Read', value: '$readCount', emphasize: false),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricPill extends StatelessWidget {
+  const _MetricPill({
+    required this.label,
+    required this.value,
+    required this.emphasize,
+  });
+
+  final String label;
+  final String value;
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = emphasize
+        ? NotificationsUi.accent
+        : AppTheme.dashTextSecondaryOf(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: emphasize
+            ? NotificationsUi.accent.withValues(alpha: 0.12)
+            : AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: emphasize
+              ? NotificationsUi.accent.withValues(alpha: 0.28)
+              : AppTheme.dashHairlineOf(context),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: color,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: color.withValues(alpha: 0.85),
+            ),
+          ),
         ],
       ),
     );
@@ -110,43 +209,45 @@ class NotificationSectionHeader extends StatelessWidget {
   final String label;
 
   IconData get _icon => switch (label) {
-    'Today' => Icons.today_rounded,
+    'Today' => Icons.wb_sunny_outlined,
     'Yesterday' => Icons.history_rounded,
-    _ => Icons.calendar_view_week_rounded,
+    _ => Icons.calendar_month_outlined,
   };
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 10),
+      padding: const EdgeInsets.only(top: 16, bottom: 10),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  NotificationsUi.accent.withValues(alpha: 0.18),
-                  AppTheme.primaryNavy.withValues(alpha: 0.08),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(20),
+              color: AppTheme.dashPanelOf(context),
+              borderRadius: BorderRadius.circular(999),
               border: Border.all(
-                color: NotificationsUi.accent.withValues(alpha: 0.35),
+                color: NotificationsUi.accent.withValues(alpha: 0.3),
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(_icon, size: 16, color: NotificationsUi.accent),
+                Icon(_icon, size: 15, color: NotificationsUi.accent),
                 const SizedBox(width: 6),
                 Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w800,
                     fontSize: 12,
-                    letterSpacing: 0.4,
-                    color: AppTheme.primaryNavy,
+                    letterSpacing: 0.2,
+                    color: AppTheme.dashTextPrimaryOf(context),
                   ),
                 ),
               ],
@@ -154,9 +255,16 @@ class NotificationSectionHeader extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Divider(
+            child: Container(
               height: 1,
-              color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppTheme.primaryNavy.withValues(alpha: 0.18),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
             ),
           ),
         ],
@@ -183,6 +291,7 @@ class NotificationListCard extends StatelessWidget {
     final visual = notificationVisualFor(n.type, n.category);
     final unread = n.isUnread;
     final categoryLabel = notificationCategoryLabel(n.category);
+    final dark = AppTheme.dashIsDark(context);
 
     return Material(
       color: Colors.transparent,
@@ -192,22 +301,20 @@ class NotificationListCard extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             color: unread
-                ? (AppTheme.dashIsDark(context)
-                      ? const Color(0xFF252D3D)
-                      : const Color(0xFFFFFBF8))
+                ? (dark ? const Color(0xFF252D3D) : NotificationsUi.accentSoft)
                 : AppTheme.dashPanelOf(context),
             borderRadius: BorderRadius.circular(NotificationsUi.radiusMd),
             border: Border.all(
               color: unread
-                  ? NotificationsUi.accent.withValues(alpha: 0.4)
+                  ? NotificationsUi.accent.withValues(alpha: 0.42)
                   : AppTheme.dashHairlineOf(context),
-              width: unread ? 1.5 : 1,
+              width: unread ? 1.4 : 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: unread ? 0.08 : 0.04),
-                blurRadius: unread ? 14 : 8,
-                offset: const Offset(0, 3),
+                color: Colors.black.withValues(alpha: unread ? 0.08 : 0.035),
+                blurRadius: unread ? 16 : 10,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
@@ -222,11 +329,15 @@ class NotificationListCard extends StatelessWidget {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: unread
-                          ? [NotificationsUi.accent, AppTheme.primaryNavy]
+                          ? const [
+                              NotificationsUi.accent,
+                              Color(0xFFFF8A3D),
+                              AppTheme.primaryNavy,
+                            ]
                           : [Colors.transparent, Colors.transparent],
                     ),
                     borderRadius: const BorderRadius.horizontal(
-                      left: Radius.circular(12),
+                      left: Radius.circular(14),
                     ),
                   ),
                 ),
@@ -235,26 +346,33 @@ class NotificationListCard extends StatelessWidget {
                     padding: EdgeInsets.fromLTRB(
                       14,
                       compact ? 12 : 14,
-                      14,
+                      12,
                       compact ? 12 : 14,
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
-                          width: compact ? 40 : 48,
-                          height: compact ? 40 : 48,
+                          width: compact ? 42 : 48,
+                          height: compact ? 42 : 48,
                           decoration: BoxDecoration(
-                            color: visual.accentBg,
-                            borderRadius: BorderRadius.circular(12),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                visual.accentBg,
+                                visual.iconColor.withValues(alpha: 0.08),
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(14),
                             border: Border.all(
-                              color: visual.iconColor.withValues(alpha: 0.2),
+                              color: visual.iconColor.withValues(alpha: 0.22),
                             ),
                           ),
                           child: Icon(
                             visual.icon,
                             color: visual.iconColor,
-                            size: compact ? 20 : 24,
+                            size: compact ? 20 : 23,
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -262,22 +380,65 @@ class NotificationListCard extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (categoryLabel != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 6),
-                                  child: NotificationCategoryChip(
-                                    label: categoryLabel,
-                                    color: visual.iconColor,
-                                  ),
-                                ),
+                              Row(
+                                children: [
+                                  if (categoryLabel != null) ...[
+                                    NotificationCategoryChip(
+                                      label: categoryLabel,
+                                      color: visual.iconColor,
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  if (unread)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 7,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: NotificationsUi.accent
+                                            .withValues(alpha: 0.14),
+                                        borderRadius: BorderRadius.circular(999),
+                                      ),
+                                      child: const Text(
+                                        'NEW',
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: 0.5,
+                                          color: NotificationsUi.accent,
+                                        ),
+                                      ),
+                                    ),
+                                  const Spacer(),
+                                  if (unread)
+                                    Container(
+                                      width: 9,
+                                      height: 9,
+                                      decoration: BoxDecoration(
+                                        color: NotificationsUi.accent,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: NotificationsUi.accent
+                                                .withValues(alpha: 0.45),
+                                            blurRadius: 5,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
                               Text(
                                 n.title,
                                 style: TextStyle(
                                   fontWeight: unread
                                       ? FontWeight.w800
-                                      : FontWeight.w600,
+                                      : FontWeight.w700,
                                   fontSize: compact ? 14 : 15,
                                   height: 1.25,
+                                  letterSpacing: -0.15,
                                   color: AppTheme.dashTextPrimaryOf(context),
                                 ),
                               ),
@@ -298,23 +459,23 @@ class NotificationListCard extends StatelessWidget {
                                   ),
                                 ),
                               ],
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 10),
                               Row(
                                 children: [
                                   Icon(
                                     Icons.schedule_rounded,
-                                    size: 13,
+                                    size: 14,
                                     color: AppTheme.dashTextSecondaryOf(
                                       context,
-                                    ).withValues(alpha: 0.8),
+                                    ).withValues(alpha: 0.85),
                                   ),
-                                  const SizedBox(width: 4),
+                                  const SizedBox(width: 5),
                                   Flexible(
                                     child: Text(
-                                      '${formatNotificationRelative(n.createdAt)} · ${formatNotificationAbsolute(n.createdAt)}',
+                                      formatNotificationTimestamp(n.createdAt),
                                       style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500,
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w600,
                                         color: AppTheme.dashTextSecondaryOf(
                                           context,
                                         ),
@@ -322,33 +483,30 @@ class NotificationListCard extends StatelessWidget {
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
+                                  if (!compact) ...[
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Open',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: NotificationsUi.accent
+                                            .withValues(alpha: 0.9),
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.chevron_right_rounded,
+                                      size: 16,
+                                      color: NotificationsUi.accent.withValues(
+                                        alpha: 0.85,
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ],
                           ),
                         ),
-                        if (unread)
-                          Container(
-                            width: 10,
-                            height: 10,
-                            margin: const EdgeInsets.only(left: 6, top: 4),
-                            decoration: BoxDecoration(
-                              color: NotificationsUi.accent,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white,
-                                width: 1.5,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: NotificationsUi.accent.withValues(
-                                    alpha: 0.4,
-                                  ),
-                                  blurRadius: 4,
-                                ),
-                              ],
-                            ),
-                          ),
                       ],
                     ),
                   ),
@@ -377,16 +535,16 @@ class NotificationCategoryChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
+        color: color.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
       ),
       child: Text(
-        label,
+        label.toUpperCase(),
         style: TextStyle(
-          fontSize: 10,
+          fontSize: 9.5,
           fontWeight: FontWeight.w800,
-          letterSpacing: 0.35,
+          letterSpacing: 0.45,
           color: color,
         ),
       ),
@@ -406,22 +564,29 @@ class NotificationEmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(26),
               decoration: BoxDecoration(
-                color: AppTheme.dashPanelOf(context),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    NotificationsUi.accent.withValues(alpha: 0.14),
+                    AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  ],
+                ),
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
+                    color: Colors.black.withValues(alpha: 0.05),
                     blurRadius: 20,
                     offset: const Offset(0, 6),
                   ),
                 ],
               ),
               child: Icon(
-                Icons.notifications_active_outlined,
-                size: 52,
-                color: NotificationsUi.accent.withValues(alpha: 0.7),
+                Icons.notifications_off_outlined,
+                size: 48,
+                color: NotificationsUi.accent.withValues(alpha: 0.85),
               ),
             ),
             const SizedBox(height: 24),
@@ -430,12 +595,13 @@ class NotificationEmptyState extends StatelessWidget {
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
                 color: AppTheme.dashTextPrimaryOf(context),
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Leave, recruitment, training, and other HR alerts will show here.',
+              'Leave, recruitment, training, endorsements, and other HR alerts will show up here.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,
@@ -528,29 +694,39 @@ class NotificationTypeVisual {
 }
 
 String? notificationCategoryLabel(String category) {
-  switch (category.toLowerCase()) {
-    case 'leave':
-      return 'Leave';
-    case 'locator':
-      return 'Locator';
-    case 'recruitment':
-      return 'Recruitment';
-    case 'training':
-      return 'Training';
-    case 'overtime':
-      return 'Overtime';
-    case 'dtr':
-      return 'DTR';
-    default:
-      return null;
-  }
+  final c = category.toLowerCase();
+  if (c == 'leave') return 'Leave';
+  if (c == 'locator') return 'Locator';
+  if (c == 'recruitment') return 'Recruitment';
+  if (c.contains('mayor') || c.contains('endorsement')) return 'Endorsement';
+  if (c == 'training') return 'Training';
+  if (c == 'overtime') return 'Overtime';
+  if (c == 'dtr') return 'DTR';
+  return null;
 }
 
 NotificationTypeVisual notificationVisualFor(String type, String category) {
   final t = type.toLowerCase();
   final cat = category.toLowerCase();
 
+  if (cat.contains('mayor') ||
+      cat.contains('endorsement') ||
+      t.contains('endorsement') ||
+      t.contains('mayor')) {
+    return NotificationTypeVisual(
+      icon: Icons.assured_workload_rounded,
+      iconColor: const Color(0xFFB45309),
+      accentBg: const Color(0xFFFFF7ED),
+    );
+  }
   if (cat == 'recruitment') {
+    if (t.contains('endorsement')) {
+      return NotificationTypeVisual(
+        icon: Icons.assured_workload_rounded,
+        iconColor: const Color(0xFFB45309),
+        accentBg: const Color(0xFFFFF7ED),
+      );
+    }
     return NotificationTypeVisual(
       icon: Icons.person_add_alt_1_rounded,
       iconColor: NotificationsUi.accent,
@@ -672,13 +848,26 @@ NotificationTypeVisual notificationVisualFor(String type, String category) {
 }
 
 String formatNotificationAbsolute(DateTime dt) {
+  const months = <String>[
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
   final local = dt.toLocal();
-  final y = local.year.toString().padLeft(4, '0');
-  final m = local.month.toString().padLeft(2, '0');
-  final d = local.day.toString().padLeft(2, '0');
-  final h = local.hour.toString().padLeft(2, '0');
+  final h24 = local.hour;
+  final h12 = h24 % 12 == 0 ? 12 : h24 % 12;
+  final ampm = h24 >= 12 ? 'PM' : 'AM';
   final min = local.minute.toString().padLeft(2, '0');
-  return '$y-$m-$d $h:$min';
+  return '${months[local.month - 1]} ${local.day} · $h12:$min $ampm';
 }
 
 String formatNotificationRelative(DateTime dt) {
@@ -686,13 +875,27 @@ String formatNotificationRelative(DateTime dt) {
   final now = DateTime.now();
   final diff = now.difference(local);
 
-  if (diff.isNegative) return 'Just now';
-  if (diff.inSeconds < 60) return 'Just now';
+  if (diff.isNegative || diff.inSeconds < 60) return 'Just now';
   if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
   if (diff.inHours < 24) return '${diff.inHours}h ago';
   if (diff.inDays == 1) return 'Yesterday';
   if (diff.inDays < 7) return '${diff.inDays}d ago';
-  return '${local.month}/${local.day}/${local.year}';
+  return formatNotificationAbsolute(local);
+}
+
+/// Single clean timestamp line (no duplicate date formats).
+String formatNotificationTimestamp(DateTime dt) {
+  final local = dt.toLocal();
+  final now = DateTime.now();
+  final diff = now.difference(local);
+  final absolute = formatNotificationAbsolute(local);
+
+  if (diff.isNegative || diff.inSeconds < 60) return 'Just now · $absolute';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago · $absolute';
+  if (diff.inHours < 24) return '${diff.inHours}h ago · $absolute';
+  if (diff.inDays == 1) return 'Yesterday · $absolute';
+  if (diff.inDays < 7) return '${diff.inDays}d ago · $absolute';
+  return absolute;
 }
 
 String prettifyNotificationBody(String body) {

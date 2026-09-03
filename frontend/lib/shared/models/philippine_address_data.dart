@@ -157,3 +157,24 @@ parseStoredAddress(String? raw) {
   }
   return (street: t, barangay: '', city: '', province: '', isStructured: false);
 }
+
+/// Readable address for UI/PDF (comma-separated parts instead of `|`).
+String formatStoredAddressForDisplay(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return '';
+  final p = parseStoredAddress(raw);
+  if (p.isStructured) {
+    final parts = [p.street, p.barangay, p.city, p.province]
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    return parts.join(', ');
+  }
+  if (raw.contains('|')) {
+    return raw
+        .split('|')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .join(', ');
+  }
+  return raw.trim();
+}

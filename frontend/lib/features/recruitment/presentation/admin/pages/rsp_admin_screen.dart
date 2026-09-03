@@ -1,25 +1,20 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 // ignore: avoid_web_libraries_in_flutter
 // ignore: avoid_web_libraries_in_flutter
 import 'package:url_launcher/url_launcher.dart';
-import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
 import 'package:hrms_plaridel/features/learning_development/models/bi_form.dart';
-import 'package:hrms_plaridel/features/learning_development/models/comparative_assessment.dart';
+import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
+import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
+import 'package:hrms_plaridel/features/learning_development/models/turn_around_time.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
-import 'package:hrms_plaridel/features/learning_development/models/performance_evaluation_form.dart';
-import 'package:hrms_plaridel/features/learning_development/models/promotion_certification.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
-import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
-import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/computation_of_points_section.dart';
-import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/rsp_final_requirements_section.dart';
-import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/work_experience_sheet_section.dart';
-import 'package:hrms_plaridel/features/learning_development/models/turn_around_time.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
@@ -28,15 +23,19 @@ import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_bei_grading_dialog.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_exam_editor_ui.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/rsp_scheduling_section.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/rsp_final_requirements_section.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/computation_of_points_section.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/work_experience_sheet_section.dart';
 import 'package:hrms_plaridel/features/recruitment/utils/rsp_applications_report_export.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_generate_report_dialog.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_applications_report_preview_screen.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
-import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_iframe_preview.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_attachment_actions.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_admin_hub.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
+import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 
 /// RSP module: hub with buttons for each RSP feature (Job Vacancies, Applications, Exam Results).
 class RspAdminContent extends StatefulWidget {
@@ -50,8 +49,7 @@ class RspAdminContent extends StatefulWidget {
 }
 
 class _RspAdminContentState extends State<RspAdminContent> {
-  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, 16 = Exam Results,
-  /// â€¦ 14 = Turn-Around Time, 15 = Scheduling (deliberation + orientation).
+  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, 16 = Exam Results, 15 = Scheduling.
   int _rspSectionIndex = 0;
 
   @override
@@ -64,7 +62,9 @@ class _RspAdminContentState extends State<RspAdminContent> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (_rspSectionIndex != 0) ...[
+              if (_rspSectionIndex != 0 &&
+                  _rspSectionIndex != 20 &&
+                  _rspSectionIndex != 21) ...[
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
@@ -86,35 +86,19 @@ class _RspAdminContentState extends State<RspAdminContent> {
               else if (_rspSectionIndex == 1)
                 const _RspJobVacanciesForm()
               else if (_rspSectionIndex == 2)
-                const _RspApplicationsMonitor(view: _RspMonitorView.applications)
+                const _RspApplicationsMonitor(
+                  view: _RspMonitorView.applications,
+                )
               else if (_rspSectionIndex == 16)
                 const _RspApplicationsMonitor(view: _RspMonitorView.examResults)
-              else if (_rspSectionIndex == 3)
-                const _RspBeiQuestionsEditor()
-              else if (_rspSectionIndex == 4)
-                const _RspGeneralExamEditor()
-              else if (_rspSectionIndex == 5)
-                const _RspMathExamEditor()
-              else if (_rspSectionIndex == 6)
-                const _RspGeneralInfoExamEditor()
-              else if (_rspSectionIndex == 7)
-                const _RspBiFormSection()
-              else if (_rspSectionIndex == 8)
-                const _RspPerformanceEvaluationSection()
-              else if (_rspSectionIndex == 10)
-                const _RspApplicantsProfileSection()
-              else if (_rspSectionIndex == 11)
-                const _RspComparativeAssessmentSection()
-              else if (_rspSectionIndex == 12)
-                const _RspPromotionCertificationSection()
-              else if (_rspSectionIndex == 13)
-                const _RspSelectionLineupSection()
-              else if (_rspSectionIndex == 17)
-                const RspComputationOfPointsSection()
-              else if (_rspSectionIndex == 18)
-                const RspWorkExperienceSheetSection()
-              else if (_rspSectionIndex == 14)
-                const _RspTurnAroundTimeSection()
+              else if (_rspSectionIndex == 20)
+                _RspExamsSection(
+                  onBackToRsp: () => setState(() => _rspSectionIndex = 0),
+                )
+              else if (_rspSectionIndex == 21)
+                _RspFormsSection(
+                  onBackToRsp: () => setState(() => _rspSectionIndex = 0),
+                )
               else if (_rspSectionIndex == 15)
                 const RspSchedulingSection()
               else if (_rspSectionIndex == 19)
@@ -127,6 +111,1326 @@ class _RspAdminContentState extends State<RspAdminContent> {
           );
         },
       ),
+    );
+  }
+}
+
+class _RspExamPickerItem {
+  const _RspExamPickerItem({
+    required this.examKey,
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.format,
+    this.isCustom = false,
+    this.customId,
+    this.isOpenEnded = false,
+  });
+
+  final String examKey;
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final String format;
+  final bool isCustom;
+  final String? customId;
+  final bool isOpenEnded;
+}
+
+const _builtInExamPickerItems = <_RspExamPickerItem>[
+  _RspExamPickerItem(
+    examKey: 'bei',
+    title: 'BEI / Exam Questions',
+    subtitle:
+        'View and edit the 8 Behavioral Event Interview questions applicants answer.',
+    icon: Icons.psychology_alt_rounded,
+    format: 'Open-ended',
+    isOpenEnded: true,
+  ),
+  _RspExamPickerItem(
+    examKey: 'general',
+    title: 'General Exam (LGU-Plaridel)',
+    subtitle:
+        'View and edit the General Exam multiple-choice questions for applicants.',
+    icon: Icons.assignment_turned_in_rounded,
+    format: 'Multiple choice',
+  ),
+  _RspExamPickerItem(
+    examKey: 'math',
+    title: 'Mathematics Exam',
+    subtitle: 'View and edit the Mathematics exam questions for applicants.',
+    icon: Icons.calculate_rounded,
+    format: 'Multiple choice',
+  ),
+  _RspExamPickerItem(
+    examKey: 'general_info',
+    title: 'General Information Exam',
+    subtitle:
+        'View and edit the General Information exam questions for applicants.',
+    icon: Icons.info_outline_rounded,
+    format: 'Multiple choice',
+  ),
+];
+
+/// RSP: "Exams" hub — pick which exam to view/edit (BEI, General, Math, General Info).
+class _RspExamsSection extends StatefulWidget {
+  const _RspExamsSection({required this.onBackToRsp});
+
+  /// Called when the back button is pressed at the picker level (top of this section).
+  final VoidCallback onBackToRsp;
+
+  @override
+  State<_RspExamsSection> createState() => _RspExamsSectionState();
+}
+
+class _RspExamsSectionState extends State<_RspExamsSection> {
+  _RspExamPickerItem? _selected;
+  List<CustomRspExam> _customExams = const [];
+  Set<String> _hiddenBuiltin = {};
+  bool _loadingCustom = true;
+
+  List<_RspExamPickerItem> get _allItems {
+    final extra = <_RspExamPickerItem>[];
+    for (var i = 0; i < _customExams.length; i++) {
+      final exam = _customExams[i];
+      extra.add(
+        _RspExamPickerItem(
+          examKey: exam.examType,
+          title: exam.name,
+          subtitle: exam.isOpenEnded
+              ? 'Open-ended exam. View and edit the questions applicants answer.'
+              : 'Multiple-choice exam. View and edit questions, options, and the correct answer.',
+          icon: exam.isOpenEnded
+              ? Icons.short_text_rounded
+              : Icons.checklist_rounded,
+          format: exam.isOpenEnded ? 'Open-ended' : 'Multiple choice',
+          isCustom: true,
+          customId: exam.id,
+          isOpenEnded: exam.isOpenEnded,
+        ),
+      );
+    }
+    return [
+      ..._builtInExamPickerItems.where(
+        (i) => !_hiddenBuiltin.contains(i.examKey),
+      ),
+      ...extra,
+    ];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCustomExams();
+  }
+
+  Future<void> _loadCustomExams() async {
+    setState(() => _loadingCustom = true);
+    final catalog = await RecruitmentRepo.instance.loadExamCatalog();
+    if (!mounted) return;
+    setState(() {
+      _customExams = catalog.exams;
+      _hiddenBuiltin = catalog.hiddenBuiltin;
+      _loadingCustom = false;
+    });
+  }
+
+  Widget _buildSelectedExam(_RspExamPickerItem item) {
+    switch (item.examKey) {
+      case 'bei':
+        return const _RspBeiQuestionsEditor();
+      case 'general':
+        return const _RspGeneralExamEditor();
+      case 'math':
+        return const _RspMathExamEditor();
+      case 'general_info':
+        return const _RspGeneralInfoExamEditor();
+      default:
+        if (item.isOpenEnded) {
+          return _RspCustomOpenEndedExamEditor(
+            examKey: item.examKey,
+            title: item.title,
+          );
+        }
+        return _RspCustomMcqExamEditor(
+          examKey: item.examKey,
+          title: item.title,
+        );
+    }
+  }
+
+  Widget _buildBreadcrumb() {
+    final navy = AppTheme.primaryNavy;
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final selectedItem = _selected;
+    return Row(
+      children: [
+        TextButton.icon(
+          onPressed: selectedItem == null
+              ? widget.onBackToRsp
+              : () => setState(() => _selected = null),
+          icon: const Icon(Icons.arrow_back_rounded, size: 20),
+          label: const Text('Back'),
+          style: TextButton.styleFrom(foregroundColor: navy),
+        ),
+        const SizedBox(width: 4),
+        Icon(Icons.chevron_right_rounded, size: 16, color: secondary),
+        const SizedBox(width: 2),
+        Text(
+          'Exams',
+          style: TextStyle(
+            color: selectedItem == null ? navy : secondary,
+            fontSize: 13,
+            fontWeight: selectedItem == null
+                ? FontWeight.w800
+                : FontWeight.w600,
+          ),
+        ),
+        if (selectedItem != null) ...[
+          const SizedBox(width: 2),
+          Icon(Icons.chevron_right_rounded, size: 16, color: secondary),
+          const SizedBox(width: 2),
+          Flexible(
+            child: Text(
+              selectedItem.title,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppTheme.primaryNavy,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _openCreateExamDialog() async {
+    final created = await showDialog<CustomRspExam>(
+      context: context,
+      builder: (ctx) => const _CreateCustomExamDialog(),
+    );
+    if (created == null || !mounted) return;
+    await _loadCustomExams();
+    if (!mounted) return;
+    final match = _allItems.where((i) => i.customId == created.id);
+    setState(() => _selected = match.isEmpty ? null : match.first);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Created "${created.name}". Add questions, then save.'),
+      ),
+    );
+  }
+
+  Future<void> _deleteExam(_RspExamPickerItem item) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete exam?'),
+        content: Text(
+          'This will remove "${item.title}" from Exams and delete its questions. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      if (item.isCustom) {
+        final id = item.customId;
+        if (id == null) return;
+        await RecruitmentRepo.instance.deleteCustomExam(id);
+      } else {
+        await RecruitmentRepo.instance.hideBuiltinExam(item.examKey);
+      }
+      if (!mounted) return;
+      if (_selected?.examKey == item.examKey) {
+        setState(() => _selected = null);
+      }
+      await _loadCustomExams();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Deleted "${item.title}".')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  Widget _examGrid(List<_RspExamPickerItem> items) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 900 ? 2 : 1;
+        Widget row(_RspExamPickerItem item) => _RspExamPickerRow(
+          item: item,
+          onTap: () => setState(() => _selected = item),
+          onDelete: () => _deleteExam(item),
+        );
+        if (columns == 1) {
+          return Column(
+            children: [
+              for (final item in items)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: row(item),
+                ),
+            ],
+          );
+        }
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final item in items)
+              SizedBox(
+                width: (constraints.maxWidth - 12) / 2,
+                child: row(item),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_selected != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildBreadcrumb(),
+          const SizedBox(height: 12),
+          _buildSelectedExam(_selected!),
+        ],
+      );
+    }
+
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+    final items = _allItems;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildBreadcrumb(),
+        const SizedBox(height: 16),
+        Container(
+          padding: EdgeInsets.all(isNarrow ? 20 : 24),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: AppTheme.dashIsDark(context)
+                  ? [const Color(0xFF252D3D), const Color(0xFF1E2430)]
+                  : [
+                      const Color(0xFFFFF8F3),
+                      Colors.white,
+                      const Color(0xFFF5F8FF),
+                    ],
+            ),
+            border: Border.all(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.14),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primaryNavy.withValues(alpha: 0.16),
+                      AppTheme.letterheadNavy.withValues(alpha: 0.08),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.14),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.quiz_rounded,
+                  color: AppTheme.primaryNavy,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Exams',
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Choose which exam you want to view or edit, or create a new exam.',
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 13.5,
+                        height: 1.4,
+                      ),
+                    ),
+                    if (isNarrow) ...[
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        onPressed: _openCreateExamDialog,
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        label: const Text('Create exam'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primaryNavy,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (!isNarrow) ...[
+                const SizedBox(width: 12),
+                FilledButton.icon(
+                  onPressed: _openCreateExamDialog,
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Create exam'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryNavy,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        if (_loadingCustom)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 28),
+            child: Center(
+              child: Text(
+                'No exams yet. Create an exam to get started.',
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 13.5,
+                ),
+              ),
+            ),
+          )
+        else
+          _examGrid(items),
+      ],
+    );
+  }
+}
+
+const _builtInFormPickerItems = <_RspExamPickerItem>[
+  _RspExamPickerItem(
+    examKey: 'bi',
+    title: 'Background Investigation (BI Form)',
+    subtitle:
+        'Record BI evaluations: applicant, respondent, and competency ratings.',
+    icon: Icons.verified_user_rounded,
+    format: 'Investigation form',
+  ),
+  _RspExamPickerItem(
+    examKey: 'applicants_profile',
+    title: 'Applicants Profile',
+    subtitle:
+        'Job vacancy details and list of applicants (name, course, address, sex, age, civil status).',
+    icon: Icons.people_alt_rounded,
+    format: 'Profile form',
+  ),
+  _RspExamPickerItem(
+    examKey: 'selection_lineup',
+    title: 'Selection Line-Up',
+    subtitle:
+        'Date, agency/office, vacant position, item no., and applicants table.',
+    icon: Icons.format_list_numbered_rounded,
+    format: 'Line-up form',
+  ),
+  _RspExamPickerItem(
+    examKey: 'computation_of_points',
+    title: 'Computation of Points',
+    subtitle:
+        'Personnel Selection Board scoring: education, eligibility, experience, training, and ranking.',
+    icon: Icons.calculate_rounded,
+    format: 'Scoring form',
+  ),
+  _RspExamPickerItem(
+    examKey: 'work_experience',
+    title: 'Work Experience Sheet',
+    subtitle:
+        'Position, department, minimum standards, last work description, and applicant signature.',
+    icon: Icons.work_history_rounded,
+    format: 'Experience form',
+  ),
+  _RspExamPickerItem(
+    examKey: 'turn_around_time',
+    title: 'Turn Around Time',
+    subtitle:
+        'Position, office, dates, and applicant tracking through hiring milestones.',
+    icon: Icons.schedule_rounded,
+    format: 'Tracking form',
+  ),
+];
+
+/// RSP: "Forms" hub — pick which form to view/edit.
+class _RspFormsSection extends StatefulWidget {
+  const _RspFormsSection({required this.onBackToRsp});
+
+  final VoidCallback onBackToRsp;
+
+  @override
+  State<_RspFormsSection> createState() => _RspFormsSectionState();
+}
+
+class _RspFormsSectionState extends State<_RspFormsSection> {
+  _RspExamPickerItem? _selected;
+
+  Widget _buildSelectedForm(_RspExamPickerItem item) {
+    switch (item.examKey) {
+      case 'bi':
+        return const _RspBiFormSection();
+      case 'applicants_profile':
+        return const _RspApplicantsProfileSection();
+      case 'selection_lineup':
+        return const _RspSelectionLineupSection();
+      case 'computation_of_points':
+        return const RspComputationOfPointsSection();
+      case 'work_experience':
+        return const RspWorkExperienceSheetSection();
+      case 'turn_around_time':
+        return const _RspTurnAroundTimeSection();
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _buildBreadcrumb() {
+    final navy = AppTheme.primaryNavy;
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final selectedItem = _selected;
+    return Row(
+      children: [
+        TextButton.icon(
+          onPressed: selectedItem == null
+              ? widget.onBackToRsp
+              : () => setState(() => _selected = null),
+          icon: const Icon(Icons.arrow_back_rounded, size: 20),
+          label: const Text('Back'),
+          style: TextButton.styleFrom(foregroundColor: navy),
+        ),
+        const SizedBox(width: 4),
+        Icon(Icons.chevron_right_rounded, size: 16, color: secondary),
+        const SizedBox(width: 2),
+        Text(
+          'Forms',
+          style: TextStyle(
+            color: selectedItem == null ? navy : secondary,
+            fontSize: 13,
+            fontWeight: selectedItem == null
+                ? FontWeight.w800
+                : FontWeight.w600,
+          ),
+        ),
+        if (selectedItem != null) ...[
+          const SizedBox(width: 2),
+          Icon(Icons.chevron_right_rounded, size: 16, color: secondary),
+          const SizedBox(width: 2),
+          Flexible(
+            child: Text(
+              selectedItem.title,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppTheme.primaryNavy,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _formGrid() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 900 ? 2 : 1;
+        Widget row(_RspExamPickerItem item) => _RspExamPickerRow(
+          item: item,
+          onTap: () => setState(() => _selected = item),
+        );
+        if (columns == 1) {
+          return Column(
+            children: [
+              for (final item in _builtInFormPickerItems)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: row(item),
+                ),
+            ],
+          );
+        }
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final item in _builtInFormPickerItems)
+              SizedBox(
+                width: (constraints.maxWidth - 12) / 2,
+                child: row(item),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_selected != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildBreadcrumb(),
+          const SizedBox(height: 12),
+          _buildSelectedForm(_selected!),
+        ],
+      );
+    }
+
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildBreadcrumb(),
+        const SizedBox(height: 16),
+        Container(
+          padding: EdgeInsets.all(isNarrow ? 20 : 24),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: AppTheme.dashIsDark(context)
+                  ? [const Color(0xFF252D3D), const Color(0xFF1E2430)]
+                  : [
+                      const Color(0xFFFFF8F3),
+                      Colors.white,
+                      const Color(0xFFF5F8FF),
+                    ],
+            ),
+            border: Border.all(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.14),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primaryNavy.withValues(alpha: 0.16),
+                      AppTheme.letterheadNavy.withValues(alpha: 0.08),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.14),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.description_rounded,
+                  color: AppTheme.primaryNavy,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Forms',
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Choose which form you want to view or edit.',
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 13.5,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        _formGrid(),
+      ],
+    );
+  }
+}
+
+/// Color-coded exam picker row (distinct from the card-grid hub layout).
+class _RspExamPickerRow extends StatefulWidget {
+  const _RspExamPickerRow({
+    required this.item,
+    required this.onTap,
+    this.onDelete,
+  });
+
+  final _RspExamPickerItem item;
+  final VoidCallback onTap;
+  final VoidCallback? onDelete;
+
+  @override
+  State<_RspExamPickerRow> createState() => _RspExamPickerRowState();
+}
+
+class _RspExamPickerRowState extends State<_RspExamPickerRow> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = AppTheme.primaryNavy;
+    final dark = AppTheme.dashIsDark(context);
+    final baseBg = AppTheme.dashPanelOf(context);
+    final baseBorder = AppTheme.dashHairlineOf(context);
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOutCubic,
+        transform: Matrix4.translationValues(0, _hovering ? -2 : 0, 0),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _hovering
+              ? color.withValues(alpha: dark ? 0.1 : 0.05)
+              : baseBg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: _hovering ? color.withValues(alpha: 0.5) : baseBorder,
+            width: _hovering ? 1.4 : 1,
+          ),
+          boxShadow: _hovering
+              ? [
+                  BoxShadow(
+                    color: color.withValues(alpha: dark ? 0.22 : 0.14),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: widget.onTap,
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              color.withValues(alpha: dark ? 0.28 : 0.14),
+                              color.withValues(alpha: dark ? 0.16 : 0.06),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: color.withValues(alpha: 0.22),
+                          ),
+                        ),
+                        child: Icon(widget.item.icon, size: 22, color: color),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.item.title,
+                              style: TextStyle(
+                                color: AppTheme.dashTextPrimaryOf(context),
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w700,
+                                height: 1.2,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              widget.item.subtitle,
+                              style: TextStyle(
+                                color: AppTheme.dashTextSecondaryOf(context),
+                                fontSize: 12.5,
+                                height: 1.35,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: color.withValues(
+                                  alpha: dark ? 0.16 : 0.1,
+                                ),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                widget.item.format,
+                                style: TextStyle(
+                                  color: color,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        width: 30,
+                        height: 30,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _hovering
+                              ? color
+                              : color.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 16,
+                          color: _hovering ? Colors.white : color,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (widget.onDelete != null) ...[
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Delete exam',
+                onPressed: widget.onDelete,
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  foregroundColor: const Color(0xFFC62828),
+                ),
+                icon: const Icon(Icons.delete_outline_rounded, size: 20),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CreateCustomExamDialog extends StatefulWidget {
+  const _CreateCustomExamDialog();
+
+  @override
+  State<_CreateCustomExamDialog> createState() =>
+      _CreateCustomExamDialogState();
+}
+
+class _CreateCustomExamDialogState extends State<_CreateCustomExamDialog> {
+  final _nameController = TextEditingController();
+  String _format = 'open_ended';
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a name for the exam.')),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final exam = await RecruitmentRepo.instance.createCustomExam(
+        name: name,
+        format: _format,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(exam);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Create exam'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _nameController,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              style: AppTheme.dashFieldTextStyle(context),
+              decoration: AppTheme.dashInputDecoration(
+                context,
+                labelText: 'Exam name',
+                hintText: 'e.g. Technical Skills Exam',
+              ),
+              onSubmitted: (_) => _saving ? null : _submit(),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'Question type',
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                  value: 'open_ended',
+                  label: Text('Open-ended'),
+                  icon: Icon(Icons.short_text_rounded, size: 18),
+                ),
+                ButtonSegment(
+                  value: 'multiple_choice',
+                  label: Text('Multiple choice'),
+                  icon: Icon(Icons.checklist_rounded, size: 18),
+                ),
+              ],
+              selected: {_format},
+              onSelectionChanged: (s) => setState(() => _format = s.first),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Create'),
+        ),
+      ],
+    );
+  }
+}
+
+class _RspCustomOpenEndedExamEditor extends StatefulWidget {
+  const _RspCustomOpenEndedExamEditor({
+    required this.examKey,
+    required this.title,
+  });
+
+  final String examKey;
+  final String title;
+
+  @override
+  State<_RspCustomOpenEndedExamEditor> createState() =>
+      _RspCustomOpenEndedExamEditorState();
+}
+
+class _RspCustomOpenEndedExamEditorState
+    extends State<_RspCustomOpenEndedExamEditor> {
+  List<TextEditingController> _controllers = [];
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final list = await RecruitmentRepo.instance.getExamQuestions(
+        widget.examKey,
+      );
+      if (!mounted) return;
+      for (final c in _controllers) {
+        c.dispose();
+      }
+      _controllers = list.isEmpty
+          ? [TextEditingController()]
+          : list.map((q) => TextEditingController(text: q)).toList();
+      setState(() => _loading = false);
+    } catch (_) {
+      if (!mounted) return;
+      for (final c in _controllers) {
+        c.dispose();
+      }
+      _controllers = [TextEditingController()];
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final questions = _controllers
+        .map((c) => c.text.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (questions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add at least one question.')),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await RecruitmentRepo.instance.saveExamQuestions(
+        widget.examKey,
+        questions,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${widget.title} questions saved.')),
+      );
+      setState(() => _saving = false);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+      );
+      setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.all(48),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RspExamPageHeader(
+          icon: Icons.short_text_rounded,
+          title: widget.title,
+          subtitle:
+              'Open-ended questions. Edit below; applicants can answer in their own words.',
+        ),
+        const SizedBox(height: 22),
+        _RspExamTimeLimitEditor(examType: widget.examKey),
+        Container(
+          padding: const EdgeInsets.all(22),
+          decoration: RspExamEditorUi.elevatedPanel(context),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ...List.generate(_controllers.length, (i) {
+                return RspBeiQuestionRow(
+                  index: i,
+                  controller: _controllers[i],
+                  onChanged: () => setState(() {}),
+                  canRemove: _controllers.length > 1,
+                  onRemove: () {
+                    _controllers[i].dispose();
+                    _controllers.removeAt(i);
+                    setState(() {});
+                  },
+                );
+              }),
+              TextButton.icon(
+                onPressed: () {
+                  _controllers.add(TextEditingController());
+                  setState(() {});
+                },
+                icon: const Icon(Icons.add_rounded, size: 20),
+                label: const Text('Add question'),
+                style: RspExamEditorUi.ghostAction(context),
+              ),
+              const SizedBox(height: 20),
+              RspExamSaveButton(
+                label: 'Save ${widget.title} questions',
+                saving: _saving,
+                onPressed: _saving ? null : _save,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RspCustomMcqExamEditor extends StatefulWidget {
+  const _RspCustomMcqExamEditor({required this.examKey, required this.title});
+
+  final String examKey;
+  final String title;
+
+  @override
+  State<_RspCustomMcqExamEditor> createState() =>
+      _RspCustomMcqExamEditorState();
+}
+
+class _RspCustomMcqExamEditorState extends State<_RspCustomMcqExamEditor> {
+  List<_GeneralExamItem> _items = [];
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  void _disposeItems() {
+    for (final item in _items) {
+      item.questionController.dispose();
+      for (final c in item.optionControllers) {
+        c.dispose();
+      }
+    }
+    _items = [];
+  }
+
+  _GeneralExamItem _makeItem(
+    String question,
+    List<String> options,
+    int correctIndex,
+  ) {
+    return _GeneralExamItem(
+      questionController: TextEditingController(text: question),
+      optionControllers: options
+          .map((o) => TextEditingController(text: o))
+          .toList(),
+      correctIndex: correctIndex.clamp(0, options.length - 1),
+    );
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final list = await RecruitmentRepo.instance.getExamQuestionsWithOptions(
+        widget.examKey,
+      );
+      if (!mounted) return;
+      _disposeItems();
+      if (list.isEmpty) {
+        _items.add(_makeItem('', <String>['', '', '', ''], 0));
+      } else {
+        for (final q in list) {
+          final opts =
+              (q['options'] as List<dynamic>?)
+                  ?.map((e) => e.toString())
+                  .toList() ??
+              <String>[];
+          while (opts.length < 2) {
+            opts.add('');
+          }
+          _items.add(
+            _makeItem(
+              q['question_text'] as String? ?? '',
+              opts,
+              (q['correct'] as num?)?.toInt() ?? 0,
+            ),
+          );
+        }
+      }
+      setState(() => _loading = false);
+    } catch (_) {
+      if (!mounted) return;
+      _disposeItems();
+      _items.add(_makeItem('', <String>['', '', '', ''], 0));
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposeItems();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final questions = <Map<String, dynamic>>[];
+    for (final item in _items) {
+      final q = item.questionController.text.trim();
+      final opts = item.optionControllers
+          .map((c) => c.text.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (q.isEmpty || opts.length < 2) continue;
+      final correct = item.correctIndex.clamp(0, opts.length - 1);
+      questions.add({'question_text': q, 'options': opts, 'correct': correct});
+    }
+    if (questions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Add at least one question with 2+ options.'),
+        ),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await RecruitmentRepo.instance.saveExamQuestionsWithOptions(
+        widget.examKey,
+        questions,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${widget.title} questions saved.')),
+      );
+      setState(() => _saving = false);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
+      );
+      setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.all(48),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RspExamPageHeader(
+          icon: Icons.checklist_rounded,
+          title: widget.title,
+          subtitle:
+              'Multiple-choice questions. Edit below; set the correct option per question.',
+        ),
+        const SizedBox(height: 22),
+        _RspExamTimeLimitEditor(examType: widget.examKey),
+        _rspMcqQuestionsPanel(
+          context: context,
+          items: _items,
+          onRefresh: () => setState(() {}),
+          onCreateItem: () => _makeItem('', <String>['', '', '', ''], 0),
+        ),
+        const SizedBox(height: 20),
+        RspExamSaveButton(
+          label: 'Save ${widget.title} questions',
+          saving: _saving,
+          onPressed: _saving ? null : _save,
+        ),
+      ],
     );
   }
 }
@@ -248,6 +1552,7 @@ class _RspBeiQuestionsEditorState extends State<_RspBeiQuestionsEditor> {
               'For New Applicant/s and Promotion/s. Edit the questions below; applicants will see these when they take the exam.',
         ),
         const SizedBox(height: 22),
+        const _RspExamTimeLimitEditor(examType: 'bei'),
         Container(
           padding: const EdgeInsets.all(22),
           decoration: RspExamEditorUi.elevatedPanel(context),
@@ -302,7 +1607,7 @@ class _GeneralExamItem {
   int correctIndex;
 }
 
-/// Admin-only: minutes per MCQ exam (0 = no time limit for applicants).
+/// Admin-only: minutes per exam (0 = no time limit for applicants).
 class _RspExamTimeLimitEditor extends StatefulWidget {
   const _RspExamTimeLimitEditor({required this.examType});
   final String examType;
@@ -476,8 +1781,10 @@ Widget _rspMcqQuestionsPanel({
                             0,
                             optCount - 1,
                           );
-                          final selected =
-                              item.optionControllers[safeIndex].text.trim();
+                          final selected = item
+                              .optionControllers[safeIndex]
+                              .text
+                              .trim();
                           if (selected.isEmpty) {
                             return 'Correct answer: Option ${safeIndex + 1}';
                           }
@@ -513,35 +1820,36 @@ Widget _rspMcqQuestionsPanel({
                                           return SingleChildScrollView(
                                             child: Column(
                                               mainAxisSize: MainAxisSize.min,
-                                              children: List.generate(optCount, (
-                                                idx,
-                                              ) {
-                                                final txt = item
-                                                    .optionControllers[idx]
-                                                    .text
-                                                    .trim();
-                                                return RadioListTile<int>(
-                                                  value: idx,
-                                                  groupValue: selected,
-                                                  onChanged: (v) {
-                                                    if (v == null) return;
-                                                    setDialogState(
-                                                      () => selected = v,
-                                                    );
-                                                  },
-                                                  title: Text(
-                                                    txt.isEmpty
-                                                        ? 'Option ${idx + 1}'
-                                                        : txt,
-                                                    maxLines: 2,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  ),
-                                                  dense: true,
-                                                  contentPadding:
-                                                      EdgeInsets.zero,
-                                                );
-                                              }),
+                                              children: List.generate(
+                                                optCount,
+                                                (idx) {
+                                                  final txt = item
+                                                      .optionControllers[idx]
+                                                      .text
+                                                      .trim();
+                                                  return RadioListTile<int>(
+                                                    value: idx,
+                                                    groupValue: selected,
+                                                    onChanged: (v) {
+                                                      if (v == null) return;
+                                                      setDialogState(
+                                                        () => selected = v,
+                                                      );
+                                                    },
+                                                    title: Text(
+                                                      txt.isEmpty
+                                                          ? 'Option ${idx + 1}'
+                                                          : txt,
+                                                      maxLines: 2,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                    dense: true,
+                                                    contentPadding:
+                                                        EdgeInsets.zero,
+                                                  );
+                                                },
+                                              ),
                                             ),
                                           );
                                         },
@@ -549,9 +1857,8 @@ Widget _rspMcqQuestionsPanel({
                                     ),
                                     actions: [
                                       TextButton(
-                                        onPressed: () => Navigator.of(
-                                          dialogContext,
-                                        ).pop(),
+                                        onPressed: () =>
+                                            Navigator.of(dialogContext).pop(),
                                         child: const Text('Cancel'),
                                       ),
                                       FilledButton(
@@ -1203,7 +2510,7 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
         Text(
           'Background Investigation (BI) Form',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: AppTheme.dashTextPrimaryOf(context),
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
@@ -1211,7 +2518,10 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
         const SizedBox(height: 8),
         Text(
           'Record BI evaluations: applicant and respondent details, plus competency ratings (1\u20135).',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 14,
+          ),
         ),
         const SizedBox(height: 24),
         if (_editing != null) ...[
@@ -1611,7 +2921,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                         Text(
                           'Work relationship to the applicants: (Kindly check the appropriate box)',
                           style: TextStyle(
-                            color: AppTheme.textSecondary,
+                            color: AppTheme.dashTextSecondaryOf(context),
                             fontSize: 12,
                           ),
                         ),
@@ -1656,7 +2966,10 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               ),
               Text(
                 'Core and Organizational Competencies:',
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                style: TextStyle(
+                  color: AppTheme.dashTextPrimaryOf(context),
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 8),
               Row(
@@ -1666,7 +2979,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                     child: Text(
                       'Using the following rating guide please check (/) the appropriate box opposite each behavioral Indicator:',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 12,
                       ),
                     ),
@@ -1784,7 +3097,10 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               const SizedBox(height: 6),
               Text(
                 'Please check (/) the boxes opposite the functional area where the applicant can perform effectively.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 12,
+                ),
               ),
               const SizedBox(height: 12),
               Row(
@@ -1844,7 +3160,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                         Text(
                           'Other (Please specify)',
                           style: TextStyle(
-                            color: AppTheme.textPrimary,
+                            color: AppTheme.dashTextPrimaryOf(context),
                             fontSize: 13,
                           ),
                         ),
@@ -1872,7 +3188,10 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               const SizedBox(height: 12),
               Text(
                 'Please tell us about the work performance of the applicants in the last three (3) years. What are the applicant\'s outstanding accomplishments recognition received and significant contributions to your office if any?',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 12,
+                ),
               ),
               const SizedBox(height: 6),
               RspSpacedOutlineField(
@@ -1886,7 +3205,10 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               const SizedBox(height: 16),
               Text(
                 'What do you think are the challenges or difficulties of the applicant in performing his/her duties and responsibilities in his/her position? How did the applicant cope with these challenges?',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 12,
+                ),
               ),
               const SizedBox(height: 6),
               RspSpacedOutlineField(
@@ -1900,7 +3222,10 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               const SizedBox(height: 16),
               Text(
                 'In terms of compliance with rules and regulation, please provide us information on the applicant\'s attendance to flag ceremonies/ retreats and other office programs and activities?',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 12,
+                ),
               ),
               const SizedBox(height: 6),
               RspSpacedOutlineField(
@@ -1926,7 +3251,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               Text(
                 'Other relevant information/ data (critical incidents, family background, health profile habits, vices, membership in unions/ associations, or any derogatory records) about the applicants, if any.',
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1971,14 +3296,17 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                   widget.entry.createdAt != null
                       ? 'Created: ${widget.entry.createdAt!.toLocal()}'
                       : '',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
                 ),
                 if (widget.entry.updatedAt != null)
                   Text(
                     'Last updated: ${widget.entry.updatedAt!.toLocal()}',
                     style: TextStyle(
                       fontSize: 11,
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                     ),
                   ),
               ],
@@ -2048,14 +3376,15 @@ class _BiFormList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(e.applicantName, bold: true),
-              rspRecordsTextCell(e.respondentName, bold: true),
-              rspRecordsTextCell(e.respondentRelationship),
+              rspRecordsTextCell(context, e.applicantName, bold: true),
+              rspRecordsTextCell(context, e.respondentName, bold: true),
+              rspRecordsTextCell(context, e.respondentRelationship),
               RspRecordsCrudActions(
                 onView: () => showReadOnlySavedEntryDialog(
                   context,
                   title: 'BI form â€” ${e.applicantName}',
-                  subtitle: '${e.respondentName} Â· ${e.respondentRelationship}',
+                  subtitle:
+                      '${e.respondentName} Â· ${e.respondentRelationship}',
                   previewBuilder: () => _BiFormEditor(
                     readOnly: true,
                     entry: e,
@@ -2081,594 +3410,6 @@ class _BiFormList extends StatelessWidget {
     );
   }
 }
-
-/// RSP: Performance / Functional Evaluation Ã¢â‚¬â€ list entries and add/edit form.
-class _RspPerformanceEvaluationSection extends StatefulWidget {
-  const _RspPerformanceEvaluationSection();
-
-  @override
-  State<_RspPerformanceEvaluationSection> createState() =>
-      _RspPerformanceEvaluationSectionState();
-}
-
-class _RspPerformanceEvaluationSectionState
-    extends State<_RspPerformanceEvaluationSection> {
-  List<PerformanceEvaluationEntry> _entries = [];
-  bool _loading = true;
-  PerformanceEvaluationEntry? _editing;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
-      final list = await PerformanceEvaluationRepo.instance.list();
-      if (mounted) {
-        setState(() {
-          _entries = list;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _entries = [];
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  void _startNew() {
-    setState(() => _editing = const PerformanceEvaluationEntry());
-  }
-
-  void _edit(PerformanceEvaluationEntry e) {
-    setState(() => _editing = e);
-  }
-
-  void _cancelEdit() {
-    setState(() => _editing = null);
-  }
-
-  void _openSavedRecordsBrowser() {
-    showRspLdSavedRecordsBrowser(
-      context,
-      sheetTitle: 'Saved performance evaluations',
-      emptyMessage: 'No evaluations yet.',
-      loading: _loading,
-      items: _entries.map((e) {
-        final areas = e.functionalAreas.isEmpty
-            ? 'â€”'
-            : e.functionalAreas.join(', ');
-        final name = (e.applicantName?.trim().isNotEmpty ?? false)
-            ? e.applicantName!
-            : '(No name)';
-        return SavedRecordListItem(
-          title: name,
-          subtitle: areas,
-          detailDialogTitle: 'Performance evaluation â€” $name',
-          previewContentWidth: 880,
-          previewBuilder: () => _PerformanceFormEditor(
-            readOnly: true,
-            entry: e,
-            onSave: (_) {},
-            onCancel: () {},
-            onPrint: (_) async {},
-            onDownloadPdf: (_) async {},
-          ),
-          onPrint: () => _printPerf(e),
-        );
-      }).toList(),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Performance / Functional Evaluation',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Record functional areas and performance narratives for applicants.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 24),
-        if (_editing != null) ...[
-          _PerformanceFormEditor(
-            key: ValueKey(_editing?.id ?? 'new'),
-            entry: _editing!,
-            onSave: _onSavePerf,
-            onCancel: _cancelEdit,
-            onPrint: _printPerf,
-            onDownloadPdf: _downloadPerf,
-          ),
-          const SizedBox(height: 24),
-        ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add evaluation'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message: 'No evaluations yet. Tap "Add evaluation" to add one.',
-            icon: Icons.assessment_outlined,
-          )
-        else
-          _PerformanceFormList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDeletePerf,
-            onPrint: _printPerf,
-            onDownloadPdf: _downloadPerf,
-          ),
-      ],
-    );
-  }
-
-  Future<void> _onSavePerf(PerformanceEvaluationEntry entry) async {
-    try {
-      if (entry.id == null) {
-        await PerformanceEvaluationRepo.instance.insert(entry);
-      } else {
-        await PerformanceEvaluationRepo.instance.update(entry);
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Evaluation saved.')));
-        setState(() => _editing = null);
-        _load();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
-        );
-      }
-    }
-  }
-
-  Future<void> _onDeletePerf(String id) async {
-    try {
-      await PerformanceEvaluationRepo.instance.delete(id);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Evaluation deleted.')));
-        _load();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
-      }
-    }
-  }
-
-  Future<void> _printPerf(PerformanceEvaluationEntry entry) async {
-    try {
-      await FormPdf.printForm(
-        context: context,
-        buildDocument: () => FormPdf.buildPerformanceEvaluationPdf(entry),
-        filename: 'Performance_Evaluation.pdf',
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _downloadPerf(PerformanceEvaluationEntry entry) async {
-    try {
-      final doc = await FormPdf.buildPerformanceEvaluationPdf(entry);
-      await FormPdf.sharePdf(doc, name: 'Performance_Evaluation.pdf');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF ready to save or share.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
-      }
-    }
-  }
-}
-
-class _PerformanceFormEditor extends StatefulWidget {
-  const _PerformanceFormEditor({
-    super.key,
-    required this.entry,
-    this.readOnly = false,
-    required this.onSave,
-    required this.onCancel,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final PerformanceEvaluationEntry entry;
-  final bool readOnly;
-  final void Function(PerformanceEvaluationEntry) onSave;
-  final VoidCallback onCancel;
-  final Future<void> Function(PerformanceEvaluationEntry) onPrint;
-  final Future<void> Function(PerformanceEvaluationEntry) onDownloadPdf;
-
-  @override
-  State<_PerformanceFormEditor> createState() => _PerformanceFormEditorState();
-}
-
-class _PerformanceFormEditorState extends State<_PerformanceFormEditor> {
-  late TextEditingController _applicantName;
-  late TextEditingController _otherArea;
-  late TextEditingController _perf3Years;
-  late TextEditingController _challenges;
-  late TextEditingController _compliance;
-  late List<bool> _functionalChecks;
-
-  @override
-  void initState() {
-    super.initState();
-    final e = widget.entry;
-    _applicantName = TextEditingController(text: e.applicantName ?? '');
-    _otherArea = TextEditingController(text: e.otherFunctionalArea ?? '');
-    _perf3Years = TextEditingController(text: e.performance3Years ?? '');
-    _challenges = TextEditingController(text: e.challengesCoping ?? '');
-    _compliance = TextEditingController(text: e.complianceAttendance ?? '');
-    _functionalChecks = List.generate(
-      PerformanceEvaluationEntry.functionalAreaOptions.length,
-      (i) => e.functionalAreas.contains(
-        PerformanceEvaluationEntry.functionalAreaOptions[i],
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _applicantName.dispose();
-    _otherArea.dispose();
-    _perf3Years.dispose();
-    _challenges.dispose();
-    _compliance.dispose();
-    super.dispose();
-  }
-
-  PerformanceEvaluationEntry _buildCurrentEntry() {
-    final areas = <String>[];
-    for (var i = 0; i < _functionalChecks.length; i++) {
-      if (_functionalChecks[i]) {
-        areas.add(PerformanceEvaluationEntry.functionalAreaOptions[i]);
-      }
-    }
-    return PerformanceEvaluationEntry(
-      id: widget.entry.id,
-      applicantName: _applicantName.text.trim().isEmpty
-          ? null
-          : _applicantName.text.trim(),
-      functionalAreas: areas,
-      otherFunctionalArea: _otherArea.text.trim().isEmpty
-          ? null
-          : _otherArea.text.trim(),
-      performance3Years: _perf3Years.text.trim().isEmpty
-          ? null
-          : _perf3Years.text.trim(),
-      challengesCoping: _challenges.text.trim().isEmpty
-          ? null
-          : _challenges.text.trim(),
-      complianceAttendance: _compliance.text.trim().isEmpty
-          ? null
-          : _compliance.text.trim(),
-      createdAt: widget.entry.createdAt,
-      updatedAt: widget.entry.updatedAt,
-    );
-  }
-
-  void _save() {
-    if (widget.readOnly) return;
-    widget.onSave(_buildCurrentEntry());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ro = widget.readOnly;
-    const options = PerformanceEvaluationEntry.functionalAreaOptions;
-    const leftCount = 6; // Left column: first 6; right column: rest + Other
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const RspFormHeader(
-              formTitle: 'Performance / Functional Evaluation',
-            ),
-            Text(
-              'A. Functional Areas:',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Please check (/) the boxes opposite the functional area where the applicant can perform effectively.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (var i = 0; i < leftCount && i < options.length; i++)
-                        CheckboxListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(
-                            options[i],
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                          value: _functionalChecks[i],
-                          onChanged: ro
-                              ? null
-                              : (v) => setState(
-                                  () => _functionalChecks[i] = v ?? false,
-                                ),
-                        ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (var i = leftCount; i < options.length; i++)
-                        CheckboxListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(
-                            options[i],
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                          value: _functionalChecks[i],
-                          onChanged: ro
-                              ? null
-                              : (v) => setState(
-                                  () => _functionalChecks[i] = v ?? false,
-                                ),
-                        ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Other (Please specify)',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 13,
-                        ),
-                      ),
-                      RspSpacedOutlineField(
-                        child: TextFormField(
-                          controller: _otherArea,
-                          readOnly: ro,
-                          decoration: rspUnderlinedField(''),
-                          maxLines: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'I. On performance and other relevant information.',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Please tell us about the work performance of the applicants in the last three (3) years. What are the applicant\'s outstanding accomplishments recognition received and significant contributions to your office if any?',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 6),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _perf3Years,
-                readOnly: ro,
-                decoration: rspUnderlinedField(''),
-                maxLines: 4,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'What do you think are the challenges or difficulties of the applicant in performing his/her duties and responsibilities in his/her position? How did the applicant cope with these challenges?',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 6),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _challenges,
-                readOnly: ro,
-                decoration: rspUnderlinedField(''),
-                maxLines: 4,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'In terms of compliance with rules and regulation, please provide us information on the applicant\'s attendance to flag ceremonies/ retreats and other office programs and activities?',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 6),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _compliance,
-                readOnly: ro,
-                decoration: rspUnderlinedField(''),
-                maxLines: 4,
-              ),
-            ),
-            const SizedBox(height: 24),
-            const RspFormFooter(),
-            const SizedBox(height: 24),
-            if (!ro) ...[
-              Row(
-                children: [
-                  FilledButton(onPressed: _save, child: const Text('Save')),
-                  const SizedBox(width: 12),
-                  TextButton(
-                    onPressed: widget.onCancel,
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                    icon: const Icon(Icons.print_rounded),
-                    tooltip: 'Print',
-                  ),
-                  IconButton(
-                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                    icon: const Icon(Icons.picture_as_pdf_rounded),
-                    tooltip: 'Download PDF',
-                  ),
-                ],
-              ),
-            ] else ...[
-              if (widget.entry.createdAt != null)
-                Text(
-                  'Created: ${widget.entry.createdAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-              if (widget.entry.updatedAt != null)
-                Text(
-                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PerformanceFormList extends StatelessWidget {
-  const _PerformanceFormList({
-    required this.entries,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final List<PerformanceEvaluationEntry> entries;
-  final void Function(PerformanceEvaluationEntry) onEdit;
-  final void Function(String id) onDelete;
-  final Future<void> Function(PerformanceEvaluationEntry) onPrint;
-  final Future<void> Function(PerformanceEvaluationEntry) onDownloadPdf;
-
-  @override
-  Widget build(BuildContext context) {
-    const columns = [
-      RspRecordsColumn('Applicant', flex: 2),
-      RspRecordsColumn('Functional areas', flex: 3.2),
-      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
-    ];
-    return RspRecordsListTable(
-      columns: columns,
-      rows: entries
-          .map(
-            (e) => [
-              rspRecordsTextCell(e.applicantName ?? '', bold: true),
-              rspRecordsTextCell(
-                e.functionalAreas.isEmpty ? '' : e.functionalAreas.join(', '),
-              ),
-              RspRecordsCrudActions(
-                onView: () => showReadOnlySavedEntryDialog(
-                  context,
-                  title: 'Performance evaluation',
-                  subtitle: e.applicantName ?? '',
-                  previewBuilder: () => _PerformanceFormEditor(
-                    readOnly: true,
-                    entry: e,
-                    onSave: (_) {},
-                    onCancel: () {},
-                    onPrint: (_) async {},
-                    onDownloadPdf: (_) async {},
-                  ),
-                  contentWidth: 880,
-                  onPrint: () => onPrint(e),
-                ),
-                onEdit: () => onEdit(e),
-                onPrint: () => onPrint(e),
-                onDownloadPdf: () => onDownloadPdf(e),
-                onDelete: () async {
-                  if (e.id != null) onDelete(e.id!);
-                },
-                deleteDialogTitle: 'Delete evaluation?',
-              ),
-            ],
-          )
-          .toList(),
-    );
-  }
-}
-
 
 /// RSP: Applicants Profile Ã¢â‚¬â€ job vacancy details + list of applicants.
 class _RspApplicantsProfileSection extends StatefulWidget {
@@ -2725,10 +3466,12 @@ class _RspApplicantsProfileSectionState
 
   ApplicantsProfileEntry _buildAutoPrefilledProfile(
     JobVacancyAnnouncement announcement,
-    List<RecruitmentApplication> applications,
-    {String? preferredPosition}
-  ) {
-    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    List<RecruitmentApplication> applications, {
+    String? preferredPosition,
+  }) {
+    final pipelineApps = applications
+        .where((a) => a.isActiveInPipeline)
+        .toList();
     final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
     final preferred = preferredPosition?.trim();
 
@@ -2753,8 +3496,9 @@ class _RspApplicantsProfileSectionState
       }
       return null;
     }();
-    selectedVacancy ??=
-        announcement.vacancies.isNotEmpty ? announcement.vacancies.first : null;
+    selectedVacancy ??= announcement.vacancies.isNotEmpty
+        ? announcement.vacancies.first
+        : null;
 
     String? selectedPosition = preferred;
     if (selectedPosition == null || selectedPosition.isEmpty) {
@@ -2773,18 +3517,19 @@ class _RspApplicantsProfileSectionState
     final matchedApps = selectedPosition == null || selectedPosition.isEmpty
         ? sourceApps
         : sourceApps
-              .where((a) => _samePosition(a.positionAppliedFor, selectedPosition))
+              .where(
+                (a) => _samePosition(a.positionAppliedFor, selectedPosition),
+              )
               .toList();
-    matchedApps.sort(
-      (a, b) => _norm(a.fullName).compareTo(_norm(b.fullName)),
-    );
+    matchedApps.sort((a, b) => _norm(a.fullName).compareTo(_norm(b.fullName)));
 
     DateTime? postingDate;
-    final withCreatedAt = matchedApps
-        .where((a) => a.createdAt != null)
-        .map((a) => a.createdAt!)
-        .toList()
-      ..sort((a, b) => a.compareTo(b));
+    final withCreatedAt =
+        matchedApps
+            .where((a) => a.createdAt != null)
+            .map((a) => a.createdAt!)
+            .toList()
+          ..sort((a, b) => a.compareTo(b));
     if (withCreatedAt.isNotEmpty) {
       postingDate = withCreatedAt.first;
     } else {
@@ -2792,8 +3537,7 @@ class _RspApplicantsProfileSectionState
     }
 
     return ApplicantsProfileEntry(
-      positionAppliedFor:
-          (selectedPosition == null || selectedPosition.isEmpty)
+      positionAppliedFor: (selectedPosition == null || selectedPosition.isEmpty)
           ? null
           : selectedPosition,
       minimumRequirements: _requirementsFromVacancy(selectedVacancy),
@@ -2805,7 +3549,9 @@ class _RspApplicantsProfileSectionState
           .map(
             (a) => ApplicantsProfileApplicant(
               name: a.fullName.trim().isEmpty ? null : a.fullName.trim(),
-              course: a.course?.trim().isEmpty == true ? null : a.course?.trim(),
+              course: a.course?.trim().isEmpty == true
+                  ? null
+                  : a.course?.trim(),
               address: a.address?.trim().isEmpty == true
                   ? null
                   : a.address?.trim(),
@@ -2837,7 +3583,9 @@ class _RspApplicantsProfileSectionState
       addPosition(v.positionKey);
     }
 
-    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    final pipelineApps = applications
+        .where((a) => a.isActiveInPipeline)
+        .toList();
     final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
     for (final app in sourceApps) {
       addPosition(app.positionAppliedFor);
@@ -2846,49 +3594,296 @@ class _RspApplicantsProfileSectionState
     return ordered;
   }
 
+  /// Returned by [_pickAutofillPosition] when the user explicitly closes the
+  /// dialog (X button or tapping outside) instead of choosing an option.
+  static const String _cancelledChoice =
+      '__cancelled_applicants_profile_pick__';
+
   Future<String?> _pickAutofillPosition(
     List<String> positions,
     List<RecruitmentApplication> applications,
   ) async {
-    if (positions.length <= 1) return positions.isEmpty ? null : positions.first;
-    final pipelineApps = applications.where((a) => a.isActiveInPipeline).toList();
+    if (positions.length <= 1)
+      return positions.isEmpty ? null : positions.first;
+    final pipelineApps = applications
+        .where((a) => a.isActiveInPipeline)
+        .toList();
     final sourceApps = pipelineApps.isNotEmpty ? pipelineApps : applications;
 
     int countFor(String position) => sourceApps
         .where((a) => _samePosition(a.positionAppliedFor, position))
         .length;
 
-    return showDialog<String>(
+    final result = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Select position for autofill'),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 430),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: positions
-                  .map(
-                    (position) => ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(position),
-                      subtitle: Text('${countFor(position)} applicant(s)'),
-                      onTap: () => Navigator.of(ctx).pop(position),
+      builder: (ctx) {
+        final hairline = AppTheme.dashHairlineOf(ctx);
+        final primary = AppTheme.dashTextPrimaryOf(ctx);
+        final secondary = AppTheme.dashTextSecondaryOf(ctx);
+        final panel = AppTheme.dashPanelOf(ctx);
+
+        String initialsFor(String position) {
+          final parts = position.trim().split(RegExp(r'\s+'));
+          var initials = '';
+          if (parts.isNotEmpty && parts.first.isNotEmpty) {
+            initials += parts.first[0].toUpperCase();
+          }
+          if (parts.length > 1 && parts.last.isNotEmpty) {
+            initials += parts.last[0].toUpperCase();
+          }
+          return initials.isEmpty ? '?' : initials;
+        }
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 28,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
+            child: Material(
+              color: panel,
+              borderRadius: BorderRadius.circular(18),
+              clipBehavior: Clip.antiAlias,
+              elevation: 12,
+              shadowColor: Colors.black26,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    height: 4,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          AppTheme.primaryNavy,
+                          AppTheme.primaryNavyLight,
+                        ],
+                      ),
                     ),
-                  )
-                  .toList(),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                          ),
+                          alignment: Alignment.center,
+                          child: const Icon(
+                            Icons.work_outline_rounded,
+                            color: AppTheme.primaryNavy,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Select position',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: primary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Choose which vacancy to autofill into the applicants profile.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.35,
+                                  color: secondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          icon: Icon(Icons.close_rounded, color: secondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 380),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+                      itemCount: positions.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) {
+                        final position = positions[i];
+                        final count = countFor(position);
+                        final countLabel = count == 1
+                            ? '1 applicant'
+                            : '$count applicants';
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => Navigator.of(ctx).pop(position),
+                            borderRadius: BorderRadius.circular(14),
+                            child: Ink(
+                              decoration: BoxDecoration(
+                                color: AppTheme.dashMutedSurfaceOf(ctx),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: hairline),
+                              ),
+                              child: IntrinsicHeight(
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 4,
+                                      decoration: const BoxDecoration(
+                                        color: AppTheme.primaryNavy,
+                                        borderRadius: BorderRadius.only(
+                                          topLeft: Radius.circular(14),
+                                          bottomLeft: Radius.circular(14),
+                                        ),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        12,
+                                        12,
+                                        14,
+                                        12,
+                                      ),
+                                      child: Container(
+                                        width: 42,
+                                        height: 42,
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                            colors: [
+                                              AppTheme.primaryNavy.withValues(
+                                                alpha: 0.18,
+                                              ),
+                                              AppTheme.primaryNavyLight
+                                                  .withValues(alpha: 0.1),
+                                            ],
+                                          ),
+                                          border: Border.all(
+                                            color: AppTheme.primaryNavy
+                                                .withValues(alpha: 0.22),
+                                          ),
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          initialsFor(position),
+                                          style: const TextStyle(
+                                            color: AppTheme.primaryNavy,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              position,
+                                              style: TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w800,
+                                                color: primary,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 6),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 4,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.primaryNavy
+                                                    .withValues(alpha: 0.1),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                                border: Border.all(
+                                                  color: AppTheme.primaryNavy
+                                                      .withValues(alpha: 0.22),
+                                                ),
+                                              ),
+                                              child: Text(
+                                                countLabel,
+                                                style: const TextStyle(
+                                                  color: AppTheme.primaryNavy,
+                                                  fontSize: 11.5,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 12),
+                                      child: Icon(
+                                        Icons.chevron_right_rounded,
+                                        color: AppTheme.primaryNavy.withValues(
+                                          alpha: 0.7,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.of(ctx).pop(_blankFormChoice),
+                      icon: const Icon(
+                        Icons.insert_drive_file_outlined,
+                        size: 18,
+                      ),
+                      label: const Text('Start with a blank form (no data)'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primaryNavy,
+                        side: BorderSide(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.4),
+                        ),
+                        minimumSize: const Size.fromHeight(44),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(positions.first),
-            child: const Text('Use default'),
-          ),
-        ],
-      ),
+        );
+      },
     );
+    return result ?? _cancelledChoice;
   }
 
   Future<void> _load() async {
@@ -2911,14 +3906,28 @@ class _RspApplicantsProfileSectionState
     }
   }
 
+  /// Sentinel returned by [_pickAutofillPosition] when the user chooses
+  /// "Start with a blank form" instead of a vacancy to autofill from.
+  static const String _blankFormChoice = '__blank_applicants_profile_form__';
+
   Future<void> _startNew() async {
     try {
       final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
       final applications = await RecruitmentRepo.instance.listApplications();
       if (!mounted) return;
       final positions = _autofillPositions(announcement, applications);
-      final selectedPosition = await _pickAutofillPosition(positions, applications);
+      final selectedPosition = await _pickAutofillPosition(
+        positions,
+        applications,
+      );
       if (!mounted) return;
+      if (selectedPosition == _cancelledChoice) {
+        return;
+      }
+      if (selectedPosition == _blankFormChoice) {
+        setState(() => _editing = const ApplicantsProfileEntry());
+        return;
+      }
       setState(
         () => _editing = _buildAutoPrefilledProfile(
           announcement,
@@ -2931,6 +3940,7 @@ class _RspApplicantsProfileSectionState
       setState(() => _editing = const ApplicantsProfileEntry());
     }
   }
+
   void _edit(ApplicantsProfileEntry e) => setState(() => _editing = e);
   void _cancelEdit() => setState(() => _editing = null);
 
@@ -3044,18 +4054,39 @@ class _RspApplicantsProfileSectionState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Row(
+          children: [
+            Text(
+              'RSP',
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 16,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+            Text(
+              'Applicants Profile',
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
         Text(
           'Applicants Profile',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: AppTheme.dashTextPrimaryOf(context),
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Job vacancy details (position, requirements, dates) and list of applicants (name, course, address, sex, age, civil status, remark).',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
         const SizedBox(height: 24),
         if (_editing != null) ...[
@@ -3155,8 +4186,10 @@ class _ApplicantsProfileFormEditorState
   late TextEditingController _closingDate;
   late TextEditingController _preparedBy;
   late TextEditingController _checkedBy;
+  late TextEditingController _searchCtrl;
   late List<Map<String, TextEditingController>> _applicantRows;
   int _currentFormPage = 0;
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -3168,14 +4201,15 @@ class _ApplicantsProfileFormEditorState
     _closingDate = TextEditingController(text: e.closingDate ?? '');
     _preparedBy = TextEditingController(text: e.preparedBy ?? '');
     _checkedBy = TextEditingController(text: e.checkedBy ?? '');
+    _searchCtrl = TextEditingController();
     _applicantRows = e.applicants.isEmpty
-        ? [_applicantRow('', '', '', '', '', '', '')]
+        ? <Map<String, TextEditingController>>[]
         : e.applicants
               .map(
                 (a) => _applicantRow(
                   a.name ?? '',
                   a.course ?? '',
-                  a.address ?? '',
+                  formatStoredAddressForDisplay(a.address),
                   a.sex ?? '',
                   a.age ?? '',
                   a.civilStatus ?? '',
@@ -3183,7 +4217,10 @@ class _ApplicantsProfileFormEditorState
                 ),
               )
               .toList();
+    _positionApplied.addListener(_onTitleFieldChanged);
   }
+
+  void _onTitleFieldChanged() => setState(() {});
 
   Map<String, TextEditingController> _applicantRow(
     String name,
@@ -3207,12 +4244,14 @@ class _ApplicantsProfileFormEditorState
 
   @override
   void dispose() {
+    _positionApplied.removeListener(_onTitleFieldChanged);
     _positionApplied.dispose();
     _minRequirements.dispose();
     _datePosting.dispose();
     _closingDate.dispose();
     _preparedBy.dispose();
     _checkedBy.dispose();
+    _searchCtrl.dispose();
     for (final row in _applicantRows) {
       for (final c in row.values) {
         c.dispose();
@@ -3234,18 +4273,62 @@ class _ApplicantsProfileFormEditorState
   List<Map<String, TextEditingController>> get _currentPageRows =>
       _applicantRows.sublist(_currentPageStart, _currentPageEnd);
 
-  void _addApplicant() {
+  Future<void> _openAddApplicantDialog() async {
     if (widget.readOnly) return;
+    final result = await showDialog<_ApplicantDialogResult>(
+      context: context,
+      builder: (_) => const _ApplicantDialog(isEditing: false),
+    );
+    if (result == null || !mounted) return;
     setState(() {
-      _applicantRows.add(_applicantRow('', '', '', '', '', '', ''));
+      _applicantRows.add(
+        _applicantRow(
+          result.name,
+          result.course,
+          result.address,
+          result.sex,
+          result.age,
+          result.civilStatus,
+          result.remark,
+        ),
+      );
       _currentFormPage = (_applicantRows.length - 1) ~/ _kApplicantsPerPage;
+    });
+  }
+
+  Future<void> _openEditApplicantDialog(int globalIndex) async {
+    if (widget.readOnly) return;
+    final row = _applicantRows[globalIndex];
+    final initial = _ApplicantDialogResult(
+      name: row['name']!.text,
+      course: row['course']!.text,
+      address: row['address']!.text,
+      sex: row['sex']!.text,
+      age: row['age']!.text,
+      civilStatus: row['civil_status']!.text,
+      remark: row['remark_disability']!.text,
+    );
+    final result = await showDialog<_ApplicantDialogResult>(
+      context: context,
+      builder: (_) => _ApplicantDialog(isEditing: true, initial: initial),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      row['name']!.text = result.name;
+      row['course']!.text = result.course;
+      row['address']!.text = result.address;
+      row['sex']!.text = result.sex;
+      row['age']!.text = result.age;
+      row['civil_status']!.text = result.civilStatus;
+      row['remark_disability']!.text = result.remark;
     });
   }
 
   void _removeApplicant(int pageLocalIndex) {
     if (widget.readOnly) return;
-    if (_applicantRows.length <= 1) return;
+    if (_applicantRows.isEmpty) return;
     final globalIndex = _currentPageStart + pageLocalIndex;
+    if (globalIndex < 0 || globalIndex >= _applicantRows.length) return;
     setState(() {
       for (final c in _applicantRows[globalIndex].values) {
         c.dispose();
@@ -3316,327 +4399,1134 @@ class _ApplicantsProfileFormEditorState
     widget.onSave(_buildCurrentEntry());
   }
 
+  static String _dash(String v) => v.trim().isEmpty ? '—' : v.trim();
+
+  static String _initialsOf(String name) {
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return (parts.first.substring(0, 1) + parts.last.substring(0, 1))
+        .toUpperCase();
+  }
+
+  Widget _statusChip(String label) {
+    final Color color = label == 'Draft'
+        ? const Color(0xFFB26A00)
+        : label == 'Read-only preview'
+        ? Colors.blueGrey
+        : const Color(0xFF2E7D32);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.32)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _editorHeaderBar(BuildContext context, bool ro) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final position = _positionApplied.text.trim();
+    final title = position.isEmpty ? 'New Applicants Profile' : position;
+    final statusLabel = ro
+        ? 'Read-only preview'
+        : (widget.entry.id == null ? 'Draft' : 'Saved');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 10,
+        spacing: 12,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        title,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _statusChip(statusLabel),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Vacancy details and applicant list for this posting.',
+                  style: TextStyle(fontSize: 12.5, color: secondary),
+                ),
+              ],
+            ),
+          ),
+          if (!ro)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: 'Print',
+                  style: rspLdRecordIconButtonStyle(),
+                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                  icon: const Icon(Icons.print_rounded, size: 20),
+                ),
+                IconButton(
+                  tooltip: 'Download PDF',
+                  style: rspLdRecordIconButtonStyle(),
+                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
+                ),
+                TextButton(
+                  onPressed: widget.onCancel,
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.save_rounded, size: 18),
+                  label: const Text('Save'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryNavy,
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  static const _kDateFieldLabels = {'Date of Posting', 'Closing Date'};
+
+  static String _formatPickedDate(DateTime dt) {
+    final d = dt.toLocal();
+    final y = d.year.toString().padLeft(4, '0');
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '$y-$m-$day';
+  }
+
+  Future<void> _pickVacancyDate(TextEditingController c) async {
+    final now = DateTime.now();
+    final parsed = DateTime.tryParse(c.text.trim());
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: parsed ?? now,
+      firstDate: DateTime(now.year - 10),
+      lastDate: DateTime(now.year + 10),
+      helpText: 'Select date',
+    );
+    if (picked == null || !mounted) return;
+    setState(() => c.text = _formatPickedDate(picked));
+  }
+
+  Widget _vacancyField(TextEditingController c, String label, bool ro) {
+    final isDateField = _kDateFieldLabels.contains(label);
+    return TextFormField(
+      controller: c,
+      readOnly: ro || isDateField,
+      minLines: 1,
+      maxLines: label == 'Minimum Requirements' ? 3 : 1,
+      onTap: (!ro && isDateField) ? () => _pickVacancyDate(c) : null,
+      decoration: AppTheme.dashInputDecoration(
+        context,
+        labelText: label,
+        suffixIcon: (isDateField && !ro)
+            ? IconButton(
+                tooltip: 'Pick a date',
+                icon: const Icon(Icons.calendar_month_outlined, size: 20),
+                onPressed: () => _pickVacancyDate(c),
+              )
+            : null,
+      ),
+    );
+  }
+
+  Widget _vacancyInfoCard(BuildContext context, bool ro) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'VACANCY INFORMATION',
+            style: AppTheme.dashSectionTitle(context),
+          ),
+          const SizedBox(height: 14),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth > 640;
+              Widget pair(
+                TextEditingController a,
+                String labelA,
+                TextEditingController b,
+                String labelB,
+              ) {
+                if (wide) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: _vacancyField(a, labelA, ro)),
+                      const SizedBox(width: 14),
+                      Expanded(child: _vacancyField(b, labelB, ro)),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    _vacancyField(a, labelA, ro),
+                    const SizedBox(height: 14),
+                    _vacancyField(b, labelB, ro),
+                  ],
+                );
+              }
+
+              return Column(
+                children: [
+                  pair(
+                    _positionApplied,
+                    'Position Applied For',
+                    _minRequirements,
+                    'Minimum Requirements',
+                  ),
+                  const SizedBox(height: 14),
+                  pair(
+                    _datePosting,
+                    'Date of Posting',
+                    _closingDate,
+                    'Closing Date',
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _applicantsSectionHeader(BuildContext context, bool ro) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final onPage = _currentPageRows.length;
+    final fraction = (onPage / _kApplicantsPerPage).clamp(0.0, 1.0);
+    final isFull = onPage >= _kApplicantsPerPage;
+
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.start,
+      runSpacing: 12,
+      spacing: 16,
+      children: [
+        ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 200, maxWidth: 320),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'Applicants',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: primary,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$onPage / $_kApplicantsPerPage',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.primaryNavy,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: SizedBox(
+                  width: 160,
+                  height: 6,
+                  child: LinearProgressIndicator(
+                    value: fraction,
+                    backgroundColor: AppTheme.dashHairlineOf(context),
+                    color: AppTheme.primaryNavy,
+                  ),
+                ),
+              ),
+              if (isFull) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Form is full. Adding one more opens the next form automatically.',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: secondary,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (!ro)
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: 220,
+                child: TextField(
+                  controller: _searchCtrl,
+                  onChanged: (v) =>
+                      setState(() => _searchQuery = v.trim().toLowerCase()),
+                  decoration:
+                      AppTheme.dashInputDecoration(
+                        context,
+                        hintText: 'Search applicants...',
+                        prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                      ).copyWith(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: _openAddApplicantDialog,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Add Applicant'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _formPagePill(BuildContext context) {
+    return Row(
+      children: [
+        IconButton(
+          tooltip: 'Previous form',
+          onPressed: _currentFormPage > 0
+              ? () => _goToFormPage(_currentFormPage - 1)
+              : null,
+          icon: const Icon(Icons.chevron_left_rounded),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.18),
+            ),
+          ),
+          child: Text(
+            'Form ${_currentFormPage + 1} of $_formPageCount',
+            style: const TextStyle(
+              color: AppTheme.primaryNavy,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Next form',
+          onPressed: _currentFormPage < _formPageCount - 1
+              ? () => _goToFormPage(_currentFormPage + 1)
+              : null,
+          icon: const Icon(Icons.chevron_right_rounded),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          _applicantRows.isEmpty
+              ? 'No applicants yet'
+              : 'Rows ${_currentPageStart + 1}–$_currentPageEnd of ${_applicantRows.length}',
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _applicantsTable(BuildContext context, bool ro) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final hairline = AppTheme.dashHairlineOf(context);
+    final rows = _currentPageRows;
+    final q = _searchQuery;
+
+    final visible = <int>[];
+    for (var i = 0; i < rows.length; i++) {
+      if (q.isEmpty) {
+        visible.add(i);
+        continue;
+      }
+      final r = rows[i];
+      final hay = [
+        r['name']!.text,
+        r['course']!.text,
+        r['address']!.text,
+      ].join(' ').toLowerCase();
+      if (hay.contains(q)) visible.add(i);
+    }
+
+    if (rows.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 28),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppTheme.dashMutedSurfaceOf(context),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: hairline),
+        ),
+        child: Text(
+          'No applicants yet. Tap "Add Applicant" to add one.',
+          style: TextStyle(color: secondary),
+        ),
+      );
+    }
+
+    if (visible.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 28),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppTheme.dashMutedSurfaceOf(context),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: hairline),
+        ),
+        child: Text(
+          'No applicants match your search.',
+          style: TextStyle(color: secondary),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 900),
+          child: DataTable(
+            headingRowColor: WidgetStateProperty.all(
+              AppTheme.dashMutedSurfaceOf(context),
+            ),
+            dataRowMinHeight: 52,
+            dataRowMaxHeight: 64,
+            columnSpacing: 20,
+            horizontalMargin: 16,
+            headingTextStyle: TextStyle(
+              color: secondary,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.3,
+            ),
+            dataTextStyle: TextStyle(color: primary, fontSize: 13),
+            columns: const [
+              DataColumn(label: Text('#')),
+              DataColumn(label: Text('NAME')),
+              DataColumn(label: Text('COURSE')),
+              DataColumn(label: Text('ADDRESS')),
+              DataColumn(label: Text('SEX')),
+              DataColumn(label: Text('AGE')),
+              DataColumn(label: Text('CIVIL STATUS')),
+              DataColumn(label: Text('REMARK')),
+              DataColumn(label: Text('ACTIONS')),
+            ],
+            rows: visible.map((i) {
+              final r = rows[i];
+              final globalIndex = _currentPageStart + i;
+              final name = r['name']!.text.trim();
+              return DataRow(
+                cells: [
+                  DataCell(
+                    Text(
+                      '${globalIndex + 1}',
+                      style: TextStyle(color: secondary),
+                    ),
+                  ),
+                  DataCell(
+                    Text(
+                      name.isEmpty ? '—' : name,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  DataCell(Text(_dash(r['course']!.text))),
+                  DataCell(
+                    SizedBox(
+                      width: 200,
+                      child: Text(
+                        _dash(r['address']!.text),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 2,
+                      ),
+                    ),
+                  ),
+                  DataCell(Text(_dash(r['sex']!.text))),
+                  DataCell(Text(_dash(r['age']!.text))),
+                  DataCell(Text(_dash(r['civil_status']!.text))),
+                  DataCell(Text(_dash(r['remark_disability']!.text))),
+                  DataCell(
+                    ro
+                        ? const SizedBox(width: 8)
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Edit',
+                                style: rspLdRecordIconButtonStyle(),
+                                onPressed: () =>
+                                    _openEditApplicantDialog(globalIndex),
+                                icon: const Icon(Icons.edit_rounded, size: 18),
+                              ),
+                              const SizedBox(width: 6),
+                              IconButton(
+                                tooltip: 'Remove',
+                                style: rspLdRecordIconButtonStyle(
+                                  foreground: const Color(0xFFC62828),
+                                ),
+                                onPressed: () => _removeApplicant(i),
+                                icon: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 18,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Blank strip with a bottom rule, sized for a physical pen signature above
+  /// the printed name (mirrors the space added in the PDF output).
+  Widget _signatureSpace(BuildContext context) {
+    return Container(
+      height: 30,
+      margin: const EdgeInsets.only(bottom: 6),
+      alignment: Alignment.bottomCenter,
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+    );
+  }
+
+  Widget _preparedByCard(BuildContext context, bool ro) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.14),
+            child: Text(
+              _initialsOf(_preparedBy.text),
+              style: const TextStyle(
+                color: AppTheme.primaryNavy,
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('PREPARED BY', style: AppTheme.dashSectionTitle(context)),
+                const SizedBox(height: 6),
+                _signatureSpace(context),
+                ro
+                    ? Text(
+                        _preparedBy.text.trim().isEmpty
+                            ? '—'
+                            : _preparedBy.text.trim(),
+                        style: TextStyle(
+                          color: primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    : TextFormField(
+                        controller: _preparedBy,
+                        decoration: AppTheme.dashInputDecoration(
+                          context,
+                          hintText: 'Full name, position',
+                        ),
+                        style: TextStyle(
+                          color: primary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13.5,
+                        ),
+                      ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _checkedByCard(BuildContext context, bool ro) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: Colors.blueGrey.withValues(alpha: 0.14),
+            child: Icon(
+              Icons.verified_user_outlined,
+              size: 18,
+              color: Colors.blueGrey.shade700,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('CHECKED BY', style: AppTheme.dashSectionTitle(context)),
+                const SizedBox(height: 6),
+                _signatureSpace(context),
+                ro
+                    ? Text(
+                        _checkedBy.text.trim().isEmpty
+                            ? '—'
+                            : _checkedBy.text.trim(),
+                        style: TextStyle(
+                          color: primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    : TextFormField(
+                        controller: _checkedBy,
+                        decoration: AppTheme.dashInputDecoration(
+                          context,
+                          hintText: 'HRMDO officer name, position',
+                        ),
+                        style: TextStyle(
+                          color: primary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13.5,
+                        ),
+                      ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ro = widget.readOnly;
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+
+    return Container(
+      decoration: AppTheme.dashSurfaceCard(context, radius: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _editorHeaderBar(context, ro),
+          Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _vacancyInfoCard(context, ro),
+                const SizedBox(height: 24),
+                _applicantsSectionHeader(context, ro),
+                const SizedBox(height: 12),
+                if (_formPageCount > 1) ...[
+                  _formPagePill(context),
+                  const SizedBox(height: 12),
+                ],
+                _applicantsTable(context, ro),
+                const SizedBox(height: 24),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final wide = constraints.maxWidth > 640;
+                    final prepared = _preparedByCard(context, ro);
+                    final checked = _checkedByCard(context, ro);
+                    if (wide) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: prepared),
+                          const SizedBox(width: 16),
+                          Expanded(child: checked),
+                        ],
+                      );
+                    }
+                    return Column(
+                      children: [prepared, const SizedBox(height: 16), checked],
+                    );
+                  },
+                ),
+                if (ro) ...[
+                  const SizedBox(height: 16),
+                  if (widget.entry.createdAt != null)
+                    Text(
+                      'Created: ${widget.entry.createdAt!.toLocal()}',
+                      style: TextStyle(fontSize: 11, color: secondary),
+                    ),
+                  if (widget.entry.updatedAt != null)
+                    Text(
+                      'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                      style: TextStyle(fontSize: 11, color: secondary),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Values collected by [_ApplicantDialog] for one applicant row.
+class _ApplicantDialogResult {
+  const _ApplicantDialogResult({
+    required this.name,
+    required this.course,
+    required this.address,
+    required this.sex,
+    required this.age,
+    required this.civilStatus,
+    required this.remark,
+  });
+
+  final String name;
+  final String course;
+  final String address;
+  final String sex;
+  final String age;
+  final String civilStatus;
+  final String remark;
+}
+
+/// Modal used by the Applicants section for both "Add Applicant" and "Edit Applicant".
+class _ApplicantDialog extends StatefulWidget {
+  const _ApplicantDialog({required this.isEditing, this.initial});
+
+  final bool isEditing;
+  final _ApplicantDialogResult? initial;
+
+  @override
+  State<_ApplicantDialog> createState() => _ApplicantDialogState();
+}
+
+class _ApplicantDialogState extends State<_ApplicantDialog> {
+  static const _sexOptions = ['Male', 'Female'];
+  static const _civilStatusOptions = [
+    'Single',
+    'Married',
+    'Widowed',
+    'Separated',
+  ];
+
+  final _formKey = GlobalKey<FormState>();
+  final _addressFormKey = GlobalKey<StructuredAddressFormState>();
+  late TextEditingController _name;
+  late TextEditingController _course;
+  late TextEditingController _street;
+  late TextEditingController _age;
+  late TextEditingController _remark;
+  String? _sex;
+  String? _civilStatus;
+  String? _initialRawAddress;
+
+  @override
+  void initState() {
+    super.initState();
+    final i = widget.initial;
+    _name = TextEditingController(text: i?.name ?? '');
+    _course = TextEditingController(text: i?.course ?? '');
+    _street = TextEditingController();
+    _age = TextEditingController(text: i?.age ?? '');
+    _remark = TextEditingController(text: i?.remark ?? '');
+    _sex = _sexOptions.contains(i?.sex) ? i!.sex : null;
+    _civilStatus = _civilStatusOptions.contains(i?.civilStatus)
+        ? i!.civilStatus
+        : null;
+    _initialRawAddress = i?.address;
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _course.dispose();
+    _street.dispose();
+    _age.dispose();
+    _remark.dispose();
+    super.dispose();
+  }
+
+  InputDecoration _fieldDec(String hint) =>
+      AppTheme.dashInputDecoration(context, labelText: hint);
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final encoded =
+        _addressFormKey.currentState?.composeEncoded() ??
+        _street.text.trim();
+    Navigator.of(context).pop(
+      _ApplicantDialogResult(
+        name: _name.text.trim(),
+        course: _course.text.trim(),
+        address: encoded,
+        sex: _sex ?? '',
+        age: _age.text.trim(),
+        civilStatus: _civilStatus ?? '',
+        remark: _remark.text.trim(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const RspFormHeader(formTitle: 'APPLICANTS PROFILE'),
-            const SizedBox(height: 20),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _positionApplied,
-                readOnly: ro,
-                decoration: rspUnderlinedField('Position Applied for:'),
-              ),
-            ),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _minRequirements,
-                readOnly: ro,
-                decoration: rspUnderlinedField('Minimum Requirements:'),
-              ),
-            ),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _datePosting,
-                readOnly: ro,
-                decoration: rspUnderlinedField('Date of Posting:'),
-              ),
-            ),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _closingDate,
-                readOnly: ro,
-                decoration: rspUnderlinedField('Closing Date:'),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final hairline = AppTheme.dashHairlineOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    final screenH = MediaQuery.sizeOf(context).height;
+    final dialogH = (screenH * 0.88).clamp(480.0, 720.0);
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: SizedBox(
+        width: 640,
+        height: dialogH,
+        child: Material(
+          color: panel,
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          elevation: 10,
+          shadowColor: Colors.black26,
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 18, 10, 12),
+                  child: Row(
                     children: [
-                      Text(
-                        'Applicants',
-                        style: TextStyle(
-                          color: primary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          widget.isEditing
+                              ? Icons.edit_outlined
+                              : Icons.person_add_alt_1_rounded,
+                          size: 20,
+                          color: AppTheme.primaryNavy,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Up to $_kApplicantsPerPage rows per form. Row 11+ opens the next form automatically.',
-                        style: TextStyle(
-                          color: secondary,
-                          fontSize: 12,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (!ro) ...[
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: _addApplicant,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add applicant'),
-                  ),
-                ],
-              ],
-            ),
-            if (_formPageCount > 1) ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Previous form',
-                    onPressed: _currentFormPage > 0
-                        ? () => _goToFormPage(_currentFormPage - 1)
-                        : null,
-                    icon: const Icon(Icons.chevron_left_rounded),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: AppTheme.primaryNavy.withValues(alpha: 0.18),
-                      ),
-                    ),
-                    child: Text(
-                      'Form ${_currentFormPage + 1} of $_formPageCount',
-                      style: const TextStyle(
-                        color: AppTheme.primaryNavy,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Next form',
-                    onPressed: _currentFormPage < _formPageCount - 1
-                        ? () => _goToFormPage(_currentFormPage + 1)
-                        : null,
-                    icon: const Icon(Icons.chevron_right_rounded),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Rows ${_currentPageStart + 1}–$_currentPageEnd of ${_applicantRows.length}',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 8),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                horizontalMargin: 10,
-                columnSpacing: 12,
-                dataRowMinHeight: 58,
-                dataRowMaxHeight: 58,
-                headingTextStyle: TextStyle(
-                  color: primary,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                ),
-                columns: [
-                  DataColumn(label: Text('NAME', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('COURSE', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('ADDRESS', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('SEX', style: TextStyle(color: primary))),
-                  DataColumn(label: Text('AGE', style: TextStyle(color: primary))),
-                  DataColumn(
-                    label: Text('CIVIL STATUS', style: TextStyle(color: primary)),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      'REMARK (DISABILITY)',
-                      style: TextStyle(color: primary),
-                    ),
-                  ),
-                  DataColumn(label: Text('', style: TextStyle(color: primary))),
-                ],
-                rows: List.generate(_currentPageRows.length, (i) {
-                  final r = _currentPageRows[i];
-                  return DataRow(
-                    cells: [
-                      DataCell(
-                        SizedBox(
-                          width: 190,
-                          child: TextFormField(
-                            controller: r['name'],
-                            readOnly: ro,
-                            style: AppTheme.dashFieldTextStyle(context),
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 145,
-                          child: TextFormField(
-                            controller: r['course'],
-                            readOnly: ro,
-                            style: AppTheme.dashFieldTextStyle(context),
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 240,
-                          child: TextFormField(
-                            controller: r['address'],
-                            readOnly: ro,
-                            style: AppTheme.dashFieldTextStyle(context),
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 70,
-                          child: TextFormField(
-                            controller: r['sex'],
-                            readOnly: ro,
-                            style: AppTheme.dashFieldTextStyle(context),
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 60,
-                          child: TextFormField(
-                            controller: r['age'],
-                            readOnly: ro,
-                            style: AppTheme.dashFieldTextStyle(context),
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 130,
-                          child: TextFormField(
-                            controller: r['civil_status'],
-                            readOnly: ro,
-                            style: AppTheme.dashFieldTextStyle(context),
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 170,
-                          child: TextFormField(
-                            controller: r['remark_disability'],
-                            readOnly: ro,
-                            style: AppTheme.dashFieldTextStyle(context),
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        ro
-                            ? const SizedBox(width: 40)
-                            : IconButton(
-                                icon: const Icon(
-                                  Icons.remove_circle_outline,
-                                  size: 20,
-                                ),
-                                onPressed: _applicantRows.length > 1
-                                    ? () => _removeApplicant(i)
-                                    : null,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.isEditing
+                                  ? 'Edit Applicant'
+                                  : 'Add Applicant',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: primary,
                               ),
-                      ),
-                    ],
-                  );
-                }),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Prepared by:',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 13,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Enter applicant details for this profile.',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: secondary,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      RspSpacedOutlineField(
-                        child: TextFormField(
-                          controller: _preparedBy,
-                          readOnly: ro,
-                          decoration: rspUnderlinedField(''),
-                        ),
-                      ),
-                      Text(
-                        '(e.g. HRMDO Staff)',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 11,
-                        ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(Icons.close_rounded, color: secondary),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 24),
+                Divider(height: 1, color: hairline),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(22, 16, 22, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'PERSONAL INFORMATION',
+                          style: AppTheme.dashSectionTitle(context),
+                        ),
+                        const SizedBox(height: 12),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final wide = constraints.maxWidth > 480;
+                            final nameField = TextFormField(
+                              controller: _name,
+                              textCapitalization: TextCapitalization.words,
+                              decoration: AppTheme.dashInputDecoration(
+                                context,
+                                labelText: 'Full Name',
+                              ),
+                              validator: (v) =>
+                                  (v == null || v.trim().isEmpty)
+                                  ? 'Required'
+                                  : null,
+                            );
+                            final courseField = TextFormField(
+                              controller: _course,
+                              decoration: AppTheme.dashInputDecoration(
+                                context,
+                                labelText: 'Course / Degree',
+                              ),
+                            );
+                            if (!wide) {
+                              return Column(
+                                children: [
+                                  nameField,
+                                  const SizedBox(height: 12),
+                                  courseField,
+                                ],
+                              );
+                            }
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(flex: 2, child: nameField),
+                                const SizedBox(width: 12),
+                                Expanded(child: courseField),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final wide = constraints.maxWidth > 480;
+                            final sexField = DropdownButtonFormField<String>(
+                              initialValue: _sex,
+                              decoration: AppTheme.dashInputDecoration(
+                                context,
+                                labelText: 'Sex',
+                              ),
+                              items: _sexOptions
+                                  .map(
+                                    (s) => DropdownMenuItem(
+                                      value: s,
+                                      child: Text(s),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) => setState(() => _sex = v),
+                            );
+                            final ageField = TextFormField(
+                              controller: _age,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                              decoration: AppTheme.dashInputDecoration(
+                                context,
+                                labelText: 'Age',
+                              ),
+                            );
+                            final civilField =
+                                DropdownButtonFormField<String>(
+                                  initialValue: _civilStatus,
+                                  decoration: AppTheme.dashInputDecoration(
+                                    context,
+                                    labelText: 'Civil Status',
+                                  ),
+                                  items: _civilStatusOptions
+                                      .map(
+                                        (s) => DropdownMenuItem(
+                                          value: s,
+                                          child: Text(s),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (v) =>
+                                      setState(() => _civilStatus = v),
+                                );
+                            if (!wide) {
+                              return Column(
+                                children: [
+                                  sexField,
+                                  const SizedBox(height: 12),
+                                  ageField,
+                                  const SizedBox(height: 12),
+                                  civilField,
+                                ],
+                              );
+                            }
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(child: sexField),
+                                const SizedBox(width: 12),
+                                Expanded(child: ageField),
+                                const SizedBox(width: 12),
+                                Expanded(flex: 2, child: civilField),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _remark,
+                          minLines: 1,
+                          maxLines: 2,
+                          decoration: AppTheme.dashInputDecoration(
+                            context,
+                            labelText: 'Remark / Disability (optional)',
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: AppTheme.dashMutedSurfaceOf(context),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: hairline),
+                          ),
+                          child: StructuredAddressForm(
+                            key: _addressFormKey,
+                            streetController: _street,
+                            initialRawAddress: _initialRawAddress,
+                            inputDecoration: _fieldDec,
+                            sectionLabel: 'ADDRESS',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Divider(height: 1, color: hairline),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 12, 22, 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      Text(
-                        'Checked by:',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 13,
-                        ),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Cancel'),
                       ),
-                      const SizedBox(height: 10),
-                      RspSpacedOutlineField(
-                        child: TextFormField(
-                          controller: _checkedBy,
-                          readOnly: ro,
-                          decoration: rspUnderlinedField(''),
+                      const SizedBox(width: 10),
+                      FilledButton.icon(
+                        onPressed: _submit,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primaryNavy,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 12,
+                          ),
                         ),
-                      ),
-                      Text(
-                        '(e.g. HRMDO)',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 11,
+                        icon: Icon(
+                          widget.isEditing
+                              ? Icons.check_rounded
+                              : Icons.person_add_alt_1_rounded,
+                          size: 18,
+                        ),
+                        label: Text(
+                          widget.isEditing ? 'Save Changes' : 'Add Applicant',
                         ),
                       ),
                     ],
@@ -3644,44 +5534,7 @@ class _ApplicantsProfileFormEditorState
                 ),
               ],
             ),
-            const SizedBox(height: 24),
-            const RspFormFooter(),
-            const SizedBox(height: 24),
-            if (!ro) ...[
-              Row(
-                children: [
-                  FilledButton(onPressed: _save, child: const Text('Save')),
-                  const SizedBox(width: 12),
-                  TextButton(
-                    onPressed: widget.onCancel,
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                    icon: const Icon(Icons.print_rounded),
-                    tooltip: 'Print',
-                  ),
-                  IconButton(
-                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                    icon: const Icon(Icons.picture_as_pdf_rounded),
-                    tooltip: 'Download PDF',
-                  ),
-                ],
-              ),
-            ] else ...[
-              if (widget.entry.createdAt != null)
-                Text(
-                  'Created: ${widget.entry.createdAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-              if (widget.entry.updatedAt != null)
-                Text(
-                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-            ],
-          ],
+          ),
         ),
       ),
     );
@@ -3716,9 +5569,14 @@ class _ApplicantsProfileList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(e.positionAppliedFor ?? '', bold: true),
-              rspRecordsTextCell(e.dateOfPosting ?? ''),
               rspRecordsTextCell(
+                context,
+                e.positionAppliedFor ?? '',
+                bold: true,
+              ),
+              rspRecordsTextCell(context, e.dateOfPosting ?? ''),
+              rspRecordsTextCell(
+                context,
                 '${e.applicants.length}',
                 align: TextAlign.center,
                 bold: true,
@@ -3754,1981 +5612,6 @@ class _ApplicantsProfileList extends StatelessWidget {
   }
 }
 
-/// RSP: Comparative Assessment of Candidates for Promotion Ã¢â‚¬â€ form only, no names/values pre-filled.
-class _RspComparativeAssessmentSection extends StatefulWidget {
-  const _RspComparativeAssessmentSection();
-
-  @override
-  State<_RspComparativeAssessmentSection> createState() =>
-      _RspComparativeAssessmentSectionState();
-}
-
-class _RspComparativeAssessmentSectionState
-    extends State<_RspComparativeAssessmentSection> {
-  List<ComparativeAssessmentEntry> _entries = [];
-  bool _loading = true;
-  ComparativeAssessmentEntry? _editing;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
-      final list = await ComparativeAssessmentRepo.instance.list();
-      if (mounted) {
-        setState(() {
-          _entries = list;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _entries = [];
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  void _startNew() =>
-      setState(() => _editing = const ComparativeAssessmentEntry());
-  void _edit(ComparativeAssessmentEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
-
-  Future<void> _onSave(ComparativeAssessmentEntry entry) async {
-    try {
-      if (entry.id == null) {
-        await ComparativeAssessmentRepo.instance.insert(entry);
-      } else {
-        await ComparativeAssessmentRepo.instance.update(entry);
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Comparative assessment saved.')),
-        );
-        setState(() => _editing = null);
-        _load();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
-        );
-      }
-    }
-  }
-
-  Future<void> _onDelete(String id) async {
-    try {
-      await ComparativeAssessmentRepo.instance.delete(id);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Deleted.')));
-        _load();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
-      }
-    }
-  }
-
-  Future<void> _printCa(ComparativeAssessmentEntry entry) async {
-    try {
-      await FormPdf.printForm(
-        context: context,
-        buildDocument: () => FormPdf.buildComparativeAssessmentPdf(entry),
-        filename: 'Comparative_Assessment.pdf',
-        format: FormPdf.pageLongLandscape,
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _downloadCa(ComparativeAssessmentEntry entry) async {
-    try {
-      final doc = await FormPdf.buildComparativeAssessmentPdf(entry);
-      await FormPdf.sharePdf(doc, name: 'Comparative_Assessment.pdf');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF ready to save or share.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
-      }
-    }
-  }
-
-  void _openSavedRecordsBrowser() {
-    showRspLdSavedRecordsBrowser(
-      context,
-      sheetTitle: 'Saved comparative assessments',
-      emptyMessage: 'No assessments yet.',
-      loading: _loading,
-      items: _entries.map((e) {
-        final pos = e.positionToBeFilled?.trim().isNotEmpty == true
-            ? e.positionToBeFilled!
-            : '(No position)';
-        return SavedRecordListItem(
-          title: pos,
-          subtitle: '${e.candidates.length} candidate(s)',
-          detailDialogTitle: 'Comparative assessment â€” $pos',
-          previewContentWidth: 960,
-          previewBuilder: () => _ComparativeAssessmentEditor(
-            readOnly: true,
-            entry: e,
-            onSave: (_) {},
-            onCancel: () {},
-            onPrint: (_) async {},
-            onDownloadPdf: (_) async {},
-          ),
-          onPrint: () => _printCa(e),
-        );
-      }).toList(),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Comparative Assessment of Candidates for Promotion',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Position, minimum requirements, and candidate comparison table. Form only\u2014no names or values pre-filled.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-        const SizedBox(height: 24),
-        if (_editing != null) ...[
-          _ComparativeAssessmentEditor(
-            key: ValueKey(_editing?.id ?? 'new'),
-            entry: _editing!,
-            onSave: _onSave,
-            onCancel: _cancelEdit,
-            onPrint: _printCa,
-            onDownloadPdf: _downloadCa,
-          ),
-          const SizedBox(height: 24),
-        ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add assessment'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message: 'No assessments yet. Tap "Add assessment" to add one.',
-            icon: Icons.compare_arrows_rounded,
-          )
-        else
-          _ComparativeAssessmentList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _printCa,
-            onDownloadPdf: _downloadCa,
-          ),
-      ],
-    );
-  }
-}
-
-class _ComparativeAssessmentEditor extends StatefulWidget {
-  const _ComparativeAssessmentEditor({
-    super.key,
-    required this.entry,
-    this.readOnly = false,
-    required this.onSave,
-    required this.onCancel,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final ComparativeAssessmentEntry entry;
-  final bool readOnly;
-  final void Function(ComparativeAssessmentEntry) onSave;
-  final VoidCallback onCancel;
-  final Future<void> Function(ComparativeAssessmentEntry) onPrint;
-  final Future<void> Function(ComparativeAssessmentEntry) onDownloadPdf;
-
-  @override
-  State<_ComparativeAssessmentEditor> createState() =>
-      _ComparativeAssessmentEditorState();
-}
-
-class _ComparativeAssessmentEditorState
-    extends State<_ComparativeAssessmentEditor> {
-  late TextEditingController _position;
-  late TextEditingController _edu;
-  late TextEditingController _exp;
-  late TextEditingController _elig;
-  late TextEditingController _training;
-  late List<Map<String, TextEditingController>> _rows;
-
-  @override
-  void initState() {
-    super.initState();
-    final e = widget.entry;
-    _position = TextEditingController(text: e.positionToBeFilled ?? '');
-    _edu = TextEditingController(text: e.minReqEducation ?? '');
-    _exp = TextEditingController(text: e.minReqExperience ?? '');
-    _elig = TextEditingController(text: e.minReqEligibility ?? '');
-    _training = TextEditingController(text: e.minReqTraining ?? '');
-    _rows = e.candidates.isEmpty
-        ? [_caRow('', '', '', '', '', '', '', '')]
-        : e.candidates
-              .map(
-                (c) => _caRow(
-                  c.candidateName ?? '',
-                  c.presentPositionSalary ?? '',
-                  c.education ?? '',
-                  c.trainingHrs ?? '',
-                  c.relatedExperience ?? '',
-                  c.eligibility ?? '',
-                  c.performanceRating ?? '',
-                  c.remarks ?? '',
-                ),
-              )
-              .toList();
-  }
-
-  Map<String, TextEditingController> _caRow(
-    String n,
-    String pos,
-    String edu,
-    String hrs,
-    String rel,
-    String elig,
-    String perf,
-    String rem,
-  ) {
-    return {
-      'name': TextEditingController(text: n),
-      'present_position_salary': TextEditingController(text: pos),
-      'education': TextEditingController(text: edu),
-      'training_hrs': TextEditingController(text: hrs),
-      'related_experience': TextEditingController(text: rel),
-      'eligibility': TextEditingController(text: elig),
-      'performance_rating': TextEditingController(text: perf),
-      'remarks': TextEditingController(text: rem),
-    };
-  }
-
-  @override
-  void dispose() {
-    _position.dispose();
-    _edu.dispose();
-    _exp.dispose();
-    _elig.dispose();
-    _training.dispose();
-    for (final row in _rows) {
-      for (final c in row.values) {
-        c.dispose();
-      }
-    }
-    super.dispose();
-  }
-
-  void _addRow() {
-    if (widget.readOnly) return;
-    setState(() => _rows.add(_caRow('', '', '', '', '', '', '', '')));
-  }
-
-  void _removeRow(int i) {
-    if (widget.readOnly) return;
-    if (_rows.length <= 1) return;
-    setState(() {
-      for (final c in _rows[i].values) {
-        c.dispose();
-      }
-      _rows.removeAt(i);
-    });
-  }
-
-  ComparativeAssessmentEntry _buildCurrentEntry() {
-    final candidates = _rows
-        .map(
-          (r) => ComparativeAssessmentCandidate(
-            candidateName: r['name']!.text.trim().isEmpty
-                ? null
-                : r['name']!.text.trim(),
-            presentPositionSalary:
-                r['present_position_salary']!.text.trim().isEmpty
-                ? null
-                : r['present_position_salary']!.text.trim(),
-            education: r['education']!.text.trim().isEmpty
-                ? null
-                : r['education']!.text.trim(),
-            trainingHrs: r['training_hrs']!.text.trim().isEmpty
-                ? null
-                : r['training_hrs']!.text.trim(),
-            relatedExperience: r['related_experience']!.text.trim().isEmpty
-                ? null
-                : r['related_experience']!.text.trim(),
-            eligibility: r['eligibility']!.text.trim().isEmpty
-                ? null
-                : r['eligibility']!.text.trim(),
-            performanceRating: r['performance_rating']!.text.trim().isEmpty
-                ? null
-                : r['performance_rating']!.text.trim(),
-            remarks: r['remarks']!.text.trim().isEmpty
-                ? null
-                : r['remarks']!.text.trim(),
-          ),
-        )
-        .toList();
-    return ComparativeAssessmentEntry(
-      id: widget.entry.id,
-      positionToBeFilled: _position.text.trim().isEmpty
-          ? null
-          : _position.text.trim(),
-      minReqEducation: _edu.text.trim().isEmpty ? null : _edu.text.trim(),
-      minReqExperience: _exp.text.trim().isEmpty ? null : _exp.text.trim(),
-      minReqEligibility: _elig.text.trim().isEmpty ? null : _elig.text.trim(),
-      minReqTraining: _training.text.trim().isEmpty
-          ? null
-          : _training.text.trim(),
-      candidates: candidates,
-      createdAt: widget.entry.createdAt,
-      updatedAt: widget.entry.updatedAt,
-    );
-  }
-
-  void _save() {
-    if (widget.readOnly) return;
-    widget.onSave(_buildCurrentEntry());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ro = widget.readOnly;
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const RspFormHeaderBoard(
-              formTitle: 'COMPARATIVE ASSESSMENT OF CANDIDATES FOR PROMOTION',
-            ),
-            Text(
-              'POSITION TO BE FILLED:',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _position,
-                readOnly: ro,
-                decoration: rspUnderlinedField(''),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'MINIMUM REQUIREMENTS:',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 6),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _edu,
-                readOnly: ro,
-                decoration: rspUnderlinedField('EDUCATION :'),
-              ),
-            ),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _exp,
-                readOnly: ro,
-                decoration: rspUnderlinedField('EXPERIENCE :'),
-              ),
-            ),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _elig,
-                readOnly: ro,
-                decoration: rspUnderlinedField('ELIGIBILITY :'),
-              ),
-            ),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _training,
-                readOnly: ro,
-                decoration: rspUnderlinedField('TRAINING :'),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    'Candidates',
-                    style: TextStyle(
-                      color: AppTheme.primaryNavy,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (!ro) ...[
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: _addRow,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add row'),
-                  ),
-                ],
-              ],
-            ),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: const [
-                  DataColumn(label: Text('CANDIDATES')),
-                  DataColumn(
-                    label: Text('Present Position/Salary Grade/Monthly Salary'),
-                  ),
-                  DataColumn(label: Text('EDUCATION')),
-                  DataColumn(label: Text('No. of hrs. Related Training')),
-                  DataColumn(label: Text('Related Experienced')),
-                  DataColumn(label: Text('Eligibility')),
-                  DataColumn(label: Text('Performance Rating')),
-                  DataColumn(label: Text('REMARKS')),
-                  DataColumn(label: Text('')),
-                ],
-                rows: List.generate(_rows.length, (i) {
-                  final r = _rows[i];
-                  return DataRow(
-                    cells: [
-                      DataCell(
-                        SizedBox(
-                          width: 100,
-                          child: TextFormField(
-                            controller: r['name'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(hintText: 'Name'),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 120,
-                          child: TextFormField(
-                            controller: r['present_position_salary'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 90,
-                          child: TextFormField(
-                            controller: r['education'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 70,
-                          child: TextFormField(
-                            controller: r['training_hrs'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 100,
-                          child: TextFormField(
-                            controller: r['related_experience'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 80,
-                          child: TextFormField(
-                            controller: r['eligibility'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 80,
-                          child: TextFormField(
-                            controller: r['performance_rating'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 90,
-                          child: TextFormField(
-                            controller: r['remarks'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        ro
-                            ? const SizedBox(width: 40)
-                            : IconButton(
-                                icon: const Icon(
-                                  Icons.remove_circle_outline,
-                                  size: 20,
-                                ),
-                                onPressed: _rows.length > 1
-                                    ? () => _removeRow(i)
-                                    : null,
-                              ),
-                      ),
-                    ],
-                  );
-                }),
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (!ro) ...[
-              Row(
-                children: [
-                  FilledButton(onPressed: _save, child: const Text('Save')),
-                  const SizedBox(width: 12),
-                  TextButton(
-                    onPressed: widget.onCancel,
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                    icon: const Icon(Icons.print_rounded),
-                    tooltip: 'Print',
-                  ),
-                  IconButton(
-                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                    icon: const Icon(Icons.picture_as_pdf_rounded),
-                    tooltip: 'Download PDF',
-                  ),
-                ],
-              ),
-            ] else ...[
-              if (widget.entry.createdAt != null)
-                Text(
-                  'Created: ${widget.entry.createdAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-              if (widget.entry.updatedAt != null)
-                Text(
-                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ComparativeAssessmentList extends StatelessWidget {
-  const _ComparativeAssessmentList({
-    required this.entries,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final List<ComparativeAssessmentEntry> entries;
-  final void Function(ComparativeAssessmentEntry) onEdit;
-  final void Function(String id) onDelete;
-  final Future<void> Function(ComparativeAssessmentEntry) onPrint;
-  final Future<void> Function(ComparativeAssessmentEntry) onDownloadPdf;
-
-  @override
-  Widget build(BuildContext context) {
-    const columns = [
-      RspRecordsColumn('Position', flex: 3),
-      RspRecordsColumn('Candidates', flex: 1, align: TextAlign.center),
-      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
-    ];
-    return RspRecordsListTable(
-      columns: columns,
-      rows: entries
-          .map(
-            (e) => [
-              rspRecordsTextCell(e.positionToBeFilled ?? '', bold: true),
-              rspRecordsTextCell(
-                '${e.candidates.length}',
-                align: TextAlign.center,
-                bold: true,
-              ),
-              RspRecordsCrudActions(
-                onView: () => showReadOnlySavedEntryDialog(
-                  context,
-                  title: 'Comparative assessment',
-                  subtitle: e.positionToBeFilled ?? '',
-                  previewBuilder: () => _ComparativeAssessmentEditor(
-                    readOnly: true,
-                    entry: e,
-                    onSave: (_) {},
-                    onCancel: () {},
-                    onPrint: (_) async {},
-                    onDownloadPdf: (_) async {},
-                  ),
-                  contentWidth: 960,
-                  onPrint: () => onPrint(e),
-                ),
-                onEdit: () => onEdit(e),
-                onPrint: () => onPrint(e),
-                onDownloadPdf: () => onDownloadPdf(e),
-                onDelete: () async {
-                  if (e.id != null) onDelete(e.id!);
-                },
-                deleteDialogTitle: 'Delete assessment?',
-              ),
-            ],
-          )
-          .toList(),
-    );
-  }
-}
-
-Widget _rspSectionHeader(
-  BuildContext context, {
-  required IconData icon,
-  required String title,
-  required String subtitle,
-}) {
-  return Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              AppTheme.primaryNavy.withValues(alpha: 0.14),
-              AppTheme.primaryNavyLight.withValues(alpha: 0.08),
-            ],
-          ),
-          border: Border.all(
-            color: AppTheme.primaryNavy.withValues(alpha: 0.2),
-          ),
-        ),
-        child: Icon(icon, size: 26, color: AppTheme.primaryNavy),
-      ),
-      const SizedBox(width: 16),
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: TextStyle(
-                color: AppTheme.dashTextPrimaryOf(context),
-                fontSize: 26,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.4,
-                height: 1.15,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              style: TextStyle(
-                color: AppTheme.dashTextSecondaryOf(context),
-                fontSize: 14.5,
-                height: 1.45,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ],
-  );
-}
-
-Widget _rspSectionToolbar(
-  BuildContext context, {
-  required bool loading,
-  required String addLabel,
-  required VoidCallback onAdd,
-  required VoidCallback onRefresh,
-  required VoidCallback onViewRecords,
-}) {
-  final narrow = MediaQuery.sizeOf(context).width < 720;
-  final addBtn = FilledButton.icon(
-    onPressed: loading ? null : onAdd,
-    icon: const Icon(Icons.add_rounded, size: 20),
-    label: Text(addLabel),
-    style: FilledButton.styleFrom(
-      backgroundColor: AppTheme.primaryNavy,
-      foregroundColor: Colors.white,
-      elevation: 0,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ),
-  );
-  final refreshBtn = OutlinedButton.icon(
-    onPressed: loading ? null : onRefresh,
-    icon: const Icon(Icons.refresh_rounded, size: 20),
-    label: const Text('Refresh'),
-    style: OutlinedButton.styleFrom(
-      foregroundColor: AppTheme.primaryNavy,
-      side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.45)),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ),
-  );
-  final recordsBtn = OutlinedButton.icon(
-    onPressed: loading ? null : onViewRecords,
-    icon: const Icon(Icons.folder_open_outlined, size: 20),
-    label: const Text('View records'),
-    style: OutlinedButton.styleFrom(
-      foregroundColor: AppTheme.primaryNavy,
-      side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.45)),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ),
-  );
-
-  return Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: AppTheme.dashMutedSurfaceOf(context),
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: AppTheme.dashHairlineOf(context)),
-    ),
-    child: narrow
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              addBtn,
-              const SizedBox(height: 10),
-              refreshBtn,
-              const SizedBox(height: 10),
-              recordsBtn,
-            ],
-          )
-        : Row(
-            children: [
-              addBtn,
-              const Spacer(),
-              refreshBtn,
-              const SizedBox(width: 10),
-              recordsBtn,
-            ],
-          ),
-  );
-}
-
-Widget _rspEmptyPlaceholder({
-  required IconData icon,
-  required String title,
-  required String subtitle,
-}) {
-  return Padding(
-    padding: const EdgeInsets.symmetric(vertical: 32),
-    child: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              icon,
-              size: 40,
-              color: AppTheme.primaryNavy.withValues(alpha: 0.75),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            title,
-            style: const TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 14,
-              height: 1.4,
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-class _RspSavedEntryCard extends StatelessWidget {
-  const _RspSavedEntryCard({
-    required this.title,
-    required this.subtitle,
-    required this.meta,
-    required this.onView,
-    required this.onEdit,
-    required this.onPrint,
-    required this.onDownloadPdf,
-    required this.onDelete,
-  });
-
-  final String title;
-  final String subtitle;
-  final String meta;
-  final VoidCallback onView;
-  final VoidCallback onEdit;
-  final Future<void> Function() onPrint;
-  final Future<void> Function() onDownloadPdf;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final hairline = AppTheme.dashHairlineOf(context);
-    final panel = AppTheme.dashPanelOf(context);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: panel,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: hairline),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.primaryNavy.withValues(alpha: 0.05),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            height: 4,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            style: TextStyle(
-                              color: AppTheme.dashTextPrimaryOf(context),
-                              fontWeight: FontWeight.w800,
-                              fontSize: 17,
-                              letterSpacing: -0.2,
-                              height: 1.2,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            subtitle,
-                            style: TextStyle(
-                              color: AppTheme.dashTextSecondaryOf(context),
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w600,
-                              height: 1.3,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(999),
-                        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-                        border: Border.all(
-                          color: AppTheme.primaryNavy.withValues(alpha: 0.22),
-                        ),
-                      ),
-                      child: Text(
-                        meta,
-                        style: const TextStyle(
-                          color: AppTheme.primaryNavy,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Divider(height: 1, color: hairline),
-                const SizedBox(height: 12),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Wrap(
-                      spacing: kRspLdRecordActionGap,
-                      runSpacing: kRspLdRecordActionGap,
-                      children: [
-                        OutlinedButton.icon(
-                          onPressed: onView,
-                          icon: const Icon(Icons.visibility_outlined, size: 18),
-                          label: const Text('View'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppTheme.primaryNavy,
-                            side: BorderSide(
-                              color: AppTheme.primaryNavy.withValues(
-                                alpha: 0.45,
-                              ),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: onEdit,
-                          icon: const Icon(Icons.edit_outlined, size: 18),
-                          label: const Text('Edit'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppTheme.primaryNavy,
-                            side: BorderSide(
-                              color: AppTheme.primaryNavy.withValues(
-                                alpha: 0.45,
-                              ),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Spacer(),
-                    Wrap(
-                      spacing: kRspLdRecordActionGap,
-                      runSpacing: kRspLdRecordActionGap,
-                      children: [
-                        IconButton(
-                          onPressed: () => onPrint(),
-                          icon: const Icon(Icons.print_rounded, size: 20),
-                          tooltip: 'Print',
-                          style: rspLdRecordIconButtonStyle(),
-                        ),
-                        IconButton(
-                          onPressed: () => onDownloadPdf(),
-                          icon: const Icon(
-                            Icons.picture_as_pdf_rounded,
-                            size: 20,
-                          ),
-                          tooltip: 'Download PDF',
-                          style: rspLdRecordIconButtonStyle(),
-                        ),
-                        TextButton.icon(
-                          onPressed: onDelete,
-                          icon: Icon(
-                            Icons.delete_outline_rounded,
-                            size: 18,
-                            color: Colors.red.shade700,
-                          ),
-                          label: Text(
-                            'Delete',
-                            style: TextStyle(
-                              color: Colors.red.shade700,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// RSP: Promotion Certification / Screening â€” form only, no names/values pre-filled.
-class _RspPromotionCertificationSection extends StatefulWidget {
-  const _RspPromotionCertificationSection();
-
-  @override
-  State<_RspPromotionCertificationSection> createState() =>
-      _RspPromotionCertificationSectionState();
-}
-
-class _RspPromotionCertificationSectionState
-    extends State<_RspPromotionCertificationSection> {
-  List<PromotionCertificationEntry> _entries = [];
-  bool _loading = true;
-  PromotionCertificationEntry? _editing;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
-      final list = await PromotionCertificationRepo.instance.list();
-      if (mounted) {
-        setState(() {
-          _entries = list;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _entries = [];
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  void _startNew() =>
-      setState(() => _editing = const PromotionCertificationEntry());
-  void _edit(PromotionCertificationEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
-
-  Future<void> _onSave(PromotionCertificationEntry entry) async {
-    try {
-      if (entry.id == null) {
-        await PromotionCertificationRepo.instance.insert(entry);
-      } else {
-        await PromotionCertificationRepo.instance.update(entry);
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Promotion certification saved.')),
-        );
-        setState(() => _editing = null);
-        _load();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
-        );
-      }
-    }
-  }
-
-  Future<void> _onDelete(String id) async {
-    try {
-      await PromotionCertificationRepo.instance.delete(id);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Deleted.')));
-        _load();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
-      }
-    }
-  }
-
-  Future<void> _printPc(PromotionCertificationEntry entry) async {
-    try {
-      await FormPdf.printForm(
-        context: context,
-        buildDocument: () => FormPdf.buildPromotionCertificationPdf(entry),
-        filename: 'Promotion_Certification.pdf',
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _downloadPc(PromotionCertificationEntry entry) async {
-    try {
-      final doc = await FormPdf.buildPromotionCertificationPdf(entry);
-      await FormPdf.sharePdf(doc, name: 'Promotion_Certification.pdf');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF ready to save or share.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
-      }
-    }
-  }
-
-  void _openSavedRecordsBrowser() {
-    showRspLdSavedRecordsBrowser(
-      context,
-      sheetTitle: 'Saved promotion certifications',
-      emptyMessage: 'No certifications yet.',
-      loading: _loading,
-      items: _entries.map((e) {
-        final pos = e.positionForPromotion?.trim().isNotEmpty == true
-            ? e.positionForPromotion!
-            : '(No position)';
-        return SavedRecordListItem(
-          title: pos,
-          subtitle: '${e.candidates.length} candidate(s)',
-          detailDialogTitle: 'Promotion certification â€” $pos',
-          previewContentWidth: 960,
-          previewBuilder: () => _PromotionCertificationEditor(
-            readOnly: true,
-            entry: e,
-            onSave: (_) {},
-            onCancel: () {},
-            onPrint: (_) async {},
-            onDownloadPdf: (_) async {},
-          ),
-          onPrint: () => _printPc(e),
-        );
-      }).toList(),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _rspSectionHeader(
-          context,
-          icon: Icons.verified_outlined,
-          title: 'Promotion Certification / Screening',
-          subtitle:
-              'Certification that candidate(s) have been screened and found qualified for promotion. Form onlyâ€”no names or values pre-filled.',
-        ),
-        const SizedBox(height: 22),
-        _rspSectionToolbar(
-          context,
-          loading: _loading,
-          addLabel: 'Add certification',
-          onAdd: _startNew,
-          onRefresh: _load,
-          onViewRecords: _openSavedRecordsBrowser,
-        ),
-        const SizedBox(height: 20),
-        if (_editing != null) ...[
-          _PromotionCertificationEditor(
-            key: ValueKey(_editing?.id ?? 'new'),
-            entry: _editing!,
-            onSave: _onSave,
-            onCancel: _cancelEdit,
-            onPrint: _printPc,
-            onDownloadPdf: _downloadPc,
-          ),
-          const SizedBox(height: 20),
-        ],
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          _rspEmptyPlaceholder(
-            icon: Icons.verified_outlined,
-            title: 'No certifications yet',
-            subtitle:
-                'Tap "Add certification" to create a Promotion Certification / Screening form.',
-          )
-        else
-          _PromotionCertificationList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _printPc,
-            onDownloadPdf: _downloadPc,
-          ),
-      ],
-    );
-  }
-}
-
-class _PromotionCertificationEditor extends StatefulWidget {
-  const _PromotionCertificationEditor({
-    super.key,
-    required this.entry,
-    this.readOnly = false,
-    required this.onSave,
-    required this.onCancel,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final PromotionCertificationEntry entry;
-  final bool readOnly;
-  final void Function(PromotionCertificationEntry) onSave;
-  final VoidCallback onCancel;
-  final Future<void> Function(PromotionCertificationEntry) onPrint;
-  final Future<void> Function(PromotionCertificationEntry) onDownloadPdf;
-
-  @override
-  State<_PromotionCertificationEditor> createState() =>
-      _PromotionCertificationEditorState();
-}
-
-class _PromotionCertificationEditorState
-    extends State<_PromotionCertificationEditor> {
-  late TextEditingController _position;
-  late TextEditingController _day;
-  late TextEditingController _month;
-  late TextEditingController _year;
-  late TextEditingController _signName;
-  late TextEditingController _signTitle;
-  late List<Map<String, TextEditingController>> _rows;
-
-  @override
-  void initState() {
-    super.initState();
-    final e = widget.entry;
-    _position = TextEditingController(text: e.positionForPromotion ?? '');
-    _day = TextEditingController(text: e.dateDay ?? '');
-    _month = TextEditingController(text: e.dateMonth ?? '');
-    _year = TextEditingController(text: e.dateYear ?? '');
-    _signName = TextEditingController(text: e.signatoryName ?? '');
-    _signTitle = TextEditingController(text: e.signatoryTitle ?? '');
-    _rows = e.candidates.isEmpty
-        ? [_pcRow('', '', '', '', '', '')]
-        : e.candidates
-              .map(
-                (c) => _pcRow(
-                  c.name ?? '',
-                  c.col1 ?? '',
-                  c.col2 ?? '',
-                  c.col3 ?? '',
-                  c.col4 ?? '',
-                  c.col5 ?? '',
-                ),
-              )
-              .toList();
-  }
-
-  Map<String, TextEditingController> _pcRow(
-    String name,
-    String c1,
-    String c2,
-    String c3,
-    String c4,
-    String c5,
-  ) {
-    return {
-      'name': TextEditingController(text: name),
-      'col1': TextEditingController(text: c1),
-      'col2': TextEditingController(text: c2),
-      'col3': TextEditingController(text: c3),
-      'col4': TextEditingController(text: c4),
-      'col5': TextEditingController(text: c5),
-    };
-  }
-
-  @override
-  void dispose() {
-    _position.dispose();
-    _day.dispose();
-    _month.dispose();
-    _year.dispose();
-    _signName.dispose();
-    _signTitle.dispose();
-    for (final row in _rows) {
-      for (final c in row.values) {
-        c.dispose();
-      }
-    }
-    super.dispose();
-  }
-
-  void _addRow() {
-    if (widget.readOnly) return;
-    setState(() => _rows.add(_pcRow('', '', '', '', '', '')));
-  }
-
-  void _removeRow(int i) {
-    if (widget.readOnly) return;
-    if (_rows.length <= 1) return;
-    setState(() {
-      for (final c in _rows[i].values) {
-        c.dispose();
-      }
-      _rows.removeAt(i);
-    });
-  }
-
-  PromotionCertificationEntry _buildCurrentEntry() {
-    final candidates = _rows
-        .map(
-          (r) => PromotionCertificationCandidate(
-            name: r['name']!.text.trim().isEmpty
-                ? null
-                : r['name']!.text.trim(),
-            col1: r['col1']!.text.trim().isEmpty
-                ? null
-                : r['col1']!.text.trim(),
-            col2: r['col2']!.text.trim().isEmpty
-                ? null
-                : r['col2']!.text.trim(),
-            col3: r['col3']!.text.trim().isEmpty
-                ? null
-                : r['col3']!.text.trim(),
-            col4: r['col4']!.text.trim().isEmpty
-                ? null
-                : r['col4']!.text.trim(),
-            col5: r['col5']!.text.trim().isEmpty
-                ? null
-                : r['col5']!.text.trim(),
-          ),
-        )
-        .toList();
-    return PromotionCertificationEntry(
-      id: widget.entry.id,
-      positionForPromotion: _position.text.trim().isEmpty
-          ? null
-          : _position.text.trim(),
-      candidates: candidates,
-      dateDay: _day.text.trim().isEmpty ? null : _day.text.trim(),
-      dateMonth: _month.text.trim().isEmpty ? null : _month.text.trim(),
-      dateYear: _year.text.trim().isEmpty ? null : _year.text.trim(),
-      signatoryName: _signName.text.trim().isEmpty
-          ? null
-          : _signName.text.trim(),
-      signatoryTitle: _signTitle.text.trim().isEmpty
-          ? null
-          : _signTitle.text.trim(),
-      createdAt: widget.entry.createdAt,
-      updatedAt: widget.entry.updatedAt,
-    );
-  }
-
-  void _save() {
-    if (widget.readOnly) return;
-    widget.onSave(_buildCurrentEntry());
-  }
-
-  Widget _pcSectionLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          color: AppTheme.primaryNavy.withValues(alpha: 0.85),
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.65,
-          height: 1.2,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ro = widget.readOnly;
-    final hairline = AppTheme.dashHairlineOf(context);
-    final muted = AppTheme.dashMutedSurfaceOf(context);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.dashPanelOf(context),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: hairline),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.primaryNavy.withValues(alpha: 0.04),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            height: 4,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const RspFormHeader(
-                    formTitle: 'Promotion Certification / Screening',
-                  ),
-                  const SizedBox(height: 20),
-                  _pcSectionLabel('Position for promotion'),
-                  RspSpacedOutlineField(
-                    child: TextFormField(
-                      controller: _position,
-                      readOnly: ro,
-                      decoration: rspUnderlinedField(''),
-                    ),
-                  ),
-                  const SizedBox(height: rspFormSectionGap),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: _pcSectionLabel('Candidates (name + 5 columns)'),
-                      ),
-                      if (!ro)
-                        OutlinedButton.icon(
-                          onPressed: _addRow,
-                          icon: const Icon(Icons.add_rounded, size: 18),
-                          label: const Text('Add row'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppTheme.primaryNavy,
-                            side: BorderSide(
-                              color: AppTheme.primaryNavy.withValues(
-                                alpha: 0.45,
-                              ),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: muted,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: hairline),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 8,
-                      horizontal: 4,
-                    ),
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: DataTable(
-                        columns: const [
-                          DataColumn(label: Text('Name')),
-                          DataColumn(label: Text('1')),
-                          DataColumn(label: Text('2')),
-                          DataColumn(label: Text('3')),
-                          DataColumn(label: Text('4')),
-                          DataColumn(label: Text('5')),
-                          DataColumn(label: Text('')),
-                        ],
-                        rows: List.generate(_rows.length, (i) {
-                          final r = _rows[i];
-                          return DataRow(
-                            cells: [
-                              DataCell(
-                                SizedBox(
-                                  width: 120,
-                                  child: TextFormField(
-                                    controller: r['name'],
-                                    readOnly: ro,
-                                    decoration: rspTableCellField(
-                                      hintText: 'Name',
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                SizedBox(
-                                  width: 80,
-                                  child: TextFormField(
-                                    controller: r['col1'],
-                                    readOnly: ro,
-                                    decoration: rspTableCellField(),
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                SizedBox(
-                                  width: 80,
-                                  child: TextFormField(
-                                    controller: r['col2'],
-                                    readOnly: ro,
-                                    decoration: rspTableCellField(),
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                SizedBox(
-                                  width: 80,
-                                  child: TextFormField(
-                                    controller: r['col3'],
-                                    readOnly: ro,
-                                    decoration: rspTableCellField(),
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                SizedBox(
-                                  width: 80,
-                                  child: TextFormField(
-                                    controller: r['col4'],
-                                    readOnly: ro,
-                                    decoration: rspTableCellField(),
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                SizedBox(
-                                  width: 80,
-                                  child: TextFormField(
-                                    controller: r['col5'],
-                                    readOnly: ro,
-                                    decoration: rspTableCellField(),
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                ro
-                                    ? const SizedBox(width: 40)
-                                    : IconButton(
-                                        icon: const Icon(
-                                          Icons.remove_circle_outline,
-                                          size: 20,
-                                        ),
-                                        onPressed: _rows.length > 1
-                                            ? () => _removeRow(i)
-                                            : null,
-                                      ),
-                              ),
-                            ],
-                          );
-                        }),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: rspFormSectionGap),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 14,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.sectionAlt.withValues(alpha: 0.55),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: hairline),
-                    ),
-                    child: const Text(
-                      'We hereby certify that the above candidate(s) have been screened and found to be qualified for promotion to the above position.',
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        fontStyle: FontStyle.italic,
-                        height: 1.5,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: rspFormSectionGap),
-                  _pcSectionLabel('Date of certification'),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: muted,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: hairline),
-                    ),
-                    child: Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 6,
-                      runSpacing: 12,
-                      children: [
-                        Text(
-                          'Done this',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 14,
-                            height: 1.35,
-                          ),
-                        ),
-                        SizedBox(
-                          width: 52,
-                          child: TextFormField(
-                            controller: _day,
-                            readOnly: ro,
-                            style: const TextStyle(fontSize: 14, height: 1.2),
-                            decoration: rspInlineClauseField(hintText: 'day'),
-                          ),
-                        ),
-                        Text(
-                          'day of',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 14,
-                            height: 1.35,
-                          ),
-                        ),
-                        SizedBox(
-                          width: 120,
-                          child: TextFormField(
-                            controller: _month,
-                            readOnly: ro,
-                            style: const TextStyle(fontSize: 14, height: 1.2),
-                            decoration: rspInlineClauseField(hintText: 'month'),
-                          ),
-                        ),
-                        Text(
-                          ',',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 14,
-                            height: 1.35,
-                          ),
-                        ),
-                        SizedBox(
-                          width: 64,
-                          child: TextFormField(
-                            controller: _year,
-                            readOnly: ro,
-                            style: const TextStyle(fontSize: 14, height: 1.2),
-                            decoration: rspInlineClauseField(hintText: 'year'),
-                          ),
-                        ),
-                        Text(
-                          '.',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 14,
-                            height: 1.35,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: rspFormSectionGap),
-                  _pcSectionLabel('Signatory (e.g. Secretariat)'),
-                  _field(_signName, 'Name'),
-                  _field(_signTitle, 'Title'),
-                  const SizedBox(height: 24),
-                  if (!ro) ...[
-                    Divider(height: 1, color: hairline),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        FilledButton(
-                          onPressed: _save,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.primaryNavy,
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 22,
-                              vertical: 14,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: const Text(
-                            'Save',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        OutlinedButton(
-                          onPressed: widget.onCancel,
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppTheme.primaryNavy,
-                            side: BorderSide(
-                              color: AppTheme.primaryNavy.withValues(
-                                alpha: 0.45,
-                              ),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 14,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: const Text('Cancel'),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                          icon: const Icon(Icons.print_rounded),
-                          tooltip: 'Print',
-                          style: IconButton.styleFrom(
-                            backgroundColor: muted,
-                            foregroundColor: AppTheme.primaryNavy,
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () =>
-                              widget.onDownloadPdf(_buildCurrentEntry()),
-                          icon: const Icon(Icons.picture_as_pdf_rounded),
-                          tooltip: 'Download PDF',
-                          style: IconButton.styleFrom(
-                            backgroundColor: muted,
-                            foregroundColor: AppTheme.primaryNavy,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ] else ...[
-                    if (widget.entry.createdAt != null)
-                      Text(
-                        'Created: ${widget.entry.createdAt!.toLocal()}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                    if (widget.entry.updatedAt != null)
-                      Text(
-                        'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _field(TextEditingController c, String label) {
-    return RspSpacedOutlineField(
-      child: TextFormField(
-        controller: c,
-        readOnly: widget.readOnly,
-        decoration: rspUnderlinedField(label),
-      ),
-    );
-  }
-}
-
-class _PromotionCertificationList extends StatelessWidget {
-  const _PromotionCertificationList({
-    required this.entries,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final List<PromotionCertificationEntry> entries;
-  final void Function(PromotionCertificationEntry) onEdit;
-  final void Function(String id) onDelete;
-  final Future<void> Function(PromotionCertificationEntry) onPrint;
-  final Future<void> Function(PromotionCertificationEntry) onDownloadPdf;
-
-  Future<void> _confirmDelete(
-    BuildContext context,
-    PromotionCertificationEntry e,
-  ) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete?'),
-        content: const Text('This cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true && e.id != null) onDelete(e.id!);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: entries.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final e = entries[index];
-        final pos = e.positionForPromotion?.trim().isNotEmpty == true
-            ? e.positionForPromotion!
-            : 'No position';
-        return _RspSavedEntryCard(
-          title: pos,
-          subtitle: 'Promotion certification',
-          meta:
-              '${e.candidates.length} candidate${e.candidates.length == 1 ? '' : 's'}',
-          onView: () => showReadOnlySavedEntryDialog(
-            context,
-            title: 'Promotion certification',
-            subtitle: e.positionForPromotion ?? '',
-            previewBuilder: () => _PromotionCertificationEditor(
-              readOnly: true,
-              entry: e,
-              onSave: (_) {},
-              onCancel: () {},
-              onPrint: (_) async {},
-              onDownloadPdf: (_) async {},
-            ),
-            contentWidth: 960,
-            onPrint: () => onPrint(e),
-          ),
-          onEdit: () => onEdit(e),
-          onPrint: () => onPrint(e),
-          onDownloadPdf: () => onDownloadPdf(e),
-          onDelete: () => _confirmDelete(context, e),
-        );
-      },
-    );
-  }
-}
-
-/// RSP: Selection Line-up Ã¢â‚¬â€ date, agency/office, vacant position, item no., applicants table. Form only, no pre-filled names.
 class _RspSelectionLineupSection extends StatefulWidget {
   const _RspSelectionLineupSection();
 
@@ -5882,18 +5765,47 @@ class _RspSelectionLineupSectionState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Row(
+          children: [
+            Text(
+              'RSP',
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 16,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+            Text(
+              'Selection Line-Up',
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
         Text(
           'Selection Line-up',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: AppTheme.dashTextPrimaryOf(context),
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 8),
         Text(
-          'Date, name of agency/office, vacant position, item no., and applicants table (name, education, experience, training, eligibility). Form only\u2014no pre-filled names.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          'Manage the vacant position, item no., and applicant list for this line-up. Printing keeps the official Selection Line-Up format.',
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 14,
+          ),
         ),
         const SizedBox(height: 24),
         if (_editing != null) ...[
@@ -5987,7 +5899,9 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
   late TextEditingController _itemNo;
   late TextEditingController _preparedName;
   late TextEditingController _preparedTitle;
+  late TextEditingController _searchCtrl;
   late List<Map<String, TextEditingController>> _rows;
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -5999,8 +5913,9 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
     _itemNo = TextEditingController(text: e.itemNo ?? '');
     _preparedName = TextEditingController(text: e.preparedByName ?? '');
     _preparedTitle = TextEditingController(text: e.preparedByTitle ?? '');
+    _searchCtrl = TextEditingController();
     _rows = e.applicants.isEmpty
-        ? [_slRow('', '', '', '', '')]
+        ? <Map<String, TextEditingController>>[]
         : e.applicants
               .map(
                 (a) => _slRow(
@@ -6012,7 +5927,10 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                 ),
               )
               .toList();
+    _position.addListener(_onTitleFieldChanged);
   }
+
+  void _onTitleFieldChanged() => setState(() {});
 
   Map<String, TextEditingController> _slRow(
     String name,
@@ -6032,12 +5950,14 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
 
   @override
   void dispose() {
+    _position.removeListener(_onTitleFieldChanged);
     _date.dispose();
     _agency.dispose();
     _position.dispose();
     _itemNo.dispose();
     _preparedName.dispose();
     _preparedTitle.dispose();
+    _searchCtrl.dispose();
     for (final row in _rows) {
       for (final c in row.values) {
         c.dispose();
@@ -6046,9 +5966,209 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
     super.dispose();
   }
 
-  void _addRow() => setState(() => _rows.add(_slRow('', '', '', '', '')));
+  static String _formatPickedDate(DateTime dt) {
+    final d = dt.toLocal();
+    final y = d.year.toString().padLeft(4, '0');
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '$y-$m-$day';
+  }
+
+  Future<void> _pickDate() async {
+    if (widget.readOnly) return;
+    final now = DateTime.now();
+    final parsed = DateTime.tryParse(_date.text.trim());
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: parsed ?? now,
+      firstDate: DateTime(now.year - 10),
+      lastDate: DateTime(now.year + 10),
+      helpText: 'Select date',
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _date.text = _formatPickedDate(picked));
+  }
+
+  Future<void> _pickVacantPosition() async {
+    if (widget.readOnly) return;
+    try {
+      final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
+      final positions = <String>[];
+      for (final v in announcement.vacancies) {
+        final key = v.positionKey?.trim();
+        if (key != null && key.isNotEmpty && !positions.contains(key)) {
+          positions.add(key);
+        }
+      }
+      if (!mounted) return;
+      if (positions.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No job vacancies found to select from.'),
+          ),
+        );
+        return;
+      }
+      final selected = await showDialog<String>(
+        context: context,
+        builder: (ctx) {
+          final primary = AppTheme.dashTextPrimaryOf(ctx);
+          final secondary = AppTheme.dashTextSecondaryOf(ctx);
+          final panel = AppTheme.dashPanelOf(ctx);
+          final hairline = AppTheme.dashHairlineOf(ctx);
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 28,
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440, maxHeight: 480),
+              child: Material(
+                color: panel,
+                borderRadius: BorderRadius.circular(16),
+                clipBehavior: Clip.antiAlias,
+                elevation: 10,
+                shadowColor: Colors.black26,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 18, 8, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Select vacant position',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: primary,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.of(ctx).pop(),
+                            icon: Icon(Icons.close_rounded, color: secondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 360),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                        itemCount: positions.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (_, i) {
+                          final p = positions[i];
+                          return Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () => Navigator.of(ctx).pop(p),
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.dashMutedSurfaceOf(ctx),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: hairline),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        p,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          color: primary,
+                                        ),
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.chevron_right_rounded,
+                                      color: AppTheme.primaryNavy.withValues(
+                                        alpha: 0.7,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+      if (selected != null && mounted) {
+        setState(() => _position.text = selected);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not load job vacancies.')),
+      );
+    }
+  }
+
+  Future<void> _openAddApplicantDialog() async {
+    if (widget.readOnly) return;
+    final result = await showDialog<_SlApplicantDialogResult>(
+      context: context,
+      builder: (_) => const _SlApplicantDialog(isEditing: false),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _rows.add(
+        _slRow(
+          result.name,
+          result.education,
+          result.experience,
+          result.training,
+          result.eligibility,
+        ),
+      );
+    });
+  }
+
+  Future<void> _openEditApplicantDialog(int index) async {
+    if (widget.readOnly) return;
+    final row = _rows[index];
+    final initial = _SlApplicantDialogResult(
+      name: row['name']!.text,
+      education: row['education']!.text,
+      experience: row['experience']!.text,
+      training: row['training']!.text,
+      eligibility: row['eligibility']!.text,
+    );
+    final result = await showDialog<_SlApplicantDialogResult>(
+      context: context,
+      builder: (_) => _SlApplicantDialog(isEditing: true, initial: initial),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      row['name']!.text = result.name;
+      row['education']!.text = result.education;
+      row['experience']!.text = result.experience;
+      row['training']!.text = result.training;
+      row['eligibility']!.text = result.eligibility;
+    });
+  }
+
   void _removeRow(int i) {
-    if (_rows.length <= 1) return;
+    if (widget.readOnly) return;
+    if (i < 0 || i >= _rows.length) return;
     setState(() {
       for (final c in _rows[i].values) {
         c.dispose();
@@ -6110,241 +6230,786 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
   Widget build(BuildContext context) {
     final ro = widget.readOnly;
     return Container(
-      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: AppTheme.white,
+        color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const RspFormHeader(formTitle: 'SELECTION LINE-UP'),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                SizedBox(
-                  width: 180,
-                  child: RspSpacedOutlineField(
-                    child: TextFormField(
-                      controller: _date,
-                      readOnly: ro,
-                      decoration: rspUnderlinedField('Date'),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'Name of Agency/Office:',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-            ),
-            const SizedBox(height: 8),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _agency,
-                readOnly: ro,
-                decoration: rspUnderlinedField(''),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Vacant Position:',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-            ),
-            const SizedBox(height: 8),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _position,
-                readOnly: ro,
-                decoration: rspUnderlinedField(''),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Item No.:',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-            ),
-            const SizedBox(height: 8),
-            RspSpacedOutlineField(
-              child: TextFormField(
-                controller: _itemNo,
-                readOnly: ro,
-                decoration: rspUnderlinedField(''),
-              ),
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            Row(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _headerBar(context, ro),
+          Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    'Name of applicants (table)',
-                    style: TextStyle(
-                      color: AppTheme.primaryNavy,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                _vacancyInfoCard(context, ro),
+                const SizedBox(height: 24),
+                _applicantsSectionHeader(context, ro),
+                const SizedBox(height: 12),
+                _applicantsTable(context, ro),
+                const SizedBox(height: 24),
+                _preparedByCard(context, ro),
+                if (ro) ...[
+                  const SizedBox(height: 16),
+                  if (widget.entry.createdAt != null)
+                    Text(
+                      'Created: ${widget.entry.createdAt!.toLocal()}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (!ro) ...[
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: _addRow,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add applicant'),
-                  ),
+                  if (widget.entry.updatedAt != null)
+                    Text(
+                      'Last updated: ${widget.entry.updatedAt!.toLocal()}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
                 ],
               ],
             ),
-            const SizedBox(height: 14),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: const [
-                  DataColumn(label: Text('NAME OF APPLICANTS')),
-                  DataColumn(label: Text('EDUCATION')),
-                  DataColumn(label: Text('EXPERIENCE')),
-                  DataColumn(label: Text('TRAINING')),
-                  DataColumn(label: Text('ELIGIBILITY')),
-                  DataColumn(label: Text('')),
-                ],
-                rows: List.generate(_rows.length, (i) {
-                  final r = _rows[i];
-                  return DataRow(
-                    cells: [
-                      DataCell(
-                        SizedBox(
-                          width: 140,
-                          child: TextFormField(
-                            controller: r['name'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(hintText: 'Name'),
-                          ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _headerBar(BuildContext context, bool ro) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final position = _position.text.trim();
+    final itemNo = _itemNo.text.trim();
+    final title = position.isEmpty ? 'New Selection Line-Up' : position;
+    final statusLabel = ro
+        ? 'Read-only preview'
+        : (widget.entry.id == null ? 'Draft' : 'Saved');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 10,
+        spacing: 12,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        title,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: primary,
                         ),
                       ),
-                      DataCell(
-                        SizedBox(
-                          width: 120,
-                          child: TextFormField(
-                            controller: r['education'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 120,
-                          child: TextFormField(
-                            controller: r['experience'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 100,
-                          child: TextFormField(
-                            controller: r['training'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        SizedBox(
-                          width: 100,
-                          child: TextFormField(
-                            controller: r['eligibility'],
-                            readOnly: ro,
-                            decoration: rspTableCellField(),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        ro
-                            ? const SizedBox(width: 40)
-                            : IconButton(
-                                icon: const Icon(
-                                  Icons.remove_circle_outline,
-                                  size: 20,
-                                ),
-                                onPressed: _rows.length > 1
-                                    ? () => _removeRow(i)
-                                    : null,
-                              ),
-                      ),
-                    ],
-                  );
-                }),
-              ),
-            ),
-            const SizedBox(height: rspFormSectionGap),
-            Text(
-              'Prepared by',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _field(_preparedName, 'Name'),
-            _field(_preparedTitle, 'Title'),
-            const SizedBox(height: 24),
-            if (!ro) ...[
-              Row(
-                children: [
-                  FilledButton(onPressed: _save, child: const Text('Save')),
-                  const SizedBox(width: 16),
-                  TextButton(
-                    onPressed: widget.onCancel,
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                    icon: const Icon(Icons.print_rounded),
-                    tooltip: 'Print',
-                  ),
-                  IconButton(
-                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                    icon: const Icon(Icons.picture_as_pdf_rounded),
-                    tooltip: 'Download PDF',
-                  ),
-                ],
-              ),
-            ] else ...[
-              if (widget.entry.createdAt != null)
-                Text(
-                  'Created: ${widget.entry.createdAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(width: 10),
+                    _statusChip(statusLabel),
+                  ],
                 ),
-              if (widget.entry.updatedAt != null)
+                const SizedBox(height: 4),
                 Text(
-                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                  itemNo.isEmpty
+                      ? 'Vacant position, item no., and applicant list.'
+                      : 'Item No. $itemNo',
+                  style: TextStyle(fontSize: 12.5, color: secondary),
                 ),
+              ],
+            ),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              IconButton(
+                tooltip: 'Print',
+                style: rspLdRecordIconButtonStyle(),
+                onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                icon: const Icon(Icons.print_rounded, size: 20),
+              ),
+              IconButton(
+                tooltip: 'Download PDF',
+                style: rspLdRecordIconButtonStyle(),
+                onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
+              ),
+              if (!ro) ...[
+                TextButton(
+                  onPressed: widget.onCancel,
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.save_rounded, size: 18),
+                  label: const Text('Save'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryNavy,
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusChip(String label) {
+    final Color color = label == 'Draft'
+        ? const Color(0xFFB26A00)
+        : label == 'Read-only preview'
+        ? Colors.blueGrey
+        : const Color(0xFF2E7D32);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.32)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: color,
         ),
       ),
     );
   }
 
-  Widget _field(TextEditingController c, String label) {
-    return RspSpacedOutlineField(
-      child: TextFormField(
-        controller: c,
-        readOnly: widget.readOnly,
-        decoration: rspUnderlinedField(label),
+  Widget _vacancyInfoCard(BuildContext context, bool ro) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'VACANCY INFORMATION',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.4,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+          ),
+          const SizedBox(height: 14),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth > 640;
+              final agencyField = TextFormField(
+                controller: _agency,
+                readOnly: ro,
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  labelText: 'Agency / Office',
+                ),
+              );
+              final dateField = TextFormField(
+                controller: _date,
+                readOnly: ro,
+                onTap: ro ? null : _pickDate,
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  labelText: 'Date',
+                  suffixIcon: ro
+                      ? null
+                      : IconButton(
+                          tooltip: 'Pick a date',
+                          icon: const Icon(
+                            Icons.calendar_month_outlined,
+                            size: 20,
+                          ),
+                          onPressed: _pickDate,
+                        ),
+                ),
+              );
+              final positionField = TextFormField(
+                controller: _position,
+                readOnly: ro,
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  labelText: 'Vacant Position',
+                  suffixIcon: ro
+                      ? null
+                      : IconButton(
+                          tooltip: 'Pick from job vacancies',
+                          icon: const Icon(
+                            Icons.playlist_add_check_rounded,
+                            size: 20,
+                          ),
+                          onPressed: _pickVacantPosition,
+                        ),
+                ),
+              );
+              final itemNoField = TextFormField(
+                controller: _itemNo,
+                readOnly: ro,
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  labelText: 'Item No.',
+                ),
+              );
+
+              Widget pair(Widget a, Widget b) {
+                if (wide) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: a),
+                      const SizedBox(width: 14),
+                      Expanded(child: b),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [a, const SizedBox(height: 14), b],
+                );
+              }
+
+              return Column(
+                children: [
+                  pair(agencyField, dateField),
+                  const SizedBox(height: 14),
+                  pair(positionField, itemNoField),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _applicantsSectionHeader(BuildContext context, bool ro) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      runSpacing: 12,
+      spacing: 16,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Applicants',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: primary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 9,
+                vertical: 3,
+              ),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '${_rows.length}',
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.primaryNavy,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (!ro)
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: 220,
+                child: TextField(
+                  controller: _searchCtrl,
+                  onChanged: (v) =>
+                      setState(() => _searchQuery = v.trim().toLowerCase()),
+                  decoration: AppTheme.dashInputDecoration(
+                    context,
+                    hintText: 'Search applicants...',
+                    prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                  ),
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: _openAddApplicantDialog,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Add Applicant'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _applicantsTable(BuildContext context, bool ro) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final hairline = AppTheme.dashHairlineOf(context);
+    final q = _searchQuery;
+    final visible = <int>[];
+    for (var i = 0; i < _rows.length; i++) {
+      if (q.isEmpty) {
+        visible.add(i);
+        continue;
+      }
+      final r = _rows[i];
+      final hay = [
+        r['name']!.text,
+        r['education']!.text,
+        r['experience']!.text,
+        r['training']!.text,
+        r['eligibility']!.text,
+      ].join(' ').toLowerCase();
+      if (hay.contains(q)) visible.add(i);
+    }
+
+    if (_rows.isEmpty) {
+      return _emptyBox(
+        context,
+        'No applicants yet. Tap "Add Applicant" to add one.',
+      );
+    }
+    if (visible.isEmpty) {
+      return _emptyBox(context, 'No applicants match your search.');
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 900),
+          child: DataTable(
+            headingRowColor: WidgetStateProperty.all(
+              AppTheme.dashMutedSurfaceOf(context),
+            ),
+            dataRowMinHeight: 52,
+            dataRowMaxHeight: 64,
+            columnSpacing: 20,
+            horizontalMargin: 16,
+            headingTextStyle: TextStyle(
+              color: secondary,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.3,
+            ),
+            dataTextStyle: TextStyle(color: primary, fontSize: 13),
+            columns: const [
+              DataColumn(label: Text('#')),
+              DataColumn(label: Text('APPLICANT')),
+              DataColumn(label: Text('EDUCATION')),
+              DataColumn(label: Text('EXPERIENCE')),
+              DataColumn(label: Text('TRAINING')),
+              DataColumn(label: Text('ELIGIBILITY')),
+              DataColumn(label: Text('ACTIONS')),
+            ],
+            rows: visible.map((i) {
+              final r = _rows[i];
+              final name = r['name']!.text.trim();
+              return DataRow(
+                cells: [
+                  DataCell(
+                    Text('${i + 1}', style: TextStyle(color: secondary)),
+                  ),
+                  DataCell(
+                    Text(
+                      name.isEmpty ? '\u2014' : name,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  DataCell(Text(_dash(r['education']!.text))),
+                  DataCell(Text(_dash(r['experience']!.text))),
+                  DataCell(Text(_dash(r['training']!.text))),
+                  DataCell(Text(_dash(r['eligibility']!.text))),
+                  DataCell(
+                    ro
+                        ? const SizedBox(width: 8)
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Edit',
+                                style: rspLdRecordIconButtonStyle(),
+                                onPressed: () => _openEditApplicantDialog(i),
+                                icon: const Icon(
+                                  Icons.edit_rounded,
+                                  size: 18,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              IconButton(
+                                tooltip: 'Remove',
+                                style: rspLdRecordIconButtonStyle(
+                                  foreground: const Color(0xFFC62828),
+                                ),
+                                onPressed: () => _removeRow(i),
+                                icon: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 18,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyBox(BuildContext context, String message) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 28),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Text(
+        message,
+        style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+      ),
+    );
+  }
+
+  static String _dash(String v) => v.trim().isEmpty ? '\u2014' : v.trim();
+
+  /// Blank strip with a bottom rule, sized for a physical pen signature above
+  /// the printed name (mirrors the space added in the PDF output).
+  Widget _signatureSpace(BuildContext context) {
+    return Container(
+      height: 30,
+      margin: const EdgeInsets.only(bottom: 6),
+      alignment: Alignment.bottomCenter,
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+    );
+  }
+
+  Widget _preparedByCard(BuildContext context, bool ro) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.14),
+            child: const Icon(
+              Icons.badge_outlined,
+              size: 18,
+              color: AppTheme.primaryNavy,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'PREPARED BY',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                _signatureSpace(context),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final wide = constraints.maxWidth > 420;
+                    final nameField = ro
+                        ? Text(
+                            _preparedName.text.trim().isEmpty
+                                ? '\u2014'
+                                : _preparedName.text.trim(),
+                            style: TextStyle(
+                              color: primary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          )
+                        : TextFormField(
+                            controller: _preparedName,
+                            decoration: AppTheme.dashInputDecoration(
+                              context,
+                              hintText: 'Full name',
+                            ),
+                          );
+                    final titleField = ro
+                        ? Text(
+                            _preparedTitle.text.trim().isEmpty
+                                ? '\u2014'
+                                : _preparedTitle.text.trim(),
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(context),
+                            ),
+                          )
+                        : TextFormField(
+                            controller: _preparedTitle,
+                            decoration: AppTheme.dashInputDecoration(
+                              context,
+                              hintText: 'Position / title',
+                            ),
+                          );
+                    if (wide) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: nameField),
+                          const SizedBox(width: 12),
+                          Expanded(child: titleField),
+                        ],
+                      );
+                    }
+                    return Column(
+                      children: [
+                        nameField,
+                        const SizedBox(height: 10),
+                        titleField,
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SlApplicantDialogResult {
+  const _SlApplicantDialogResult({
+    required this.name,
+    required this.education,
+    required this.experience,
+    required this.training,
+    required this.eligibility,
+  });
+
+  final String name;
+  final String education;
+  final String experience;
+  final String training;
+  final String eligibility;
+}
+
+class _SlApplicantDialog extends StatefulWidget {
+  const _SlApplicantDialog({required this.isEditing, this.initial});
+
+  final bool isEditing;
+  final _SlApplicantDialogResult? initial;
+
+  @override
+  State<_SlApplicantDialog> createState() => _SlApplicantDialogState();
+}
+
+class _SlApplicantDialogState extends State<_SlApplicantDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late TextEditingController _name;
+  late TextEditingController _education;
+  late TextEditingController _experience;
+  late TextEditingController _training;
+  late TextEditingController _eligibility;
+
+  @override
+  void initState() {
+    super.initState();
+    final i = widget.initial;
+    _name = TextEditingController(text: i?.name ?? '');
+    _education = TextEditingController(text: i?.education ?? '');
+    _experience = TextEditingController(text: i?.experience ?? '');
+    _training = TextEditingController(text: i?.training ?? '');
+    _eligibility = TextEditingController(text: i?.eligibility ?? '');
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _education.dispose();
+    _experience.dispose();
+    _training.dispose();
+    _eligibility.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.of(context).pop(
+      _SlApplicantDialogResult(
+        name: _name.text.trim(),
+        education: _education.text.trim(),
+        experience: _experience.text.trim(),
+        training: _training.text.trim(),
+        eligibility: _eligibility.text.trim(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Material(
+          color: AppTheme.dashPanelOf(context),
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          elevation: 10,
+          shadowColor: Colors.black26,
+          child: Form(
+            key: _formKey,
+            child: Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.isEditing
+                              ? 'Edit Applicant'
+                              : 'Add Applicant',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: primary,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(Icons.close_rounded, color: secondary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  TextFormField(
+                    controller: _name,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: AppTheme.dashInputDecoration(
+                      context,
+                      labelText: 'Applicant Name',
+                    ),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _education,
+                    decoration: AppTheme.dashInputDecoration(
+                      context,
+                      labelText: 'Education',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _experience,
+                    decoration: AppTheme.dashInputDecoration(
+                      context,
+                      labelText: 'Experience',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _training,
+                    decoration: AppTheme.dashInputDecoration(
+                      context,
+                      labelText: 'Training',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _eligibility,
+                    decoration: AppTheme.dashInputDecoration(
+                      context,
+                      labelText: 'Eligibility',
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 10),
+                      FilledButton(
+                        onPressed: _submit,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primaryNavy,
+                        ),
+                        child: Text(
+                          widget.isEditing ? 'Save Changes' : 'Add Applicant',
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -6378,9 +7043,10 @@ class _SelectionLineupList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(e.vacantPosition ?? '', bold: true),
-              rspRecordsTextCell(e.date ?? ''),
+              rspRecordsTextCell(context, e.vacantPosition ?? '', bold: true),
+              rspRecordsTextCell(context, e.date ?? ''),
               rspRecordsTextCell(
+                context,
                 '${e.applicants.length}',
                 align: TextAlign.center,
                 bold: true,
@@ -6417,6 +7083,7 @@ class _SelectionLineupList extends StatelessWidget {
 }
 
 /// RSP: Turn-Around Time Ã¢â‚¬â€ position, office, dates, applicant tracking table. Form only, no pre-filled names.
+
 class _RspTurnAroundTimeSection extends StatefulWidget {
   const _RspTurnAroundTimeSection();
 
@@ -6547,7 +7214,8 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
             : '(No position)';
         return SavedRecordListItem(
           title: pos,
-          subtitle: '${e.office ?? "â€”"} Â· ${e.applicants.length} applicant(s)',
+          subtitle:
+              '${e.office ?? "â€”"} Â· ${e.applicants.length} applicant(s)',
           detailDialogTitle: 'Turn-around time â€” $pos',
           previewContentWidth: 1200,
           previewBuilder: () => _TurnAroundTimeEditor(
@@ -6572,7 +7240,7 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
         Text(
           'Turn-Around Time',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: AppTheme.dashTextPrimaryOf(context),
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
@@ -6580,7 +7248,10 @@ class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
         const SizedBox(height: 8),
         Text(
           'Position, office, dates, and applicant tracking (assessment, exam, deliberation, job offer, assumption, cost). Form onlyÃ¢â‚¬â€no pre-filled names.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 14,
+          ),
         ),
         const SizedBox(height: 24),
         if (_editing != null) ...[
@@ -6875,7 +7546,7 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                       'Position:',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -6890,7 +7561,7 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                       'Office:',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -6905,7 +7576,7 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                       'No. of Vacant Position:',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -6920,7 +7591,7 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                       'Date of Publication:',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -6935,7 +7606,7 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                       'End Search:',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -6950,7 +7621,7 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
                       'Q.S.:',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 13,
                       ),
                     ),
@@ -6996,7 +7667,7 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
               'Scroll horizontally to see all columns.',
               style: TextStyle(
                 fontSize: 12,
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
                 fontStyle: FontStyle.italic,
               ),
             ),
@@ -7125,12 +7796,18 @@ class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
               if (widget.entry.createdAt != null)
                 Text(
                   'Created: ${widget.entry.createdAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
                 ),
               if (widget.entry.updatedAt != null)
                 Text(
                   'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
                 ),
             ],
           ],
@@ -7178,9 +7855,10 @@ class _TurnAroundTimeList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(e.position ?? '', bold: true),
-              rspRecordsTextCell(e.office ?? ''),
+              rspRecordsTextCell(context, e.position ?? '', bold: true),
+              rspRecordsTextCell(context, e.office ?? ''),
               rspRecordsTextCell(
+                context,
                 '${e.applicants.length}',
                 align: TextAlign.center,
                 bold: true,
@@ -8447,14 +9125,15 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   Map<String, RecruitmentExamResult> _examResults = {};
   String? _selectedPositionFilter;
   DateTime? _selectedAppliedDate;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
 
   bool _loading = true;
   bool _syncing = false;
   bool _exportingReport = false;
   String? _adminPassingApplicantId;
   final ScrollController _horizontalScrollController = ScrollController();
-  final ScrollController _scoreBreakdownVScrollController =
-      ScrollController();
+  final ScrollController _scoreBreakdownVScrollController = ScrollController();
 
   Set<String> get _positionFilterOptions {
     final out = <String>{};
@@ -8485,6 +9164,12 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
             !_isSameLocalDate(createdAt, _selectedAppliedDate!)) {
           return false;
         }
+      }
+      if (_searchQuery.isNotEmpty) {
+        final hay =
+            '${app.applicantNumber ?? ''} ${app.fullName} ${app.email} ${app.phone ?? ''} ${app.positionAppliedFor ?? ''}'
+                .toLowerCase();
+        if (!hay.contains(_searchQuery)) return false;
       }
       return true;
     }).toList();
@@ -8612,9 +9297,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Could not mark as passed. ${userFacingApiError(e)}',
-          ),
+          content: Text('Could not mark as passed. ${userFacingApiError(e)}'),
         ),
       );
     } finally {
@@ -8734,8 +9417,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     }
 
     return Tooltip(
-      message:
-          'Admin pass: choose perfect 100% or encode custom scores',
+      message: 'Admin pass: choose perfect 100% or encode custom scores',
       child: FilledButton.tonal(
         onPressed: () => _confirmAndAdminPassExam(app, exam),
         style: FilledButton.styleFrom(
@@ -9009,10 +9691,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                             exam: exam,
                             isPassing: isPassingThis,
                           )
-                        : _scoreBreakdownStatusPill(
-                            dialogContext,
-                            exam: exam,
-                          ),
+                        : _scoreBreakdownStatusPill(dialogContext, exam: exam),
                   ),
                   background: rowBg,
                   padding: const EdgeInsets.symmetric(
@@ -9059,11 +9738,17 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(() {
+      setState(
+        () => _searchQuery = _searchController.text.trim().toLowerCase(),
+      );
+    });
     _load();
   }
 
   @override
   void dispose() {
+    _searchController.dispose();
     _horizontalScrollController.dispose();
     _scoreBreakdownVScrollController.dispose();
     super.dispose();
@@ -9330,25 +10015,26 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         final e = entries[i];
         final fileName = e['fileName']!;
         final kind = RspApplicationDocKind.fromStorageFileName(fileName);
-        final finalReqKind =
-            RspFinalRequirementDocKind.fromStorageFileName(fileName);
+        final finalReqKind = RspFinalRequirementDocKind.fromStorageFileName(
+          fileName,
+        );
         final bool ok;
         if (kind != null) {
           ok = await RecruitmentRepo.instance
               .setApplicationTypedAttachmentIfMissing(
-            e['applicationId']!,
-            e['path']!,
-            fileName,
-            kind,
-          );
+                e['applicationId']!,
+                e['path']!,
+                fileName,
+                kind,
+              );
         } else if (finalReqKind != null) {
           ok = await RecruitmentRepo.instance
               .setApplicationFinalRequirementIfMissing(
-            e['applicationId']!,
-            e['path']!,
-            fileName,
-            finalReqKind,
-          );
+                e['applicationId']!,
+                e['path']!,
+                fileName,
+                finalReqKind,
+              );
         } else {
           ok = await RecruitmentRepo.instance.setApplicationAttachmentIfMissing(
             e['applicationId']!,
@@ -9570,7 +10256,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.summarize_outlined, size: 18),
-        label: Text(_exportingReport ? 'Generatingâ€¦' : 'Generate report'),
+        label: Text(_exportingReport ? 'Generating…' : 'Generate report'),
         style: OutlinedButton.styleFrom(
           foregroundColor: AppTheme.dashIsDark(context)
               ? AppTheme.primaryNavyLight
@@ -9797,12 +10483,14 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                           onPressed:
                               (_loading ||
                                   (_selectedPositionFilter == null &&
-                                      _selectedAppliedDate == null))
+                                      _selectedAppliedDate == null &&
+                                      _searchQuery.isEmpty))
                               ? null
                               : () {
                                   setState(() {
                                     _selectedPositionFilter = null;
                                     _selectedAppliedDate = null;
+                                    _searchController.clear();
                                   });
                                 },
                           icon: const Icon(Icons.clear_all_rounded, size: 18),
@@ -9817,10 +10505,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 spacing: 10,
                 runSpacing: 10,
                 crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  generateReportBtn,
-                  if (isApplicationsView) syncBtn,
-                ],
+                children: [generateReportBtn, if (isApplicationsView) syncBtn],
               );
             },
           ),
@@ -9831,6 +10516,33 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
           runSpacing: 10,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            SizedBox(
+              width: 280,
+              child: TextField(
+                controller: _searchController,
+                enabled: !_loading,
+                decoration: InputDecoration(
+                  labelText: 'Search applicant ID, name, email…',
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  suffixIcon: _searchQuery.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Clear search',
+                          onPressed: _searchController.clear,
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                        ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: hairline),
+                  ),
+                ),
+              ),
+            ),
             SizedBox(
               width: 320,
               child: DropdownButtonFormField<String>(
@@ -9879,12 +10591,14 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               onPressed:
                   (_loading ||
                       (_selectedPositionFilter == null &&
-                          _selectedAppliedDate == null))
+                          _selectedAppliedDate == null &&
+                          _searchQuery.isEmpty))
                   ? null
                   : () {
                       setState(() {
                         _selectedPositionFilter = null;
                         _selectedAppliedDate = null;
+                        _searchController.clear();
                       });
                     },
               icon: const Icon(Icons.clear_all_rounded, size: 18),
@@ -9976,7 +10690,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     final scrollWidth = constraints.maxWidth.isFinite
                         ? constraints.maxWidth
                         : MediaQuery.sizeOf(context).width;
-                    const fixedTableWidth = 3350.0;
+                    const fixedTableWidth = 3510.0;
                     final tableWidth = scrollWidth > fixedTableWidth
                         ? scrollWidth
                         : fixedTableWidth;
@@ -9997,37 +10711,42 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                               constraints: BoxConstraints(minWidth: tableWidth),
                               child: Table(
                                 columnWidths: {
-                                  0: const FixedColumnWidth(140), // First
-                                  1: const FixedColumnWidth(140), // Middle
-                                  2: const FixedColumnWidth(140), // Last
-                                  3: const FixedColumnWidth(90), // Suffix
-                                  4: const FixedColumnWidth(90), // Gender
-                                  5: const FixedColumnWidth(150), // Course
-                                  6: const FixedColumnWidth(70), // Age
-                                  7: const FixedColumnWidth(140), // Civil status
+                                  0: const FixedColumnWidth(
+                                    160,
+                                  ), // Applicant ID
+                                  1: const FixedColumnWidth(140), // First
+                                  2: const FixedColumnWidth(140), // Middle
+                                  3: const FixedColumnWidth(140), // Last
+                                  4: const FixedColumnWidth(90), // Suffix
+                                  5: const FixedColumnWidth(90), // Gender
+                                  6: const FixedColumnWidth(150), // Course
+                                  7: const FixedColumnWidth(70), // Age
                                   8: const FixedColumnWidth(
+                                    140,
+                                  ), // Civil status
+                                  9: const FixedColumnWidth(
                                     170,
                                   ), // City / Municipality
-                                  9: const FixedColumnWidth(150), // Barangay
-                                  10: const FixedColumnWidth(180), // Street
-                                  11: const FixedColumnWidth(260), // Email
-                                  12: const FixedColumnWidth(140), // Phone
-                                  13: const FixedColumnWidth(
+                                  10: const FixedColumnWidth(150), // Barangay
+                                  11: const FixedColumnWidth(180), // Street
+                                  12: const FixedColumnWidth(260), // Email
+                                  13: const FixedColumnWidth(140), // Phone
+                                  14: const FixedColumnWidth(
                                     200,
                                   ), // Position applied
-                                  14: const FixedColumnWidth(170), // Status
-                                  15: const FixedColumnWidth(
+                                  15: const FixedColumnWidth(170), // Status
+                                  16: const FixedColumnWidth(
                                     188,
                                   ), // Application letter
-                                  16: const FixedColumnWidth(188), // Resume
-                                  17: const FixedColumnWidth(188), // TOR
-                                  18: const FixedColumnWidth(
+                                  17: const FixedColumnWidth(188), // Resume
+                                  18: const FixedColumnWidth(188), // TOR
+                                  19: const FixedColumnWidth(
                                     200,
                                   ), // Eligibility/trainings
-                                  19: const FixedColumnWidth(
+                                  20: const FixedColumnWidth(
                                     248,
                                   ), // Document review
-                                  20: const FixedColumnWidth(108), // Actions
+                                  21: const FixedColumnWidth(108), // Actions
                                 },
                                 defaultVerticalAlignment:
                                     TableCellVerticalAlignment.middle,
@@ -10048,6 +10767,13 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                       ),
                                     ),
                                     children: [
+                                      _tableCell(
+                                        160,
+                                        Text(
+                                          'Applicant ID',
+                                          style: tableHeaderStyle,
+                                        ),
+                                      ),
                                       _tableCell(
                                         140,
                                         Text(
@@ -10101,7 +10827,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                       ),
                                       _tableCell(
                                         150,
-                                        Text('Barangay', style: tableHeaderStyle),
+                                        Text(
+                                          'Barangay',
+                                          style: tableHeaderStyle,
+                                        ),
                                       ),
                                       _tableCell(
                                         180,
@@ -10200,8 +10929,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                     final gender = _displayOrNa(app.sex);
                                     final course = _displayOrNa(app.course);
                                     final age = _displayOrNa(app.age);
-                                    final civilStatus =
-                                        _displayOrNa(app.civilStatus);
+                                    final civilStatus = _displayOrNa(
+                                      app.civilStatus,
+                                    );
                                     final addr = _appAddressParts(app);
                                     final city = _displayOrNa(
                                       addr.city.isEmpty ? null : addr.city,
@@ -10214,6 +10944,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                     final street = _displayOrNa(
                                       addr.street.isEmpty ? null : addr.street,
                                     );
+                                    final applicantId = _displayOrNa(
+                                      app.applicantNumber,
+                                    );
 
                                     return TableRow(
                                       decoration: ri.isOdd
@@ -10224,6 +10957,18 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                             )
                                           : null,
                                       children: [
+                                        _tableCell(
+                                          160,
+                                          SelectableText(
+                                            applicantId,
+                                            style: TextStyle(
+                                              fontSize: 12.5,
+                                              color: const Color(0xFFE85D04),
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 0.3,
+                                            ),
+                                          ),
+                                        ),
                                         _tableCell(
                                           140,
                                           Tooltip(
@@ -10581,10 +11326,7 @@ class _AdminPassChoice {
 }
 
 class _AdminExamBypassDialog extends StatefulWidget {
-  const _AdminExamBypassDialog({
-    required this.app,
-    required this.existing,
-  });
+  const _AdminExamBypassDialog({required this.app, required this.existing});
 
   final RecruitmentApplication app;
   final RecruitmentExamResult? existing;
@@ -10719,7 +11461,9 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(22),
+              ),
               child: Container(
                 height: 4,
                 decoration: const BoxDecoration(
@@ -10835,7 +11579,10 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                             const SizedBox(height: 2),
                             Text(
                               email,
-                              style: TextStyle(color: secondary, fontSize: 12.5),
+                              style: TextStyle(
+                                color: secondary,
+                                fontSize: 12.5,
+                              ),
                             ),
                           ],
                           if (position.isNotEmpty) ...[
@@ -11011,9 +11758,9 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF8E1).withValues(
-                    alpha: dark ? 0.22 : 1,
-                  ),
+                  color: const Color(
+                    0xFFFFF8E1,
+                  ).withValues(alpha: dark ? 0.22 : 1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: const Color(0xFFFFB300).withValues(alpha: 0.45),
@@ -11634,7 +12381,7 @@ class _AttachmentActions extends StatelessWidget {
     final url = await _resolveUrl();
     if (url != null && context.mounted) {
       if (kIsWeb) {
-        _showAttachmentPreviewDialog(
+        showRspAttachmentPreviewDialog(
           context,
           url: url,
           fileName: fileName,
@@ -11651,8 +12398,8 @@ class _AttachmentActions extends StatelessWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Could not create attachment link. Restart the API and set '
-            'SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY, and run rsp-storage-attachment-policy.sql.',
+            'Could not create attachment link. Restart the API and verify '
+            'storage configuration.',
           ),
         ),
       );
@@ -11722,222 +12469,4 @@ class _AttachmentActions extends StatelessWidget {
       ],
     );
   }
-}
-
-bool _isImageExt(String ext) {
-  return const <String>[
-    'png',
-    'jpg',
-    'jpeg',
-    'gif',
-    'tif',
-    'tiff',
-    'webp',
-    'bmp',
-  ].contains(ext.toLowerCase());
-}
-
-String _extractExt(String fileName) {
-  final lower = fileName.toLowerCase();
-  final dot = lower.lastIndexOf('.');
-  if (dot == -1 || dot == lower.length - 1) return '';
-  return lower.substring(dot + 1);
-}
-
-/// Same UX as L&D Training Daily Report attachment preview (Image.network + actions).
-void _showAttachmentPreviewDialog(
-  BuildContext context, {
-  required String url,
-  required String fileName,
-  required String objectPath,
-}) {
-  // Prefer `fileName` (DB `attachment_name`), but if it has no extension,
-  // fall back to the stored object key (e.g. `${applicationId}/${fileName}`).
-  final ext = _extractExt(fileName).isNotEmpty
-      ? _extractExt(fileName)
-      : _extractExt(objectPath);
-  final isImage = _isImageExt(ext);
-  final isPdf = ext.toLowerCase() == 'pdf';
-  final lowerExt = ext.toLowerCase();
-  final isWord = <String>[
-    'doc',
-    'docx',
-    'xls',
-    'xlsx',
-    'ppt',
-    'pptx',
-  ].contains(lowerExt);
-  final downloadUri = Uri.parse(url).replace(
-    queryParameters: {...Uri.parse(url).queryParameters, 'download': '1'},
-  );
-
-  showDialog<void>(
-    context: context,
-    builder: (ctx) {
-      return Dialog(
-        insetPadding: const EdgeInsets.all(24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900, maxHeight: 700),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Attachment preview',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Close',
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: isImage
-                        ? InteractiveViewer(
-                            minScale: 0.5,
-                            maxScale: 4,
-                            child: Image.network(
-                              url,
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Text(
-                                      'Preview for this file type is not supported.',
-                                      style: TextStyle(fontSize: 13),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    TextButton.icon(
-                                      onPressed: () async {
-                                        await launchUrl(
-                                          Uri.parse(url),
-                                          mode: LaunchMode.externalApplication,
-                                        );
-                                      },
-                                      icon: const Icon(
-                                        Icons.open_in_new_rounded,
-                                        size: 18,
-                                      ),
-                                      label: const Text('Open in new tab'),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          )
-                        : kIsWeb
-                        ? (isPdf || isWord)
-                              ? RspIframePreview(
-                                  url: isWord ? _withPreviewParam(url) : url,
-                                )
-                              : Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Text(
-                                        'Preview for this file type is not supported.',
-                                        style: TextStyle(fontSize: 13),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      TextButton.icon(
-                                        onPressed: () async {
-                                          await launchUrl(
-                                            Uri.parse(url),
-                                            mode:
-                                                LaunchMode.externalApplication,
-                                          );
-                                        },
-                                        icon: const Icon(
-                                          Icons.open_in_new_rounded,
-                                          size: 18,
-                                        ),
-                                        label: const Text('Open in new tab'),
-                                      ),
-                                    ],
-                                  ),
-                                )
-                        : Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text(
-                                  'Preview for this file type is not supported.',
-                                  style: TextStyle(fontSize: 13),
-                                ),
-                                const SizedBox(height: 8),
-                                TextButton.icon(
-                                  onPressed: () async {
-                                    await launchUrl(
-                                      Uri.parse(url),
-                                      mode: LaunchMode.externalApplication,
-                                    );
-                                  },
-                                  icon: const Icon(
-                                    Icons.open_in_new_rounded,
-                                    size: 18,
-                                  ),
-                                  label: const Text('Open in new tab'),
-                                ),
-                              ],
-                            ),
-                          ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton.icon(
-                      onPressed: () async {
-                        await launchUrl(
-                          downloadUri,
-                          mode: LaunchMode.externalApplication,
-                        );
-                      },
-                      icon: const Icon(Icons.download_rounded, size: 18),
-                      label: const Text('Download'),
-                    ),
-                    const SizedBox(width: 8),
-                    TextButton.icon(
-                      onPressed: () async {
-                        await launchUrl(
-                          Uri.parse(url),
-                          mode: LaunchMode.externalApplication,
-                        );
-                      },
-                      icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                      label: const Text('Open file'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    },
-  );
-}
-
-String _withPreviewParam(String url) {
-  final uri = Uri.parse(url);
-  final qp = <String, String>{...uri.queryParameters};
-  qp['preview'] = '1';
-  // Ensure we don't accidentally request download mode for inline preview.
-  qp.remove('download');
-  return uri.replace(queryParameters: qp).toString();
 }

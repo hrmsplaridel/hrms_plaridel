@@ -885,9 +885,9 @@ class _IdpList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(e.name ?? '', bold: true),
-              rspRecordsTextCell(e.position ?? ''),
-              rspRecordsTextCell(e.department ?? ''),
+              rspRecordsTextCell(context,e.name ?? '', bold: true),
+              rspRecordsTextCell(context,e.position ?? ''),
+              rspRecordsTextCell(context,e.department ?? ''),
               RspRecordsCrudActions(
                 onView: () => showReadOnlySavedEntryDialog(
                   context,

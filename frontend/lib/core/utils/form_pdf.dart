@@ -9,6 +9,7 @@ import 'package:printing/printing.dart';
 // Use project data models (same package)
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
 import 'package:hrms_plaridel/features/learning_development/models/bi_form.dart';
+import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'package:hrms_plaridel/features/learning_development/models/comparative_assessment.dart';
 import 'package:hrms_plaridel/features/learning_development/models/individual_development_plan.dart';
 import 'package:hrms_plaridel/features/learning_development/models/performance_evaluation_form.dart';
@@ -631,6 +632,18 @@ class FormPdf {
         ),
       ],
     ),
+  );
+
+  /// Signature block used side-by-side (Prepared by / Checked by): label on
+  /// top, blank space for a pen signature, then the (typed) name below.
+  static pw.Widget _signatureBlock(String label, String value) => pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    mainAxisSize: pw.MainAxisSize.min,
+    children: [
+      pw.Text(label, style: const pw.TextStyle(fontSize: 10)),
+      pw.SizedBox(height: 26),
+      pw.Text(value, style: const pw.TextStyle(fontSize: 10)),
+    ],
   );
 
   static Future<pw.Document> buildBiFormPdf(BiFormEntry e) async {
@@ -1872,7 +1885,7 @@ class FormPdf {
                   [
                         _s(a.name),
                         _s(a.course),
-                        _s(a.address),
+                        _s(formatStoredAddressForDisplay(a.address)),
                         _s(a.sex),
                         _s(a.age),
                         _s(a.civilStatus),
@@ -1929,8 +1942,24 @@ class FormPdf {
                 applicantsTable(chunk),
                 pw.SizedBox(height: 12),
                 if (page == pageCount - 1) ...[
-                  _row('Prepared by:', _s(e.preparedBy)),
-                  _row('Checked by:', _s(e.checkedBy)),
+                  pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Expanded(
+                        child: _signatureBlock(
+                          'Prepared by:',
+                          _idpField(e.preparedBy),
+                        ),
+                      ),
+                      pw.SizedBox(width: 32),
+                      pw.Expanded(
+                        child: _signatureBlock(
+                          'Checked by:',
+                          _idpField(e.checkedBy),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ],
             ),
@@ -2369,15 +2398,16 @@ class FormPdf {
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
+              pw.SizedBox(height: 26),
               pw.Text(
-                _s(e.preparedByName),
+                _idpField(e.preparedByName),
                 style: pw.TextStyle(
                   fontSize: 10,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
               pw.Text(
-                _s(e.preparedByTitle),
+                _idpField(e.preparedByTitle),
                 style: const pw.TextStyle(fontSize: 9),
               ),
             ],

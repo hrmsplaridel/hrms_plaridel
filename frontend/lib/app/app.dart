@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/auth/presentation/pages/login_page.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/admin_dashboard.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
+import 'package:hrms_plaridel/features/mayor/presentation/pages/mayor_dashboard_page.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_access_policy.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/providers/theme_mode_provider.dart';
@@ -158,6 +159,7 @@ class _RestrictedMobileRouteScreen extends StatelessWidget {
 Widget _initialHome(AuthProvider auth) {
   if (auth.user != null) {
     final role = auth.user!.role ?? 'employee';
+    if (role == 'mayor') return const MayorDashboardPage();
     final isPrivileged = role == 'admin' || role == 'hr';
     return isPrivileged ? const AdminDashboard() : const EmployeeDashboard();
   }

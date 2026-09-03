@@ -44,6 +44,7 @@ enum RspFinalRequirementDocKind {
 class RecruitmentApplication {
   const RecruitmentApplication({
     required this.id,
+    this.applicantNumber,
     required this.fullName,
     this.firstName,
     this.middleName,
@@ -74,6 +75,9 @@ class RecruitmentApplication {
     this.docDrugTestName,
     this.docNbiClearancePath,
     this.docNbiClearanceName,
+    this.docMedicalCertificateRejectReason,
+    this.docDrugTestRejectReason,
+    this.docNbiClearanceRejectReason,
     this.finalRequirementsApproved = false,
     this.orientationAt,
     this.orientationAttended,
@@ -88,6 +92,9 @@ class RecruitmentApplication {
   });
 
   final String id;
+
+  /// Human-readable randomized ID (e.g. PLR-AB12CD34) for search/verification.
+  final String? applicantNumber;
   final String fullName;
   final String? firstName;
   final String? middleName;
@@ -121,6 +128,11 @@ class RecruitmentApplication {
   final String? docNbiClearancePath;
   final String? docNbiClearanceName;
 
+  /// Set when HR rejects a final-requirement upload (cleared on re-upload).
+  final String? docMedicalCertificateRejectReason;
+  final String? docDrugTestRejectReason;
+  final String? docNbiClearanceRejectReason;
+
   /// HR marks all three final requirement PDFs as approved.
   final bool finalRequirementsApproved;
 
@@ -150,6 +162,24 @@ class RecruitmentApplication {
 
   /// Awaiting HR document approve/decline (RSP Applications).
   bool get isAwaitingDocumentReview => status == 'submitted';
+
+  /// Dummy row created by Mayor Endorsement Intake — not a real RSP applicant.
+  bool get isMayorIntakeStub {
+    final e = email.trim().toLowerCase();
+    return e.endsWith('@local.intake') || e.contains('mayor-intake-');
+  }
+
+  /// Mayor-office records that should not appear in HR recruitment views.
+  bool get isFromMayorModule {
+    if (isMayorIntakeStub) return true;
+    switch (status.trim().toLowerCase()) {
+      case 'endorsed':
+      case 'rejected':
+        return true;
+      default:
+        return false;
+    }
+  }
 
   /// Still moving through recruitment (not hired or closed out).
   bool get isActiveInPipeline {
@@ -212,6 +242,27 @@ class RecruitmentApplication {
     }
   }
 
+  String? finalRequirementRejectReason(RspFinalRequirementDocKind kind) {
+    switch (kind) {
+      case RspFinalRequirementDocKind.medicalCertificate:
+        return docMedicalCertificateRejectReason;
+      case RspFinalRequirementDocKind.drugTestResult:
+        return docDrugTestRejectReason;
+      case RspFinalRequirementDocKind.nbiClearance:
+        return docNbiClearanceRejectReason;
+    }
+  }
+
+  bool get hasRejectedFinalRequirement {
+    for (final kind in RspFinalRequirementDocKind.values) {
+      final r = finalRequirementRejectReason(kind)?.trim();
+      if (r != null && r.isNotEmpty) return true;
+      // Rejected with empty reason still clears path; treat missing path after
+      // reject only via reason OR via incomplete set after prior submit.
+    }
+    return false;
+  }
+
   bool get hasAllFinalRequirementsUploaded {
     for (final kind in RspFinalRequirementDocKind.values) {
       final path = finalRequirementPath(kind);
@@ -239,6 +290,7 @@ class RecruitmentApplication {
   factory RecruitmentApplication.fromJson(Map<String, dynamic> json) {
     return RecruitmentApplication(
       id: json['id'] as String,
+      applicantNumber: json['applicant_number']?.toString(),
       fullName: json['full_name'] as String? ?? '',
       firstName: json['first_name'] as String?,
       middleName: json['middle_name'] as String?,
@@ -273,6 +325,11 @@ class RecruitmentApplication {
       docDrugTestName: json['doc_drug_test_name'] as String?,
       docNbiClearancePath: json['doc_nbi_clearance_path'] as String?,
       docNbiClearanceName: json['doc_nbi_clearance_name'] as String?,
+      docMedicalCertificateRejectReason:
+          json['doc_medical_certificate_reject_reason'] as String?,
+      docDrugTestRejectReason: json['doc_drug_test_reject_reason'] as String?,
+      docNbiClearanceRejectReason:
+          json['doc_nbi_clearance_reject_reason'] as String?,
       finalRequirementsApproved: json['final_requirements_approved'] == true,
       orientationAt: json['orientation_at'] != null
           ? DateTime.tryParse(json['orientation_at'].toString())
@@ -425,13 +482,41 @@ class RspEmailVerificationConfig {
   }
 }
 
+class CustomRspExam {
+  const CustomRspExam({
+    required this.id,
+    required this.examType,
+    required this.name,
+    required this.format,
+  });
+
+  final String id;
+  final String examType;
+  final String name;
+
+  /// `open_ended` or `multiple_choice`.
+  final String format;
+
+  bool get isOpenEnded => format == 'open_ended';
+
+  factory CustomRspExam.fromJson(Map<String, dynamic> json) {
+    return CustomRspExam(
+      id: json['id']?.toString() ?? '',
+      examType: json['examType']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      format: json['format']?.toString() ?? 'multiple_choice',
+    );
+  }
+}
+
 /// Repo for recruitment applications and exam results.
 class RecruitmentRepo {
   RecruitmentRepo._();
   static final RecruitmentRepo instance = RecruitmentRepo._();
 
-  /// Seconds per MCQ exam (`general`, `math`, `general_info`). Used when API is unavailable.
+  /// Seconds per exam. Used when API is unavailable. `0` = no countdown.
   static const Map<String, int> kDefaultRspExamTimeLimitSeconds = {
+    'bei': 0,
     'general': 45 * 60,
     'math': 45 * 60,
     'general_info': 10 * 60,
@@ -509,7 +594,7 @@ class RecruitmentRepo {
   ///
   /// When the server enables email OTP, pass [emailVerificationToken] from
   /// [verifyRspApplicantEmailOtp] for the same address as [app.email].
-  Future<String> insertApplication(
+  Future<({String id, String? applicantNumber})> insertApplication(
     RecruitmentApplication app, {
     String? emailVerificationToken,
   }) async {
@@ -543,7 +628,13 @@ class RecruitmentRepo {
       final appRow = res.data?['application'] as Map<String, dynamic>?;
       final id = appRow?['id'];
       if (id == null) throw Exception('Insert failed: missing id in response');
-      return id.toString();
+      final applicantNumber = appRow?['applicant_number']?.toString();
+      return (
+        id: id.toString(),
+        applicantNumber: (applicantNumber == null || applicantNumber.isEmpty)
+            ? null
+            : applicantNumber,
+      );
     } on DioException catch (e) {
       final data = e.response?.data;
       if (data is Map) {
@@ -552,6 +643,24 @@ class RecruitmentRepo {
           throw Exception(err);
         }
       }
+      rethrow;
+    }
+  }
+
+  /// Look up an application by randomized applicant ID (e.g. PLR-AB12CD34).
+  Future<RecruitmentApplication?> findByApplicantNumber(String number) async {
+    final n = number.trim();
+    if (n.isEmpty) return null;
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/rsp/applications/by-applicant-number',
+        queryParameters: {'number': n},
+      );
+      final row = res.data?['application'];
+      if (row is! Map) return null;
+      return RecruitmentApplication.fromJson(Map<String, dynamic>.from(row));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
       rethrow;
     }
   }
@@ -625,6 +734,25 @@ class RecruitmentRepo {
       '/api/rsp/applications/$applicationId/final-requirements-approval',
       data: <String, dynamic>{'approved': approved},
     );
+  }
+
+  /// Admin: reject one final-requirement PDF (applicant must re-upload).
+  Future<RecruitmentApplication> rejectFinalRequirement(
+    String applicationId,
+    RspFinalRequirementDocKind kind, {
+    String? reason,
+  }) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/final-requirements/${kind.apiValue}/reject',
+      data: <String, dynamic>{
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      },
+    );
+    final row = res.data?['application'] as Map<String, dynamic>?;
+    if (row == null) {
+      throw Exception('Reject failed: missing application in response');
+    }
+    return RecruitmentApplication.fromJson(row);
   }
 
   /// Upload one final requirement PDF (after passing deliberation).
@@ -1075,6 +1203,100 @@ class RecruitmentRepo {
     return null;
   }
 
+  /// Admin: list custom exams and built-in exams hidden from the Exams picker.
+  Future<({List<CustomRspExam> exams, Set<String> hiddenBuiltin})>
+  loadExamCatalog() async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/rsp/custom-exams',
+      );
+      final rows = res.data?['exams'] as List<dynamic>? ?? [];
+      final hiddenRaw = res.data?['hiddenBuiltin'] as List<dynamic>? ?? [];
+      final exams = rows
+          .whereType<Map>()
+          .map((e) => CustomRspExam.fromJson(Map<String, dynamic>.from(e)))
+          .where((e) => e.id.isNotEmpty && e.examType.isNotEmpty)
+          .toList();
+      final hidden = hiddenRaw
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toSet();
+      return (exams: exams, hiddenBuiltin: hidden);
+    } catch (_) {
+      return (exams: <CustomRspExam>[], hiddenBuiltin: <String>{});
+    }
+  }
+
+  Future<List<CustomRspExam>> listCustomExams() async {
+    final catalog = await loadExamCatalog();
+    return catalog.exams;
+  }
+
+  Future<CustomRspExam> createCustomExam({
+    required String name,
+    required String format,
+  }) async {
+    try {
+      final res = await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/rsp/custom-exams',
+        data: {'name': name, 'format': format},
+      );
+      final exam = res.data?['exam'];
+      if (exam is! Map) {
+        throw Exception('Create failed: missing exam in response');
+      }
+      return CustomRspExam.fromJson(Map<String, dynamic>.from(exam));
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final details =
+          (data is Map && (data['details'] != null || data['error'] != null))
+          ? (data['details'] ?? data['error'])
+          : null;
+      throw Exception(
+        details != null
+            ? 'Create failed: $details'
+            : 'Create failed: ${e.message ?? e.toString()}',
+      );
+    }
+  }
+
+  Future<void> hideBuiltinExam(String examType) async {
+    try {
+      await ApiClient.instance.post(
+        '/api/rsp/custom-exams/hide',
+        data: {'examType': examType},
+      );
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final details =
+          (data is Map && (data['details'] != null || data['error'] != null))
+          ? (data['details'] ?? data['error'])
+          : null;
+      throw Exception(
+        details != null
+            ? 'Delete failed: $details'
+            : 'Delete failed: ${e.message ?? e.toString()}',
+      );
+    }
+  }
+
+  Future<void> deleteCustomExam(String id) async {
+    try {
+      await ApiClient.instance.delete('/api/rsp/custom-exams/$id');
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final details =
+          (data is Map && (data['details'] != null || data['error'] != null))
+          ? (data['details'] ?? data['error'])
+          : null;
+      throw Exception(
+        details != null
+            ? 'Delete failed: $details'
+            : 'Delete failed: ${e.message ?? e.toString()}',
+      );
+    }
+  }
+
   /// Get exam questions for an exam type (e.g. 'bei'), ordered by sort_order. Returns list of question text.
   Future<List<String>> getExamQuestions(String examType) async {
     try {
@@ -1183,7 +1405,7 @@ class RecruitmentRepo {
     }
   }
 
-  /// Per-exam countdown in seconds (0 = no limit). Keys: `general`, `math`, `general_info`.
+  /// Per-exam countdown in seconds (0 = no limit). Includes built-in and custom exams.
   Future<Map<String, int>> getExamTimeLimits() async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
@@ -1192,12 +1414,13 @@ class RecruitmentRepo {
       final raw = res.data?['limits'];
       final out = Map<String, int>.from(kDefaultRspExamTimeLimitSeconds);
       if (raw is Map) {
-        for (final key in kDefaultRspExamTimeLimitSeconds.keys) {
-          final v = raw[key];
+        raw.forEach((key, v) {
+          final k = key.toString().trim();
+          if (k.isEmpty) return;
           if (v is num) {
-            out[key] = v.toInt().clamp(0, 86400);
+            out[k] = v.toInt().clamp(0, 86400);
           }
-        }
+        });
       }
       return out;
     } catch (_) {

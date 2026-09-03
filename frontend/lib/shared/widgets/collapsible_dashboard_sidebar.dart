@@ -553,8 +553,8 @@ class _CollapsedSectionGem extends StatelessWidget {
   }
 }
 
-/// Collapsed footer profile — clean avatar chip with subtle motion.
-class CollapsedSidebarProfileOrb extends StatefulWidget {
+/// Collapsed footer profile — static avatar chip (no orbit / float animation).
+class CollapsedSidebarProfileOrb extends StatelessWidget {
   const CollapsedSidebarProfileOrb({
     super.key,
     required this.displayName,
@@ -567,154 +567,51 @@ class CollapsedSidebarProfileOrb extends StatefulWidget {
   final String? avatarPath;
 
   @override
-  State<CollapsedSidebarProfileOrb> createState() =>
-      _CollapsedSidebarProfileOrbState();
-}
-
-class _CollapsedSidebarProfileOrbState extends State<CollapsedSidebarProfileOrb>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _float;
-
-  @override
-  void initState() {
-    super.initState();
-    _float = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2600),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _float.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final panel = AppTheme.dashPanelOf(context);
     final primary = AppTheme.primaryNavy;
 
     return Tooltip(
-      message: '${widget.displayName}\n${widget.subtitle}',
+      message: '$displayName\n$subtitle',
       waitDuration: const Duration(milliseconds: 400),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 4),
-        child: AnimatedBuilder(
-          animation: _float,
-          builder: (context, _) {
-            final wave = math.sin(_float.value * 2 * math.pi);
-            final yOffset = wave * 1.6;
-            final scale = 1 + (wave * 0.015);
-            final barWidth = 16 + ((wave + 1) * 1.8);
-            final pulse = 0.5 + ((wave + 1) / 2) * 0.5;
-            final ringSize = 56.0 + pulse * 2.0;
-            final orbitAngle = _float.value * 2 * math.pi;
-
-            return Transform.translate(
-              offset: Offset(0, yOffset),
-              child: Transform.scale(
-                scale: scale,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 60,
-                      height: 60,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Container(
-                            width: ringSize,
-                            height: ringSize,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: RadialGradient(
-                                colors: [
-                                  primary.withValues(alpha: 0.16 * pulse),
-                                  primary.withValues(alpha: 0.01),
-                                ],
-                              ),
-                            ),
-                          ),
-                          Transform.rotate(
-                            angle: orbitAngle,
-                            child: Align(
-                              alignment: Alignment.topCenter,
-                              child: Container(
-                                width: 7,
-                                height: 7,
-                                decoration: BoxDecoration(
-                                  color: primary.withValues(alpha: 0.9),
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: primary.withValues(alpha: 0.45),
-                                      blurRadius: 6,
-                                      spreadRadius: 0.4,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          Container(
-                            width: 48,
-                            height: 48,
-                            padding: const EdgeInsets.all(3.5),
-                            decoration: BoxDecoration(
-                              color: panel,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: primary.withValues(
-                                  alpha: 0.35 + pulse * 0.2,
-                                ),
-                                width: 1.8,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.1),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 2),
-                                ),
-                                BoxShadow(
-                                  color: primary.withValues(
-                                    alpha: 0.12 + pulse * 0.1,
-                                  ),
-                                  blurRadius: 10,
-                                  spreadRadius: 0.3,
-                                ),
-                              ],
-                            ),
-                            child: ClipOval(
-                              child: _CollapsedAvatar(
-                                avatarPath: widget.avatarPath,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      width: barWidth,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            primary.withValues(alpha: 0.18),
-                            primary.withValues(alpha: 0.55),
-                            primary.withValues(alpha: 0.18),
-                          ],
-                        ),
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                    ),
-                  ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              padding: const EdgeInsets.all(3.5),
+              decoration: BoxDecoration(
+                color: panel,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: primary.withValues(alpha: 0.4),
+                  width: 1.8,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
-            );
-          },
+              child: ClipOval(
+                child: _CollapsedAvatar(avatarPath: avatarPath),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: 18,
+              height: 4,
+              decoration: BoxDecoration(
+                color: primary.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(99),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -739,7 +636,8 @@ class _CollapsedAvatar extends StatelessWidget {
   }
 }
 
-/// Spinning orange arc around rail logo or profile (collapsed sidebar).
+/// Spinning orange arc around the collapsed rail logo (top).
+/// Bottom profile stays static via [CollapsedSidebarProfileOrb].
 class SidebarRotatingAccentRing extends StatefulWidget {
   const SidebarRotatingAccentRing({
     super.key,

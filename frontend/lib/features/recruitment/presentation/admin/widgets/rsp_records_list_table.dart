@@ -56,8 +56,8 @@ class RspRecordsListTable extends StatelessWidget {
                   textAlign: c.align,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppTheme.letterheadNavy,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontWeight: FontWeight.w800,
                     fontSize: 12,
                     letterSpacing: 0.4,
@@ -145,6 +145,7 @@ class RspRecordsListTable extends StatelessWidget {
 
 /// Standard text cell for [RspRecordsListTable].
 Widget rspRecordsTextCell(
+  BuildContext context,
   String text, {
   bool bold = false,
   TextAlign align = TextAlign.start,
@@ -158,7 +159,9 @@ Widget rspRecordsTextCell(
     style: TextStyle(
       fontSize: bold ? 13.5 : 13,
       fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
-      color: bold ? AppTheme.textPrimary : AppTheme.textSecondary,
+      color: bold
+          ? AppTheme.dashTextPrimaryOf(context)
+          : AppTheme.dashTextSecondaryOf(context),
       height: 1.3,
     ),
   );
@@ -302,14 +305,14 @@ class RspFormEmptyState extends StatelessWidget {
               Icon(
                 icon ?? Icons.inbox_outlined,
                 size: 44,
-                color: AppTheme.textSecondary.withValues(alpha: 0.45),
+                color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.45),
               ),
               const SizedBox(height: 12),
               Text(
                 message,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                  color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.95),
                   fontSize: 14,
                   height: 1.45,
                 ),

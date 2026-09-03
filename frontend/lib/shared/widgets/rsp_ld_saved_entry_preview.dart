@@ -11,6 +11,7 @@ import 'package:hrms_plaridel/features/learning_development/models/promotion_cer
 import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_need_analysis.dart';
 import 'package:hrms_plaridel/features/learning_development/models/turn_around_time.dart';
+import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'read_only_saved_entry_dialog.dart';
 
 /// Builds scroll sections for “View” on saved RSP / L&D forms.
@@ -219,7 +220,10 @@ class RspLdSavedEntryPreview {
               ),
               ...roField('Name', e.applicants[i].name),
               ...roField('Course', e.applicants[i].course),
-              ...roField('Address', e.applicants[i].address),
+              ...roField(
+                'Address',
+                formatStoredAddressForDisplay(e.applicants[i].address),
+              ),
               ...roField('Sex', e.applicants[i].sex),
               ...roField('Age', e.applicants[i].age),
               ...roField('Civil status', e.applicants[i].civilStatus),

@@ -14,11 +14,13 @@ class StructuredAddressForm extends StatefulWidget {
     required this.streetController,
     this.initialRawAddress,
     required this.inputDecoration,
+    this.sectionLabel = 'Address',
   });
 
   final TextEditingController streetController;
   final String? initialRawAddress;
   final InputDecoration Function(String hint) inputDecoration;
+  final String sectionLabel;
 
   @override
   StructuredAddressFormState createState() => StructuredAddressFormState();
@@ -211,7 +213,7 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Address',
+          widget.sectionLabel,
           style: TextStyle(
             color: sectionTitleColor,
             fontSize: 13,

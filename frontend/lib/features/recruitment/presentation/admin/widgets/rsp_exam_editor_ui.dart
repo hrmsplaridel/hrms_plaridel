@@ -163,7 +163,7 @@ class RspExamPageHeader extends StatelessWidget {
   }
 }
 
-/// Applicant time limit strip (shared by MCQ exam editors).
+/// Applicant time limit strip (shared by all exam editors).
 class RspExamTimeLimitPanel extends StatelessWidget {
   const RspExamTimeLimitPanel({
     super.key,

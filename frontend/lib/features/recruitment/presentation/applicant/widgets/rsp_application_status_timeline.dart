@@ -454,6 +454,9 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if (application.finalRequirementsApproved) {
       return 'HR approved your medical certificate, drug test, and NBI clearance.';
     }
+    if (application.hasRejectedFinalRequirement) {
+      return 'HR rejected a document — please re-upload the corrected PDF.';
+    }
     if (application.hasAllFinalRequirementsUploaded) {
       return 'All three documents uploaded. Awaiting HR review.';
     }

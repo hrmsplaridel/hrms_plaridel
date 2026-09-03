@@ -523,9 +523,9 @@ class _WorkExperienceSheetList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(e.positionAppliedFor ?? '', bold: true),
-              rspRecordsTextCell(e.applicantName ?? ''),
-              rspRecordsTextCell(e.department ?? ''),
+              rspRecordsTextCell(context,e.positionAppliedFor ?? '', bold: true),
+              rspRecordsTextCell(context,e.applicantName ?? ''),
+              rspRecordsTextCell(context,e.department ?? ''),
               RspRecordsCrudActions(
                 onView: () => showReadOnlySavedEntryDialog(
                   context,

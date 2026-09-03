@@ -165,6 +165,31 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
   }
 
   Future<void> _clearSchedule(RecruitmentApplication app) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear orientation schedule?'),
+        content: Text(
+          'This removes the date and time for ${app.fullName}. '
+          'They will no longer see a schedule on Step 8.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
     await _withSaveLock(app.id, () async {
       await RecruitmentRepo.instance.updateOrientationAt(app.id, null);
       if (mounted) {
@@ -173,6 +198,97 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
         );
       }
     });
+  }
+
+  BoxDecoration _shellCardDecoration(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    return BoxDecoration(
+      color: panel,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: hairline),
+      boxShadow: [
+        BoxShadow(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+          blurRadius: 28,
+          offset: const Offset(0, 12),
+        ),
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.04),
+          blurRadius: 10,
+          offset: const Offset(0, 3),
+        ),
+      ],
+    );
+  }
+
+  Widget _shellTopAccent() {
+    return Container(
+      height: 4,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+        ),
+      ),
+    );
+  }
+
+  Widget _applicantInitials(BuildContext context, String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    var initials = '';
+    if (parts.isNotEmpty && parts.first.isNotEmpty) {
+      initials += parts.first[0].toUpperCase();
+    }
+    if (parts.length > 1 && parts.last.isNotEmpty) {
+      initials += parts.last[0].toUpperCase();
+    }
+    if (initials.isEmpty) initials = '?';
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppTheme.primaryNavy.withValues(alpha: 0.18),
+            AppTheme.primaryNavyLight.withValues(alpha: 0.1),
+          ],
+        ),
+        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.22)),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: TextStyle(
+          color: AppTheme.dashIsDark(context)
+              ? AppTheme.primaryNavyLight
+              : AppTheme.primaryNavy,
+          fontWeight: FontWeight.w800,
+          fontSize: 16,
+        ),
+      ),
+    );
+  }
+
+  Widget _statusChip({required String label, required Color color}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
   }
 
   @override
@@ -377,135 +493,236 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
     final busy = _savingIds.contains(app.id);
     final scheduled = app.orientationAt;
     final expanded = _expandedIds.contains(app.id) || scheduled == null;
+    final hairline = AppTheme.dashHairlineOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final applicantNo = (app.applicantNumber ?? '').trim();
+    final position = (app.positionAppliedFor ?? '').trim();
 
-    if (!expanded) {
-      return Material(
-        color: AppTheme.dashPanelOf(context),
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => setState(() => _expandedIds.add(app.id)),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppTheme.dashHairlineOf(context)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        app.fullName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 16,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _formatSchedule(scheduled, context),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.dashTextSecondaryOf(context),
-                        ),
-                      ),
-                    ],
+    final header = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _applicantInitials(context, app.fullName),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                app.fullName,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: expanded ? 18 : 16,
+                  letterSpacing: -0.2,
+                  color: primary,
+                  height: 1.2,
+                ),
+              ),
+              if (applicantNo.isNotEmpty) ...[
+                const SizedBox(height: 3),
+                Text(
+                  applicantNo,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
+                    color: accentNavy,
                   ),
                 ),
-                const Icon(Icons.expand_more_rounded),
               ],
-            ),
+              const SizedBox(height: 4),
+              Text(
+                app.email,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: secondary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              if (position.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Position: $position',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: accentNavy,
+                  ),
+                ),
+              ],
+              if (!expanded) ...[
+                const SizedBox(height: 6),
+                Text(
+                  _formatSchedule(scheduled, context),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: secondary,
+                  ),
+                ),
+              ],
+            ],
           ),
+        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            _statusChip(
+              label: scheduled == null ? 'Not scheduled' : 'Scheduled',
+              color: scheduled == null
+                  ? AppTheme.dashTextSecondaryOf(context)
+                  : accentNavy,
+            ),
+            if (!expanded) ...[
+              const SizedBox(height: 10),
+              Icon(Icons.expand_more_rounded, color: secondary),
+            ],
+          ],
+        ),
+      ],
+    );
+
+    if (!expanded) {
+      return Container(
+        decoration: _shellCardDecoration(context),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _shellTopAccent(),
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => setState(() => _expandedIds.add(app.id)),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: header,
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }
 
     return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.dashPanelOf(context),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
-        boxShadow: AppTheme.cardShadow,
-      ),
+      decoration: _shellCardDecoration(context),
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      app.fullName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 17,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      app.email,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.dashTextSecondaryOf(context),
-                      ),
-                    ),
-                    if (app.positionAppliedFor?.trim().isNotEmpty == true) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'Position: ${app.positionAppliedFor!.trim()}',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: accentNavy,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              if (scheduled != null)
-                TextButton.icon(
-                  onPressed: () => setState(() => _expandedIds.remove(app.id)),
-                  icon: const Icon(Icons.unfold_less_rounded, size: 18),
-                  label: const Text('Show less'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.dashMutedSurfaceOf(context),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.dashHairlineOf(context)),
-            ),
+          _shellTopAccent(),
+          Padding(
+            padding: const EdgeInsets.all(22),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: header),
+                    if (scheduled != null)
+                      TextButton.icon(
+                        onPressed: () =>
+                            setState(() => _expandedIds.remove(app.id)),
+                        icon: const Icon(Icons.unfold_less_rounded, size: 18),
+                        label: const Text('Show less'),
+                        style: TextButton.styleFrom(foregroundColor: accentNavy),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Divider(height: 1, color: hairline),
+                const SizedBox(height: 18),
                 Text(
-                  scheduled == null
-                      ? 'No date set'
-                      : _formatSchedule(scheduled, context),
+                  'ORIENTATION',
                   style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.65,
+                    color: secondary,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'Applicants see this orientation schedule when they refresh Step 8.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    height: 1.4,
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: muted,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: hairline),
+                  ),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(
+                          width: 4,
+                          margin: const EdgeInsets.symmetric(
+                            vertical: 12,
+                            horizontal: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: accentNavy,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(2, 14, 16, 14),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  scheduled == null
+                                      ? Icons.event_outlined
+                                      : Icons.event_available_rounded,
+                                  size: 22,
+                                  color: accentNavy.withValues(alpha: 0.9),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        scheduled == null
+                                            ? 'No date set'
+                                            : _formatSchedule(
+                                                scheduled,
+                                                context,
+                                              ),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 15,
+                                          height: 1.3,
+                                          color: scheduled == null
+                                              ? secondary
+                                              : accentNavy,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        scheduled == null
+                                            ? 'Pick a date and time. Applicants see it on Step 8 after they refresh.'
+                                            : 'Applicants see this orientation schedule when they refresh Step 8.',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: secondary,
+                                          height: 1.4,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -515,15 +732,33 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
                   children: [
                     FilledButton.icon(
                       onPressed: busy ? null : () => _pickDateTime(app),
-                      icon: const Icon(Icons.event_rounded, size: 20),
+                      icon: busy
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Icon(
+                              scheduled == null
+                                  ? Icons.event_rounded
+                                  : Icons.edit_calendar_rounded,
+                              size: 20,
+                            ),
                       label: Text(
                         scheduled == null
                             ? 'Set date & time'
                             : 'Change schedule',
                       ),
                       style: FilledButton.styleFrom(
-                        backgroundColor: accentNavy,
+                        backgroundColor: AppTheme.primaryNavy,
                         foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 12,
+                        ),
                       ),
                     ),
                     if (scheduled != null)
@@ -531,6 +766,9 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
                         onPressed: busy ? null : () => _clearSchedule(app),
                         icon: const Icon(Icons.event_busy_rounded, size: 20),
                         label: const Text('Clear'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: accentNavy,
+                        ),
                       ),
                   ],
                 ),

@@ -165,16 +165,6 @@ class _AdminDashUi {
       ],
     );
   }
-
-  static ButtonStyle ghostAction(BuildContext context) {
-    return TextButton.styleFrom(
-      foregroundColor: AppTheme.primaryNavy,
-      backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.06),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-    );
-  }
 }
 
 class _AdminSectionHeader extends StatelessWidget {
@@ -650,9 +640,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   Widget _buildContent(String displayName) {
     switch (_selectedMenu) {
       case AdminMenu.dashboard:
-        return _DashboardContent(
-          onOpenRecruitment: () => _onMenuSelected(AdminMenu.rsp),
-        );
+        return _DashboardContent();
       case AdminMenu.myAttendance:
         return EmployeeAttendanceOverviewSection(
           displayName: displayName,
@@ -1129,9 +1117,7 @@ class _Sidebar extends StatelessWidget {
 }
 
 class _DashboardContent extends StatelessWidget {
-  const _DashboardContent({this.onOpenRecruitment});
-
-  final VoidCallback? onOpenRecruitment;
+  const _DashboardContent();
 
   static bool _sectionVisible(String query, List<String> keywords) {
     final q = query.trim().toLowerCase();
@@ -1257,7 +1243,7 @@ class _DashboardContent extends StatelessWidget {
         if ((showWelcome || showSummary) && showRecruitment)
           const SizedBox(height: 28),
         if (showRecruitment)
-          _RecruitmentHubCard(onOpenRecruitment: onOpenRecruitment),
+          _RecruitmentHubCard(),
         if ((showWelcome || showSummary || showRecruitment) && showDocu)
           const SizedBox(height: 28),
         if (showDocu) ...[
@@ -1317,8 +1303,9 @@ class _SummaryCardsState extends State<_SummaryCards> {
     try {
       final applications = await RecruitmentRepo.instance.listApplications();
       final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
-      final totalApplicants = applications.length;
-      final pendingCount = applications
+      final hrApps = applications.where((a) => !a.isFromMayorModule).toList();
+      final totalApplicants = hrApps.length;
+      final pendingCount = hrApps
           .where((a) => a.status == 'submitted')
           .length;
       final hiringActive = announcement.hasVacancies;
@@ -1647,9 +1634,7 @@ class _RecruitmentPipelineStats {
 }
 
 class _RecruitmentHubCard extends StatefulWidget {
-  const _RecruitmentHubCard({this.onOpenRecruitment});
-
-  final VoidCallback? onOpenRecruitment;
+  const _RecruitmentHubCard();
 
   @override
   State<_RecruitmentHubCard> createState() => _RecruitmentHubCardState();
@@ -1662,7 +1647,14 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
   List<RecruitmentApplication> _all = const [];
 
   List<RecruitmentApplication> get _activePipeline =>
-      _all.where((a) => a.isActiveInPipeline).toList()..sort(
+      _all.where((a) {
+        if (a.status == 'failed' || a.status == 'document_declined') {
+          return false;
+        }
+        return a.isActiveInPipeline ||
+            a.hiredUserId != null ||
+            a.status == 'registered';
+      }).toList()..sort(
         (a, b) => (b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
             .compareTo(a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0)),
       );
@@ -1711,7 +1703,7 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
       final apps = await RecruitmentRepo.instance.listApplications();
       if (!mounted) return;
       setState(() {
-        _all = apps;
+        _all = apps.where((a) => !a.isFromMayorModule).toList();
         _error = null;
       });
     } catch (e) {
@@ -1732,22 +1724,8 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
     return MaterialLocalizations.of(context).formatMediumDate(dt.toLocal());
   }
 
-  void _openRecruitment() {
-    if (widget.onOpenRecruitment != null) {
-      widget.onOpenRecruitment!();
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Open the Recruitment module to review all applicants.'),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    final isCompact = width < 480;
     final activePipeline = _activePipeline;
     final pipelinePreview = activePipeline.take(5).toList();
     final stats = _RecruitmentPipelineStats.fromApps(_all);
@@ -1762,60 +1740,18 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
             title: 'Recruitment',
             icon: Icons.groups_rounded,
             subtitle: 'Application pipeline and pending reviews',
-            trailing: isCompact
-                ? null
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: 'Refresh',
-                        onPressed: _refreshing
-                            ? null
-                            : () => _load(refresh: true),
-                        icon: _refreshing
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.refresh_rounded, size: 18),
-                      ),
-                      const SizedBox(width: 6),
-                      TextButton.icon(
-                        onPressed: _openRecruitment,
-                        icon: const Icon(Icons.arrow_forward_rounded, size: 16),
-                        label: const Text('Open Recruitment'),
-                        style: _AdminDashUi.ghostAction(context),
-                      ),
-                    ],
-                  ),
-          ),
-          if (isCompact) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                IconButton(
-                  tooltip: 'Refresh',
-                  onPressed: _refreshing ? null : () => _load(refresh: true),
-                  icon: _refreshing
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.refresh_rounded, size: 18),
-                ),
-                TextButton.icon(
-                  onPressed: _openRecruitment,
-                  icon: const Icon(Icons.arrow_forward_rounded, size: 16),
-                  label: const Text('Open Recruitment'),
-                  style: _AdminDashUi.ghostAction(context),
-                ),
-              ],
+            trailing: IconButton(
+              tooltip: 'Refresh',
+              onPressed: _refreshing ? null : () => _load(refresh: true),
+              icon: _refreshing
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh_rounded, size: 18),
             ),
-          ],
+          ),
           const SizedBox(height: 16),
           const SizedBox(height: 8),
           if (_loading)
@@ -1875,7 +1811,7 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Applicants still in the recruitment pipeline',
+              'Applicants from submission through hired',
               style: TextStyle(
                 color: AppTheme.dashTextSecondaryOf(context),
                 fontSize: 13,

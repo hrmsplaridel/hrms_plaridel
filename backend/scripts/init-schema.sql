@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'employee'
-    CHECK (role IN ('admin', 'hr', 'employee', 'supervisor')),
+    CHECK (role IN ('admin', 'hr', 'employee', 'supervisor', 'mayor')),
 
   full_name TEXT NOT NULL,
   avatar_path TEXT,
@@ -1099,6 +1099,7 @@ CREATE TABLE IF NOT EXISTS ld_training_requirement_records (
 -- =========================================
 CREATE TABLE IF NOT EXISTS recruitment_applications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  applicant_number TEXT,
   first_name TEXT,
   middle_name TEXT,
   last_name TEXT,
@@ -1129,6 +1130,9 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   doc_drug_test_name TEXT,
   doc_nbi_clearance_path TEXT,
   doc_nbi_clearance_name TEXT,
+  doc_medical_certificate_reject_reason TEXT,
+  doc_drug_test_reject_reason TEXT,
+  doc_nbi_clearance_reject_reason TEXT,
   final_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
   orientation_at TIMESTAMPTZ,
   orientation_attended BOOLEAN,
@@ -1141,7 +1145,9 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
         'exam_taken',
         'passed',
         'failed',
-        'registered'
+        'registered',
+        'endorsed',
+        'rejected'
       )
     ),
   final_interview_at TIMESTAMPTZ,
@@ -1173,6 +1179,20 @@ CREATE TABLE IF NOT EXISTS recruitment_exam_questions (
   correct_index INT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_custom_exams (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  exam_type TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  format TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_hidden_exams (
+  exam_type TEXT PRIMARY KEY,
+  hidden_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS job_vacancy_announcement (
@@ -1277,8 +1297,54 @@ CREATE TABLE IF NOT EXISTS recruitment_exam_time_limits (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS mayor_endorsement_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  application_id UUID NOT NULL REFERENCES recruitment_applications(id) ON DELETE CASCADE,
+  requested_office_id UUID REFERENCES offices(id) ON DELETE SET NULL,
+  requested_office_name TEXT,
+  destination_office_id UUID REFERENCES offices(id) ON DELETE SET NULL,
+  destination_office_name TEXT,
+  priority TEXT NOT NULL DEFAULT 'normal'
+    CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  intake_form JSONB NOT NULL DEFAULT '{}'::JSONB,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'mayor_approved', 'endorsed', 'rejected')),
+  staff_notes TEXT,
+  mayor_remarks TEXT,
+  rejection_reason TEXT,
+  endorsement_letter TEXT,
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  approved_at TIMESTAMPTZ,
+  approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  office_form_approved_at TIMESTAMPTZ,
+  office_form_approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  rejected_at TIMESTAMPTZ,
+  rejected_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  submitted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  submitted_by_name TEXT,
+  appointment_at TIMESTAMPTZ,
+  appointment_status TEXT NOT NULL DEFAULT 'none',
+  appointment_notes TEXT,
+  no_show_count INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (application_id)
+);
+
+CREATE TABLE IF NOT EXISTS mayor_endorsement_activity_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  request_id UUID NOT NULL REFERENCES mayor_endorsement_requests(id) ON DELETE CASCADE,
+  application_id UUID REFERENCES recruitment_applications(id) ON DELETE SET NULL,
+  actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  remarks TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 INSERT INTO recruitment_exam_time_limits (exam_type, time_limit_seconds)
 VALUES
+  ('bei', 0),
   ('general', 2700),
   ('math', 2700),
   ('general_info', 600)
@@ -1879,6 +1945,22 @@ DO UPDATE SET
   granted = EXCLUDED.granted,
   updated_at = now();
 
+-- Mayor endorsement account seed (idempotent)
+INSERT INTO users (email, password_hash, role, full_name, is_active)
+VALUES (
+  'mayorsoffice@test.com',
+  '$2b$10$uhPv2oXZLwC9WJ7hXjg3NOLTnYrjyWextH30e9CoR/z3JovGmHeyy',
+  'mayor',
+  'Mayor''s Office',
+  true
+)
+ON CONFLICT (email) DO UPDATE
+SET password_hash = EXCLUDED.password_hash,
+    role = EXCLUDED.role,
+    full_name = EXCLUDED.full_name,
+    is_active = true,
+    updated_at = now();
+
 -- =========================================
 -- INDEXES
 -- =========================================
@@ -2015,12 +2097,27 @@ CREATE INDEX IF NOT EXISTS idx_recruitment_applications_status
   ON recruitment_applications(status);
 CREATE INDEX IF NOT EXISTS idx_recruitment_applications_created
   ON recruitment_applications(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_recruitment_applications_applicant_number
+  ON recruitment_applications (applicant_number)
+  WHERE applicant_number IS NOT NULL AND btrim(applicant_number) <> '';
+CREATE INDEX IF NOT EXISTS idx_recruitment_applications_applicant_number
+  ON recruitment_applications (applicant_number);
 CREATE INDEX IF NOT EXISTS idx_recruitment_exam_results_application
   ON recruitment_exam_results(application_id);
 CREATE INDEX IF NOT EXISTS idx_recruitment_exam_questions_type
   ON recruitment_exam_questions(exam_type);
+CREATE INDEX IF NOT EXISTS idx_recruitment_custom_exams_created
+  ON recruitment_custom_exams(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_vacancy_announcement_updated
   ON job_vacancy_announcement(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_status
+  ON mayor_endorsement_requests(status);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_submitted
+  ON mayor_endorsement_requests(submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_office
+  ON mayor_endorsement_requests(requested_office_id, destination_office_id);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_activity_request_created
+  ON mayor_endorsement_activity_logs(request_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_selection_lineup_entries_created
   ON selection_lineup_entries(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_applicants_profile_entries_created

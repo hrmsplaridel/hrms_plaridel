@@ -56,7 +56,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget build(BuildContext context) {
     final np = context.watch<NotificationProvider>();
     final doc = context.watch<DocuTrackerProvider>();
-    final scheme = Theme.of(context).colorScheme;
     final hrmsEmpty = np.items.isEmpty;
     final docEmpty = doc.notifications.isEmpty;
     final allEmpty = hrmsEmpty && docEmpty;
@@ -122,13 +121,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         actions: [
           if (totalUnread > 0)
             Padding(
-              padding: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.only(right: 6),
               child: _isNarrow(context)
                   ? IconButton(
                       onPressed: () => _markAllRead(np, doc),
                       tooltip: 'Mark all read',
                       style: IconButton.styleFrom(
-                        foregroundColor: AppTheme.primaryNavy,
+                        foregroundColor: NotificationsUi.accent,
+                        backgroundColor:
+                            NotificationsUi.accent.withValues(alpha: 0.1),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       icon: const Icon(Icons.done_all_rounded, size: 20),
                     )
@@ -136,9 +140,21 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       onPressed: () => _markAllRead(np, doc),
                       icon: const Icon(Icons.done_all_rounded, size: 18),
                       style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.primaryNavy,
+                        foregroundColor: NotificationsUi.accent,
+                        backgroundColor:
+                            NotificationsUi.accent.withValues(alpha: 0.1),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      label: const Text('Mark all read'),
+                      label: const Text(
+                        'Mark all read',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                     ),
             ),
         ],
@@ -152,11 +168,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     SizedBox(
-                      width: 32,
-                      height: 32,
+                      width: 36,
+                      height: 36,
                       child: CircularProgressIndicator(
                         strokeWidth: 3,
-                        color: scheme.primary,
+                        color: NotificationsUi.accent,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -165,6 +181,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       style: TextStyle(
                         color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 14,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
@@ -175,10 +192,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             : allEmpty
             ? const NotificationEmptyState()
             : RefreshIndicator(
-                color: AppTheme.primaryNavy,
+                color: NotificationsUi.accent,
                 onRefresh: _reload,
                 child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 28),
                   children: [
                     if (!hrmsEmpty || !docEmpty)
                       NotificationsSummaryStrip(
@@ -186,7 +203,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         unreadCount: totalUnread,
                       ),
                     if (!docEmpty) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
                       const _PanelSectionTitle(title: 'DocuTracker'),
                       const SizedBox(height: 8),
                       DocuTrackerNotificationPanel(
@@ -248,13 +265,29 @@ class _PanelSectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: TextStyle(
-        fontWeight: FontWeight.w800,
-        fontSize: 13,
-        letterSpacing: 0.5,
-        color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 14,
+            decoration: BoxDecoration(
+              color: NotificationsUi.accent,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 13,
+              letterSpacing: 0.35,
+              color: AppTheme.dashTextPrimaryOf(context),
+            ),
+          ),
+        ],
       ),
     );
   }

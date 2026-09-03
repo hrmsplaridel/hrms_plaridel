@@ -32,7 +32,7 @@ class _RspFinalRequirementsSectionState
   List<RecruitmentApplication> _applications = [];
   bool _loading = true;
   final Set<String> _savingIds = {};
-  final Set<String> _expandedApplicantIds = {};
+  final Set<String> _expandedIds = {};
   final _searchController = TextEditingController();
   String _searchQuery = '';
   String? _selectedPositionFilter;
@@ -149,7 +149,7 @@ class _RspFinalRequirementsSectionState
       if (!_matchesStatusFilter(a)) return false;
       if (_searchQuery.isNotEmpty) {
         final hay =
-            '${a.fullName} ${a.email} ${a.positionAppliedFor ?? ''}'
+            '${a.applicantNumber ?? ''} ${a.fullName} ${a.email} ${a.positionAppliedFor ?? ''}'
                 .toLowerCase();
         if (!hay.contains(_searchQuery)) return false;
       }
@@ -584,19 +584,6 @@ class _RspFinalRequirementsSectionState
                       height: 1.15,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Applicants who passed deliberation must submit medical certificate, '
-                    'drug test result, and NBI clearance. Review uploads, mark compliance, '
-                    'then create the employee account and email credentials.',
-                    style: TextStyle(
-                      fontFamily: 'NotoSans',
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 14,
-                      height: 1.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -660,7 +647,7 @@ class _RspFinalRequirementsSectionState
         TextField(
           controller: _searchController,
           decoration: InputDecoration(
-            hintText: 'Search by name, email, or position…',
+            hintText: 'Search by applicant ID, name, email, or position…',
             prefixIcon: const Icon(Icons.search_rounded),
             suffixIcon: _searchQuery.isEmpty
                 ? null
@@ -890,10 +877,94 @@ class _RspFinalRequirementsSectionState
     final hired = _isHired(app);
     final statusLabel = _complianceLabel(app);
     final statusColor = _complianceColor(app);
-    final useMinimalRow =
-        approved && !_expandedApplicantIds.contains(app.id) && !saving;
+    // Same as Scheduling: keep open while work remains; otherwise collapsed.
+    final needsAttention =
+        !hired &&
+        (!allUploaded ||
+            !approved ||
+            app.hasRejectedFinalRequirement ||
+            saving);
+    final expanded = needsAttention || _expandedIds.contains(app.id);
 
-    if (useMinimalRow) {
+    final header = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _applicantInitials(context, app.fullName),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                app.fullName,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: expanded ? 18 : 16,
+                  color: AppTheme.dashTextPrimaryOf(context),
+                ),
+              ),
+              if ((app.applicantNumber ?? '').trim().isNotEmpty) ...[
+                const SizedBox(height: 3),
+                Text(
+                  app.applicantNumber!.trim(),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
+                    color: Color(0xFFE85D04),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 4),
+              Text(
+                app.email,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+              ),
+              if (app.positionAppliedFor != null &&
+                  app.positionAppliedFor!.trim().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Position: ${app.positionAppliedFor!.trim()}',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                  ),
+                ),
+              ],
+              if (app.createdAt != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Applied: ${_formatDateShort(app.createdAt!)}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            _statusChip(label: statusLabel, color: statusColor),
+            if (!expanded) ...[
+              const SizedBox(height: 10),
+              Icon(
+                Icons.expand_more_rounded,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+
+    if (!expanded) {
       return Container(
         decoration: _shellCardDecoration(context),
         clipBehavior: Clip.antiAlias,
@@ -904,40 +975,10 @@ class _RspFinalRequirementsSectionState
             Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: () =>
-                    setState(() => _expandedApplicantIds.add(app.id)),
+                onTap: () => setState(() => _expandedIds.add(app.id)),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 16,
-                  ),
-                  child: Row(
-                    children: [
-                      _applicantInitials(context, app.fullName),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              app.fullName,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 17,
-                                color: AppTheme.dashTextPrimaryOf(context),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            _statusChip(label: statusLabel, color: statusColor),
-                          ],
-                        ),
-                      ),
-                      Icon(
-                        Icons.expand_more_rounded,
-                        color: AppTheme.dashTextSecondaryOf(context),
-                      ),
-                    ],
-                  ),
+                  padding: const EdgeInsets.all(18),
+                  child: header,
                 ),
               ),
             ),
@@ -958,74 +999,17 @@ class _RspFinalRequirementsSectionState
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (approved) ...[
-                  Row(
-                    children: [
-                      const Spacer(),
-                      TextButton.icon(
-                        onPressed: () => setState(
-                          () => _expandedApplicantIds.remove(app.id),
-                        ),
-                        icon: const Icon(Icons.unfold_less_rounded, size: 20),
-                        label: const Text('Show less'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                ],
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _applicantInitials(context, app.fullName),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            app.fullName,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 18,
-                              color: AppTheme.dashTextPrimaryOf(context),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            app.email,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.dashTextSecondaryOf(context),
-                            ),
-                          ),
-                          if (app.positionAppliedFor != null &&
-                              app.positionAppliedFor!.trim().isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              'Position: ${app.positionAppliedFor!.trim()}',
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.primaryNavy.withValues(
-                                  alpha: 0.85,
-                                ),
-                              ),
-                            ),
-                          ],
-                          if (app.createdAt != null) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              'Applied: ${_formatDateShort(app.createdAt!)}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.dashTextSecondaryOf(context),
-                              ),
-                            ),
-                          ],
-                        ],
+                    Expanded(child: header),
+                    if (!needsAttention)
+                      TextButton.icon(
+                        onPressed: () =>
+                            setState(() => _expandedIds.remove(app.id)),
+                        icon: const Icon(Icons.unfold_less_rounded, size: 18),
+                        label: const Text('Show less'),
                       ),
-                    ),
-                    _statusChip(label: statusLabel, color: statusColor),
                   ],
                 ),
                 const SizedBox(height: 18),
@@ -1060,10 +1044,14 @@ class _RspFinalRequirementsSectionState
                             .toList(),
                       );
                     }
-                    return Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: tiles,
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var i = 0; i < tiles.length; i++) ...[
+                          if (i > 0) const SizedBox(height: 12),
+                          tiles[i],
+                        ],
+                      ],
                     );
                   },
                 ),
@@ -1134,80 +1122,79 @@ class _RspFinalRequirementsSectionState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
-                              children: [
-                                Container(
-                                  width: 30,
-                                  height: 30,
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFE85D04)
-                                        .withValues(alpha: 0.15),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Text(
-                                    '3',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      color: step3Enabled
-                                          ? const Color(0xFFE85D04)
-                                          : AppTheme.dashTextSecondaryOf(
-                                              context,
-                                            ),
-                                    ),
-                                  ),
+                            children: [
+                              Container(
+                                width: 30,
+                                height: 30,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE85D04)
+                                      .withValues(alpha: 0.15),
+                                  shape: BoxShape.circle,
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Employee account',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 15,
-                                          color: step3Enabled
-                                              ? AppTheme.dashTextPrimaryOf(
-                                                  context,
-                                                )
-                                              : AppTheme.dashTextSecondaryOf(
-                                                  context,
-                                                ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        step3Subtitle,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: AppTheme.dashTextSecondaryOf(
+                                child: Text(
+                                  '3',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    color: step3Enabled
+                                        ? const Color(0xFFE85D04)
+                                        : AppTheme.dashTextSecondaryOf(
                                             context,
                                           ),
-                                        ),
-                                      ),
-                                    ],
                                   ),
                                 ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            RspEmployeeAccountSetupPanel(
-                              app: app,
-                              enabled: step3Enabled,
-                              busy: saving,
-                              onBusyChanged: (v) {
-                                if (v) {
-                                  setState(() => _savingIds.add(app.id));
-                                } else {
-                                  setState(() => _savingIds.remove(app.id));
-                                }
-                              },
-                              onReload: _load,
-                              onGoToCreateAccount: widget.onGoToCreateAccount,
-                            ),
-                          ],
-                        );
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Employee account',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 15,
+                                        color: step3Enabled
+                                            ? AppTheme.dashTextPrimaryOf(
+                                                context,
+                                              )
+                                            : AppTheme.dashTextSecondaryOf(
+                                                context,
+                                              ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      step3Subtitle,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppTheme.dashTextSecondaryOf(
+                                          context,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          RspEmployeeAccountSetupPanel(
+                            app: app,
+                            enabled: step3Enabled,
+                            busy: saving,
+                            onBusyChanged: (v) {
+                              if (v) {
+                                setState(() => _savingIds.add(app.id));
+                              } else {
+                                setState(() => _savingIds.remove(app.id));
+                              }
+                            },
+                            onReload: _load,
+                            onGoToCreateAccount: widget.onGoToCreateAccount,
+                          ),
+                        ],
+                      );
                     },
                   ),
                 ],
@@ -1219,20 +1206,133 @@ class _RspFinalRequirementsSectionState
     );
   }
 
+  Future<void> _rejectRequirement(
+    RecruitmentApplication app,
+    RspFinalRequirementDocKind kind,
+  ) async {
+    final hired = _isHired(app);
+    if (hired) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot reject requirements after the applicant is hired.'),
+        ),
+      );
+      return;
+    }
+    final path = app.finalRequirementPath(kind)?.trim();
+    if (path == null || path.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No uploaded file to reject.')),
+      );
+      return;
+    }
+
+    final reasonCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text('Reject ${_kindLabel(kind)}?'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'This removes the uploaded file. The applicant must re-submit '
+                  '${_kindLabel(kind).toLowerCase()}.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.4,
+                    color: AppTheme.dashTextSecondaryOf(ctx),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: reasonCtrl,
+                  maxLines: 3,
+                  maxLength: 500,
+                  decoration: const InputDecoration(
+                    labelText: 'Reason for applicant (optional)',
+                    hintText: 'e.g. Unreadable scan — please upload a clearer PDF',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC62828),
+              ),
+              child: const Text('Reject & request resubmit'),
+            ),
+          ],
+        );
+      },
+    );
+    final reason = reasonCtrl.text;
+    reasonCtrl.dispose();
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _savingIds.add(app.id));
+    try {
+      await RecruitmentRepo.instance.rejectFinalRequirement(
+        app.id,
+        kind,
+        reason: reason,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${_kindLabel(kind)} rejected. Applicant must re-upload.',
+          ),
+        ),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(userFacingApiError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _savingIds.remove(app.id));
+    }
+  }
+
   Widget _docTile({
     required RecruitmentApplication app,
     required RspFinalRequirementDocKind kind,
   }) {
-    final path = app.finalRequirementPath(kind);
-    final name = app.finalRequirementDisplayName(kind);
-    final hasFile = path != null && path.isNotEmpty && name != null;
+    final path = app.finalRequirementPath(kind)?.trim();
+    final name = app.finalRequirementDisplayName(kind)?.trim();
+    final hasFile = path != null && path.isNotEmpty;
+    final displayName = (name != null && name.isNotEmpty)
+        ? name
+        : (hasFile ? path.split('/').last : '');
+    final rejectReason = app.finalRequirementRejectReason(kind)?.trim();
+    final saving = _savingIds.contains(app.id);
+    final canReject = hasFile && !_isHired(app) && !saving;
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        border: Border.all(
+          color: rejectReason != null && rejectReason.isNotEmpty && !hasFile
+              ? const Color(0xFFC62828).withValues(alpha: 0.45)
+              : AppTheme.dashHairlineOf(context),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1240,10 +1340,16 @@ class _RspFinalRequirementsSectionState
           Row(
             children: [
               Icon(
-                hasFile ? Icons.check_circle_rounded : Icons.pending_rounded,
+                hasFile
+                    ? Icons.check_circle_rounded
+                    : (rejectReason != null && rejectReason.isNotEmpty)
+                    ? Icons.cancel_rounded
+                    : Icons.pending_rounded,
                 size: 16,
                 color: hasFile
                     ? const Color(0xFF2E7D32)
+                    : (rejectReason != null && rejectReason.isNotEmpty)
+                    ? const Color(0xFFC62828)
                     : AppTheme.dashTextSecondaryOf(context),
               ),
               const SizedBox(width: 6),
@@ -1259,9 +1365,42 @@ class _RspFinalRequirementsSectionState
             ],
           ),
           const SizedBox(height: 8),
-          if (hasFile)
-            RspAttachmentActions(path: path, fileName: name)
-          else
+          if (hasFile) ...[
+            RspAttachmentActions(path: path, fileName: displayName),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: canReject
+                    ? () => _rejectRequirement(app, kind)
+                    : null,
+                icon: const Icon(Icons.highlight_off_rounded, size: 18),
+                label: const Text('Reject'),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFC62828),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+            ),
+          ] else if (rejectReason != null && rejectReason.isNotEmpty) ...[
+            Text(
+              'Rejected — awaiting resubmit',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFFC62828).withValues(alpha: 0.95),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              rejectReason,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+            ),
+          ] else
             Text(
               'Not submitted',
               style: TextStyle(

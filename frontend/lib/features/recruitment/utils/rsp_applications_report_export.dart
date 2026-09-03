@@ -23,6 +23,7 @@ String _rspReportField(String? value) {
 /// One applicant row for CSV / PDF export (Applications & Exam Results).
 class RspApplicationsReportRow {
   const RspApplicationsReportRow({
+    required this.applicantNumber,
     required this.firstName,
     required this.middleName,
     required this.lastName,
@@ -45,6 +46,7 @@ class RspApplicationsReportRow {
     required this.eligibilityTrainings,
   });
 
+  final String applicantNumber;
   final String firstName;
   final String middleName;
   final String lastName;
@@ -128,6 +130,7 @@ class RspApplicationsReportRow {
     }
 
     return RspApplicationsReportRow(
+      applicantNumber: _rspReportField(app.applicantNumber),
       firstName: first,
       middleName: middle,
       lastName: last,
@@ -236,6 +239,7 @@ abstract final class RspApplicationsReportExport {
     String? filterSummary,
   }) {
     final header = [
+      'Applicant ID',
       'First name',
       'Middle name',
       'Last name',
@@ -265,6 +269,7 @@ abstract final class RspApplicationsReportExport {
       header.map(_csvEscape).join(','),
       for (final r in rows)
         [
+          r.applicantNumber,
           r.firstName,
           r.middleName,
           r.lastName,
@@ -319,6 +324,7 @@ abstract final class RspApplicationsReportExport {
       pw.TableRow(
         decoration: const pw.BoxDecoration(color: PdfColors.grey300),
         children: [
+          'ID',
           'First',
           'Last',
           'Email',
@@ -337,6 +343,7 @@ abstract final class RspApplicationsReportExport {
       for (final r in rows)
         pw.TableRow(
           children: [
+            r.applicantNumber,
             r.firstName,
             r.lastName,
             r.email,
