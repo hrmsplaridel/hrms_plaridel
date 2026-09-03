@@ -4,18 +4,22 @@ const assert = require('node:assert/strict');
 const {
   getDepartmentReviewSnapshot,
   getDepartmentReviewSnapshotForDate,
+  isDepartmentHead,
 } = require('../src/services/departmentHeadService');
+const { todayInHrmsTimezone } = require('../src/utils/dateRangeParser');
 
 const EMPLOYEE_ID = '00000000-0000-0000-0000-000000000101';
 const DEPARTMENT_ID = '00000000-0000-0000-0000-000000000201';
 const HEAD_ID = '00000000-0000-0000-0000-000000000301';
+const BACKUP_ID = '00000000-0000-0000-0000-000000000302';
 
-test('review snapshot resolves the assignment effective today without is_active filtering', async () => {
-  const sqlCalls = [];
-  const client = {
-    async query(sql) {
+function reviewerClient({ primary = true, backup = true, excludePrimary = false } = {}) {
+  const calls = [];
+  return {
+    calls,
+    async query(sql, params) {
       const text = String(sql);
-      sqlCalls.push(text);
+      calls.push({ text, params });
       if (text.includes('LEFT JOIN departments d')) {
         return {
           rows: [{
@@ -24,80 +28,124 @@ test('review snapshot resolves the assignment effective today without is_active 
           }],
         };
       }
-      if (text.includes('LOWER(p.name) = ANY')) {
-        return { rows: [{ employee_id: HEAD_ID }] };
+      if (text.includes('JOIN position_department_head_periods head_period')) {
+        return primary && !excludePrimary
+          ? { rows: [{ reviewer_id: HEAD_ID, reviewer_name: 'HR Head' }] }
+          : { rows: [] };
       }
-      throw new Error(`Unexpected query: ${text.slice(0, 80)}`);
+      if (text.includes('FROM department_reviewer_backups b')) {
+        return backup
+          ? {
+              rows: [{
+                reviewer_id: BACKUP_ID,
+                reviewer_name: 'Backup Reviewer',
+                backup_rank: 1,
+              }],
+            }
+          : { rows: [] };
+      }
+      throw new Error(`Unexpected query: ${text.slice(0, 100)}`);
     },
   };
+}
 
+test('review snapshot resolves the explicit Head and effective backups', async () => {
+  const client = reviewerClient();
   const snapshot = await getDepartmentReviewSnapshot(client, EMPLOYEE_ID);
 
-  assert.deepEqual(snapshot, {
-    departmentHeadUserId: HEAD_ID,
-    departmentId: DEPARTMENT_ID,
-    departmentName: 'Human Resources',
-  });
-  assert.equal(sqlCalls.every((sql) => !/a\.is_active/i.test(sql)), true);
-  assert.equal(sqlCalls.every((sql) => sql.includes('CURRENT_DATE')), true);
+  assert.equal(snapshot.departmentHeadUserId, HEAD_ID);
+  assert.equal(snapshot.departmentId, DEPARTMENT_ID);
+  assert.deepEqual(snapshot.reviewerUserIds, [HEAD_ID, BACKUP_ID]);
+  assert.deepEqual(snapshot.reviewers.map((reviewer) => reviewer.reviewerRole), [
+    'primary',
+    'backup',
+  ]);
+  assert.equal(
+    client.calls.every(({ text }) => !/LOWER\(p\.name\)|ILIKE/i.test(text)),
+    true
+  );
+  const primaryQuery = client.calls.find(({ text }) =>
+    text.includes('JOIN position_department_head_periods head_period')
+  );
+  assert.match(primaryQuery.text, /head_period\.effective_from <= \$2::date/);
+  assert.match(primaryQuery.text, /head_period\.effective_to/);
+  assert.match(primaryQuery.text, /a\.is_active = true/);
+  assert.match(primaryQuery.text, /p\.is_active = true/);
 });
 
-test('review snapshot retains the department when no head is configured', async () => {
-  let call = 0;
+test('direct Department Head authority excludes archived assignments and inactive positions', async () => {
+  let authorityQuery = '';
   const client = {
-    async query() {
-      call += 1;
-      if (call === 1) {
-        return {
-          rows: [{ department_id: DEPARTMENT_ID, department_name: 'Accounting' }],
-        };
-      }
+    async query(sql) {
+      authorityQuery = String(sql);
       return { rows: [] };
     },
   };
 
-  const snapshot = await getDepartmentReviewSnapshot(client, EMPLOYEE_ID);
+  const result = await isDepartmentHead(client, HEAD_ID);
 
-  assert.deepEqual(snapshot, {
-    departmentHeadUserId: null,
-    departmentId: DEPARTMENT_ID,
-    departmentName: 'Accounting',
+  assert.deepEqual(result, {
+    isDeptHead: false,
+    departmentId: null,
+    departmentName: null,
   });
+  assert.match(authorityQuery, /JOIN position_department_head_periods head_period/);
+  assert.match(authorityQuery, /head_period\.effective_from <= \$2::date/);
+  assert.match(authorityQuery, /a\.is_active = true/);
+  assert.match(authorityQuery, /p\.is_active = true/);
 });
 
-test('historical review snapshot uses the assignment effective on the request date', async () => {
-  const calls = [];
-  const client = {
-    async query(sql, params) {
-      const text = String(sql);
-      calls.push({ text, params });
-      if (text.includes('a.effective_from <= $2::date')) {
-        return {
-          rows: [{
-            department_id: DEPARTMENT_ID,
-            department_name: 'Historical Department',
-          }],
-        };
-      }
-      if (text.includes('LOWER(p.name) = ANY')) {
-        return { rows: [{ employee_id: HEAD_ID }] };
-      }
-      throw new Error('Unexpected query: ' + text.slice(0, 80));
-    },
-  };
+test('review snapshot retains the department when no reviewers are configured', async () => {
+  const snapshot = await getDepartmentReviewSnapshot(
+    reviewerClient({ primary: false, backup: false }),
+    EMPLOYEE_ID
+  );
 
+  assert.equal(snapshot.departmentHeadUserId, null);
+  assert.equal(snapshot.departmentId, DEPARTMENT_ID);
+  assert.deepEqual(snapshot.reviewerUserIds, []);
+  assert.deepEqual(snapshot.reviewers, []);
+});
+
+test('historical snapshot uses reviewers effective on the request date', async () => {
+  const client = reviewerClient();
   const snapshot = await getDepartmentReviewSnapshotForDate(
     client,
     EMPLOYEE_ID,
     '2026-06-20'
   );
 
-  assert.deepEqual(snapshot, {
-    departmentHeadUserId: HEAD_ID,
-    departmentId: DEPARTMENT_ID,
-    departmentName: 'Historical Department',
-  });
-  assert.deepEqual(calls[0].params, [EMPLOYEE_ID, '2026-06-20']);
-  assert.doesNotMatch(calls[0].text, /a\.is_active/i);
-  assert.match(calls[1].text, /CURRENT_DATE/);
+  assert.equal(snapshot.departmentHeadUserId, HEAD_ID);
+  assert.deepEqual(client.calls[0].params, [EMPLOYEE_ID, '2026-06-20']);
+  assert.equal(
+    client.calls.slice(1).every(({ params }) => params[1] === '2026-06-20'),
+    true
+  );
+});
+
+test('a backup becomes the routing reviewer when the requester is the Head', async () => {
+  const snapshot = await getDepartmentReviewSnapshotForDate(
+    reviewerClient({ excludePrimary: true }),
+    HEAD_ID,
+    '2026-08-30'
+  );
+
+  assert.equal(snapshot.departmentHeadUserId, BACKUP_ID);
+  assert.deepEqual(snapshot.reviewerUserIds, [BACKUP_ID]);
+});
+
+test('Department Head resolution uses the Manila date across the UTC boundary', async () => {
+  const instant = new Date('2026-08-29T16:30:00.000Z');
+  const manilaDate = todayInHrmsTimezone(instant, 'Asia/Manila');
+  const utcDate = todayInHrmsTimezone(instant, 'UTC');
+  assert.equal(manilaDate, '2026-08-30');
+  assert.equal(utcDate, '2026-08-29');
+
+  const client = reviewerClient();
+  await getDepartmentReviewSnapshot(client, EMPLOYEE_ID, manilaDate);
+
+  assert.equal(
+    client.calls.every(({ params }) => params[1] === '2026-08-30'),
+    true
+  );
 });

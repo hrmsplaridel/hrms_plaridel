@@ -1142,6 +1142,9 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
       .map((s) => ({
         step_order: Number(s.step_order ?? s.stepOrder ?? 0),
         assignee_type: String(s.assignee_type ?? s.assigneeType ?? '').trim().toLowerCase(),
+        assignee_source: String(
+          s.assignee_source ?? s.assigneeSource ?? 'specific_users'
+        ).trim().toLowerCase(),
         role_id: s.role_id ?? s.roleId ?? null,
         department_id: s.department_id ?? s.departmentId ?? null,
         user_ids: Array.isArray(s.user_ids) ? s.user_ids : Array.isArray(s.userIds) ? s.userIds : null,
@@ -1174,6 +1177,9 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
     }
     for (const s of normalizedSteps) {
       if (!s.enabled) continue;
+      if (!['specific_users', 'department_reviewers'].includes(s.assignee_source)) {
+        return res.status(400).json({ error: `Invalid assignee_source for step ${s.step_order}.` });
+      }
       if (!['user', 'role', 'department', 'office'].includes(s.assignee_type)) {
         return res.status(400).json({ error: `Invalid assignee_type for step ${s.step_order}.` });
       }
@@ -1183,10 +1189,15 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
           error: `Step ${s.step_order} must route to specific user(s) (assignee_type='user') for workflow actions.`,
         });
       }
+      if (s.assignee_source === 'department_reviewers' && !s.department_id) {
+        return res.status(400).json({
+          error: `Department reviewer step ${s.step_order} must include department_id.`,
+        });
+      }
       if (s.deadline_hours != null && (!Number.isFinite(s.deadline_hours) || s.deadline_hours <= 0)) {
         return res.status(400).json({ error: `Invalid deadline_hours for step ${s.step_order}.` });
       }
-      if (s.assignee_type === 'user') {
+      if (s.assignee_type === 'user' && s.assignee_source === 'specific_users') {
         const ids = Array.isArray(s.user_ids) ? s.user_ids.filter(Boolean) : [];
         if (ids.length === 0) {
           return res.status(400).json({ error: `User step ${s.step_order} must include user_ids.` });
@@ -1209,6 +1220,7 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
       // Backup users are admin-curated selections and bypass the department constraint.
       for (const s of normalizedSteps) {
         if (!s.enabled) continue;
+        if (s.assignee_source === 'department_reviewers') continue;
         const ids = Array.isArray(s.user_ids) ? s.user_ids.filter(Boolean) : [];
         if (!ids.length) continue;
 
@@ -1320,14 +1332,16 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
       for (const s of normalizedSteps) {
         const ins = await client.query(
           `INSERT INTO docutracker_workflow_steps
-           (document_type, workflow_version, step_order, department_id, label, enabled)
-           VALUES ($1, $2, $3, $4, $5, $6)
+           (document_type, workflow_version, step_order, department_id,
+            assignee_source, label, enabled)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            RETURNING id`,
           [
             document_type,
             nextVersion,
             s.step_order,
             s.department_id || null, // null is fine; no ::uuid cast needed for null
+            s.assignee_source,
             s.label || null,
             s.enabled !== false,
           ]
@@ -1336,6 +1350,7 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
       }
 
       for (const s of normalizedSteps) {
+        if (s.assignee_source === 'department_reviewers') continue;
         if (s.assignee_type !== 'user') continue;
         const stepId = stepIdByOrder.get(s.step_order);
         if (!stepId) continue;
@@ -1401,6 +1416,7 @@ router.get('/workflow-steps', protect, requireAdmin, async (req, res) => {
          s.workflow_version,
          s.step_order,
          s.department_id,
+         s.assignee_source,
          s.label,
          s.enabled,
          COALESCE(
@@ -1537,7 +1553,7 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
     try {
       await client.query('BEGIN');
       const stepExists = await client.query(
-        `SELECT id, department_id
+        `SELECT id, department_id, assignee_source
          FROM docutracker_workflow_steps
          WHERE id = $1::uuid
          LIMIT 1`,
@@ -1546,6 +1562,12 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
       if (!stepExists.rowCount) {
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Workflow step not found' });
+      }
+      if (stepExists.rows[0]?.assignee_source === 'department_reviewers') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'This step uses automatic department reviewers. Manage them from Department Management.',
+        });
       }
       const deptId = stepExists.rows[0]?.department_id || null;
 

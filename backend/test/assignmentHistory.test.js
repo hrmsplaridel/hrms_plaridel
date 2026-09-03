@@ -5,6 +5,7 @@ const {
   AssignmentHistoryError,
   deactivateAssignmentRecord,
   permanentlyDeleteFutureAssignment,
+  repairPrimaryPredecessorAfterFutureChange,
 } = require('../src/services/assignmentHistory');
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
@@ -29,6 +30,9 @@ test('primary assignment deactivation preserves the row and writes before/after 
       }
       if (/^\s*INSERT INTO audit_logs/i.test(sql)) {
         return { rowCount: 1, rows: [] };
+      }
+      if (/AS is_future/i.test(sql)) {
+        return { rowCount: 1, rows: [{ is_future: false }] };
       }
       throw new Error(`Unexpected SQL: ${sql}`);
     },
@@ -258,4 +262,170 @@ test('started assignment cannot be permanently deleted', async () => {
       error instanceof AssignmentHistoryError && error.statusCode === 409
   );
   assert.equal(queryIndex, 2);
+});
+
+test('moving an open-ended future transfer later extends its predecessor to the new boundary', async () => {
+  const previous = {
+    id: RECORD_ID,
+    employee_id: '33333333-3333-4333-8333-333333333333',
+    effective_from: '2026-09-01',
+    effective_to: null,
+    is_active: true,
+  };
+  const replacement = { ...previous, effective_from: '2026-10-01' };
+  const predecessor = {
+    id: '44444444-4444-4444-8444-444444444444',
+    employee_id: previous.employee_id,
+    effective_from: '2026-01-01',
+    effective_to: '2026-08-31',
+    is_active: true,
+  };
+  const calls = [];
+  const db = {
+    async query(sql, params) {
+      const text = String(sql);
+      calls.push({ text, params });
+      if (/AS is_future/i.test(text)) {
+        return { rowCount: 1, rows: [{ is_future: true }] };
+      }
+      if (/effective_to = \(\$3::date - INTERVAL/i.test(text)) {
+        return { rowCount: 1, rows: [predecessor] };
+      }
+      if (/^\s*UPDATE assignments/i.test(text)) {
+        return {
+          rowCount: 1,
+          rows: [{ ...predecessor, effective_to: '2026-09-30' }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  const result = await repairPrimaryPredecessorAfterFutureChange(db, {
+    previousRecord: previous,
+    replacementRecord: replacement,
+  });
+
+  assert.equal(result.after.effective_to, '2026-09-30');
+  const update = calls.find(({ text }) => /^\s*UPDATE assignments/i.test(text));
+  assert.equal(update.params[1], '2026-09-30');
+});
+
+test('moving a future transfer earlier does not restore the old boundary', async () => {
+  const previous = {
+    id: RECORD_ID,
+    employee_id: '33333333-3333-4333-8333-333333333333',
+    effective_from: '2026-10-01',
+    effective_to: null,
+    is_active: true,
+  };
+  const calls = [];
+  const db = {
+    async query(sql) {
+      calls.push(String(sql));
+      return { rowCount: 1, rows: [{ is_future: true }] };
+    },
+  };
+
+  const result = await repairPrimaryPredecessorAfterFutureChange(db, {
+    previousRecord: previous,
+    replacementRecord: { ...previous, effective_from: '2026-09-01' },
+  });
+
+  assert.equal(result, null);
+  assert.equal(calls.length, 1);
+});
+
+test('deactivating an open-ended future transfer reopens its predecessor', async () => {
+  const previous = {
+    id: RECORD_ID,
+    employee_id: '33333333-3333-4333-8333-333333333333',
+    effective_from: '2026-10-01',
+    effective_to: null,
+    is_active: true,
+  };
+  const predecessor = {
+    id: '44444444-4444-4444-8444-444444444444',
+    employee_id: previous.employee_id,
+    effective_from: '2026-01-01',
+    effective_to: '2026-09-30',
+    is_active: true,
+  };
+  const calls = [];
+  const db = {
+    async query(sql, params) {
+      const text = String(sql);
+      calls.push({ text, params });
+      if (/AS is_future/i.test(text)) {
+        return { rowCount: 1, rows: [{ is_future: true }] };
+      }
+      if (/effective_to = \(\$3::date - INTERVAL/i.test(text)) {
+        return { rowCount: 1, rows: [predecessor] };
+      }
+      if (/^\s*UPDATE assignments/i.test(text)) {
+        return {
+          rowCount: 1,
+          rows: [{ ...predecessor, effective_to: null }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  const result = await repairPrimaryPredecessorAfterFutureChange(db, {
+    previousRecord: previous,
+    replacementRecord: { ...previous, is_active: false },
+  });
+
+  assert.equal(result.after.effective_to, null);
+  const update = calls.find(({ text }) => /^\s*UPDATE assignments/i.test(text));
+  assert.equal(update.params[1], null);
+});
+
+test('moving a bounded future assignment restores only its original coverage', async () => {
+  const previous = {
+    id: RECORD_ID,
+    employee_id: '33333333-3333-4333-8333-333333333333',
+    effective_from: '2026-09-01',
+    effective_to: '2026-09-15',
+    is_active: true,
+  };
+  const predecessor = {
+    id: '44444444-4444-4444-8444-444444444444',
+    employee_id: previous.employee_id,
+    effective_from: '2026-01-01',
+    effective_to: '2026-08-31',
+    is_active: true,
+  };
+  let restoredTo;
+  const db = {
+    async query(sql, params) {
+      const text = String(sql);
+      if (/AS is_future/i.test(text)) {
+        return { rowCount: 1, rows: [{ is_future: true }] };
+      }
+      if (/effective_to = \(\$3::date - INTERVAL/i.test(text)) {
+        return { rowCount: 1, rows: [predecessor] };
+      }
+      if (/^\s*UPDATE assignments/i.test(text)) {
+        restoredTo = params[1];
+        return {
+          rowCount: 1,
+          rows: [{ ...predecessor, effective_to: restoredTo }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  await repairPrimaryPredecessorAfterFutureChange(db, {
+    previousRecord: previous,
+    replacementRecord: {
+      ...previous,
+      effective_from: '2026-10-01',
+      effective_to: '2026-10-15',
+    },
+  });
+
+  assert.equal(restoredTo, '2026-09-15');
 });

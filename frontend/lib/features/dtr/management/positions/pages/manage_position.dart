@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/positions/data/position_request_guard.dart';
+import 'package:hrms_plaridel/features/dtr/management/positions/widgets/position_lifecycle_button.dart';
 
 /// Position record for display/CRUD.
 class _PositionRecord {
@@ -11,7 +15,14 @@ class _PositionRecord {
     this.description,
     this.departmentId,
     this.departmentName,
+    required this.isDepartmentHead,
     required this.isActive,
+    required this.canPermanentlyDelete,
+    this.departmentHeadPeriodId,
+    this.departmentHeadEffectiveFrom,
+    this.departmentHeadEffectiveTo,
+    this.departmentHeadPeriods = const [],
+    this.deactivationBlockers = const [],
     this.positionNumber,
   });
   final String id;
@@ -19,7 +30,14 @@ class _PositionRecord {
   final String? description;
   final String? departmentId;
   final String? departmentName;
+  final bool isDepartmentHead;
   final bool isActive;
+  final bool canPermanentlyDelete;
+  final String? departmentHeadPeriodId;
+  final DateTime? departmentHeadEffectiveFrom;
+  final DateTime? departmentHeadEffectiveTo;
+  final List<Map<String, dynamic>> departmentHeadPeriods;
+  final List<Map<String, dynamic>> deactivationBlockers;
   final int? positionNumber;
 
   /// Display as POS-001, POS-002, etc., or "—" if null.
@@ -42,15 +60,24 @@ class _ManagePositionState extends State<ManagePosition> {
   final _searchController = TextEditingController();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _positionRequestGuard = PositionRequestGuard();
+  Timer? _searchDebounce;
 
   String? _departmentFilterId;
   String _statusFilter = 'Active';
   int _page = 0;
+  int _totalPositions = 0;
+  int _pageCount = 1;
   List<_PositionRecord> _positions = [];
   List<Map<String, dynamic>> _departments = [];
   bool _loading = false;
   _PositionRecord? _selectedPosition;
   String? _selectedDepartmentId;
+  bool _isDepartmentHead = false;
+  String? _departmentHeadPeriodId;
+  DateTime? _departmentHeadEffectiveFrom;
+  DateTime? _departmentHeadEffectiveTo;
+  List<Map<String, dynamic>> _departmentHeadPeriods = [];
   StateSetter? _drawerSetState;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
@@ -60,6 +87,56 @@ class _ManagePositionState extends State<ManagePosition> {
 
   Color _mutedColor(BuildContext context) =>
       AppTheme.dashTextSecondaryOf(context);
+
+  String _apiErrorMessage(DioException error, String fallback) {
+    final data = error.response?.data;
+    if (data is Map && data['error'] != null) {
+      final message = data['error'].toString().trim();
+      if (message.isNotEmpty) return message;
+    }
+    final message = error.message?.trim();
+    return message == null || message.isEmpty ? fallback : message;
+  }
+
+  DateTime? _parseDate(dynamic value) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isEmpty) return null;
+    return DateTime.tryParse(text.length >= 10 ? text.substring(0, 10) : text);
+  }
+
+  String? _apiDate(DateTime? value) {
+    if (value == null) return null;
+    return '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';
+  }
+
+  String _displayDate(DateTime? value) =>
+      _apiDate(value) ?? 'Official HRMS date';
+
+  Future<void> _pickDepartmentHeadDate({required bool isStart}) async {
+    final current = isStart
+        ? _departmentHeadEffectiveFrom
+        : _departmentHeadEffectiveTo;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current ?? _departmentHeadEffectiveFrom ?? DateTime.now(),
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null) return;
+    _updatePositionFormState(() {
+      if (isStart) {
+        _departmentHeadEffectiveFrom = picked;
+        if (_departmentHeadEffectiveTo != null &&
+            _departmentHeadEffectiveTo!.isBefore(picked)) {
+          _departmentHeadEffectiveTo = null;
+        }
+      } else {
+        _departmentHeadEffectiveTo = picked;
+      }
+    });
+  }
 
   BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
     color: _isDark(context)
@@ -95,6 +172,8 @@ class _ManagePositionState extends State<ManagePosition> {
 
   @override
   void dispose() {
+    _positionRequestGuard.invalidate();
+    _searchDebounce?.cancel();
     _searchController.dispose();
     _titleController.dispose();
     _descriptionController.dispose();
@@ -110,7 +189,11 @@ class _ManagePositionState extends State<ManagePosition> {
       final data = res.data ?? [];
       _departments = data.map((e) {
         final m = e as Map<String, dynamic>;
-        return {'id': m['id'], 'name': m['name'] as String? ?? ''};
+        return {
+          'id': m['id'],
+          'name': m['name'] as String? ?? '',
+          'is_active': m['is_active'] as bool? ?? true,
+        };
       }).toList();
     } on DioException catch (e) {
       debugPrint('Load departments failed: ${e.response?.data ?? e.message}');
@@ -122,22 +205,63 @@ class _ManagePositionState extends State<ManagePosition> {
     _updatePositionFormState(() {});
   }
 
+  bool _departmentIsActive(Map<String, dynamic> department) =>
+      department['is_active'] as bool? ?? true;
+
+  String _departmentLabel(Map<String, dynamic> department) {
+    final name = department['name'] as String? ?? '';
+    return _departmentIsActive(department) ? name : '$name (Inactive)';
+  }
+
+  List<Map<String, dynamic>> get _formDepartments {
+    final existingDepartmentId = _selectedPosition?.departmentId;
+    return _departments
+        .where(
+          (department) =>
+              _departmentIsActive(department) ||
+              department['id'] == existingDepartmentId,
+        )
+        .toList();
+  }
+
+  Map<String, dynamic> _positionQuery() => <String, dynamic>{
+    'status': _statusFilter,
+    'department_id': _departmentFilterId,
+    'page': _page + 1,
+    'limit': _rowsPerPage,
+    'search': _searchController.text.trim(),
+  };
+
   Future<void> _loadPositions() async {
-    setState(() {
-      _loading = true;
-      _page = 0;
-    });
+    if (!mounted) return;
+    final requestedQuery = _positionQuery();
+    final request = _positionRequestGuard.begin(requestedQuery);
+    setState(() => _loading = true);
     try {
-      final params = <String, String>{'status': _statusFilter};
-      if (_departmentFilterId != null) {
-        params['department_id'] = _departmentFilterId!;
+      final params = <String, String>{
+        'paginated': 'true',
+        'status': requestedQuery['status'] as String,
+        'page': (requestedQuery['page'] as int).toString(),
+        'limit': (requestedQuery['limit'] as int).toString(),
+      };
+      final requestedDepartmentId = requestedQuery['department_id'] as String?;
+      if (requestedDepartmentId != null) {
+        params['department_id'] = requestedDepartmentId;
       }
-      final res = await ApiClient.instance.get<List<dynamic>>(
+      final requestedSearch = requestedQuery['search'] as String;
+      if (requestedSearch.isNotEmpty) {
+        params['search'] = requestedSearch;
+      }
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/positions',
         queryParameters: params,
       );
-      final data = res.data ?? [];
-      _positions = (data).map((e) {
+      final response = res.data ?? const <String, dynamic>{};
+      final data = response['items'] as List<dynamic>? ?? const [];
+      final pagination =
+          response['pagination'] as Map<String, dynamic>? ??
+          const <String, dynamic>{};
+      final positions = data.map((e) {
         final m = e as Map<String, dynamic>;
         final dept = m['departments'];
         final deptName =
@@ -150,17 +274,71 @@ class _ManagePositionState extends State<ManagePosition> {
           description: m['description'] as String?,
           departmentId: m['department_id'] as String?,
           departmentName: deptName,
+          isDepartmentHead: m['is_department_head'] as bool? ?? false,
+          departmentHeadPeriodId: m['department_head_period_id'] as String?,
+          departmentHeadEffectiveFrom: _parseDate(
+            m['department_head_effective_from'],
+          ),
+          departmentHeadEffectiveTo: _parseDate(
+            m['department_head_effective_to'],
+          ),
+          departmentHeadPeriods:
+              (m['department_head_periods'] as List<dynamic>? ?? const [])
+                  .whereType<Map>()
+                  .map((period) => Map<String, dynamic>.from(period))
+                  .toList(),
+          deactivationBlockers:
+              (m['deactivation_blockers'] as List<dynamic>? ?? const [])
+                  .whereType<Map>()
+                  .map((blocker) => Map<String, dynamic>.from(blocker))
+                  .toList(),
           isActive: m['is_active'] as bool? ?? true,
+          canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
           positionNumber: posNum is int
               ? posNum
               : (posNum != null ? int.tryParse(posNum.toString()) : null),
         );
       }).toList();
+      if (!mounted ||
+          !_positionRequestGuard.accepts(request, _positionQuery())) {
+        return;
+      }
+      final total = int.tryParse('${pagination['total'] ?? 0}') ?? 0;
+      final pageCount = int.tryParse('${pagination['page_count'] ?? 1}') ?? 1;
+      final returnedPage = int.tryParse('${pagination['page'] ?? 1}') ?? 1;
+      setState(() {
+        _positions = positions;
+        _totalPositions = total;
+        _pageCount = pageCount < 1 ? 1 : pageCount;
+        _page = returnedPage < 1 ? 0 : returnedPage - 1;
+      });
     } on DioException catch (e) {
+      if (!mounted ||
+          !_positionRequestGuard.accepts(request, _positionQuery())) {
+        return;
+      }
       debugPrint('Load positions failed: ${e.response?.data ?? e.message}');
-      _positions = [];
+      setState(() {
+        _positions = [];
+        _totalPositions = 0;
+        _pageCount = 1;
+      });
+    } catch (e) {
+      if (!mounted ||
+          !_positionRequestGuard.accepts(request, _positionQuery())) {
+        return;
+      }
+      debugPrint('Load positions failed: $e');
+      setState(() {
+        _positions = [];
+        _totalPositions = 0;
+        _pageCount = 1;
+      });
+    } finally {
+      if (mounted && _positionRequestGuard.accepts(request, _positionQuery())) {
+        setState(() => _loading = false);
+      }
     }
-    if (mounted) setState(() => _loading = false);
   }
 
   void _selectPosition(_PositionRecord p) {
@@ -169,6 +347,11 @@ class _ManagePositionState extends State<ManagePosition> {
       _titleController.text = p.name;
       _descriptionController.text = p.description ?? '';
       _selectedDepartmentId = p.departmentId;
+      _isDepartmentHead = p.isDepartmentHead;
+      _departmentHeadPeriodId = p.departmentHeadPeriodId;
+      _departmentHeadEffectiveFrom = p.departmentHeadEffectiveFrom;
+      _departmentHeadEffectiveTo = p.departmentHeadEffectiveTo;
+      _departmentHeadPeriods = p.departmentHeadPeriods;
     });
   }
 
@@ -178,6 +361,11 @@ class _ManagePositionState extends State<ManagePosition> {
       _titleController.clear();
       _descriptionController.clear();
       _selectedDepartmentId = null;
+      _isDepartmentHead = false;
+      _departmentHeadPeriodId = null;
+      _departmentHeadEffectiveFrom = null;
+      _departmentHeadEffectiveTo = null;
+      _departmentHeadPeriods = [];
     });
   }
 
@@ -186,6 +374,29 @@ class _ManagePositionState extends State<ManagePosition> {
     if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a position title.')),
+      );
+      return false;
+    }
+    if (_isDepartmentHead && _selectedDepartmentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Select a department for the official Department Head position.',
+          ),
+        ),
+      );
+      return false;
+    }
+    if (_isDepartmentHead &&
+        _departmentHeadEffectiveFrom != null &&
+        _departmentHeadEffectiveTo != null &&
+        _departmentHeadEffectiveTo!.isBefore(_departmentHeadEffectiveFrom!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The Department Head end date cannot precede its start date.',
+          ),
+        ),
       );
       return false;
     }
@@ -198,6 +409,13 @@ class _ManagePositionState extends State<ManagePosition> {
               ? null
               : _descriptionController.text.trim(),
           'department_id': _selectedDepartmentId,
+          'is_department_head': _isDepartmentHead,
+          'department_head_effective_from': _isDepartmentHead
+              ? _apiDate(_departmentHeadEffectiveFrom)
+              : null,
+          'department_head_effective_to': _isDepartmentHead
+              ? _apiDate(_departmentHeadEffectiveTo)
+              : null,
           'is_active': true,
         },
       );
@@ -213,7 +431,7 @@ class _ManagePositionState extends State<ManagePosition> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to add: ${e.response?.data ?? e.message}'),
+            content: Text(_apiErrorMessage(e, 'Failed to add position')),
           ),
         );
       }
@@ -236,6 +454,29 @@ class _ManagePositionState extends State<ManagePosition> {
       );
       return false;
     }
+    if (_isDepartmentHead && _selectedDepartmentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Select a department for the official Department Head position.',
+          ),
+        ),
+      );
+      return false;
+    }
+    if (_isDepartmentHead &&
+        _departmentHeadEffectiveFrom != null &&
+        _departmentHeadEffectiveTo != null &&
+        _departmentHeadEffectiveTo!.isBefore(_departmentHeadEffectiveFrom!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The Department Head end date cannot precede its start date.',
+          ),
+        ),
+      );
+      return false;
+    }
     try {
       await ApiClient.instance.put(
         '/api/positions/${p.id}',
@@ -245,6 +486,14 @@ class _ManagePositionState extends State<ManagePosition> {
               ? null
               : _descriptionController.text.trim(),
           'department_id': _selectedDepartmentId,
+          'is_department_head': _isDepartmentHead,
+          'department_head_period_id': _departmentHeadPeriodId,
+          'department_head_effective_from': _isDepartmentHead
+              ? _apiDate(_departmentHeadEffectiveFrom)
+              : null,
+          'department_head_effective_to': _isDepartmentHead
+              ? _apiDate(_departmentHeadEffectiveTo)
+              : null,
         },
       );
       if (mounted) {
@@ -259,7 +508,7 @@ class _ManagePositionState extends State<ManagePosition> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to update: ${e.response?.data ?? e.message}'),
+            content: Text(_apiErrorMessage(e, 'Failed to update position')),
           ),
         );
       }
@@ -272,6 +521,33 @@ class _ManagePositionState extends State<ManagePosition> {
     if (p == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a position to deactivate.')),
+      );
+      return false;
+    }
+    if (p.deactivationBlockers.isNotEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Position is still in use'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: p.deactivationBlockers.map((blocker) {
+              final count = blocker['count'] ?? 0;
+              final label = blocker['label']?.toString() ?? 'active records';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text('$count $label'),
+              );
+            }).toList(),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
       );
       return false;
     }
@@ -313,8 +589,148 @@ class _ManagePositionState extends State<ManagePosition> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
+            content: Text(_apiErrorMessage(e, 'Failed to deactivate position')),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _reactivatePosition() async {
+    final p = _selectedPosition;
+    if (p == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a position to reactivate.')),
+      );
+      return false;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reactivate position?'),
+        content: Text(
+          'This will restore "${p.name}" to active position lists.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            icon: const Icon(Icons.restore_rounded, size: 18),
+            label: const Text('Reactivate'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return false;
+    try {
+      await ApiClient.instance.put(
+        '/api/positions/${p.id}',
+        data: {'is_active': true},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${p.name} has been reactivated.')),
+        );
+        _clearForm();
+        await _loadPositions();
+      }
+      return true;
+    } on DioException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_apiErrorMessage(e, 'Failed to reactivate position')),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<String?> _requestMistakenDeleteReason(_PositionRecord position) async {
+    final formKey = GlobalKey<FormState>();
+    var enteredReason = '';
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete unused position?'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This permanently removes "${position.name}". This is allowed only because the position has no assignment history.',
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                autofocus: true,
+                maxLength: 1000,
+                maxLines: 3,
+                onChanged: (value) => enteredReason = value,
+                decoration: const InputDecoration(
+                  labelText: 'Reason',
+                  hintText: 'Why should this unused position be deleted?',
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'A reason is required.'
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              if (formKey.currentState?.validate() != true) return;
+              Navigator.of(dialogContext).pop(enteredReason.trim());
+            },
+            icon: const Icon(Icons.delete_forever_rounded, size: 18),
+            label: const Text('Delete permanently'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          ),
+        ],
+      ),
+    );
+    return reason;
+  }
+
+  Future<bool> _deleteMistakenPosition() async {
+    final position = _selectedPosition;
+    if (position == null || !position.canPermanentlyDelete) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This position has assignment history and cannot be permanently deleted.',
+          ),
+        ),
+      );
+      return false;
+    }
+
+    final reason = await _requestMistakenDeleteReason(position);
+    if (reason == null || !mounted) return false;
+    try {
+      await ApiClient.instance.delete(
+        '/api/positions/${position.id}',
+        data: {'reason': reason},
+      );
+      return true;
+    } on DioException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
             content: Text(
-              'Failed to deactivate: ${e.response?.data ?? e.message}',
+              _apiErrorMessage(e, 'Failed to delete mistaken position'),
             ),
           ),
         );
@@ -325,6 +741,7 @@ class _ManagePositionState extends State<ManagePosition> {
 
   Future<void> _openPositionDrawer({_PositionRecord? position}) async {
     _drawerSetState = null;
+    var positionDeleted = false;
     if (position == null) {
       _clearForm();
     } else {
@@ -332,7 +749,7 @@ class _ManagePositionState extends State<ManagePosition> {
     }
 
     try {
-      await showGeneralDialog<void>(
+      final result = await showGeneralDialog<bool>(
         context: context,
         barrierDismissible: true,
         barrierLabel: MaterialLocalizations.of(
@@ -376,8 +793,18 @@ class _ManagePositionState extends State<ManagePosition> {
           );
         },
       );
+      positionDeleted = result ?? false;
     } finally {
       _drawerSetState = null;
+    }
+    if (positionDeleted && mounted) {
+      _clearForm();
+      await _loadPositions();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unused position deleted.')),
+        );
+      }
     }
   }
 
@@ -426,6 +853,7 @@ class _ManagePositionState extends State<ManagePosition> {
 
   Widget _buildDrawerFooter(BuildContext drawerContext) {
     final isEditing = _selectedPosition != null;
+    final position = _selectedPosition;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -439,20 +867,32 @@ class _ManagePositionState extends State<ManagePosition> {
         runSpacing: 8,
         alignment: WrapAlignment.end,
         children: [
-          TextButton(
-            onPressed: () => Navigator.of(drawerContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          if (isEditing)
-            OutlinedButton.icon(
-              onPressed: () async {
+          if (position != null)
+            PositionLifecycleButton(
+              isActive: position.isActive,
+              onDeactivate: () async {
                 final ok = await _deactivatePosition();
                 if (ok && drawerContext.mounted) {
                   Navigator.of(drawerContext).pop();
                 }
               },
-              icon: const Icon(Icons.person_off_rounded, size: 18),
-              label: const Text('Deactivate'),
+              onReactivate: () async {
+                final ok = await _reactivatePosition();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+            ),
+          if (_selectedPosition?.canPermanentlyDelete == true)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deleteMistakenPosition();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop(true);
+                }
+              },
+              icon: const Icon(Icons.delete_forever_rounded, size: 18),
+              label: const Text('Delete Unused Position'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
@@ -522,29 +962,13 @@ class _ManagePositionState extends State<ManagePosition> {
 
   Widget _buildLeftPanel() {
     final dark = _isDark(context);
-    final search = _searchController.text.toLowerCase();
-    final filtered = search.isEmpty
-        ? _positions
-        : _positions.where((p) {
-            final n = p.name.toLowerCase();
-            final desc = (p.description ?? '').toLowerCase();
-            final dept = (p.departmentName ?? '').toLowerCase();
-            return n.contains(search) ||
-                desc.contains(search) ||
-                dept.contains(search);
-          }).toList();
-    final total = filtered.length;
-    final pageCount = total == 0
-        ? 1
-        : ((total + _rowsPerPage - 1) ~/ _rowsPerPage);
-    final page = _page >= pageCount ? pageCount - 1 : _page;
+    final showStatus = _statusFilter == 'All';
+    final total = _totalPositions;
+    final pageCount = _pageCount;
+    final page = _page;
     final pageStart = page * _rowsPerPage;
-    final pageEnd = pageStart + _rowsPerPage > total
-        ? total
-        : pageStart + _rowsPerPage;
-    final paged = total == 0
-        ? <_PositionRecord>[]
-        : filtered.sublist(pageStart, pageEnd);
+    final returnedEnd = pageStart + _positions.length;
+    final pageEnd = returnedEnd > total ? total : returnedEnd;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -617,6 +1041,18 @@ class _ManagePositionState extends State<ManagePosition> {
                     ),
                   ),
                 ),
+                if (showStatus)
+                  SizedBox(
+                    width: 100,
+                    child: Text(
+                      'Status',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: _headingColor(context),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -626,7 +1062,7 @@ class _ManagePositionState extends State<ManagePosition> {
               padding: EdgeInsets.all(32),
               child: Center(child: CircularProgressIndicator()),
             )
-          else if (filtered.isEmpty)
+          else if (_positions.isEmpty)
             Container(
               constraints: const BoxConstraints(minHeight: 120),
               alignment: Alignment.center,
@@ -642,13 +1078,14 @@ class _ManagePositionState extends State<ManagePosition> {
             Column(
               children: [
                 Table(
-                  columnWidths: const {
+                  columnWidths: {
                     0: FixedColumnWidth(88),
                     1: FlexColumnWidth(),
                     2: FlexColumnWidth(),
                     3: FlexColumnWidth(2),
+                    if (showStatus) 4: const FixedColumnWidth(100),
                   },
-                  children: paged.map((p) {
+                  children: _positions.map((p) {
                     final isSelected = _selectedPosition?.id == p.id;
                     return TableRow(
                       decoration: BoxDecoration(
@@ -680,6 +1117,7 @@ class _ManagePositionState extends State<ManagePosition> {
                           onTap: () => _openPositionDrawer(position: p),
                           secondary: true,
                         ),
+                        if (showStatus) _statusTableCell(p),
                       ],
                     );
                   }).toList(),
@@ -726,14 +1164,20 @@ class _ManagePositionState extends State<ManagePosition> {
             const SizedBox(width: 12),
             OutlinedButton(
               onPressed: page > 0
-                  ? () => setState(() => _page = page - 1)
+                  ? () {
+                      setState(() => _page = page - 1);
+                      _loadPositions();
+                    }
                   : null,
               child: const Text('Previous'),
             ),
             const SizedBox(width: 8),
             OutlinedButton(
               onPressed: page < pageCount - 1
-                  ? () => setState(() => _page = page + 1)
+                  ? () {
+                      setState(() => _page = page + 1);
+                      _loadPositions();
+                    }
                   : null,
               child: const Text('Next'),
             ),
@@ -768,10 +1212,49 @@ class _ManagePositionState extends State<ManagePosition> {
     );
   }
 
+  Widget _statusTableCell(_PositionRecord position) {
+    final color = position.isActive ? Colors.green : _mutedColor(context);
+    return TableCell(
+      verticalAlignment: TableCellVerticalAlignment.middle,
+      child: InkWell(
+        onTap: () => _openPositionDrawer(position: position),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: color.withValues(alpha: 0.5)),
+              ),
+              child: Text(
+                position.isActive ? 'Active' : 'Inactive',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSearchField() {
     return TextField(
       controller: _searchController,
-      onChanged: (_) => setState(() => _page = 0),
+      onChanged: (_) {
+        _searchDebounce?.cancel();
+        setState(() => _page = 0);
+        _searchDebounce = Timer(
+          const Duration(milliseconds: 300),
+          _loadPositions,
+        );
+      },
       style: AppTheme.dashFieldTextStyle(context),
       decoration: AppTheme.dashInputDecoration(
         context,
@@ -809,7 +1292,7 @@ class _ManagePositionState extends State<ManagePosition> {
             (d) => DropdownMenuItem(
               value: d['id'] as String?,
               child: Text(
-                d['name'] as String? ?? '',
+                _departmentLabel(d),
                 style: AppTheme.dashFieldTextStyle(context),
               ),
             ),
@@ -886,7 +1369,7 @@ class _ManagePositionState extends State<ManagePosition> {
         DropdownButtonFormField<String?>(
           key: ValueKey(_selectedDepartmentId),
           initialValue:
-              _departments.any((d) => d['id'] == _selectedDepartmentId)
+              _formDepartments.any((d) => d['id'] == _selectedDepartmentId)
               ? _selectedDepartmentId
               : null,
           dropdownColor: AppTheme.dashPanelOf(context),
@@ -909,19 +1392,105 @@ class _ManagePositionState extends State<ManagePosition> {
                 style: AppTheme.dashFieldTextStyle(context),
               ),
             ),
-            ..._departments.map(
+            ..._formDepartments.map(
               (d) => DropdownMenuItem<String?>(
                 value: d['id'] as String?,
+                enabled: _departmentIsActive(d),
                 child: Text(
-                  d['name'] as String? ?? '',
+                  _departmentLabel(d),
                   style: AppTheme.dashFieldTextStyle(context),
                 ),
               ),
             ),
           ],
-          onChanged: (v) =>
-              _updatePositionFormState(() => _selectedDepartmentId = v),
+          onChanged: (v) => _updatePositionFormState(() {
+            _selectedDepartmentId = v;
+            if (v == null) _isDepartmentHead = false;
+          }),
         ),
+        const SizedBox(height: 14),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          value: _isDepartmentHead,
+          onChanged: _selectedDepartmentId == null
+              ? null
+              : (value) => _updatePositionFormState(() {
+                  _isDepartmentHead = value;
+                  if (value && _departmentHeadPeriodId == null) {
+                    _departmentHeadEffectiveFrom = null;
+                    _departmentHeadEffectiveTo = null;
+                  }
+                }),
+          title: Text(
+            'Official Department Head',
+            style: AppTheme.dashFieldTextStyle(context),
+          ),
+          subtitle: Text(
+            'The employee assigned to this position becomes the primary reviewer.',
+            style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+          ),
+        ),
+        if (_isDepartmentHead) ...[
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildDepartmentHeadDateField(
+                  label: 'Effective from',
+                  value: _departmentHeadEffectiveFrom,
+                  onTap: () => _pickDepartmentHeadDate(isStart: true),
+                  allowClear: _departmentHeadEffectiveFrom != null,
+                  onClear: () => _updatePositionFormState(
+                    () => _departmentHeadEffectiveFrom = null,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildDepartmentHeadDateField(
+                  label: 'Effective to (optional)',
+                  value: _departmentHeadEffectiveTo,
+                  onTap: () => _pickDepartmentHeadDate(isStart: false),
+                  allowClear: _departmentHeadEffectiveTo != null,
+                  onClear: () => _updatePositionFormState(
+                    () => _departmentHeadEffectiveTo = null,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+        if (_departmentHeadPeriods.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Text(
+            'Designation history',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _mutedColor(context),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _departmentHeadPeriods.map((period) {
+              final from = period['effective_from']?.toString() ?? 'Unknown';
+              final to = period['effective_to']?.toString() ?? 'Onward';
+              final active = period['is_active'] == true;
+              return Chip(
+                avatar: Icon(
+                  active
+                      ? Icons.event_available_rounded
+                      : Icons.event_busy_rounded,
+                  size: 16,
+                ),
+                label: Text('$from to $to'),
+                visualDensity: VisualDensity.compact,
+              );
+            }).toList(),
+          ),
+        ],
         const SizedBox(height: 20),
         Text(
           'Description',
@@ -979,25 +1548,12 @@ class _ManagePositionState extends State<ManagePosition> {
                   ),
                 ),
               ),
-              FilledButton.icon(
-                onPressed: _selectedPosition != null
-                    ? () => _deactivatePosition()
-                    : null,
-                icon: const Icon(Icons.person_off_rounded, size: 18),
-                label: const Text('Deactivate'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFE53935),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  elevation: 0,
+              if (_selectedPosition case final position?)
+                PositionLifecycleButton(
+                  isActive: position.isActive,
+                  onDeactivate: () => _deactivatePosition(),
+                  onReactivate: () => _reactivatePosition(),
                 ),
-              ),
             ],
           ),
         ],
@@ -1021,4 +1577,48 @@ class _ManagePositionState extends State<ManagePosition> {
     radius: 8,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
   );
+
+  Widget _buildDepartmentHeadDateField({
+    required String label,
+    required DateTime? value,
+    required VoidCallback onTap,
+    required bool allowClear,
+    required VoidCallback onClear,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _mutedColor(context),
+          ),
+        ),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: InputDecorator(
+            decoration: _inputDecoration(label).copyWith(
+              prefixIcon: const Icon(Icons.calendar_today_rounded, size: 18),
+              suffixIcon: allowClear
+                  ? IconButton(
+                      tooltip: 'Clear date',
+                      onPressed: onClear,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    )
+                  : null,
+            ),
+            child: Text(
+              _displayDate(value),
+              style: AppTheme.dashFieldTextStyle(context),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }

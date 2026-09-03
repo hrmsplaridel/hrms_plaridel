@@ -3,11 +3,47 @@ const assert = require('node:assert/strict');
 
 const {
   AssignmentTransitionError,
+  assertNoOverlappingDepartmentHeadAssignment,
   validateAssignmentSelection,
   createAssignmentTransition,
   updateAssignmentTransition,
   endEmployeeAssignmentsFromDate,
 } = require('../src/services/assignmentTransition');
+
+test('overlapping Department Head assignments are rejected for one department', async () => {
+  const calls = [];
+  const db = {
+    async query(sql) {
+      const text = String(sql);
+      calls.push(text);
+      if (text.includes('WHERE position_id = $1::uuid')) {
+        return { rows: [{ id: IDS.current }], rowCount: 1 };
+      }
+      if (text.includes('SELECT id FROM departments')) {
+        return { rows: [{ id: IDS.department }], rowCount: 1 };
+      }
+      if (text.includes('FROM position_department_head_periods selected_period')) {
+        return {
+          rows: [{ id: IDS.current, employee_id: IDS.employee }],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  await assert.rejects(
+    assertNoOverlappingDepartmentHeadAssignment(db, {
+      departmentId: IDS.department,
+      positionId: IDS.position,
+      effectiveFrom: '2026-08-01',
+      effectiveTo: null,
+    }),
+    (error) =>
+      error instanceof AssignmentTransitionError && error.statusCode === 409
+  );
+  assert.equal(calls.some((sql) => sql.includes('FOR UPDATE')), true);
+});
 
 const IDS = {
   employee: '11111111-1111-4111-8111-111111111111',
@@ -36,6 +72,8 @@ function validSelectionRow(overrides = {}) {
     employee_exists: true,
     employee_is_active: true,
     employee_status: 'active',
+    employee_date_hired: '2020-01-01',
+    employee_separation_date: null,
     department_exists: true,
     department_is_active: true,
     position_exists: true,
@@ -118,6 +156,9 @@ test('future transfer closes the current assignment on the previous day', async 
         };
       }
       if (sql.includes("COALESCE($3::date, 'infinity'::date)")) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('FROM position_department_head_periods')) {
         return { rowCount: 0, rows: [] };
       }
       if (sql.includes('INSERT INTO assignments')) {
@@ -221,6 +262,174 @@ test('updating an assignment rejects coverage that reaches a scheduled assignmen
     (error) =>
       error instanceof AssignmentTransitionError && error.statusCode === 409
   );
+});
+
+test('date edit cannot reopen assignment coverage after employee separation', async () => {
+  const calls = [];
+  const db = {
+    async query(sql) {
+      calls.push(sql);
+      if (sql.includes('WHERE id = $1::uuid') && sql.includes('FOR UPDATE')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: IDS.current,
+            employee_id: IDS.employee,
+            department_id: IDS.department,
+            position_id: IDS.position,
+            shift_id: IDS.shift,
+            effective_from: '2026-01-01',
+            effective_to: '2026-08-15',
+            is_active: true,
+            remarks: null,
+          }],
+        };
+      }
+      if (sql.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('AS employee_exists')) {
+        return {
+          rowCount: 1,
+          rows: [validSelectionRow({
+            employee_is_active: false,
+            employee_status: 'resigned',
+            employee_separation_date: '2026-08-15',
+          })],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  };
+
+  await assert.rejects(
+    updateAssignmentTransition(db, {
+      assignmentId: IDS.current,
+      changes: { effectiveTo: null },
+    }),
+    (error) =>
+      error instanceof AssignmentTransitionError &&
+      error.statusCode === 409 &&
+      error.message.includes('separation date')
+  );
+  assert.equal(calls.some((sql) => sql.startsWith('UPDATE assignments')), false);
+});
+
+test('historical date correction is allowed within employee service dates', async () => {
+  const calls = [];
+  const db = {
+    async query(sql) {
+      calls.push(sql);
+      if (sql.includes('WHERE id = $1::uuid') && sql.includes('FOR UPDATE')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: IDS.current,
+            employee_id: IDS.employee,
+            department_id: IDS.department,
+            position_id: IDS.position,
+            shift_id: IDS.shift,
+            effective_from: '2026-01-01',
+            effective_to: '2026-08-15',
+            is_active: true,
+            remarks: null,
+          }],
+        };
+      }
+      if (sql.includes('AS employee_exists')) {
+        return {
+          rowCount: 1,
+          rows: [validSelectionRow({
+            employee_is_active: false,
+            employee_status: 'resigned',
+            employee_separation_date: '2026-08-15',
+          })],
+        };
+      }
+      if (sql.includes('effective_from < $2::date')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes("COALESCE($3::date, 'infinity'::date)")) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.startsWith('UPDATE assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: IDS.current,
+            employee_id: IDS.employee,
+            effective_from: '2026-02-01',
+            effective_to: '2026-08-15',
+            is_active: true,
+          }],
+        };
+      }
+      if (sql.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  };
+
+  const updated = await updateAssignmentTransition(db, {
+    assignmentId: IDS.current,
+    changes: { effectiveFrom: '2026-02-01' },
+  });
+
+  assert.equal(updated.effective_from, '2026-02-01');
+  assert.equal(calls.some((sql) => sql.includes('AS employee_exists')), true);
+});
+
+test('remarks-only correction does not revalidate separated employee coverage', async () => {
+  const calls = [];
+  const db = {
+    async query(sql) {
+      calls.push(sql);
+      if (sql.includes('WHERE id = $1::uuid') && sql.includes('FOR UPDATE')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: IDS.current,
+            employee_id: IDS.employee,
+            department_id: IDS.department,
+            position_id: IDS.position,
+            shift_id: IDS.shift,
+            effective_from: '2026-01-01',
+            effective_to: '2026-08-15',
+            is_active: true,
+            remarks: 'Old note',
+          }],
+        };
+      }
+      if (sql.includes('effective_from < $2::date')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes("COALESCE($3::date, 'infinity'::date)")) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.startsWith('UPDATE assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: IDS.current, remarks: 'Corrected note' }],
+        };
+      }
+      if (sql.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  };
+
+  const updated = await updateAssignmentTransition(db, {
+    assignmentId: IDS.current,
+    changes: { remarks: 'Corrected note' },
+  });
+
+  assert.equal(updated.remarks, 'Corrected note');
+  assert.equal(calls.some((sql) => sql.includes('AS employee_exists')), false);
 });
 
 test('clearing setup cancels future rows and ends current coverage the previous day', async () => {

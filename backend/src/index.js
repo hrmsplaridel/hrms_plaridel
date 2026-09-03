@@ -56,6 +56,7 @@ const { isUniSmsConfigured } = require('./utils/uniSmsSms');
 
 const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
 const { validateEmployeeSchema } = require('./services/employeeSchemaValidation');
+const { validateAssignmentSchema } = require('./services/assignmentSchemaValidation');
 
 const app = express();
 app.disable('x-powered-by');
@@ -171,6 +172,8 @@ app.use('/api/contact', contactPublicRoutes);
 async function startServer() {
   await validateEmployeeSchema(pool);
   console.log('[startup] Employee database schema validated.');
+  await validateAssignmentSchema(pool);
+  console.log('[startup] Assignment database schema validated.');
 
   const server = app.listen(PORT, HOST, () => {
   console.log(`HRMS API listening on http://${HOST}:${PORT}`);

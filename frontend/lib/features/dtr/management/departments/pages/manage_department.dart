@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/departments/data/department_request_guard.dart';
+import 'package:hrms_plaridel/features/dtr/management/departments/widgets/department_lifecycle_button.dart';
 
 /// Department record for display/CRUD.
 class _DepartmentRecord {
@@ -11,16 +13,57 @@ class _DepartmentRecord {
     this.departmentNumber,
     this.description,
     required this.isActive,
+    required this.canPermanentlyDelete,
   });
   final String id;
   final String name;
   final int? departmentNumber;
   final String? description;
   final bool isActive;
+  final bool canPermanentlyDelete;
 
   String get displayDepartmentNo => departmentNumber != null
       ? 'DEPT-${departmentNumber!.toString().padLeft(3, '0')}'
       : '—';
+}
+
+class _DepartmentDeactivationBlocker {
+  const _DepartmentDeactivationBlocker({
+    required this.label,
+    required this.count,
+  });
+
+  final String label;
+  final int count;
+}
+
+class _DepartmentDeactivationPreview {
+  const _DepartmentDeactivationPreview({
+    required this.canDeactivate,
+    required this.blockers,
+  });
+
+  factory _DepartmentDeactivationPreview.fromJson(Map<String, dynamic> json) {
+    final rawBlockers = json['blockers'];
+    final blockers = rawBlockers is List
+        ? rawBlockers.whereType<Map>().map((item) {
+            final countValue = item['count'];
+            return _DepartmentDeactivationBlocker(
+              label: item['label']?.toString() ?? 'active dependencies',
+              count: countValue is num
+                  ? countValue.toInt()
+                  : int.tryParse(countValue?.toString() ?? '') ?? 0,
+            );
+          }).toList()
+        : <_DepartmentDeactivationBlocker>[];
+    return _DepartmentDeactivationPreview(
+      canDeactivate: json['can_deactivate'] == true,
+      blockers: blockers,
+    );
+  }
+
+  final bool canDeactivate;
+  final List<_DepartmentDeactivationBlocker> blockers;
 }
 
 /// Department management screen: list with search/status filter + form for Add/Update/Deactivate.
@@ -44,6 +87,13 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   bool _loading = false;
   _DepartmentRecord? _selectedDepartment;
   StateSetter? _drawerSetState;
+  bool _reviewersLoading = false;
+  bool _reviewersSaving = false;
+  String? _reviewerEffectiveDate;
+  Map<String, dynamic>? _primaryReviewer;
+  List<Map<String, dynamic>> _reviewerRoster = [];
+  List<String> _backupReviewerIds = [];
+  final _departmentRequestGuard = DepartmentRequestGuard();
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -84,6 +134,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
 
   @override
   void dispose() {
+    _departmentRequestGuard.invalidate();
     _searchController.dispose();
     _nameController.dispose();
     _descriptionController.dispose();
@@ -91,6 +142,8 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   }
 
   Future<void> _loadDepartments() async {
+    final requestedStatus = _statusFilter;
+    final request = _departmentRequestGuard.begin(requestedStatus);
     setState(() {
       _loading = true;
       _page = 0;
@@ -98,10 +151,10 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/departments',
-        queryParameters: {'status': _statusFilter},
+        queryParameters: {'status': requestedStatus},
       );
       final data = res.data ?? [];
-      _departments = (data).map((e) {
+      final departments = data.map((e) {
         final m = e as Map<String, dynamic>;
         final numVal = m['department_number'];
         return _DepartmentRecord(
@@ -112,16 +165,33 @@ class _ManageDepartmentState extends State<ManageDepartment> {
               : (numVal != null ? int.tryParse(numVal.toString()) : null),
           description: m['description'] as String?,
           isActive: m['is_active'] as bool? ?? true,
+          canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
         );
       }).toList();
+      if (!mounted ||
+          !_departmentRequestGuard.accepts(request, _statusFilter)) {
+        return;
+      }
+      setState(() => _departments = departments);
     } on DioException catch (e) {
+      if (!mounted ||
+          !_departmentRequestGuard.accepts(request, _statusFilter)) {
+        return;
+      }
       debugPrint('Load departments failed: ${e.response?.data ?? e.message}');
-      _departments = [];
+      setState(() => _departments = []);
     } catch (e) {
+      if (!mounted ||
+          !_departmentRequestGuard.accepts(request, _statusFilter)) {
+        return;
+      }
       debugPrint('Load departments failed: $e');
-      _departments = [];
+      setState(() => _departments = []);
+    } finally {
+      if (mounted && _departmentRequestGuard.accepts(request, _statusFilter)) {
+        setState(() => _loading = false);
+      }
     }
-    if (mounted) setState(() => _loading = false);
   }
 
   void _selectDepartment(_DepartmentRecord d) {
@@ -130,6 +200,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       _nameController.text = d.name;
       _descriptionController.text = d.description ?? '';
     });
+    _loadReviewerConfig(d.id);
   }
 
   void _clearForm() {
@@ -137,7 +208,107 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       _selectedDepartment = null;
       _nameController.clear();
       _descriptionController.clear();
+      _reviewerEffectiveDate = null;
+      _primaryReviewer = null;
+      _reviewerRoster = [];
+      _backupReviewerIds = [];
     });
+  }
+
+  Future<void> _loadReviewerConfig(
+    String departmentId, {
+    String? effectiveDate,
+  }) async {
+    _updateDepartmentFormState(() => _reviewersLoading = true);
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/departments/$departmentId/reviewer-config',
+        queryParameters: {
+          if (effectiveDate != null) 'effective_date': effectiveDate,
+        },
+      );
+      final data = response.data ?? const <String, dynamic>{};
+      final rawRoster = data['eligible_employees'];
+      final rawBackups = data['backups'];
+      _updateDepartmentFormState(() {
+        _reviewerEffectiveDate = data['effective_date']?.toString();
+        _primaryReviewer = data['primary'] is Map
+            ? Map<String, dynamic>.from(data['primary'] as Map)
+            : null;
+        _reviewerRoster = rawRoster is List
+            ? rawRoster
+                  .whereType<Map>()
+                  .map((item) => Map<String, dynamic>.from(item))
+                  .toList()
+            : [];
+        _backupReviewerIds = rawBackups is List
+            ? rawBackups
+                  .whereType<Map>()
+                  .map((item) => item['reviewerId']?.toString() ?? '')
+                  .where((id) => id.isNotEmpty)
+                  .toList()
+            : [];
+      });
+    } on DioException catch (error) {
+      if (mounted) {
+        final message =
+            (error.response?.data as Map?)?['error'] ?? error.message;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load reviewers: $message')),
+        );
+      }
+    } finally {
+      _updateDepartmentFormState(() => _reviewersLoading = false);
+    }
+  }
+
+  Future<void> _pickReviewerEffectiveDate() async {
+    final initial =
+        DateTime.tryParse(_reviewerEffectiveDate ?? '') ?? DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (selected == null || _selectedDepartment == null) return;
+    final value =
+        '${selected.year.toString().padLeft(4, '0')}-'
+        '${selected.month.toString().padLeft(2, '0')}-'
+        '${selected.day.toString().padLeft(2, '0')}';
+    await _loadReviewerConfig(_selectedDepartment!.id, effectiveDate: value);
+  }
+
+  Future<void> _saveReviewerBackups() async {
+    final department = _selectedDepartment;
+    final effectiveDate = _reviewerEffectiveDate;
+    if (department == null || effectiveDate == null || _reviewersSaving) return;
+    _updateDepartmentFormState(() => _reviewersSaving = true);
+    try {
+      await ApiClient.instance.put(
+        '/api/departments/${department.id}/reviewer-backups',
+        data: {
+          'effective_from': effectiveDate,
+          'employee_ids': _backupReviewerIds,
+        },
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Department reviewer backups saved.')),
+        );
+      }
+      await _loadReviewerConfig(department.id, effectiveDate: effectiveDate);
+    } on DioException catch (error) {
+      if (mounted) {
+        final message =
+            (error.response?.data as Map?)?['error'] ?? error.message;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save reviewers: $message')),
+        );
+      }
+    } finally {
+      _updateDepartmentFormState(() => _reviewersSaving = false);
+    }
   }
 
   Future<bool> _addDepartment() async {
@@ -203,6 +374,32 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       );
       return false;
     }
+    final isRename = name != d.name;
+    var renameConfirmed = false;
+    if (isRename && !d.canPermanentlyDelete) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Rename department?'),
+          content: Text(
+            'Renaming "${d.name}" will update the department label shown across its historical records.\n\nFor an organizational restructuring, deactivate this department and create a new one instead.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.edit_rounded, size: 18),
+              label: const Text('Rename anyway'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return false;
+      renameConfirmed = true;
+    }
     try {
       await ApiClient.instance.put(
         '/api/departments/${d.id}',
@@ -211,6 +408,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           'description': _descriptionController.text.trim().isEmpty
               ? null
               : _descriptionController.text.trim(),
+          if (renameConfirmed) 'confirm_historical_label_change': true,
         },
       );
       if (mounted) {
@@ -250,6 +448,80 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       );
       return false;
     }
+    late final _DepartmentDeactivationPreview preview;
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/departments/${d.id}/deactivation-preview',
+      );
+      preview = _DepartmentDeactivationPreview.fromJson(response.data ?? {});
+    } on DioException catch (e) {
+      if (mounted) {
+        final msg =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to check department dependencies';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg.toString())));
+      }
+      return false;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to check department dependencies: $e'),
+          ),
+        );
+      }
+      return false;
+    }
+    if (!mounted) return false;
+
+    if (!preview.canDeactivate) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Department is still in use'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Resolve the following items before deactivating "${d.name}":',
+              ),
+              const SizedBox(height: 16),
+              ...preview.blockers.map(
+                (blocker) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.warning_amber_rounded,
+                        size: 20,
+                        color: Colors.orange,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text('${blocker.count} ${blocker.label}'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -300,6 +572,170 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _reactivateDepartment() async {
+    final department = _selectedDepartment;
+    if (department == null || department.isActive) return false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reactivate department?'),
+        content: Text(
+          'This will restore "${department.name}" to active department lists.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.restore_rounded, size: 18),
+            label: const Text('Reactivate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+
+    try {
+      await ApiClient.instance.put(
+        '/api/departments/${department.id}',
+        data: {'is_active': true},
+      );
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${department.name} has been reactivated.')),
+      );
+      _clearForm();
+      _loadDepartments();
+      return true;
+    } on DioException catch (error) {
+      if (mounted) {
+        final message =
+            (error.response?.data as Map?)?['error'] ??
+            error.message ??
+            'Failed to reactivate department';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to reactivate: $message')),
+        );
+      }
+      return false;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to reactivate: $error')));
+      }
+      return false;
+    }
+  }
+
+  Future<String?> _requestMistakenDeleteReason(
+    _DepartmentRecord department,
+  ) async {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete mistaken department?'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This permanently removes "${department.name}". This is allowed only because the department has no dependent records.',
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 1000,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Reason',
+                  hintText: 'Why was this department created by mistake?',
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'A reason is required.'
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              if (formKey.currentState?.validate() != true) return;
+              Navigator.of(dialogContext).pop(controller.text.trim());
+            },
+            icon: const Icon(Icons.delete_forever_rounded, size: 18),
+            label: const Text('Delete permanently'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return reason;
+  }
+
+  Future<bool> _deleteMistakenDepartment() async {
+    final department = _selectedDepartment;
+    if (department == null || !department.canPermanentlyDelete) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This department is already in use and cannot be permanently deleted.',
+          ),
+        ),
+      );
+      return false;
+    }
+
+    final reason = await _requestMistakenDeleteReason(department);
+    if (reason == null || !mounted) return false;
+    try {
+      await ApiClient.instance.delete(
+        '/api/departments/${department.id}',
+        data: {'reason': reason},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mistaken department deleted.')),
+        );
+        _clearForm();
+        _loadDepartments();
+      }
+      return true;
+    } on DioException catch (e) {
+      if (mounted) {
+        final message =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to delete department';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message.toString())));
+      }
+      return false;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete department: $e')),
+        );
       }
       return false;
     }
@@ -408,6 +844,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
 
   Widget _buildDrawerFooter(BuildContext drawerContext) {
     final isEditing = _selectedDepartment != null;
+    final department = _selectedDepartment;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -416,30 +853,42 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           top: BorderSide(color: AppTheme.dashHairlineOf(context)),
         ),
       ),
-      child: Wrap(
-        spacing: 12,
-        runSpacing: 8,
-        alignment: WrapAlignment.end,
+      child: Row(
         children: [
-          TextButton(
-            onPressed: () => Navigator.of(drawerContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          if (isEditing)
-            OutlinedButton.icon(
-              onPressed: () async {
+          if (department != null)
+            DepartmentLifecycleButton(
+              isActive: department.isActive,
+              onDeactivate: () async {
                 final ok = await _deactivateDepartment();
                 if (ok && drawerContext.mounted) {
                   Navigator.of(drawerContext).pop();
                 }
               },
-              icon: const Icon(Icons.person_off_rounded, size: 18),
-              label: const Text('Deactivate'),
+              onReactivate: () async {
+                final ok = await _reactivateDepartment();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+            ),
+          if (department != null && department.canPermanentlyDelete)
+            const SizedBox(width: 12),
+          if (department != null && department.canPermanentlyDelete)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deleteMistakenDepartment();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.delete_forever_rounded, size: 18),
+              label: const Text('Delete Mistake'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
               ),
             ),
+          const Spacer(),
           FilledButton.icon(
             onPressed: () async {
               final ok = isEditing
@@ -800,6 +1249,171 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           decoration: _inputDecoration('Description'),
           maxLines: 4,
         ),
+        if (_selectedDepartment != null) ...[
+          const SizedBox(height: 28),
+          Divider(color: AppTheme.dashHairlineOf(context)),
+          const SizedBox(height: 18),
+          Text(
+            'Department Reviewers',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: _headingColor(context),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'The official Head is automatic. Selected backups can review the same requests.',
+            style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Effective date',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _mutedColor(context),
+            ),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _reviewersLoading ? null : _pickReviewerEffectiveDate,
+              icon: const Icon(Icons.calendar_month_rounded, size: 18),
+              label: Text(
+                _reviewerEffectiveDate ?? 'Select effective date',
+                overflow: TextOverflow.ellipsis,
+              ),
+              style: OutlinedButton.styleFrom(
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 14,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          if (_reviewersLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 28),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            )
+          else ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.verified_user_outlined,
+                  size: 20,
+                  color: _mutedColor(context),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Primary reviewer',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _mutedColor(context),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _primaryReviewer?['reviewerName'] ??
+                            'No official Department Head assigned',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: _headingColor(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'Backup reviewers',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _mutedColor(context),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Selection order sets the review rank.',
+              style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+            ),
+            const SizedBox(height: 8),
+            if (_reviewerRoster.where((employee) {
+              return employee['id']?.toString() !=
+                  _primaryReviewer?['reviewerId']?.toString();
+            }).isEmpty)
+              Text(
+                'No other active employees are assigned to this department on this date.',
+                style: TextStyle(fontSize: 12, color: _mutedColor(context)),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _reviewerRoster
+                    .where((employee) {
+                      return employee['id']?.toString() !=
+                          _primaryReviewer?['reviewerId']?.toString();
+                    })
+                    .map((employee) {
+                      final id = employee['id']?.toString() ?? '';
+                      final selected = _backupReviewerIds.contains(id);
+                      final rank = selected
+                          ? _backupReviewerIds.indexOf(id) + 1
+                          : null;
+                      return FilterChip(
+                        selected: selected,
+                        avatar: rank == null
+                            ? null
+                            : CircleAvatar(child: Text('$rank')),
+                        label: Text(employee['name']?.toString() ?? id),
+                        onSelected: (value) {
+                          _updateDepartmentFormState(() {
+                            if (value) {
+                              if (_backupReviewerIds.length < 5) {
+                                _backupReviewerIds.add(id);
+                              }
+                            } else {
+                              _backupReviewerIds.remove(id);
+                            }
+                          });
+                        },
+                      );
+                    })
+                    .toList(),
+              ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _reviewersSaving ? null : _saveReviewerBackups,
+                icon: _reviewersSaving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_rounded, size: 18),
+                label: const Text('Save Reviewers'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                ),
+              ),
+            ),
+          ],
+        ],
         if (showActions) ...[
           const SizedBox(height: 28),
           Wrap(

@@ -78,6 +78,7 @@ class _DtrReportsState extends State<DtrReports> {
   ).day;
   String? _selectedEmployeeId;
   String? _selectedDepartmentId;
+  String _selectedEmployeeStatus = 'Active';
   final Set<String> _selectedEmployeeIds = <String>{};
   final DtrReportRequestGuard _requestGuard = DtrReportRequestGuard();
   List<EmployeeOption> _reportEmployeeOptions = const [];
@@ -265,6 +266,7 @@ class _DtrReportsState extends State<DtrReports> {
 
   Future<List<EmployeeOption>> _fetchReportEmployees({
     required String? departmentId,
+    required String employeeStatus,
     required DateTime startDate,
     required DateTime endDate,
   }) async {
@@ -274,7 +276,7 @@ class _DtrReportsState extends State<DtrReports> {
         '${value.day.toString().padLeft(2, '0')}';
 
     final params = <String, dynamic>{
-      'status': 'All',
+      'status': employeeStatus,
       'role': 'User',
       'start_date': dateKey(startDate),
       'end_date': dateKey(endDate),
@@ -313,6 +315,7 @@ class _DtrReportsState extends State<DtrReports> {
           token,
           employeeId: _selectedEmployeeId,
           departmentId: _selectedDepartmentId,
+          employeeStatus: _selectedEmployeeStatus,
           year: _selectedYear,
           month: _selectedMonth,
         );
@@ -352,6 +355,7 @@ class _DtrReportsState extends State<DtrReports> {
     final token = _requestGuard.begin(
       employeeId: _selectedEmployeeId,
       departmentId: _selectedDepartmentId,
+      employeeStatus: _selectedEmployeeStatus,
       year: _selectedYear,
       month: _selectedMonth,
     );
@@ -371,6 +375,7 @@ class _DtrReportsState extends State<DtrReports> {
     try {
       final employeesFuture = _fetchReportEmployees(
         departmentId: token.departmentId,
+        employeeStatus: token.employeeStatus,
         startDate: monthStart,
         endDate: monthEnd,
       );
@@ -456,6 +461,7 @@ class _DtrReportsState extends State<DtrReports> {
     final token = _requestGuard.begin(
       employeeId: employeeId,
       departmentId: _selectedDepartmentId,
+      employeeStatus: _selectedEmployeeStatus,
       year: year,
       month: month,
     );
@@ -848,6 +854,7 @@ class _DtrReportsState extends State<DtrReports> {
       _rangeStartDay = 1;
       _rangeEndDay = _daysInSelectedMonth();
       _selectedDepartmentId = null;
+      _selectedEmployeeStatus = 'Active';
       _selectedEmployeeIds.clear();
       _multiSelectMode = false;
     });
@@ -2094,6 +2101,25 @@ class _DtrReportsState extends State<DtrReports> {
                 _load();
               },
             ),
+          if (!widget.selfService)
+            DropdownButton<String>(
+              value: _selectedEmployeeStatus,
+              dropdownColor: AppTheme.dashPanelOf(context),
+              style: AppTheme.dashFieldTextStyle(context),
+              items: const ['Active', 'Inactive', 'All']
+                  .map(
+                    (status) => DropdownMenuItem<String>(
+                      value: status,
+                      child: Text(status),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value == null || value == _selectedEmployeeStatus) return;
+                setState(() => _selectedEmployeeStatus = value);
+                _load();
+              },
+            ),
           DropdownButton<int>(
             value: _selectedMonth,
             dropdownColor: AppTheme.dashPanelOf(context),
@@ -2216,6 +2242,39 @@ class _DtrReportsState extends State<DtrReports> {
                 ],
                 onChanged: (v) {
                   setState(() => _selectedDepartmentId = v);
+                  _load();
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 130,
+              child: DropdownButtonFormField<String>(
+                key: ValueKey('employee-status-$_selectedEmployeeStatus'),
+                initialValue: _selectedEmployeeStatus,
+                dropdownColor: AppTheme.dashPanelOf(context),
+                style: AppTheme.dashFieldTextStyle(context),
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  radius: 8,
+                ),
+                items: const ['Active', 'Inactive', 'All']
+                    .map(
+                      (status) => DropdownMenuItem<String>(
+                        value: status,
+                        child: Text(status),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null || value == _selectedEmployeeStatus) {
+                    return;
+                  }
+                  setState(() => _selectedEmployeeStatus = value);
                   _load();
                 },
               ),

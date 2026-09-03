@@ -1,3 +1,6 @@
+const { addDays } = require('../utils/dateRangeParser');
+const { assignmentStatusContext } = require('./assignmentStatus');
+
 class AssignmentHistoryError extends Error {
   constructor(message, statusCode = 400) {
     super(message);
@@ -16,6 +19,11 @@ const ASSIGNMENT_RECORD_TYPES = Object.freeze({
     table: 'employee_other_positions',
     entityType: 'employee_other_position',
     notFoundMessage: 'Employee other position not found',
+  },
+  policy: {
+    table: 'policy_assignments',
+    entityType: 'policy_assignment',
+    notFoundMessage: 'Policy assignment not found',
   },
 });
 
@@ -71,7 +79,7 @@ async function deactivateAssignmentRecord(
 
   const before = existing.rows[0];
   if (before.is_active === false) {
-    return { changed: false, record: before };
+    return { changed: false, before, record: before };
   }
 
   const updated = await db.query(
@@ -92,7 +100,24 @@ async function deactivateAssignmentRecord(
     before,
     after,
   });
-  return { changed: true, record: after };
+  const restoredPredecessor = recordType === 'primary'
+    ? await repairPrimaryPredecessorAfterFutureChange(db, {
+        previousRecord: before,
+        replacementRecord: after,
+      })
+    : null;
+  if (restoredPredecessor) {
+    await writeAssignmentHistoryAudit(db, {
+      actorId,
+      recordType: 'primary',
+      recordId: restoredPredecessor.after.id,
+      action: 'assignment_predecessor_restored',
+      reason: normalizedReason,
+      before: restoredPredecessor.before,
+      after: restoredPredecessor.after,
+    });
+  }
+  return { changed: true, before, record: after, restoredPredecessor };
 }
 
 async function findPrimaryAssignmentDependencies(db, record) {
@@ -132,8 +157,12 @@ function dependencyMessage(dependencies) {
     : null;
 }
 
-async function restorePrimaryPredecessor(db, deletedRecord) {
-  if (deletedRecord.is_active === false) return null;
+async function restorePrimaryPredecessor(
+  db,
+  previousRecord,
+  { replacementEffectiveFrom = null } = {}
+) {
+  if (previousRecord.is_active === false) return null;
   const predecessor = await db.query(
     `SELECT *
        FROM assignments
@@ -145,20 +174,53 @@ async function restorePrimaryPredecessor(db, deletedRecord) {
       ORDER BY effective_from DESC, created_at DESC, id DESC
       LIMIT 1
       FOR UPDATE`,
-    [deletedRecord.employee_id, deletedRecord.id, deletedRecord.effective_from]
+    [previousRecord.employee_id, previousRecord.id, previousRecord.effective_from]
   );
   if (predecessor.rowCount === 0) return null;
 
   const before = predecessor.rows[0];
+  let restoredEffectiveTo = previousRecord.effective_to || null;
+  if (
+    replacementEffectiveFrom &&
+    (!restoredEffectiveTo || restoredEffectiveTo >= replacementEffectiveFrom)
+  ) {
+    restoredEffectiveTo = addDays(replacementEffectiveFrom, -1);
+  }
   const restored = await db.query(
     `UPDATE assignments
         SET effective_to = $2::date,
             updated_at = now()
       WHERE id = $1::uuid
       RETURNING *`,
-    [before.id, deletedRecord.effective_to || null]
+    [before.id, restoredEffectiveTo]
   );
   return { before, after: restored.rows[0] };
+}
+
+async function repairPrimaryPredecessorAfterFutureChange(
+  db,
+  { previousRecord, replacementRecord = null }
+) {
+  if (!previousRecord || previousRecord.is_active === false) return null;
+  const futureCheck = await db.query(
+    `SELECT $1::date > $2::date AS is_future`,
+    [previousRecord.effective_from, assignmentStatusContext('All').today]
+  );
+  if (futureCheck.rows[0]?.is_future !== true) return null;
+
+  const replacementIsActive = replacementRecord?.is_active !== false;
+  const movedLater =
+    replacementIsActive &&
+    String(replacementRecord?.effective_from || '') >
+      String(previousRecord.effective_from || '');
+  const removedFromTimeline = !replacementIsActive;
+  if (!movedLater && !removedFromTimeline) return null;
+
+  return restorePrimaryPredecessor(db, previousRecord, {
+    replacementEffectiveFrom: movedLater
+      ? replacementRecord.effective_from
+      : null,
+  });
 }
 
 async function permanentlyDeleteFutureAssignment(
@@ -177,8 +239,8 @@ async function permanentlyDeleteFutureAssignment(
 
   const record = existing.rows[0];
   const futureCheck = await db.query(
-    `SELECT $1::date > (now() AT TIME ZONE 'Asia/Manila')::date AS is_future`,
-    [record.effective_from]
+    `SELECT $1::date > $2::date AS is_future`,
+    [record.effective_from, assignmentStatusContext('All').today]
   );
   if (futureCheck.rows[0]?.is_future !== true) {
     throw new AssignmentHistoryError(
@@ -229,5 +291,6 @@ module.exports = {
   deactivateAssignmentRecord,
   normalizeChangeReason,
   permanentlyDeleteFutureAssignment,
+  repairPrimaryPredecessorAfterFutureChange,
   writeAssignmentHistoryAudit,
 };

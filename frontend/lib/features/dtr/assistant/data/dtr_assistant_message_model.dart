@@ -11,6 +11,7 @@ class DtrAssistantMessage {
     this.model,
     this.modelProfile,
     this.promptPreview,
+    this.feedbackToken,
     this.suggestions = const <DtrAssistantSuggestion>[],
     this.attachments = const <DtrAssistantAttachment>[],
     this.actions = const <DtrAssistantAction>[],
@@ -27,6 +28,7 @@ class DtrAssistantMessage {
   final String? model;
   final String? modelProfile;
   final String? promptPreview;
+  final String? feedbackToken;
   final List<DtrAssistantSuggestion> suggestions;
   final List<DtrAssistantAttachment> attachments;
   final List<DtrAssistantAction> actions;
@@ -34,6 +36,30 @@ class DtrAssistantMessage {
   bool get isUser => role == 'user';
 
   Map<String, dynamic> toJson() {
+    final safeActions = actions
+        .where((item) => item.isSafeForSession)
+        .map((item) => item.toSessionJson())
+        .toList(growable: true);
+    final expiredAttachments = attachments
+        .where((item) => item.filename.isNotEmpty)
+        .map((item) => item.toExpiredSessionJson())
+        .toList(growable: false);
+
+    if (expiredAttachments.isNotEmpty &&
+        !safeActions.any((item) => item['id'] == 'regenerate_dtr_export')) {
+      safeActions.insert(
+        0,
+        DtrAssistantAction(
+          id: 'regenerate_dtr_export',
+          label: 'Regenerate DTR export',
+          type: 'send_prompt',
+          icon: 'file_download',
+          intent: 'dtr_export_guidance',
+          prompt: _regenerateExportPrompt(attachments.first.filename),
+        ).toSessionJson(),
+      );
+    }
+
     return {
       if (id != null) 'id': id,
       'role': role,
@@ -46,6 +72,11 @@ class DtrAssistantMessage {
       if (model != null) 'model': model,
       if (modelProfile != null) 'modelProfile': modelProfile,
       if (promptPreview != null) 'promptPreview': promptPreview,
+      if (feedbackToken != null) 'feedbackToken': feedbackToken,
+      if (suggestions.isNotEmpty)
+        'suggestions': suggestions.map((item) => item.toJson()).toList(),
+      if (expiredAttachments.isNotEmpty) 'attachments': expiredAttachments,
+      if (safeActions.isNotEmpty) 'actions': safeActions,
     };
   }
 
@@ -79,6 +110,7 @@ class DtrAssistantMessage {
       model: json['model']?.toString(),
       modelProfile: json['modelProfile']?.toString(),
       promptPreview: json['promptPreview']?.toString(),
+      feedbackToken: json['feedbackToken']?.toString(),
       suggestions: rawSuggestions is List
           ? rawSuggestions
                 .whereType<Map>()
@@ -101,7 +133,8 @@ class DtrAssistantMessage {
                 .where(
                   (item) =>
                       item.filename.isNotEmpty &&
-                      (item.contentBase64.isNotEmpty ||
+                      (item.isExpired ||
+                          item.contentBase64.isNotEmpty ||
                           item.downloadUrl.isNotEmpty),
                 )
                 .toList(growable: false)
@@ -148,6 +181,30 @@ class DtrAssistantAction {
   final Map<String, dynamic> payload;
   final bool autoExecute;
 
+  bool get isSafeForSession => const <String>{
+    'send_prompt',
+    'open_leave_form',
+    'open_leave_page',
+    'open_locator_form',
+    'open_locator_page',
+    'open_dtr_time_logs',
+    'open_dtr_reports',
+  }.contains(type);
+
+  Map<String, dynamic> toSessionJson() {
+    return {
+      'id': id,
+      'label': label,
+      'type': type,
+      if (icon != null) 'icon': icon,
+      if (intent != null) 'intent': intent,
+      if (prompt != null) 'prompt': prompt,
+      if (payload.isNotEmpty) 'payload': payload,
+      // Restoring history must never trigger navigation automatically.
+      'autoExecute': false,
+    };
+  }
+
   factory DtrAssistantAction.fromJson(Map<String, dynamic> json) {
     final rawPayload = json['payload'];
     return DtrAssistantAction(
@@ -175,6 +232,7 @@ class DtrAssistantAttachment {
     this.kind,
     this.expiresAt,
     this.encoding = 'base64',
+    this.expired = false,
   });
 
   final String? id;
@@ -185,6 +243,21 @@ class DtrAssistantAttachment {
   final String downloadUrl;
   final String? kind;
   final DateTime? expiresAt;
+  final bool expired;
+
+  bool get isExpired =>
+      expired ||
+      (expiresAt != null && !expiresAt!.isAfter(DateTime.now().toUtc()));
+
+  Map<String, dynamic> toExpiredSessionJson() {
+    return {
+      'filename': filename,
+      'mimeType': mimeType,
+      if (kind != null) 'kind': kind,
+      if (expiresAt != null) 'expiresAt': expiresAt!.toUtc().toIso8601String(),
+      'expired': true,
+    };
+  }
 
   factory DtrAssistantAttachment.fromJson(Map<String, dynamic> json) {
     return DtrAssistantAttachment(
@@ -196,6 +269,7 @@ class DtrAssistantAttachment {
       downloadUrl: json['downloadUrl']?.toString() ?? '',
       kind: json['kind']?.toString(),
       expiresAt: DateTime.tryParse(json['expiresAt']?.toString() ?? ''),
+      expired: json['expired'] == true,
     );
   }
 }
@@ -206,12 +280,29 @@ class DtrAssistantSuggestion {
   final String text;
   final String? intent;
 
+  Map<String, dynamic> toJson() {
+    return {'text': text, if (intent != null) 'intent': intent};
+  }
+
   factory DtrAssistantSuggestion.fromJson(Map<String, dynamic> json) {
     return DtrAssistantSuggestion(
       text: json['text']?.toString() ?? '',
       intent: json['intent']?.toString(),
     );
   }
+}
+
+String _regenerateExportPrompt(String filename) {
+  final match = RegExp(
+    r'dtr_export_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.',
+  ).firstMatch(filename);
+  if (match == null) return 'Generate my DTR export again.';
+  final startDate = match.group(1);
+  final endDate = match.group(2);
+  if (startDate == endDate) {
+    return 'Generate my DTR export for $startDate.';
+  }
+  return 'Generate my DTR export from $startDate to $endDate.';
 }
 
 class DtrAssistantModelProfile {
@@ -225,6 +316,10 @@ class DtrAssistantModelProfile {
     this.available = true,
     this.recommended = false,
     this.unavailableReason,
+    this.external = false,
+    this.requiresConsent = false,
+    this.consentVersion,
+    this.dataDisclosure,
   });
 
   final String id;
@@ -236,6 +331,10 @@ class DtrAssistantModelProfile {
   final bool available;
   final bool recommended;
   final String? unavailableReason;
+  final bool external;
+  final bool requiresConsent;
+  final String? consentVersion;
+  final String? dataDisclosure;
 
   factory DtrAssistantModelProfile.fromJson(Map<String, dynamic> json) {
     return DtrAssistantModelProfile(
@@ -248,6 +347,10 @@ class DtrAssistantModelProfile {
       available: json['available'] != false,
       recommended: json['recommended'] == true,
       unavailableReason: json['unavailableReason']?.toString(),
+      external: json['external'] == true,
+      requiresConsent: json['requiresConsent'] == true,
+      consentVersion: json['consentVersion']?.toString(),
+      dataDisclosure: json['dataDisclosure']?.toString(),
     );
   }
 }

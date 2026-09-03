@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/assignments/data/assignment_request_guard.dart';
 
 part '../models/assignment_models.dart';
 part '../widgets/assignment_drawers.dart';
@@ -24,6 +25,12 @@ String _userFacingApiError(Object e) {
     return 'Request failed';
   }
   return e.toString();
+}
+
+DateTime? _assignmentDateFromApi(dynamic value) {
+  final text = value?.toString().trim() ?? '';
+  if (text.isEmpty) return null;
+  return DateTime.tryParse(text);
 }
 
 /// Assignment management screen: employee list + assignment CRUD.
@@ -48,9 +55,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   final _searchController = TextEditingController();
   String _employeeStatusFilter = 'All';
   String? _employeeDepartmentFilterId;
-  String _assignmentStatusFilter = 'Active';
+  String _assignmentStatusFilter = 'Current';
   String? _selectedEmployeeId;
   String? _selectedEmployeeName;
+  DateTime? _officialHrmsDate;
+  DateTime? _assignmentPickerFirstDate;
+  DateTime? _assignmentPickerLastDate;
   List<_EmployeeSummary> _employees = [];
   bool _loadingEmployees = false;
   int _pageIndex = 0;
@@ -58,9 +68,16 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   int _totalEmployeeCount = 0;
   String _searchQuery = '';
   Timer? _searchDebounceTimer;
+  final _employeeListRequestGuard = AssignmentRequestGuard();
+  final _lookupRequestGuard = AssignmentRequestGuard();
+  final _assignmentRequestGuard = AssignmentRequestGuard();
+  final _designationRequestGuard = AssignmentRequestGuard();
+  final _prefillRequestGuard = AssignmentRequestGuard();
 
   List<_AssignmentRecord> _assignments = [];
   bool _loadingAssignments = false;
+  List<_PolicyAssignmentRecord> _policyAssignments = [];
+  bool _loadingPolicyAssignments = false;
   List<_DesignationRecord> _designations = [];
   bool _loadingDesignations = false;
 
@@ -79,6 +96,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   final _remarksController = TextEditingController();
   _AssignmentRecord? _selectedAssignment;
   StateSetter? _drawerSetState;
+  String? _policyPeriodPolicyId;
+  DateTime? _policyPeriodEffectiveFrom;
+  DateTime? _policyPeriodEffectiveTo;
+  _PolicyAssignmentRecord? _selectedPolicyPeriod;
+  StateSetter? _policyDrawerSetState;
   String? _designationDeptId;
   String? _designationPositionId;
   DateTime? _designationEffectiveFrom;
@@ -121,6 +143,17 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
   }
 
+  void _updatePolicyFormState(VoidCallback update) {
+    if (mounted) setState(update);
+    final drawerSetState = _policyDrawerSetState;
+    if (!mounted || drawerSetState == null) return;
+    try {
+      drawerSetState(() {});
+    } catch (_) {
+      _policyDrawerSetState = null;
+    }
+  }
+
   void _updateDesignationFormState(VoidCallback update) {
     if (mounted) setState(update);
     final drawerSetState = _designationDrawerSetState;
@@ -148,6 +181,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   @override
   void dispose() {
     _searchDebounceTimer?.cancel();
+    _employeeListRequestGuard.invalidate();
+    _lookupRequestGuard.invalidate();
+    _assignmentRequestGuard.invalidate();
+    _designationRequestGuard.invalidate();
+    _prefillRequestGuard.invalidate();
     _searchController.dispose();
     _remarksController.dispose();
     _designationRemarksController.dispose();
@@ -177,18 +215,39 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     return query;
   }
 
+  Map<String, dynamic> _employeeListPageQuery() => <String, dynamic>{
+    ..._employeeListQueryBase(),
+    'limit': _pageSize,
+    'offset': _pageIndex * _pageSize,
+  };
+
+  Map<String, dynamic> _assignmentQueryContext() => <String, dynamic>{
+    'employee_id': _selectedEmployeeId,
+    'status': _assignmentStatusFilter,
+  };
+
+  Map<String, dynamic> _designationQueryContext() => <String, dynamic>{
+    'employee_id': _selectedEmployeeId,
+    'status': _assignmentStatusFilter,
+  };
+
   Future<void> _loadEmployees({bool clampPage = true}) async {
+    if (!mounted) return;
+    final query = Map<String, dynamic>.unmodifiable(_employeeListPageQuery());
+    final request = _employeeListRequestGuard.begin(query);
     setState(() => _loadingEmployees = true);
     try {
-      final query = <String, dynamic>{
-        ..._employeeListQueryBase(),
-        'limit': _pageSize,
-        'offset': _pageIndex * _pageSize,
-      };
       final res = await ApiClient.instance.get<dynamic>(
         '/api/employees',
         queryParameters: query,
       );
+      if (!mounted ||
+          !_employeeListRequestGuard.accepts(
+            request,
+            _employeeListPageQuery(),
+          )) {
+        return;
+      }
       final data = res.data;
       List<_EmployeeSummary> next;
       int total;
@@ -233,41 +292,45 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       }
 
       if (clampPage && pageIdx != _pageIndex) {
-        if (mounted) {
-          setState(() {
-            _pageIndex = pageIdx;
-            _loadingEmployees = false;
-          });
-          await _loadEmployees(clampPage: false);
-          return;
-        }
+        setState(() {
+          _pageIndex = pageIdx;
+          _loadingEmployees = false;
+        });
+        await _loadEmployees(clampPage: false);
+        return;
       }
 
-      if (mounted) {
-        setState(() {
-          _employees = next;
-          _totalEmployeeCount = total;
-          _loadingEmployees = false;
-          final selectedId = _selectedEmployeeId;
-          if (selectedId != null) {
-            final match = next.where((e) => e.id == selectedId);
-            if (match.isNotEmpty) {
-              _selectedEmployeeName = match.first.fullName;
-            }
+      setState(() {
+        _employees = next;
+        _totalEmployeeCount = total;
+        _loadingEmployees = false;
+        final selectedId = _selectedEmployeeId;
+        if (selectedId != null) {
+          final match = next.where((e) => e.id == selectedId);
+          if (match.isNotEmpty) {
+            _selectedEmployeeName = match.first.fullName;
           }
-        });
-      }
+        }
+      });
     } catch (e) {
       debugPrint('Load employees failed: $e');
-      if (mounted) {
-        setState(() {
-          _employees = [];
-          _totalEmployeeCount = 0;
-          _loadingEmployees = false;
-        });
+      if (!mounted ||
+          !_employeeListRequestGuard.accepts(
+            request,
+            _employeeListPageQuery(),
+          )) {
+        return;
       }
+      setState(() {
+        _employees = [];
+        _totalEmployeeCount = 0;
+        _loadingEmployees = false;
+      });
     }
-    if (!_initialPrefillApplied && widget.initialEmployeeId != null) {
+    if (mounted &&
+        _employeeListRequestGuard.accepts(request, _employeeListPageQuery()) &&
+        !_initialPrefillApplied &&
+        widget.initialEmployeeId != null) {
       _initialPrefillApplied = true;
       await _applyInitialEmployeePrefill();
     }
@@ -325,26 +388,35 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     if (_employees.any((e) => e.id == id)) {
       if (!mounted) return;
       final employee = _employees.firstWhere((e) => e.id == id);
-      setState(() {
-        _selectedEmployeeId = id;
-        _selectedEmployeeName = employee.fullName;
-      });
-      await Future.wait([_loadAssignments(), _loadDesignations()]);
+      await _selectEmployee(employee, invalidatePrefill: false);
       widget.onInitialEmployeeConsumed?.call();
       return;
     }
 
+    final context = <String, dynamic>{'employee_id': id};
+    final request = _prefillRequestGuard.begin(context);
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/employees/$id',
       );
       final data = res.data;
-      if (data != null && mounted) {
-        setState(() {
-          _selectedEmployeeId = id;
-          _selectedEmployeeName = data['full_name'] as String? ?? 'Unknown';
-        });
-        await Future.wait([_loadAssignments(), _loadDesignations()]);
+      if (data != null &&
+          mounted &&
+          _selectedEmployeeId == null &&
+          _prefillRequestGuard.accepts(request, context)) {
+        final employeeNumber = data['employee_number'];
+        await _selectEmployee(
+          _EmployeeSummary(
+            id: id,
+            fullName: data['full_name'] as String? ?? 'Unknown',
+            employeeNumber: employeeNumber is int
+                ? employeeNumber
+                : (employeeNumber != null
+                      ? int.tryParse(employeeNumber.toString())
+                      : null),
+          ),
+          invalidatePrefill: false,
+        );
       }
     } catch (e) {
       debugPrint('Initial employee prefill failed: $e');
@@ -353,6 +425,9 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   Future<void> _loadLookups() async {
+    if (!mounted) return;
+    const context = <String, dynamic>{'status': 'Active'};
+    final request = _lookupRequestGuard.begin(context);
     setState(() => _loadingLookups = true);
     try {
       final deptRes = await ApiClient.instance.get<List<dynamic>>(
@@ -372,17 +447,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         queryParameters: {'status': 'Active'},
       );
 
-      _departments = (deptRes.data ?? []).map((e) {
+      if (!mounted || !_lookupRequestGuard.accepts(request, context)) return;
+
+      final departments = (deptRes.data ?? []).map((e) {
         final m = e as Map<String, dynamic>;
         return {'id': m['id'], 'name': m['name'] as String? ?? ''};
       }).toList();
-      if (_employeeDepartmentFilterId != null &&
-          !_departments.any(
-            (d) => d['id']?.toString() == _employeeDepartmentFilterId,
-          )) {
-        _employeeDepartmentFilterId = null;
-      }
-      _positions = (posRes.data ?? []).map((e) {
+      final positions = (posRes.data ?? []).map((e) {
         final m = e as Map<String, dynamic>;
         return {
           'id': m['id'],
@@ -390,68 +461,151 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           'department_id': m['department_id'],
         };
       }).toList();
-      _shifts = (shiftRes.data ?? []).map((e) {
+      final shifts = (shiftRes.data ?? []).map((e) {
         final m = e as Map<String, dynamic>;
         return {'id': m['id'], 'name': m['name'] as String? ?? ''};
       }).toList();
-      _attendancePolicies = (policyRes.data ?? []).map((e) {
+      final attendancePolicies = (policyRes.data ?? []).map((e) {
         final m = e as Map<String, dynamic>;
         final name =
             (m['policy_name'] as String?) ?? (m['name'] as String?) ?? '';
         return {'id': m['id'], 'name': name};
       }).toList();
-      if (!_positionBelongsToDepartment(_selectedPositionId, _selectedDeptId)) {
-        _selectedPositionId = null;
-      }
+      _updateAssignmentFormState(() {
+        _departments = departments;
+        _positions = positions;
+        _shifts = shifts;
+        _attendancePolicies = attendancePolicies;
+        if (_employeeDepartmentFilterId != null &&
+            !_departments.any(
+              (d) => d['id']?.toString() == _employeeDepartmentFilterId,
+            )) {
+          _employeeDepartmentFilterId = null;
+        }
+        if (!_positionBelongsToDepartment(
+          _selectedPositionId,
+          _selectedDeptId,
+        )) {
+          _selectedPositionId = null;
+        }
+        _loadingLookups = false;
+      });
     } catch (e) {
       debugPrint('Load lookups failed: $e');
-      _departments = [];
-      _positions = [];
-      _shifts = [];
-      _attendancePolicies = [];
+      if (!mounted || !_lookupRequestGuard.accepts(request, context)) return;
+      _updateAssignmentFormState(() {
+        _departments = [];
+        _positions = [];
+        _shifts = [];
+        _attendancePolicies = [];
+        _loadingLookups = false;
+      });
     }
-    _updateAssignmentFormState(() => _loadingLookups = false);
   }
 
   Future<void> _loadAssignments() async {
-    if (_selectedEmployeeId == null) {
-      _assignments = [];
-      _updateAssignmentFormState(() {});
+    final employeeId = _selectedEmployeeId;
+    if (employeeId == null) {
+      _assignmentRequestGuard.invalidate();
+      _updateAssignmentFormState(() {
+        _assignments = [];
+        _policyAssignments = [];
+        _loadingAssignments = false;
+        _loadingPolicyAssignments = false;
+      });
       return;
     }
-    setState(() => _loadingAssignments = true);
+    final context = Map<String, dynamic>.unmodifiable(
+      _assignmentQueryContext(),
+    );
+    final request = _assignmentRequestGuard.begin(context);
+    _updateAssignmentFormState(() {
+      _loadingAssignments = true;
+      _loadingPolicyAssignments = true;
+    });
     try {
+      final contextRes = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/assignments/context',
+        queryParameters: {'employee_id': employeeId},
+      );
+      if (!mounted ||
+          !_assignmentRequestGuard.accepts(
+            request,
+            _assignmentQueryContext(),
+          )) {
+        return;
+      }
+      final assignmentContext = contextRes.data ?? const <String, dynamic>{};
+      final officialDate = _assignmentDateFromApi(
+        assignmentContext['official_date'],
+      );
+      final pickerFirstDate = _assignmentDateFromApi(
+        assignmentContext['first_date'],
+      );
+      final pickerLastDate = _assignmentDateFromApi(
+        assignmentContext['last_date'],
+      );
+      if (officialDate == null ||
+          pickerFirstDate == null ||
+          pickerLastDate == null) {
+        throw const FormatException('Invalid assignment date context');
+      }
+
       final policyRes = await ApiClient.instance.get<List<dynamic>>(
         '/api/policy-assignments',
         queryParameters: {
-          'employee_id': _selectedEmployeeId!,
-          'status': 'Active',
+          'employee_id': employeeId,
+          'status': context['status'],
         },
       );
+      if (!mounted ||
+          !_assignmentRequestGuard.accepts(
+            request,
+            _assignmentQueryContext(),
+          )) {
+        return;
+      }
       final policyRows = (policyRes.data ?? [])
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
+      final policyAssignments = policyRows.map((m) {
+        final fromDate = m['effective_from'];
+        final toDate = m['effective_to'];
+        return _PolicyAssignmentRecord(
+          id: m['id'].toString(),
+          policyId: m['attendance_policy_id'].toString(),
+          policyName: m['policy_name']?.toString() ?? 'Attendance policy',
+          effectiveFrom: DateTime.parse(fromDate.toString()),
+          effectiveTo: toDate != null && toDate.toString().isNotEmpty
+              ? DateTime.tryParse(toDate.toString())
+              : null,
+          isActive: m['is_active'] as bool? ?? true,
+          computedStatus: m['computed_status']?.toString() ?? 'Current',
+        );
+      }).toList();
 
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/assignments',
         queryParameters: {
-          'employee_id': _selectedEmployeeId!,
-          'status': _assignmentStatusFilter,
+          'employee_id': employeeId,
+          'status': context['status'],
         },
       );
+      if (!mounted ||
+          !_assignmentRequestGuard.accepts(
+            request,
+            _assignmentQueryContext(),
+          )) {
+        return;
+      }
       final data = res.data ?? [];
-      _assignments = data.map((e) {
+      final assignments = data.map((e) {
         final m = e as Map<String, dynamic>;
         final st = m['start_time'] ?? m['override_start_time'];
         final et = m['end_time'] ?? m['override_end_time'];
         final fromDate = m['effective_from'] ?? m['date_assigned'];
         final toDate = m['effective_to'];
-        final resolvedPolicy = _resolvePolicyForAssignmentRange(
-          policyRows,
-          fromDate?.toString(),
-          toDate?.toString(),
-        );
         return _AssignmentRecord(
           id: m['id'] as String,
           departmentId: m['department_id'] as String?,
@@ -468,44 +622,79 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           effectiveTo: toDate != null && toDate.toString().isNotEmpty
               ? DateTime.tryParse(toDate.toString())
               : null,
-          policyId: resolvedPolicy?['attendance_policy_id']?.toString(),
-          policyName: resolvedPolicy?['policy_name']?.toString(),
           isActive: m['is_active'] as bool? ?? true,
+          computedStatus: m['computed_status']?.toString() ?? 'Current',
+          canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
           remarks: m['remarks'] as String?,
         );
       }).toList();
+      _updateAssignmentFormState(() {
+        _assignments = assignments;
+        _policyAssignments = policyAssignments;
+        _loadingAssignments = false;
+        _loadingPolicyAssignments = false;
+        _selectedAssignment = null;
+        _officialHrmsDate = officialDate;
+        _assignmentPickerFirstDate = pickerFirstDate;
+        _assignmentPickerLastDate = pickerLastDate;
+      });
     } catch (e) {
       debugPrint('Load assignments failed: $e');
-      _assignments = [];
-    }
-    if (mounted) {
+      if (!mounted ||
+          !_assignmentRequestGuard.accepts(
+            request,
+            _assignmentQueryContext(),
+          )) {
+        return;
+      }
       _updateAssignmentFormState(() {
+        _assignments = [];
+        _policyAssignments = [];
         _loadingAssignments = false;
+        _loadingPolicyAssignments = false;
         _selectedAssignment = null;
       });
     }
   }
 
   Future<void> _loadDesignations() async {
-    if (_selectedEmployeeId == null) {
-      _designations = [];
-      _updateDesignationFormState(() {});
+    final employeeId = _selectedEmployeeId;
+    if (employeeId == null) {
+      _designationRequestGuard.invalidate();
+      _updateDesignationFormState(() {
+        _designations = [];
+        _loadingDesignations = false;
+      });
       return;
     }
-    setState(() => _loadingDesignations = true);
+    final context = Map<String, dynamic>.unmodifiable(
+      _designationQueryContext(),
+    );
+    final request = _designationRequestGuard.begin(context);
+    _updateDesignationFormState(() => _loadingDesignations = true);
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employee-other-positions',
-        queryParameters: {'employee_id': _selectedEmployeeId!, 'status': 'All'},
+        queryParameters: {
+          'employee_id': employeeId,
+          'status': context['status'],
+        },
       );
+      if (!mounted ||
+          !_designationRequestGuard.accepts(
+            request,
+            _designationQueryContext(),
+          )) {
+        return;
+      }
       final data = res.data ?? [];
-      _designations = data.map((e) {
+      final designations = data.map((e) {
         final m = e as Map<String, dynamic>;
         final fromDate = m['effective_from'];
         final toDate = m['effective_to'];
         return _DesignationRecord(
           id: m['id'] as String,
-          employeeId: m['employee_id'] as String? ?? _selectedEmployeeId!,
+          employeeId: m['employee_id'] as String? ?? employeeId,
           departmentId: m['department_id'] as String?,
           positionId: m['position_id'] as String?,
           effectiveFrom: fromDate != null
@@ -515,49 +704,33 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               ? DateTime.tryParse(toDate.toString())
               : null,
           isActive: m['is_active'] as bool? ?? true,
+          computedStatus: m['computed_status']?.toString() ?? 'Current',
+          canPermanentlyDelete: m['can_permanently_delete'] as bool? ?? false,
           remarks: m['remarks'] as String?,
           departmentName: m['department_name'] as String?,
           positionName: m['position_name'] as String?,
         );
       }).toList();
+      _updateDesignationFormState(() {
+        _designations = designations;
+        _loadingDesignations = false;
+        _selectedDesignation = null;
+      });
     } catch (e) {
       debugPrint('Load designations failed: $e');
-      _designations = [];
-    }
-    if (mounted) {
+      if (!mounted ||
+          !_designationRequestGuard.accepts(
+            request,
+            _designationQueryContext(),
+          )) {
+        return;
+      }
       _updateDesignationFormState(() {
+        _designations = [];
         _loadingDesignations = false;
         _selectedDesignation = null;
       });
     }
-  }
-
-  Map<String, dynamic>? _resolvePolicyForAssignmentRange(
-    List<Map<String, dynamic>> policies,
-    String? assignmentFromRaw,
-    String? assignmentToRaw,
-  ) {
-    if (assignmentFromRaw == null) return null;
-    final assignmentFrom = DateTime.tryParse(assignmentFromRaw.toString());
-    if (assignmentFrom == null) return null;
-    final assignmentTo =
-        assignmentToRaw != null && assignmentToRaw.toString().trim().isNotEmpty
-        ? DateTime.tryParse(assignmentToRaw.toString())
-        : null;
-
-    for (final p in policies) {
-      final pFrom = DateTime.tryParse((p['effective_from'] ?? '').toString());
-      if (pFrom == null) continue;
-      final pToRaw = p['effective_to'];
-      final pTo = pToRaw != null && pToRaw.toString().trim().isNotEmpty
-          ? DateTime.tryParse(pToRaw.toString())
-          : null;
-      final overlap =
-          !pFrom.isAfter(assignmentTo ?? DateTime(9999, 12, 31)) &&
-          !(pTo ?? DateTime(9999, 12, 31)).isBefore(assignmentFrom);
-      if (overlap) return p;
-    }
-    return null;
   }
 
   TimeOfDay? _parseTime(dynamic v) {
@@ -592,6 +765,16 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     return to == null ? from : '$from → ${_dateStr(to)}';
   }
 
+  String _policyEffectivePeriodStr(_PolicyAssignmentRecord policy) {
+    final from = _dateStr(policy.effectiveFrom);
+    final to = policy.effectiveTo;
+    return to == null ? '$from onward' : '$from → ${_dateStr(to)}';
+  }
+
+  String _policyPeriodStatus(_PolicyAssignmentRecord policy) {
+    return policy.computedStatus;
+  }
+
   String _designationTitle(_DesignationRecord designation) {
     final position = designation.positionName?.trim();
     if (position != null && position.isNotEmpty) return position;
@@ -599,24 +782,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   String _designationStatus(_DesignationRecord designation) {
-    if (!designation.isActive) return 'Inactive';
-    final today = DateTime.now();
-    final currentDay = DateTime(today.year, today.month, today.day);
-    final from = DateTime(
-      designation.effectiveFrom.year,
-      designation.effectiveFrom.month,
-      designation.effectiveFrom.day,
-    );
-    final to = designation.effectiveTo == null
-        ? null
-        : DateTime(
-            designation.effectiveTo!.year,
-            designation.effectiveTo!.month,
-            designation.effectiveTo!.day,
-          );
-    if (from.isAfter(currentDay)) return 'Upcoming';
-    if (to != null && to.isBefore(currentDay)) return 'Expired';
-    return 'Active';
+    return designation.computedStatus;
   }
 
   List<Map<String, dynamic>> get _positionsForSelectedDepartment {
@@ -675,17 +841,64 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     });
   }
 
+  Future<void> _selectEmployee(
+    _EmployeeSummary employee, {
+    bool invalidatePrefill = true,
+  }) async {
+    if (!mounted) return;
+    if (invalidatePrefill) _prefillRequestGuard.invalidate();
+    _assignmentRequestGuard.invalidate();
+    _designationRequestGuard.invalidate();
+    _updateAssignmentFormState(() {
+      _selectedEmployeeId = employee.id;
+      _selectedEmployeeName = employee.fullName;
+      _officialHrmsDate = null;
+      _assignmentPickerFirstDate = null;
+      _assignmentPickerLastDate = null;
+      _selectedAssignment = null;
+      _selectedDeptId = null;
+      _selectedPositionId = null;
+      _selectedShiftId = null;
+      _selectedPolicyId = null;
+      _effectiveFrom = null;
+      _effectiveTo = null;
+      _selectedDesignation = null;
+      _designationDeptId = null;
+      _designationPositionId = null;
+      _designationEffectiveFrom = null;
+      _designationEffectiveTo = null;
+      _designationIsActive = true;
+      _remarksController.clear();
+      _designationRemarksController.clear();
+    });
+    await Future.wait([_loadAssignments(), _loadDesignations()]);
+  }
+
   void _clearEmployeeSelection() {
+    _prefillRequestGuard.invalidate();
+    _assignmentRequestGuard.invalidate();
+    _designationRequestGuard.invalidate();
     _selectedEmployeeId = null;
     _selectedEmployeeName = null;
+    _officialHrmsDate = null;
+    _assignmentPickerFirstDate = null;
+    _assignmentPickerLastDate = null;
     _assignments = [];
+    _policyAssignments = [];
     _designations = [];
+    _loadingAssignments = false;
+    _loadingPolicyAssignments = false;
+    _loadingDesignations = false;
     _selectedAssignment = null;
     _selectedDesignation = null;
     _selectedDeptId = null;
     _selectedPositionId = null;
     _selectedShiftId = null;
     _selectedPolicyId = null;
+    _policyPeriodPolicyId = null;
+    _policyPeriodEffectiveFrom = null;
+    _policyPeriodEffectiveTo = null;
+    _selectedPolicyPeriod = null;
     _effectiveFrom = null;
     _effectiveTo = null;
     _designationDeptId = null;
@@ -714,7 +927,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           ? a.positionId
           : null;
       _selectedShiftId = a.shiftId;
-      _selectedPolicyId = a.policyId;
+      _selectedPolicyId = null;
       _effectiveFrom = a.effectiveFrom;
       _effectiveTo = a.effectiveTo;
       _remarksController.text = a.remarks ?? '';
@@ -764,6 +977,26 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     });
   }
 
+  String _saveMessageWithReconciliation(
+    String baseMessage,
+    Map<String, dynamic>? payload,
+  ) {
+    final raw = payload?['reconciliation'];
+    if (raw is! Map) return baseMessage;
+    final reconciliation = Map<String, dynamic>.from(raw);
+    final warning = reconciliation['warning']?.toString().trim();
+    if (warning != null && warning.isNotEmpty) {
+      return '$baseMessage $warning';
+    }
+    final months = reconciliation['queued_months'];
+    final queuedCount = months is List ? months.length : 0;
+    if (reconciliation['required'] == true && queuedCount > 0) {
+      final noun = queuedCount == 1 ? 'month' : 'months';
+      return '$baseMessage $queuedCount completed $noun queued for DTR reconciliation.';
+    }
+    return baseMessage;
+  }
+
   Future<bool> _addAssignment() async {
     if (_selectedEmployeeId == null) return false;
     if (_selectedDeptId == null ||
@@ -800,18 +1033,104 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         if (_effectiveTo != null)
           'effective_to': _effectiveTo!.toIso8601String().split('T')[0],
         'is_active': true,
+        if (_selectedPolicyId != null)
+          'attendance_policy_id': _selectedPolicyId,
         'remarks': _remarksController.text.trim().isEmpty
             ? null
             : _remarksController.text.trim(),
       };
-      await ApiClient.instance.post('/api/assignments', data: data);
-      await _upsertEmployeePolicyAssignment();
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/assignments',
+        data: data,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _saveMessageWithReconciliation(
+                'Assignment added.',
+                response.data,
+              ),
+            ),
+          ),
+        );
+        _clearForm();
+        _loadAssignments();
+      }
+      return true;
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Assignment added.')));
-        _clearForm();
-        _loadAssignments();
+        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
+      }
+      return false;
+    }
+  }
+
+  void _clearPolicyPeriodForm() {
+    _updatePolicyFormState(() {
+      _selectedPolicyPeriod = null;
+      _policyPeriodPolicyId = null;
+      _policyPeriodEffectiveFrom = null;
+      _policyPeriodEffectiveTo = null;
+    });
+  }
+
+  void _selectPolicyPeriod(_PolicyAssignmentRecord policy) {
+    _updatePolicyFormState(() {
+      _selectedPolicyPeriod = policy;
+      _policyPeriodPolicyId = policy.policyId;
+      _policyPeriodEffectiveFrom = policy.effectiveFrom;
+      _policyPeriodEffectiveTo = policy.effectiveTo;
+    });
+  }
+
+  Future<bool> _savePolicyPeriod() async {
+    if (_selectedEmployeeId == null || _policyPeriodEffectiveFrom == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select an employee and effective date.')),
+      );
+      return false;
+    }
+    if (!_isEffectiveRangeValid(
+      _policyPeriodEffectiveFrom!,
+      _policyPeriodEffectiveTo,
+    )) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Effective to must be on or after effective from.'),
+        ),
+      );
+      return false;
+    }
+
+    try {
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/policy-assignments/employee-upsert',
+        data: {
+          'employee_id': _selectedEmployeeId,
+          'attendance_policy_id': _policyPeriodPolicyId,
+          'effective_from': _dateStr(_policyPeriodEffectiveFrom!),
+          'effective_to': _policyPeriodEffectiveTo == null
+              ? null
+              : _dateStr(_policyPeriodEffectiveTo!),
+          'is_active': true,
+        },
+      );
+      if (mounted) {
+        final message = _policyPeriodPolicyId == null
+            ? 'Employee policy removed for the selected period.'
+            : 'Attendance policy period saved.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _saveMessageWithReconciliation(message, response.data),
+            ),
+          ),
+        );
+        _clearPolicyPeriodForm();
+        await _loadAssignments();
       }
       return true;
     } catch (e) {
@@ -869,12 +1188,21 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             ? null
             : _remarksController.text.trim(),
       };
-      await ApiClient.instance.put('/api/assignments/${a.id}', data: data);
-      await _upsertEmployeePolicyAssignment();
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '/api/assignments/${a.id}',
+        data: data,
+      );
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Assignment updated.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _saveMessageWithReconciliation(
+                'Assignment updated.',
+                response.data,
+              ),
+            ),
+          ),
+        );
         _clearForm();
         _loadAssignments();
       }
@@ -887,22 +1215,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       }
       return false;
     }
-  }
-
-  Future<void> _upsertEmployeePolicyAssignment() async {
-    if (_selectedEmployeeId == null || _effectiveFrom == null) return;
-    await ApiClient.instance.post(
-      '/api/policy-assignments/employee-upsert',
-      data: {
-        'employee_id': _selectedEmployeeId,
-        'attendance_policy_id': _selectedPolicyId,
-        'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],
-        'effective_to': _effectiveTo != null
-            ? _effectiveTo!.toIso8601String().split('T')[0]
-            : null,
-        'is_active': true,
-      },
-    );
   }
 
   Future<String?> _requestDeactivationReason({
@@ -976,13 +1288,20 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     );
     if (reason == null || !mounted) return false;
     try {
-      await ApiClient.instance.put(
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
         '/api/assignments/${a.id}',
         data: {'is_active': false, 'change_reason': reason},
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Assignment deactivated.')),
+          SnackBar(
+            content: Text(
+              _saveMessageWithReconciliation(
+                'Assignment deactivated.',
+                response.data,
+              ),
+            ),
+          ),
         );
         _clearForm();
         _loadAssignments();
@@ -998,18 +1317,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
   }
 
-  bool _isFutureAssignment(DateTime effectiveFrom) {
-    return DateUtils.dateOnly(
-      effectiveFrom,
-    ).isAfter(DateUtils.dateOnly(DateTime.now()));
-  }
-
   Future<bool> _deleteMistakenAssignment() async {
     final assignment = _selectedAssignment;
-    if (assignment == null || !_isFutureAssignment(assignment.effectiveFrom)) {
+    if (assignment == null || !assignment.canPermanentlyDelete) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Only a future assignment can be permanently deleted.'),
+          content: Text(
+            'This assignment is no longer eligible for permanent deletion.',
+          ),
         ),
       );
       return false;
@@ -1186,12 +1501,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   Future<bool> _deleteMistakenDesignation() async {
     final designation = _selectedDesignation;
-    if (designation == null ||
-        !_isFutureAssignment(designation.effectiveFrom)) {
+    if (designation == null || !designation.canPermanentlyDelete) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Only a future additional position can be permanently deleted.',
+            'This additional position is no longer eligible for permanent deletion.',
           ),
         ),
       );
@@ -1358,9 +1672,77 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
   }
 
+  Future<void> _openPolicyPeriodDrawer({
+    _PolicyAssignmentRecord? policyPeriod,
+  }) async {
+    _policyDrawerSetState = null;
+    if (_selectedEmployeeId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select an employee first.')),
+      );
+      return;
+    }
+
+    if (policyPeriod == null) {
+      _clearPolicyPeriodForm();
+    } else {
+      _selectPolicyPeriod(policyPeriod);
+    }
+
+    try {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(
+          context,
+        ).modalBarrierDismissLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (dialogContext, _, __) {
+          final screenWidth = MediaQuery.of(dialogContext).size.width;
+          final drawerWidth = screenWidth < 760 ? screenWidth : 560.0;
+          return Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: drawerWidth,
+              height: double.infinity,
+              child: Material(
+                color: AppTheme.dashPanelOf(dialogContext),
+                elevation: 18,
+                child: StatefulBuilder(
+                  builder: (context, drawerSetState) {
+                    _policyDrawerSetState = drawerSetState;
+                    return _buildPolicyPeriodDrawer(dialogContext);
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+        transitionBuilder: (context, animation, _, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
+      );
+    } finally {
+      _policyDrawerSetState = null;
+    }
+  }
+
   void _setAssignmentStatusFilter(String? value) {
-    setState(() => _assignmentStatusFilter = value ?? 'Active');
+    setState(() => _assignmentStatusFilter = value ?? 'Current');
     _loadAssignments();
+    _loadDesignations();
   }
 
   @override

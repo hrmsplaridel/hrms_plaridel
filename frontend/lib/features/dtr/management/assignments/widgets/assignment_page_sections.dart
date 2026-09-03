@@ -106,27 +106,7 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                     : Colors.transparent,
                 child: InkWell(
                   onTap: () {
-                    _updateAssignmentFormState(() {
-                      _selectedEmployeeId = e.id;
-                      _selectedEmployeeName = e.fullName;
-                      _selectedAssignment = null;
-                      _selectedDeptId = null;
-                      _selectedPositionId = null;
-                      _selectedShiftId = null;
-                      _selectedPolicyId = null;
-                      _effectiveFrom = null;
-                      _effectiveTo = null;
-                      _selectedDesignation = null;
-                      _designationDeptId = null;
-                      _designationPositionId = null;
-                      _designationEffectiveFrom = null;
-                      _designationEffectiveTo = null;
-                      _designationIsActive = true;
-                      _remarksController.clear();
-                      _designationRemarksController.clear();
-                    });
-                    _loadAssignments();
-                    _loadDesignations();
+                    _selectEmployee(e);
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -434,6 +414,8 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
             _buildAssignmentsTable(hasSelection),
             if (hasSelection) ...[
               const SizedBox(height: 24),
+              _buildPolicyPeriodsSection(),
+              const SizedBox(height: 24),
               _buildDesignationsSection(),
             ],
           ],
@@ -452,7 +434,7 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
         style: AppTheme.dashFieldTextStyle(context),
         underline: const SizedBox.shrink(),
         isDense: true,
-        items: ['Active', 'Inactive', 'All']
+        items: ['Current', 'Upcoming', 'Expired', 'Archived', 'All']
             .map(
               (o) => DropdownMenuItem(
                 value: o,
@@ -529,10 +511,6 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                   child: Text('Shift', style: _tableHeaderStyle(context)),
                 ),
                 Expanded(
-                  flex: 2,
-                  child: Text('Policy', style: _tableHeaderStyle(context)),
-                ),
-                Expanded(
                   flex: 1,
                   child: Text('Time', style: _tableHeaderStyle(context)),
                 ),
@@ -542,6 +520,10 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                     'Effective period',
                     style: _tableHeaderStyle(context),
                   ),
+                ),
+                SizedBox(
+                  width: 92,
+                  child: Text('Status', style: _tableHeaderStyle(context)),
                 ),
               ],
             ),
@@ -601,16 +583,6 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                           ),
                         ),
                         Expanded(
-                          flex: 2,
-                          child: Text(
-                            (a.policyName != null &&
-                                    a.policyName!.trim().isNotEmpty)
-                                ? a.policyName!
-                                : 'Default policy',
-                            style: _tableCellStyle(context),
-                          ),
-                        ),
-                        Expanded(
                           flex: 1,
                           child: Text(
                             '${_timeStr(a.startTime)} - ${_timeStr(a.endTime)}',
@@ -624,12 +596,165 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                             style: _tableCellStyle(context),
                           ),
                         ),
+                        SizedBox(
+                          width: 92,
+                          child: _buildDesignationStatusBadge(a.computedStatus),
+                        ),
                       ],
                     ),
                   ),
                 ),
               );
             }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPolicyPeriodsSection() {
+    final dark = _isDark(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: dark
+            ? AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.65)
+            : AppTheme.lightGray.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(8),
+              ),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.policy_rounded,
+                  size: 18,
+                  color: _mutedColor(context),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Attendance Policy Periods',
+                    style: _tableHeaderStyle(context),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _loadingLookups
+                      ? null
+                      : () => _openPolicyPeriodDrawer(),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Add Period'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFE85D04),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_loadingPolicyAssignments)
+            const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_policyAssignments.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: Text(
+                  'No employee-level policy periods. Fallback policy applies.',
+                  style: TextStyle(color: _mutedColor(context)),
+                ),
+              ),
+            )
+          else ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Text('Policy', style: _tableHeaderStyle(context)),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      'Effective period',
+                      style: _tableHeaderStyle(context),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 92,
+                    child: Text('Status', style: _tableHeaderStyle(context)),
+                  ),
+                ],
+              ),
+            ),
+            ..._policyAssignments.map((policy) {
+              final status = _policyPeriodStatus(policy);
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _openPolicyPeriodDrawer(policyPeriod: policy),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: AppTheme.dashHairlineOf(
+                            context,
+                          ).withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            policy.policyName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _tableCellStyle(context),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            _policyEffectivePeriodStr(policy),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _tableCellStyle(context),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 92,
+                          child: _buildDesignationStatusBadge(status),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
         ],
       ),
     );
@@ -807,10 +932,11 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
 
   Widget _buildDesignationStatusBadge(String status) {
     final Color color = switch (status) {
-      'Active' => const Color(0xFF2E7D32),
+      'Current' => const Color(0xFF2E7D32),
       'Upcoming' => const Color(0xFF1565C0),
       'Expired' => const Color(0xFF6B7280),
-      _ => const Color(0xFFC62828),
+      'Archived' => const Color(0xFFC62828),
+      _ => const Color(0xFF6B7280),
     };
     return Align(
       alignment: Alignment.centerLeft,

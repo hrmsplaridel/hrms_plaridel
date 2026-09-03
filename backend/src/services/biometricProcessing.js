@@ -5,6 +5,7 @@ const {
   ensureShiftPunchModeColumn,
   getShiftType: resolveShiftType,
   getExpectedAmEndMinutes,
+  getExpectedPmStartMinutes,
   computeClockOutUndertimeMinutes,
   interpretPunchesForShift,
   computeTotalHours: computeShiftTotalHours,
@@ -19,6 +20,19 @@ const ATTENDANCE_POLICY_CACHE_TTL_MS = 60 * 1000;
 let _cachedAttendancePolicy = null;
 let _cachedAttendancePolicyAt = 0;
 const _policyByEmployeeDateCache = new Map();
+
+function clearBiometricAttendancePolicyCache({ employeeId = null, dateFrom = null, dateTo = null } = {}) {
+  const employee = employeeId == null ? null : String(employeeId);
+  for (const key of _policyByEmployeeDateCache.keys()) {
+    const separator = key.indexOf('|');
+    const cachedEmployee = separator < 0 ? key : key.slice(0, separator);
+    const cachedDate = separator < 0 ? '' : key.slice(separator + 1);
+    if (employee && cachedEmployee !== employee) continue;
+    if (dateFrom && cachedDate < dateFrom) continue;
+    if (dateTo && cachedDate > dateTo) continue;
+    _policyByEmployeeDateCache.delete(key);
+  }
+}
 
 function _normalizePolicy(row) {
   return {
@@ -284,7 +298,7 @@ async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, st
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
   const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
   if (!shiftInfo) return 0;
-  const { startMinutes, graceMinutes, breakEndMinutes } = shiftInfo;
+  const { startMinutes, graceMinutes } = shiftInfo;
   const type = getShiftType(shiftInfo);
   let total = 0;
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
@@ -296,8 +310,8 @@ async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, st
       if (localMins > cutoff) total += localMins - cutoff;
     }
   }
-  const pmStartMinutes = breakEndMinutes ?? startMinutes;
-  if (evalPm && breakInIso && (type === 'pm_only' || pmStartMinutes != null)) {
+  const pmStartMinutes = getExpectedPmStartMinutes(shiftInfo);
+  if (evalPm && breakInIso && pmStartMinutes != null) {
     const localMins = minutesFromMidnightInTimeZone(breakInIso);
     if (localMins != null) {
       const cutoff = pmStartMinutes + graceMinutes;
@@ -323,7 +337,7 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
   if (type === 'full_day' && evalAm && shiftInfo.startMinutes != null) {
     const hasAmLogs = timeInIso != null && breakOutIso != null;
     const amEndMinutes = getExpectedAmEndMinutes(shiftInfo);
-    const pmStartMinutes = shiftInfo.breakEndMinutes ?? NOON_MINUTES;
+    const pmStartMinutes = getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
     const amWindowClosed =
       dateStr < todayStr || (dateStr === todayStr && nowMinutes >= pmStartMinutes);
     if (!hasAmLogs && amWindowClosed) {
@@ -884,6 +898,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
 }
 
 module.exports = {
+  clearBiometricAttendancePolicyCache,
   processBiometricLogsToSummary,
   interpretPunchesForDay,
   hasBiometricSummaryChanged,

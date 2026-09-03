@@ -15,6 +15,7 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
       _selectedPolicyId,
       _attendancePolicies,
     );
+    final isEditing = _selectedAssignment != null;
     final filteredPositions = _positionsForSelectedDepartment;
     final hasDepartment = selectedDeptValue != null;
     final canSelectPosition = hasDepartment && filteredPositions.isNotEmpty;
@@ -75,18 +76,20 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 1,
-                    child: _buildFormDropdown(
-                      'Attendance Policy (opt)',
-                      selectedPolicyValue,
-                      _attendancePolicies,
-                      (v) => _updateAssignmentFormState(
-                        () => _selectedPolicyId = v,
+                  if (!isEditing) ...[
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 1,
+                      child: _buildFormDropdown(
+                        'Initial Attendance Policy (opt)',
+                        selectedPolicyValue,
+                        _attendancePolicies,
+                        (v) => _updateAssignmentFormState(
+                          () => _selectedPolicyId = v,
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ],
               );
             }
@@ -115,13 +118,14 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
                   _shifts,
                   (v) => _updateAssignmentFormState(() => _selectedShiftId = v),
                 ),
-                _buildFormDropdown(
-                  'Attendance Policy (opt)',
-                  selectedPolicyValue,
-                  _attendancePolicies,
-                  (v) =>
-                      _updateAssignmentFormState(() => _selectedPolicyId = v),
-                ),
+                if (!isEditing)
+                  _buildFormDropdown(
+                    'Initial Attendance Policy (opt)',
+                    selectedPolicyValue,
+                    _attendancePolicies,
+                    (v) =>
+                        _updateAssignmentFormState(() => _selectedPolicyId = v),
+                  ),
               ],
             );
           },
@@ -275,6 +279,109 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
         border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: content,
+    );
+  }
+
+  Widget _buildPolicyPeriodForm() {
+    final policyItems = [..._attendancePolicies];
+    final selectedPeriod = _selectedPolicyPeriod;
+    if (selectedPeriod != null &&
+        !policyItems.any(
+          (item) => item['id']?.toString() == selectedPeriod.policyId,
+        )) {
+      policyItems.add({
+        'id': selectedPeriod.policyId,
+        'name': '${selectedPeriod.policyName} (inactive)',
+      });
+    }
+    final selectedPolicyValue =
+        policyItems.any(
+          (item) => item['id']?.toString() == _policyPeriodPolicyId,
+        )
+        ? _policyPeriodPolicyId
+        : null;
+
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildFormDropdown(
+            'Employee attendance policy',
+            selectedPolicyValue,
+            policyItems,
+            (value) =>
+                _updatePolicyFormState(() => _policyPeriodPolicyId = value),
+            selectLabel: 'Use fallback policy',
+          ),
+          const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final useRow = constraints.maxWidth >= 420;
+              final from = _buildDatePicker(
+                'Effective from',
+                _policyPeriodEffectiveFrom,
+                (date) => _updatePolicyFormState(
+                  () => _policyPeriodEffectiveFrom = date,
+                ),
+              );
+              final to = _buildDatePicker(
+                'Effective to (optional)',
+                _policyPeriodEffectiveTo,
+                (date) => _updatePolicyFormState(
+                  () => _policyPeriodEffectiveTo = date,
+                ),
+              );
+              if (!useRow) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [from, const SizedBox(height: 16), to],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: from),
+                  const SizedBox(width: 16),
+                  Expanded(child: to),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline_rounded,
+                  size: 20,
+                  color: _mutedColor(context),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    selectedPolicyValue == null
+                        ? 'The employee-level policy is removed only for this period. Shift, department, or default policy can then apply.'
+                        : 'Existing policy periods before and after these dates are preserved automatically.',
+                    style: TextStyle(
+                      color: _mutedColor(context),
+                      fontSize: 13,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -565,6 +672,17 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
     DateTime? value,
     ValueChanged<DateTime> onChanged,
   ) {
+    final firstDate = _assignmentPickerFirstDate;
+    final lastDate = _assignmentPickerLastDate;
+    final pickerEnabled = firstDate != null && lastDate != null;
+
+    DateTime clampToRange(DateTime candidate) {
+      final date = DateUtils.dateOnly(candidate);
+      if (date.isBefore(firstDate!)) return firstDate;
+      if (date.isAfter(lastDate!)) return lastDate;
+      return date;
+    }
+
     return SizedBox(
       width: 160,
       child: Column(
@@ -580,15 +698,23 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
           ),
           const SizedBox(height: 6),
           InkWell(
-            onTap: () async {
-              final d = await showDatePicker(
-                context: context,
-                initialDate: value ?? DateTime.now(),
-                firstDate: DateTime(2020),
-                lastDate: DateTime(2030),
-              );
-              if (d != null) onChanged(d);
-            },
+            onTap: !pickerEnabled
+                ? null
+                : () async {
+                    final initialDate = clampToRange(
+                      value ?? _officialHrmsDate ?? firstDate,
+                    );
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: initialDate,
+                      currentDate: clampToRange(
+                        _officialHrmsDate ?? initialDate,
+                      ),
+                      firstDate: firstDate,
+                      lastDate: lastDate,
+                    );
+                    if (d != null) onChanged(d);
+                  },
             borderRadius: BorderRadius.circular(8),
             child: InputDecorator(
               decoration: _inputDecoration('Select date').copyWith(

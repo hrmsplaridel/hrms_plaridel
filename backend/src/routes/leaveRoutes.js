@@ -24,6 +24,9 @@ const {
   isDepartmentHead,
 } = require('../services/departmentHeadService');
 const {
+  replaceRequestReviewerSnapshot,
+} = require('../services/departmentReviewerService');
+const {
   initLeaveRequestHistory,
   insertLeaveRequestHistory,
 } = require('../services/leaveRequestHistory');
@@ -165,45 +168,7 @@ async function findAssignmentProfileByUserIdAtDate(db, userId, effectiveDate = n
   return result.rows[0] || null;
 }
 
-let ensureOtherPositionsPromise = null;
-
-async function ensureEmployeeOtherPositionsTable(db) {
-  if (!ensureOtherPositionsPromise) {
-    ensureOtherPositionsPromise = (async () => {
-      await db.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
-      await db.query(`
-        CREATE TABLE IF NOT EXISTS employee_other_positions (
-          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-          employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
-          position_id UUID NOT NULL REFERENCES positions(id) ON DELETE RESTRICT,
-          effective_from DATE NOT NULL,
-          effective_to DATE,
-          is_active BOOLEAN NOT NULL DEFAULT true,
-          remarks TEXT,
-          created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-      `);
-      await db.query(`
-        CREATE INDEX IF NOT EXISTS idx_employee_other_positions_employee
-          ON employee_other_positions(employee_id, effective_from DESC)
-      `);
-      await db.query(`
-        CREATE INDEX IF NOT EXISTS idx_employee_other_positions_position
-          ON employee_other_positions(position_id)
-      `);
-    })().catch((err) => {
-      ensureOtherPositionsPromise = null;
-      throw err;
-    });
-  }
-  return ensureOtherPositionsPromise;
-}
-
 async function findActiveEmployeeByPositionTitle(db, positionTitle) {
-  await ensureEmployeeOtherPositionsTable(db);
   const result = await db.query(
     `WITH candidates AS (
        SELECT u.id AS user_id,
@@ -2213,6 +2178,12 @@ router.post('/submit', protect, async (req, res) => {
       row.review_department_id = reviewSnapshot?.departmentId || null;
       row.assigned_department_head_id =
         reviewSnapshot?.departmentHeadUserId || null;
+      await replaceRequestReviewerSnapshot(client, {
+        requestType: 'leave',
+        requestId: row.id,
+        departmentId: reviewSnapshot?.departmentId || null,
+        reviewers: reviewSnapshot?.reviewers || [],
+      });
 
       await insertLeaveRequestHistory(client, {
         leaveRequestId: row.id,
@@ -2261,6 +2232,7 @@ router.post('/submit', protect, async (req, res) => {
           startDateStr: startStr,
           endDateStr: endStr,
           departmentHeadUserId: reviewSnapshot?.departmentHeadUserId ?? null,
+          departmentReviewerUserIds: reviewSnapshot?.reviewerUserIds || [],
         })
       );
       const mapped = mapLeaveRowToApi({ ...row, leave_type_name: typeName });
@@ -2456,6 +2428,12 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       row.review_department_id = reviewSnapshot?.departmentId || null;
       row.assigned_department_head_id =
         reviewSnapshot?.departmentHeadUserId || null;
+      await replaceRequestReviewerSnapshot(client, {
+        requestType: 'leave',
+        requestId: row.id,
+        departmentId: reviewSnapshot?.departmentId || null,
+        reviewers: reviewSnapshot?.reviewers || [],
+      });
 
       await insertLeaveRequestHistory(client, {
         leaveRequestId: row.id,
@@ -2510,6 +2488,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
           startDateStr: startStr,
           endDateStr: endStr,
           departmentHeadUserId: reviewSnapshot?.departmentHeadUserId ?? null,
+          departmentReviewerUserIds: reviewSnapshot?.reviewerUserIds || [],
         })
       );
       const mapped = mapLeaveRowToApi({ ...row, leave_type_name: typeName });
@@ -2721,6 +2700,14 @@ router.put('/:id', protect, async (req, res) => {
         ]
       );
       const row = q.rows[0];
+      if (refreshReviewSnapshot) {
+        await replaceRequestReviewerSnapshot(client, {
+          requestType: 'leave',
+          requestId: row.id,
+          departmentId: reviewSnapshot?.departmentId || null,
+          reviewers: reviewSnapshot?.reviewers || [],
+        });
+      }
       await insertLeaveRequestHistory(client, {
         leaveRequestId: row.id,
         action: historyAction,
@@ -2782,6 +2769,10 @@ router.put('/:id', protect, async (req, res) => {
               row.status === 'pending_department_head'
                 ? row.assigned_department_head_id || null
                 : null,
+            departmentReviewerUserIds:
+              row.status === 'pending_department_head'
+                ? reviewSnapshot?.reviewerUserIds || []
+                : [],
           })
         );
       }
@@ -3013,6 +3004,12 @@ router.get('/signatories', protect, async (req, res) => {
                       'department_head_returned'
                     )
                 ) AS requester_reviewed
+                , EXISTS (
+                  SELECT 1
+                  FROM leave_request_department_reviewers lrr
+                  WHERE lrr.leave_request_id = lr.id
+                    AND lrr.reviewer_id = $2::uuid
+                ) AS requester_snapshotted_reviewer
          FROM leave_requests lr
          LEFT JOIN departments d ON d.id = lr.review_department_id
          WHERE lr.id = $1::uuid
@@ -3028,7 +3025,8 @@ router.get('/signatories', protect, async (req, res) => {
       }
       const canReviewRequest =
         requestContext.assigned_department_head_id === requesterId ||
-        requestContext.requester_reviewed === true;
+        requestContext.requester_reviewed === true ||
+        requestContext.requester_snapshotted_reviewer === true;
       if (!privileged && requesterId !== employeeId && !canReviewRequest) {
         return res.status(403).json({ error: 'Not authorized to view leave form signatories' });
       }
@@ -3445,7 +3443,25 @@ router.get('/department-head/check', protect, async (req, res) => {
   const client = await pool.connect();
   try {
     const result = await isDepartmentHead(client, userId);
-    res.json(result);
+    const assigned = await client.query(
+      `SELECT lr.review_department_id AS department_id,
+              d.name AS department_name
+       FROM leave_requests lr
+       JOIN leave_request_department_reviewers lrr
+         ON lrr.leave_request_id = lr.id
+       LEFT JOIN departments d ON d.id = lr.review_department_id
+       WHERE lrr.reviewer_id = $1::uuid
+         AND lr.status = 'pending_department_head'
+       ORDER BY lr.updated_at DESC
+       LIMIT 1`,
+      [userId]
+    );
+    const assignedDepartment = assigned.rows[0] || null;
+    res.json({
+      isDeptHead: result.isDeptHead || Boolean(assignedDepartment),
+      departmentId: result.departmentId || assignedDepartment?.department_id || null,
+      departmentName: result.departmentName || assignedDepartment?.department_name || null,
+    });
   } catch (err) {
     console.error('[leave GET /department-head/check]', err);
     res.status(500).json({ error: 'Failed to check department head status' });
@@ -3507,7 +3523,15 @@ router.get('/department-head', protect, async (req, res) => {
         WHERE (
             (
               lr.status = 'pending_department_head'
-              AND lr.assigned_department_head_id = $1::uuid
+              AND (
+                lr.assigned_department_head_id = $1::uuid
+                OR EXISTS (
+                  SELECT 1
+                  FROM leave_request_department_reviewers lrr
+                  WHERE lrr.leave_request_id = lr.id
+                    AND lrr.reviewer_id = $1::uuid
+                )
+              )
             )
             OR dhh.department_head_reviewer_id IS NOT NULL
           )
@@ -3557,7 +3581,14 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        WHERE lr.id = $1
-         AND lr.assigned_department_head_id = $2::uuid
+         AND (
+           lr.assigned_department_head_id = $2::uuid
+           OR EXISTS (
+             SELECT 1 FROM leave_request_department_reviewers lrr
+             WHERE lrr.leave_request_id = lr.id
+               AND lrr.reviewer_id = $2::uuid
+           )
+         )
        FOR UPDATE OF lr`,
       [id, reviewerId]
     );
@@ -3650,7 +3681,15 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
               COALESCE(lr.number_of_days, lr.total_days) AS days, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       WHERE lr.id = $1 AND lr.assigned_department_head_id = $2::uuid
+       WHERE lr.id = $1
+         AND (
+           lr.assigned_department_head_id = $2::uuid
+           OR EXISTS (
+             SELECT 1 FROM leave_request_department_reviewers lrr
+             WHERE lrr.leave_request_id = lr.id
+               AND lrr.reviewer_id = $2::uuid
+           )
+         )
        FOR UPDATE OF lr`,
       [id, reviewerId]
     );
@@ -3743,7 +3782,15 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
               COALESCE(lr.number_of_days, lr.total_days) AS days, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       WHERE lr.id = $1 AND lr.assigned_department_head_id = $2::uuid
+       WHERE lr.id = $1
+         AND (
+           lr.assigned_department_head_id = $2::uuid
+           OR EXISTS (
+             SELECT 1 FROM leave_request_department_reviewers lrr
+             WHERE lrr.leave_request_id = lr.id
+               AND lrr.reviewer_id = $2::uuid
+           )
+         )
        FOR UPDATE OF lr`,
       [id, reviewerId]
     );
@@ -5000,18 +5047,24 @@ router.get('/:id/attachment', protect, async (req, res) => {
   const { id } = req.params;
   try {
     const rows = await pool.query(
-      `SELECT user_id, employee_id, status, assigned_department_head_id,
-              attachment_path, attachment_name, attachment_mime_type
-       FROM leave_requests
-       WHERE id = $1`,
-      [id]
+      `SELECT lr.user_id, lr.employee_id, lr.status,
+              lr.assigned_department_head_id,
+              lr.attachment_path, lr.attachment_name, lr.attachment_mime_type,
+              EXISTS (
+                SELECT 1 FROM leave_request_department_reviewers lrr
+                WHERE lrr.leave_request_id = lr.id
+                  AND lrr.reviewer_id = $2::uuid
+              ) AS is_snapshotted_reviewer
+       FROM leave_requests lr
+       WHERE lr.id = $1`,
+      [id, userId]
     );
     if (rows.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
     const row = rows.rows[0];
     const targetUserId = row.user_id || row.employee_id;
     const assignedDepartmentHeadId =
       row.status === 'pending_department_head'
-        ? row.assigned_department_head_id || null
+        ? (row.is_snapshotted_reviewer ? userId : row.assigned_department_head_id) || null
         : null;
     let historicalDepartmentHeadAction = null;
     const isOwner = targetUserId === userId;

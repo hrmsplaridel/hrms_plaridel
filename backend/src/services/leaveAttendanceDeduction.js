@@ -11,6 +11,7 @@
 const { loadHolidayOverlayMap } = require('./holidayOverlay');
 const {
   getExpectedWorkMinutes,
+  getExpectedPmStartMinutes,
   getShiftType,
 } = require('./shiftAttendance');
 const {
@@ -34,6 +35,7 @@ const {
 const VACATION_LEAVE = 'vacationLeave';
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
+const ONE_PM_MINUTES = 13 * 60;
 
 function addMonths(date, count) {
   const result = new Date(date.getTime());
@@ -178,7 +180,7 @@ function expectedMinutesForCoverage(assignment, coverage) {
   if (coverage === 'am_only') {
     if (shiftType === 'am_only') return 0;
     if (shiftType === 'pm_only' || shiftType === 'single_session') return full;
-    const pmStart = assignment.breakEndMinutes ?? NOON_MINUTES;
+    const pmStart = getExpectedPmStartMinutes(assignment) ?? ONE_PM_MINUTES;
     return Math.max(0, (assignment.endMinutes ?? pmStart) - pmStart);
   }
   if (coverage === 'pm_only') {

@@ -49,7 +49,7 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
   Widget _buildDrawerFooter(BuildContext drawerContext) {
     final isEditing = _selectedAssignment != null;
     final canDeleteMistake =
-        isEditing && _isFutureAssignment(_selectedAssignment!.effectiveFrom);
+        isEditing && _selectedAssignment!.canPermanentlyDelete;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -67,7 +67,7 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
             onPressed: () => Navigator.of(drawerContext).pop(),
             child: const Text('Cancel'),
           ),
-          if (isEditing)
+          if (isEditing && !canDeleteMistake)
             OutlinedButton.icon(
               onPressed: () async {
                 final ok = await _deactivateAssignment();
@@ -83,7 +83,7 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
               ),
             ),
           if (canDeleteMistake)
-            IconButton(
+            OutlinedButton.icon(
               onPressed: () async {
                 final ok = await _deleteMistakenAssignment();
                 if (ok && drawerContext.mounted) {
@@ -91,8 +91,11 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
                 }
               },
               icon: const Icon(Icons.delete_forever_rounded),
-              color: Colors.red,
-              tooltip: 'Delete mistaken future assignment',
+              label: const Text('Remove Mistaken Future Assignment'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
             ),
           FilledButton.icon(
             onPressed: _loadingLookups
@@ -163,12 +166,87 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
     );
   }
 
+  Widget _buildPolicyPeriodDrawer(BuildContext drawerContext) {
+    final isEditing = _selectedPolicyPeriod != null;
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isEditing ? 'Change Policy Period' : 'Add Policy Period',
+                    style: TextStyle(
+                      color: _headingColor(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  icon: Icon(Icons.close_rounded, color: _mutedColor(context)),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(child: _buildPolicyPeriodForm()),
+          ),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.dashPanelOf(context),
+              border: Border(
+                top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(drawerContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 12),
+                FilledButton.icon(
+                  onPressed: _loadingLookups
+                      ? null
+                      : () async {
+                          final ok = await _savePolicyPeriod();
+                          if (ok && drawerContext.mounted) {
+                            Navigator.of(drawerContext).pop();
+                          }
+                        },
+                  icon: const Icon(Icons.save_rounded, size: 18),
+                  label: Text(isEditing ? 'Apply Change' : 'Save Period'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE85D04),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDesignationDrawerFooter(BuildContext drawerContext) {
     final isEditing = _selectedDesignation != null;
     final canDeactivate =
         isEditing && (_selectedDesignation?.isActive ?? false);
     final canDeleteMistake =
-        isEditing && _isFutureAssignment(_selectedDesignation!.effectiveFrom);
+        isEditing && _selectedDesignation!.canPermanentlyDelete;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(

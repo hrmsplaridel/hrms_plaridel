@@ -1,8 +1,88 @@
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
+const MAX_ASSISTANT_DATE_RANGE_DAYS = 366;
 
-function todayInHrmsTimezone(now = new Date()) {
+function isValidIsoCalendarDate(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const monthLengths = [
+    31,
+    year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return day <= monthLengths[month - 1];
+}
+
+function isoDateEpochDay(value) {
+  const [year, month, day] = String(value).split('-').map(Number);
+  const date = new Date(0);
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCFullYear(year, month - 1, day);
+  return Math.floor(date.getTime() / 86400000);
+}
+
+function assistantDateRangeError(message, code) {
+  const err = new Error(message);
+  err.statusCode = 400;
+  err.code = code;
+  return err;
+}
+
+function assertAssistantDateRange(
+  range,
+  { maxDays = MAX_ASSISTANT_DATE_RANGE_DAYS } = {}
+) {
+  const startDate = String(range?.startDate || '').trim();
+  const endDate = String(range?.endDate || startDate).trim();
+  if (!isValidIsoCalendarDate(startDate) || !isValidIsoCalendarDate(endDate)) {
+    throw assistantDateRangeError(
+      'Use a real attendance date in YYYY-MM-DD format.',
+      'ASSISTANT_DATE_INVALID'
+    );
+  }
+  if (startDate > endDate) {
+    throw assistantDateRangeError(
+      'The attendance start date must be on or before the end date.',
+      'ASSISTANT_DATE_RANGE_REVERSED'
+    );
+  }
+  const dayCount = isoDateEpochDay(endDate) - isoDateEpochDay(startDate) + 1;
+  if (!Number.isInteger(dayCount) || dayCount < 1) {
+    throw assistantDateRangeError(
+      'The attendance date range is invalid.',
+      'ASSISTANT_DATE_INVALID'
+    );
+  }
+  if (dayCount > maxDays) {
+    throw assistantDateRangeError(
+      `The chatbot can load up to ${maxDays} days per request. Choose a shorter period.`,
+      'ASSISTANT_DATE_RANGE_TOO_LARGE'
+    );
+  }
+  return {
+    label: String(
+      range?.label || (startDate === endDate ? startDate : `${startDate} to ${endDate}`)
+    ).trim(),
+    startDate,
+    endDate,
+  };
+}
+
+function todayInHrmsTimezone(now = new Date(), timeZone = HRMS_TIMEZONE) {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: HRMS_TIMEZONE,
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -276,7 +356,7 @@ function weekdayDate(today, targetWeekday, mode = 'next') {
   return addDays(today, offset);
 }
 
-function parseAssistantDateRange(message, options = {}) {
+function parseAssistantDateRangeUnchecked(message, options = {}) {
   const text = String(message || '').toLowerCase();
   const today = options.today || todayInHrmsTimezone(options.now);
   const monthNames = Object.keys(MONTHS).join('|');
@@ -657,9 +737,19 @@ function parseAssistantDateRange(message, options = {}) {
   };
 }
 
+function parseAssistantDateRange(message, options = {}) {
+  return assertAssistantDateRange(
+    parseAssistantDateRangeUnchecked(message, options),
+    { maxDays: options.maxDays || MAX_ASSISTANT_DATE_RANGE_DAYS }
+  );
+}
+
 module.exports = {
+  MAX_ASSISTANT_DATE_RANGE_DAYS,
   addDays,
   addMonths,
+  assertAssistantDateRange,
+  isValidIsoCalendarDate,
   parseAssistantDateRange,
   todayInHrmsTimezone,
 };
