@@ -8,9 +8,14 @@ const {
 } = require('../services/shiftAttendance');
 const {
   ShiftLifecycleError,
+  ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   lockShiftForUpdate,
+  shiftDeactivationBlockers,
+  shiftDeactivationCountsFromRow,
+  shiftDeactivationCountsSql,
 } = require('../services/shiftLifecycle');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -36,6 +41,7 @@ function parseWorkingDays(val) {
 router.get('/', protect, async (req, res) => {
   try {
     await ensureShiftPunchModeColumn(pool);
+    const today = todayInHrmsTimezone();
     const status = req.query.status || 'Active';
     let where = '';
     if (status === 'Active') where = 'WHERE (is_active IS NULL OR is_active = true)';
@@ -44,26 +50,35 @@ router.get('/', protect, async (req, res) => {
     const result = await pool.query(
       `SELECT id, shift_number, name, start_time, end_time, break_end, punch_mode,
               grace_period_minutes, working_days, is_active,
-              (SELECT COUNT(*)::int FROM assignments a WHERE a.shift_id = shifts.id) AS assignment_history_count
+              (SELECT COUNT(*)::int FROM assignments a WHERE a.shift_id = shifts.id) AS assignment_history_count,
+              ${shiftDeactivationCountsSql('shifts.id', '$1')}
        FROM shifts ${where}
-       ORDER BY name`
+       ORDER BY name`,
+      [today]
     );
-    res.json(result.rows.map((r) => ({
-      id: r.id,
-      shift_number: r.shift_number,
-      name: r.name,
-      start_time: r.start_time,
-      end_time: r.end_time,
-      break_end: r.break_end,
-      punch_mode: normalizePunchMode(r.punch_mode),
-      grace_period_minutes: r.grace_period_minutes ?? 0,
-      working_days: r.working_days && Array.isArray(r.working_days)
-        ? r.working_days.map((d) => (typeof d === 'number' ? d : parseInt(d, 10)))
-        : [1, 2, 3, 4, 5],
-      is_active: r.is_active ?? true,
-      assignment_history_count: Number(r.assignment_history_count || 0),
-      schedule_edit_locked: Number(r.assignment_history_count || 0) > 0,
-    })));
+    res.json(result.rows.map((r) => {
+      const deactivationCounts = shiftDeactivationCountsFromRow(r);
+      const deactivationBlockers = shiftDeactivationBlockers(deactivationCounts);
+      return {
+        id: r.id,
+        shift_number: r.shift_number,
+        name: r.name,
+        start_time: r.start_time,
+        end_time: r.end_time,
+        break_end: r.break_end,
+        punch_mode: normalizePunchMode(r.punch_mode),
+        grace_period_minutes: r.grace_period_minutes ?? 0,
+        working_days: r.working_days && Array.isArray(r.working_days)
+          ? r.working_days.map((d) => (typeof d === 'number' ? d : parseInt(d, 10)))
+          : [1, 2, 3, 4, 5],
+        is_active: r.is_active ?? true,
+        assignment_history_count: Number(r.assignment_history_count || 0),
+        schedule_edit_locked: Number(r.assignment_history_count || 0) > 0,
+        can_deactivate: deactivationBlockers.length === 0,
+        deactivation_blockers: deactivationBlockers,
+        deactivation_official_date: today,
+      };
+    }));
   } catch (err) {
     console.error('[shifts GET]', err);
     res.status(500).json({ error: 'Failed to fetch shifts' });
@@ -168,6 +183,16 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       changes: scheduleChanges,
       lockedShift,
     });
+    const nextIsActive = is_active === undefined
+      ? lockedShift.is_active !== false
+      : !!is_active;
+    if (lockedShift.is_active !== false && nextIsActive === false) {
+      await ensureShiftDeactivationAllowed(client, {
+        shiftId: id,
+        effectiveDate: todayInHrmsTimezone(),
+        lockedShift,
+      });
+    }
 
     const result = await client.query(
       `UPDATE shifts SET ${updates.join(', ')} WHERE id = $${i}

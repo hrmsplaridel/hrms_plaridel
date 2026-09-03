@@ -44,6 +44,8 @@ class _ShiftRecord {
     this.punchMode = 'auto',
     this.assignmentHistoryCount = 0,
     this.scheduleEditLocked = false,
+    this.canDeactivate = true,
+    this.deactivationBlockers = const [],
   });
   final String id;
   final String name;
@@ -57,6 +59,8 @@ class _ShiftRecord {
   final String punchMode;
   final int assignmentHistoryCount;
   final bool scheduleEditLocked;
+  final bool canDeactivate;
+  final List<String> deactivationBlockers;
 
   /// Display as SHF-001, SHF-002, etc., or "—" if null.
   String get displayShiftNo => shiftNumber != null
@@ -191,6 +195,18 @@ class _ManageShiftState extends State<ManageShift> {
         final shiftNum = m['shift_number'];
         final assignmentHistoryCount =
             int.tryParse(m['assignment_history_count']?.toString() ?? '') ?? 0;
+        final deactivationBlockers =
+            (m['deactivation_blockers'] as List?)
+                ?.map((item) {
+                  if (item is! Map) return '';
+                  final count =
+                      int.tryParse(item['count']?.toString() ?? '') ?? 0;
+                  final label = item['label']?.toString().trim() ?? '';
+                  return count > 0 && label.isNotEmpty ? '$count $label' : '';
+                })
+                .where((item) => item.isNotEmpty)
+                .toList() ??
+            const <String>[];
         List<int> days = [1, 2, 3, 4, 5];
         if (wd is List) {
           final parsed = wd
@@ -223,6 +239,9 @@ class _ManageShiftState extends State<ManageShift> {
           assignmentHistoryCount: assignmentHistoryCount,
           scheduleEditLocked:
               m['schedule_edit_locked'] == true || assignmentHistoryCount > 0,
+          canDeactivate:
+              m['can_deactivate'] != false && deactivationBlockers.isEmpty,
+          deactivationBlockers: deactivationBlockers,
         );
       }).toList();
     } on DioException catch (e) {
@@ -388,6 +407,19 @@ class _ManageShiftState extends State<ManageShift> {
     if (s == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a shift to deactivate.')),
+      );
+      return false;
+    }
+    if (!s.canDeactivate) {
+      final blockers = s.deactivationBlockers.isEmpty
+          ? 'current or future operational periods'
+          : s.deactivationBlockers.join(' and ');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cannot deactivate ${s.name}: $blockers. End or transfer these periods first.',
+          ),
+        ),
       );
       return false;
     }
@@ -1040,6 +1072,39 @@ class _ManageShiftState extends State<ManageShift> {
                 Expanded(
                   child: Text(
                     'Schedule locked because this shift has ${_selectedShift!.assignmentHistoryCount} assignment record${_selectedShift!.assignmentHistoryCount == 1 ? '' : 's'}. Create a new shift and assignment period for schedule changes.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: _headingColor(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (_selectedShift?.isActive == true &&
+            _selectedShift?.canDeactivate == false) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.08),
+              border: Border.all(color: Colors.red.withValues(alpha: 0.55)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.info_outline_rounded,
+                  color: Colors.red,
+                  size: 19,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Deactivation blocked by ${_selectedShift!.deactivationBlockers.join(' and ')}. End or transfer these periods first.',
                     style: TextStyle(
                       fontSize: 12,
                       height: 1.4,

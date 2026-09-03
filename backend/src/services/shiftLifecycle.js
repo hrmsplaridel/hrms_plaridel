@@ -18,6 +18,17 @@ const SHIFT_SCHEDULE_FIELDS = Object.freeze([
   'working_days',
 ]);
 
+const SHIFT_DEACTIVATION_DEPENDENCIES = Object.freeze([
+  {
+    key: 'assignments',
+    label: 'current or future employee assignments',
+  },
+  {
+    key: 'policy_periods',
+    label: 'current or future attendance-policy periods',
+  },
+]);
+
 function normalizedTime(value) {
   if (value === null || value === undefined || value === '') return null;
   return String(value).trim().slice(0, 8);
@@ -73,6 +84,75 @@ async function shiftAssignmentHistoryCount(db, shiftId) {
   return Number(result.rows[0]?.assignment_history_count || 0);
 }
 
+function shiftDeactivationCountsSql(
+  shiftIdExpression = 'shifts.id',
+  todayPlaceholder = '$1'
+) {
+  return `(
+            SELECT COUNT(*)::int
+              FROM assignments assignment
+             WHERE assignment.shift_id = ${shiftIdExpression}
+               AND assignment.is_active = true
+               AND (
+                 assignment.effective_to IS NULL
+                 OR assignment.effective_to >= ${todayPlaceholder}::date
+               )
+          ) AS deactivation_assignments,
+          (
+            SELECT COUNT(*)::int
+              FROM policy_assignments policy_period
+             WHERE policy_period.shift_id = ${shiftIdExpression}
+               AND policy_period.is_active = true
+               AND (
+                 policy_period.effective_to IS NULL
+                 OR policy_period.effective_to >= ${todayPlaceholder}::date
+               )
+          ) AS deactivation_policy_periods`;
+}
+
+function shiftDeactivationCountsFromRow(row = {}) {
+  return Object.fromEntries(
+    SHIFT_DEACTIVATION_DEPENDENCIES.map(({ key }) => [
+      key,
+      Number(row[`deactivation_${key}`] || 0),
+    ])
+  );
+}
+
+function shiftDeactivationBlockers(counts = {}) {
+  return SHIFT_DEACTIVATION_DEPENDENCIES
+    .map(({ key, label }) => ({ key, label, count: Number(counts[key] || 0) }))
+    .filter((item) => item.count > 0);
+}
+
+async function ensureShiftDeactivationAllowed(
+  db,
+  { shiftId, effectiveDate, lockedShift = null }
+) {
+  const shift = lockedShift || await lockShiftForUpdate(db, shiftId);
+  if (!shift) {
+    throw new ShiftLifecycleError('Shift not found', 404);
+  }
+
+  const result = await db.query(
+    `SELECT ${shiftDeactivationCountsSql('$1::uuid', '$2')}`,
+    [shiftId, effectiveDate]
+  );
+  const dependencies = shiftDeactivationCountsFromRow(result.rows[0]);
+  const blockers = shiftDeactivationBlockers(dependencies);
+  if (blockers.length > 0) {
+    const details = blockers
+      .map((item) => `${item.count} ${item.label}`)
+      .join(', ');
+    throw new ShiftLifecycleError(
+      `Shift cannot be deactivated because it has ${details}. End or transfer these periods first.`,
+      409,
+      { blockers, dependencies, official_date: effectiveDate }
+    );
+  }
+  return shift;
+}
+
 async function ensureShiftScheduleChangeAllowed(
   db,
   { shiftId, changes, lockedShift = null }
@@ -100,10 +180,15 @@ async function ensureShiftScheduleChangeAllowed(
 }
 
 module.exports = {
+  SHIFT_DEACTIVATION_DEPENDENCIES,
   SHIFT_SCHEDULE_FIELDS,
   ShiftLifecycleError,
   changedShiftScheduleFields,
+  ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   lockShiftForUpdate,
   shiftAssignmentHistoryCount,
+  shiftDeactivationBlockers,
+  shiftDeactivationCountsFromRow,
+  shiftDeactivationCountsSql,
 };

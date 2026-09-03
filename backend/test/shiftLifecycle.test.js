@@ -6,7 +6,9 @@ const assert = require('node:assert/strict');
 const {
   ShiftLifecycleError,
   changedShiftScheduleFields,
+  ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
+  shiftDeactivationCountsSql,
 } = require('../src/services/shiftLifecycle');
 
 const SHIFT_ID = '22222222-2222-4222-8222-222222222222';
@@ -107,6 +109,71 @@ test('unused shift permits schedule changes', async () => {
     shiftId: SHIFT_ID,
     lockedShift: shiftRow(),
     changes: { working_days: [2, 3, 4, 5, 6] },
+  });
+
+  assert.equal(result.id, SHIFT_ID);
+});
+
+test('shift deactivation dependency SQL is bounded by the official date', () => {
+  const sql = shiftDeactivationCountsSql('shift.id', '$4');
+  assert.match(sql, /assignment\.effective_to >= \$4::date/);
+  assert.match(sql, /policy_period\.effective_to >= \$4::date/);
+  assert.match(sql, /assignment\.is_active = true/);
+  assert.match(sql, /policy_period\.is_active = true/);
+});
+
+test('current or future dependencies block shift deactivation', async () => {
+  const db = {
+    async query(sql, params) {
+      assert.match(String(sql), /deactivation_assignments/);
+      assert.deepEqual(params, [SHIFT_ID, '2026-09-03']);
+      return {
+        rows: [{
+          deactivation_assignments: 2,
+          deactivation_policy_periods: 1,
+        }],
+        rowCount: 1,
+      };
+    },
+  };
+
+  await assert.rejects(
+    ensureShiftDeactivationAllowed(db, {
+      shiftId: SHIFT_ID,
+      effectiveDate: '2026-09-03',
+      lockedShift: shiftRow(),
+    }),
+    (error) => {
+      assert.ok(error instanceof ShiftLifecycleError);
+      assert.equal(error.statusCode, 409);
+      assert.deepEqual(error.details.dependencies, {
+        assignments: 2,
+        policy_periods: 1,
+      });
+      assert.equal(error.details.official_date, '2026-09-03');
+      assert.equal(error.details.blockers.length, 2);
+      return true;
+    }
+  );
+});
+
+test('expired or inactive dependencies allow shift deactivation', async () => {
+  const db = {
+    async query() {
+      return {
+        rows: [{
+          deactivation_assignments: 0,
+          deactivation_policy_periods: 0,
+        }],
+        rowCount: 1,
+      };
+    },
+  };
+
+  const result = await ensureShiftDeactivationAllowed(db, {
+    shiftId: SHIFT_ID,
+    effectiveDate: '2026-09-03',
+    lockedShift: shiftRow(),
   });
 
   assert.equal(result.id, SHIFT_ID);
