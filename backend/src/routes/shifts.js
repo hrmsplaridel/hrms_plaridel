@@ -6,6 +6,11 @@ const {
   ensureShiftPunchModeColumn,
   normalizePunchMode,
 } = require('../services/shiftAttendance');
+const {
+  ShiftLifecycleError,
+  ensureShiftScheduleChangeAllowed,
+  lockShiftForUpdate,
+} = require('../services/shiftLifecycle');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -37,7 +42,9 @@ router.get('/', protect, async (req, res) => {
     else if (status === 'Inactive') where = 'WHERE is_active = false';
 
     const result = await pool.query(
-      `SELECT id, shift_number, name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active
+      `SELECT id, shift_number, name, start_time, end_time, break_end, punch_mode,
+              grace_period_minutes, working_days, is_active,
+              (SELECT COUNT(*)::int FROM assignments a WHERE a.shift_id = shifts.id) AS assignment_history_count
        FROM shifts ${where}
        ORDER BY name`
     );
@@ -54,6 +61,8 @@ router.get('/', protect, async (req, res) => {
         ? r.working_days.map((d) => (typeof d === 'number' ? d : parseInt(d, 10)))
         : [1, 2, 3, 4, 5],
       is_active: r.is_active ?? true,
+      assignment_history_count: Number(r.assignment_history_count || 0),
+      schedule_edit_locked: Number(r.assignment_history_count || 0) > 0,
     })));
   } catch (err) {
     console.error('[shifts GET]', err);
@@ -105,6 +114,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
 // PUT /api/shifts/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     await ensureShiftPunchModeColumn(pool);
     const { id } = req.params;
@@ -133,12 +143,38 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     updates.push('updated_at = now()');
     values.push(id);
 
-    const result = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const lockedShift = await lockShiftForUpdate(client, id);
+    if (!lockedShift) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Shift not found' });
+    }
+    const scheduleChanges = {};
+    if (start_time !== undefined) scheduleChanges.start_time = parseTime(start_time) || '09:00:00';
+    if (end_time !== undefined) scheduleChanges.end_time = parseTime(end_time) || '17:00:00';
+    if (break_end !== undefined) {
+      scheduleChanges.break_end = break_end != null && break_end !== '' ? parseTime(break_end) : null;
+    }
+    if (punch_mode !== undefined) scheduleChanges.punch_mode = normalizePunchMode(punch_mode);
+    if (grace_period_minutes !== undefined) {
+      scheduleChanges.grace_period_minutes = Math.max(0, parseInt(grace_period_minutes, 10) || 0);
+    }
+    if (working_days !== undefined) {
+      scheduleChanges.working_days = parseWorkingDays(working_days) || [1, 2, 3, 4, 5];
+    }
+    await ensureShiftScheduleChangeAllowed(client, {
+      shiftId: id,
+      changes: scheduleChanges,
+      lockedShift,
+    });
+
+    const result = await client.query(
       `UPDATE shifts SET ${updates.join(', ')} WHERE id = $${i}
        RETURNING id, shift_number, name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active`,
       values
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Shift not found' });
+    await client.query('COMMIT');
     const r = result.rows[0];
     res.json({
       id: r.id,
@@ -155,8 +191,23 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       is_active: r.is_active ?? true,
     });
   } catch (err) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[shifts PUT rollback]', rollbackError);
+      }
+    }
+    if (err instanceof ShiftLifecycleError) {
+      return res.status(err.statusCode).json({
+        error: err.message,
+        ...(err.details || {}),
+      });
+    }
     console.error('[shifts PUT]', err);
     res.status(500).json({ error: 'Failed to update shift' });
+  } finally {
+    client?.release();
   }
 });
 

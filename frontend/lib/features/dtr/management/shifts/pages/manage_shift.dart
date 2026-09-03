@@ -42,6 +42,8 @@ class _ShiftRecord {
     this.shiftNumber,
     this.breakEndTime,
     this.punchMode = 'auto',
+    this.assignmentHistoryCount = 0,
+    this.scheduleEditLocked = false,
   });
   final String id;
   final String name;
@@ -53,6 +55,8 @@ class _ShiftRecord {
   final List<int> workingDays;
   final int? shiftNumber;
   final String punchMode;
+  final int assignmentHistoryCount;
+  final bool scheduleEditLocked;
 
   /// Display as SHF-001, SHF-002, etc., or "—" if null.
   String get displayShiftNo => shiftNumber != null
@@ -185,6 +189,8 @@ class _ManageShiftState extends State<ManageShift> {
         final grace = m['grace_period_minutes'];
         final wd = m['working_days'];
         final shiftNum = m['shift_number'];
+        final assignmentHistoryCount =
+            int.tryParse(m['assignment_history_count']?.toString() ?? '') ?? 0;
         List<int> days = [1, 2, 3, 4, 5];
         if (wd is List) {
           final parsed = wd
@@ -214,6 +220,9 @@ class _ManageShiftState extends State<ManageShift> {
           shiftNumber: shiftNum is int
               ? shiftNum
               : (shiftNum != null ? int.tryParse(shiftNum.toString()) : null),
+          assignmentHistoryCount: assignmentHistoryCount,
+          scheduleEditLocked:
+              m['schedule_edit_locked'] == true || assignmentHistoryCount > 0,
         );
       }).toList();
     } on DioException catch (e) {
@@ -951,7 +960,7 @@ class _ManageShiftState extends State<ManageShift> {
     );
   }
 
-  Widget _buildPunchModeDropdown() {
+  Widget _buildPunchModeDropdown({bool enabled = true}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: _filterDecoration(context),
@@ -973,14 +982,16 @@ class _ManageShiftState extends State<ManageShift> {
                 ),
               )
               .toList(),
-          onChanged: (mode) {
-            _updateShiftFormState(() {
-              _punchMode = mode ?? 'auto';
-              if (_punchMode == 'single_session') {
-                _breakEndTime = null;
-              }
-            });
-          },
+          onChanged: enabled
+              ? (mode) {
+                  _updateShiftFormState(() {
+                    _punchMode = mode ?? 'auto';
+                    if (_punchMode == 'single_session') {
+                      _breakEndTime = null;
+                    }
+                  });
+                }
+              : null,
         ),
       ),
     );
@@ -988,6 +999,7 @@ class _ManageShiftState extends State<ManageShift> {
 
   Widget _buildFormPanel({bool framed = true, bool showActions = true}) {
     final dark = _isDark(context);
+    final scheduleLocked = _selectedShift?.scheduleEditLocked ?? false;
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1005,6 +1017,40 @@ class _ManageShiftState extends State<ManageShift> {
           style: AppTheme.dashFieldTextStyle(context),
           decoration: _inputDecoration('Shift Name'),
         ),
+        if (scheduleLocked) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE85D04).withValues(alpha: 0.1),
+              border: Border.all(
+                color: const Color(0xFFE85D04).withValues(alpha: 0.65),
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.lock_outline_rounded,
+                  color: Color(0xFFE85D04),
+                  size: 19,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Schedule locked because this shift has ${_selectedShift!.assignmentHistoryCount} assignment record${_selectedShift!.assignmentHistoryCount == 1 ? '' : 's'}. Create a new shift and assignment period for schedule changes.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: _headingColor(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 20),
         Text(
           'Start Time',
@@ -1018,6 +1064,7 @@ class _ManageShiftState extends State<ManageShift> {
         _buildTimePicker(
           _startTime,
           (t) => _updateShiftFormState(() => _startTime = t),
+          enabled: !scheduleLocked,
         ),
         const SizedBox(height: 20),
         Text(
@@ -1032,6 +1079,7 @@ class _ManageShiftState extends State<ManageShift> {
         _buildTimePicker(
           _endTime,
           (t) => _updateShiftFormState(() => _endTime = t),
+          enabled: !scheduleLocked,
         ),
         const SizedBox(height: 20),
         Text(
@@ -1051,7 +1099,7 @@ class _ManageShiftState extends State<ManageShift> {
           ),
         ),
         const SizedBox(height: 6),
-        _buildPunchModeDropdown(),
+        _buildPunchModeDropdown(enabled: !scheduleLocked),
         const SizedBox(height: 20),
         Text(
           'PM Start (Break End)',
@@ -1076,7 +1124,7 @@ class _ManageShiftState extends State<ManageShift> {
           _breakEndTime,
           (t) => _updateShiftFormState(() => _breakEndTime = t),
           allowClear: true,
-          enabled: _punchMode != 'single_session',
+          enabled: !scheduleLocked && _punchMode != 'single_session',
         ),
         const SizedBox(height: 20),
         Text(
@@ -1090,6 +1138,7 @@ class _ManageShiftState extends State<ManageShift> {
         const SizedBox(height: 6),
         TextFormField(
           controller: _graceController,
+          enabled: !scheduleLocked,
           keyboardType: TextInputType.number,
           style: AppTheme.dashFieldTextStyle(context),
           decoration: _inputDecoration('0'),
@@ -1121,7 +1170,7 @@ class _ManageShiftState extends State<ManageShift> {
                       : _headingColor(context),
                 ),
               ),
-              onSelected: (_) => _toggleWorkingDay(day),
+              onSelected: scheduleLocked ? null : (_) => _toggleWorkingDay(day),
               selectedColor: dark
                   ? AppTheme.primaryNavy.withValues(alpha: 0.35)
                   : AppTheme.primaryNavy.withValues(alpha: 0.2),
