@@ -6,9 +6,11 @@ const assert = require('node:assert/strict');
 const {
   ShiftLifecycleError,
   changedShiftScheduleFields,
+  deleteUnusedShift,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   shiftDeactivationCountsSql,
+  shiftDependencyCountsSql,
 } = require('../src/services/shiftLifecycle');
 
 const SHIFT_ID = '22222222-2222-4222-8222-222222222222';
@@ -177,4 +179,81 @@ test('expired or inactive dependencies allow shift deactivation', async () => {
   });
 
   assert.equal(result.id, SHIFT_ID);
+});
+
+test('permanent deletion dependency SQL checks all historical references', () => {
+  const sql = shiftDependencyCountsSql('shift.id');
+  assert.match(sql, /FROM assignments dependency/);
+  assert.match(sql, /FROM dtr_daily_summary dependency/);
+  assert.match(sql, /FROM policy_assignments dependency/);
+  assert.match(sql, /dependency\.shift_id = shift\.id/);
+});
+
+test('used shift cannot be permanently deleted', async () => {
+  let deleteCalled = false;
+  const db = {
+    async query(sql, params) {
+      assert.deepEqual(params, [SHIFT_ID]);
+      if (/^DELETE FROM shifts/.test(String(sql))) {
+        deleteCalled = true;
+      }
+      return {
+        rows: [{
+          dependency_assignments: 2,
+          dependency_dtr_records: 5,
+          dependency_policy_periods: 1,
+        }],
+        rowCount: 1,
+      };
+    },
+  };
+
+  await assert.rejects(
+    deleteUnusedShift(db, {
+      shiftId: SHIFT_ID,
+      lockedShift: shiftRow(),
+    }),
+    (error) => {
+      assert.ok(error instanceof ShiftLifecycleError);
+      assert.equal(error.statusCode, 409);
+      assert.deepEqual(error.details.dependencies, {
+        assignments: 2,
+        dtr_records: 5,
+        policy_periods: 1,
+      });
+      assert.equal(error.details.blockers.length, 3);
+      return true;
+    }
+  );
+  assert.equal(deleteCalled, false);
+});
+
+test('completely unused shift can be permanently deleted', async () => {
+  const queries = [];
+  const db = {
+    async query(sql, params) {
+      queries.push({ sql: String(sql), params });
+      if (/^DELETE FROM shifts/.test(String(sql))) {
+        return { rows: [], rowCount: 1 };
+      }
+      return {
+        rows: [{
+          dependency_assignments: 0,
+          dependency_dtr_records: 0,
+          dependency_policy_periods: 0,
+        }],
+        rowCount: 1,
+      };
+    },
+  };
+
+  const result = await deleteUnusedShift(db, {
+    shiftId: SHIFT_ID,
+    lockedShift: shiftRow(),
+  });
+
+  assert.equal(result.id, SHIFT_ID);
+  assert.equal(queries.length, 2);
+  assert.match(queries[1].sql, /^DELETE FROM shifts/);
+  assert.deepEqual(queries[1].params, [SHIFT_ID]);
 });

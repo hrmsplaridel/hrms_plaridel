@@ -8,12 +8,16 @@ const {
 } = require('../services/shiftAttendance');
 const {
   ShiftLifecycleError,
+  deleteUnusedShift,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   lockShiftForUpdate,
   shiftDeactivationBlockers,
   shiftDeactivationCountsFromRow,
   shiftDeactivationCountsSql,
+  shiftDependencyBlockers,
+  shiftDependencyCountsFromRow,
+  shiftDependencyCountsSql,
 } = require('../services/shiftLifecycle');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
@@ -50,13 +54,15 @@ router.get('/', protect, async (req, res) => {
     const result = await pool.query(
       `SELECT id, shift_number, name, start_time, end_time, break_end, punch_mode,
               grace_period_minutes, working_days, is_active,
-              (SELECT COUNT(*)::int FROM assignments a WHERE a.shift_id = shifts.id) AS assignment_history_count,
+              ${shiftDependencyCountsSql('shifts.id')},
               ${shiftDeactivationCountsSql('shifts.id', '$1')}
        FROM shifts ${where}
        ORDER BY name`,
       [today]
     );
     res.json(result.rows.map((r) => {
+      const dependencyCounts = shiftDependencyCountsFromRow(r);
+      const deleteBlockers = shiftDependencyBlockers(dependencyCounts);
       const deactivationCounts = shiftDeactivationCountsFromRow(r);
       const deactivationBlockers = shiftDeactivationBlockers(deactivationCounts);
       return {
@@ -72,11 +78,13 @@ router.get('/', protect, async (req, res) => {
           ? r.working_days.map((d) => (typeof d === 'number' ? d : parseInt(d, 10)))
           : [1, 2, 3, 4, 5],
         is_active: r.is_active ?? true,
-        assignment_history_count: Number(r.assignment_history_count || 0),
-        schedule_edit_locked: Number(r.assignment_history_count || 0) > 0,
+        assignment_history_count: dependencyCounts.assignments,
+        schedule_edit_locked: deleteBlockers.length > 0,
         can_deactivate: deactivationBlockers.length === 0,
         deactivation_blockers: deactivationBlockers,
         deactivation_official_date: today,
+        can_permanently_delete: deleteBlockers.length === 0,
+        delete_blockers: deleteBlockers,
       };
     }));
   } catch (err) {
@@ -238,13 +246,40 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
 // DELETE /api/shifts/:id (admin only)
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
-    const result = await pool.query('DELETE FROM shifts WHERE id = $1 RETURNING id', [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Shift not found' });
-    res.status(204).send();
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const deletedShift = await deleteUnusedShift(client, {
+      shiftId: req.params.id,
+    });
+    await client.query('COMMIT');
+    res.json({
+      message: 'Unused shift permanently deleted',
+      shift: {
+        id: deletedShift.id,
+        shift_number: deletedShift.shift_number,
+        name: deletedShift.name,
+      },
+    });
   } catch (err) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[shifts DELETE rollback]', rollbackError);
+      }
+    }
+    if (err instanceof ShiftLifecycleError) {
+      return res.status(err.statusCode).json({
+        error: err.message,
+        ...(err.details || {}),
+      });
+    }
     console.error('[shifts DELETE]', err);
     res.status(500).json({ error: 'Failed to delete shift' });
+  } finally {
+    client?.release();
   }
 });
 

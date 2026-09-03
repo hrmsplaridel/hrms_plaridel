@@ -46,6 +46,8 @@ class _ShiftRecord {
     this.scheduleEditLocked = false,
     this.canDeactivate = true,
     this.deactivationBlockers = const [],
+    this.canPermanentlyDelete = false,
+    this.deleteBlockers = const [],
   });
   final String id;
   final String name;
@@ -61,6 +63,8 @@ class _ShiftRecord {
   final bool scheduleEditLocked;
   final bool canDeactivate;
   final List<String> deactivationBlockers;
+  final bool canPermanentlyDelete;
+  final List<String> deleteBlockers;
 
   /// Display as SHF-001, SHF-002, etc., or "—" if null.
   String get displayShiftNo => shiftNumber != null
@@ -207,6 +211,18 @@ class _ManageShiftState extends State<ManageShift> {
                 .where((item) => item.isNotEmpty)
                 .toList() ??
             const <String>[];
+        final deleteBlockers =
+            (m['delete_blockers'] as List?)
+                ?.map((item) {
+                  if (item is! Map) return '';
+                  final count =
+                      int.tryParse(item['count']?.toString() ?? '') ?? 0;
+                  final label = item['label']?.toString().trim() ?? '';
+                  return count > 0 && label.isNotEmpty ? '$count $label' : '';
+                })
+                .where((item) => item.isNotEmpty)
+                .toList() ??
+            const <String>[];
         List<int> days = [1, 2, 3, 4, 5];
         if (wd is List) {
           final parsed = wd
@@ -242,6 +258,9 @@ class _ManageShiftState extends State<ManageShift> {
           canDeactivate:
               m['can_deactivate'] != false && deactivationBlockers.isEmpty,
           deactivationBlockers: deactivationBlockers,
+          canPermanentlyDelete:
+              m['can_permanently_delete'] == true && deleteBlockers.isEmpty,
+          deleteBlockers: deleteBlockers,
         );
       }).toList();
     } on DioException catch (e) {
@@ -471,6 +490,68 @@ class _ManageShiftState extends State<ManageShift> {
     }
   }
 
+  Future<bool> _deleteUnusedShift() async {
+    final s = _selectedShift;
+    if (s == null || !s.canPermanentlyDelete) {
+      final blockers = s?.deleteBlockers.join(' and ') ?? '';
+      final detail = blockers.isEmpty ? 'existing shift usage' : blockers;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'This shift cannot be permanently deleted because of $detail.',
+          ),
+        ),
+      );
+      return false;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete unused shift?'),
+        content: Text(
+          'Permanently delete "${s.name}"? This is allowed only because it has no assignment, DTR, or attendance-policy history. This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            icon: const Icon(Icons.delete_forever_rounded, size: 18),
+            label: const Text('Delete'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+
+    try {
+      await ApiClient.instance.delete('/api/shifts/${s.id}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${s.name} was permanently deleted.')),
+        );
+        _clearForm();
+        _loadShifts();
+      }
+      return true;
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final message = data is Map && data['error'] != null
+          ? data['error'].toString()
+          : e.message ?? 'Request failed';
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to delete: $message')));
+      }
+      return false;
+    }
+  }
+
   Future<void> _openShiftDrawer({_ShiftRecord? shift}) async {
     _drawerSetState = null;
     if (shift == null) {
@@ -601,6 +682,21 @@ class _ManageShiftState extends State<ManageShift> {
               },
               icon: const Icon(Icons.person_off_rounded, size: 18),
               label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          if (isEditing && _selectedShift!.canPermanentlyDelete)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deleteUnusedShift();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.delete_forever_rounded, size: 18),
+              label: const Text('Delete Unused Shift'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
@@ -1071,7 +1167,7 @@ class _ManageShiftState extends State<ManageShift> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Schedule locked because this shift has ${_selectedShift!.assignmentHistoryCount} assignment record${_selectedShift!.assignmentHistoryCount == 1 ? '' : 's'}. Create a new shift and assignment period for schedule changes.',
+                    'Schedule locked because this shift has historical assignment, DTR, or attendance-policy usage. Create a new shift and assignment period for schedule changes.',
                     style: TextStyle(
                       fontSize: 12,
                       height: 1.4,
@@ -1305,6 +1401,20 @@ class _ManageShiftState extends State<ManageShift> {
                   elevation: 0,
                 ),
               ),
+              if (_selectedShift?.canPermanentlyDelete == true)
+                OutlinedButton.icon(
+                  onPressed: _deleteUnusedShift,
+                  icon: const Icon(Icons.delete_forever_rounded, size: 18),
+                  label: const Text('Delete Unused Shift'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
             ],
           ),
         ],

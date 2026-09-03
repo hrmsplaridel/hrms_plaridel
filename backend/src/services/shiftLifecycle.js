@@ -29,6 +29,27 @@ const SHIFT_DEACTIVATION_DEPENDENCIES = Object.freeze([
   },
 ]);
 
+const SHIFT_DELETE_DEPENDENCIES = Object.freeze([
+  {
+    key: 'assignments',
+    label: 'employee assignments',
+    table: 'assignments',
+    column: 'shift_id',
+  },
+  {
+    key: 'dtr_records',
+    label: 'DTR records',
+    table: 'dtr_daily_summary',
+    column: 'shift_id',
+  },
+  {
+    key: 'policy_periods',
+    label: 'attendance-policy periods',
+    table: 'policy_assignments',
+    column: 'shift_id',
+  },
+]);
+
 function normalizedTime(value) {
   if (value === null || value === undefined || value === '') return null;
   return String(value).trim().slice(0, 8);
@@ -125,6 +146,60 @@ function shiftDeactivationBlockers(counts = {}) {
     .filter((item) => item.count > 0);
 }
 
+function shiftDependencyCountsSql(shiftIdExpression = 'shifts.id') {
+  return SHIFT_DELETE_DEPENDENCIES
+    .map(({ key, table, column }) => (
+      `(SELECT COUNT(*)::int FROM ${table} dependency WHERE dependency.${column} = ${shiftIdExpression}) AS dependency_${key}`
+    ))
+    .join(',\n              ');
+}
+
+function shiftDependencyCountsFromRow(row = {}) {
+  return Object.fromEntries(
+    SHIFT_DELETE_DEPENDENCIES.map(({ key }) => [
+      key,
+      Number(row[`dependency_${key}`] || 0),
+    ])
+  );
+}
+
+function shiftDependencyBlockers(counts = {}) {
+  return SHIFT_DELETE_DEPENDENCIES
+    .map(({ key, label }) => ({ key, label, count: Number(counts[key] || 0) }))
+    .filter((item) => item.count > 0);
+}
+
+async function shiftDependencyCounts(db, shiftId) {
+  const result = await db.query(
+    `SELECT ${shiftDependencyCountsSql('$1::uuid')}`,
+    [shiftId]
+  );
+  return shiftDependencyCountsFromRow(result.rows[0]);
+}
+
+async function deleteUnusedShift(db, { shiftId, lockedShift = null }) {
+  const shift = lockedShift || await lockShiftForUpdate(db, shiftId);
+  if (!shift) {
+    throw new ShiftLifecycleError('Shift not found', 404);
+  }
+
+  const dependencies = await shiftDependencyCounts(db, shiftId);
+  const blockers = shiftDependencyBlockers(dependencies);
+  if (blockers.length > 0) {
+    const details = blockers
+      .map((item) => `${item.count} ${item.label}`)
+      .join(', ');
+    throw new ShiftLifecycleError(
+      `Shift cannot be permanently deleted because it is used by ${details}. Deactivate it after ending current and future periods instead.`,
+      409,
+      { blockers, dependencies }
+    );
+  }
+
+  await db.query('DELETE FROM shifts WHERE id = $1::uuid', [shiftId]);
+  return shift;
+}
+
 async function ensureShiftDeactivationAllowed(
   db,
   { shiftId, effectiveDate, lockedShift = null }
@@ -181,9 +256,11 @@ async function ensureShiftScheduleChangeAllowed(
 
 module.exports = {
   SHIFT_DEACTIVATION_DEPENDENCIES,
+  SHIFT_DELETE_DEPENDENCIES,
   SHIFT_SCHEDULE_FIELDS,
   ShiftLifecycleError,
   changedShiftScheduleFields,
+  deleteUnusedShift,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   lockShiftForUpdate,
@@ -191,4 +268,8 @@ module.exports = {
   shiftDeactivationBlockers,
   shiftDeactivationCountsFromRow,
   shiftDeactivationCountsSql,
+  shiftDependencyBlockers,
+  shiftDependencyCounts,
+  shiftDependencyCountsFromRow,
+  shiftDependencyCountsSql,
 };
