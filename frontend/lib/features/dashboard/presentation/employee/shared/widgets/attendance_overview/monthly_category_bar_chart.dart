@@ -35,6 +35,8 @@ class MonthlyCategoryBarChart extends StatelessWidget {
     final maxVal = data.map((e) => e.count).reduce((a, b) => a > b ? a : b);
     final allZero = maxVal == 0;
     final scaleMax = maxVal <= 0 ? 1 : maxVal;
+    final primaryText = AppTheme.dashTextPrimaryOf(context);
+    final secondaryText = AppTheme.dashTextSecondaryOf(context);
 
     return LayoutBuilder(
       builder: (context, c) {
@@ -52,7 +54,7 @@ class MonthlyCategoryBarChart extends StatelessWidget {
               fill = d.color.withValues(alpha: 0.22);
             } else if (d.count == 0) {
               barH = 4;
-              fill = Colors.black.withValues(alpha: 0.08);
+              fill = secondaryText.withValues(alpha: 0.22);
             } else {
               barH = (maxBarHeight * d.count / scaleMax).clamp(
                 12.0,
@@ -73,8 +75,8 @@ class MonthlyCategoryBarChart extends StatelessWidget {
                         fontSize: narrow ? 11.5 : 12.5,
                         fontWeight: FontWeight.w800,
                         color: allZero || d.count == 0
-                            ? Colors.black.withValues(alpha: 0.38)
-                            : AppTheme.textPrimary,
+                            ? secondaryText.withValues(alpha: 0.78)
+                            : primaryText,
                       ),
                     ),
                     SizedBox(height: padTop),
@@ -120,7 +122,7 @@ class MonthlyCategoryBarChart extends StatelessWidget {
                       style: TextStyle(
                         fontSize: narrow ? 9.5 : 10,
                         fontWeight: FontWeight.w600,
-                        color: Colors.black.withValues(alpha: 0.52),
+                        color: secondaryText,
                         height: 1.2,
                       ),
                     ),
@@ -138,8 +140,8 @@ class MonthlyCategoryBarChart extends StatelessWidget {
 List<MonthlyCategoryBarDatum> summaryToBarData(MonthlyAttendanceSummary s) {
   return [
     MonthlyCategoryBarDatum(
-      label: 'Present',
-      shortLabel: 'Present',
+      label: 'On time',
+      shortLabel: 'On time',
       count: s.present,
       color: AttendanceOverviewColors.present,
     ),

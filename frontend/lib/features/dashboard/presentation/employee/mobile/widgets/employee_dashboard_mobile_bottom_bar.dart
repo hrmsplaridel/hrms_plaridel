@@ -30,8 +30,8 @@ class EmployeeDashboardMobileBottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hairline = AppTheme.dashHairlineOf(context);
     final panel = AppTheme.dashPanelOf(context);
+    final canvas = AppTheme.dashCanvasOf(context);
     final hrmsUnread = context.select<NotificationProvider, int>(
       (p) => p.unreadCount,
     );
@@ -40,22 +40,26 @@ class EmployeeDashboardMobileBottomBar extends StatelessWidget {
     );
     final unread = hrmsUnread + docUnread;
 
-    return Material(
-      color: panel,
-      elevation: 8,
-      shadowColor: Colors.black.withValues(alpha: 0.12),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: hairline)),
-        ),
-        child: SafeArea(
-          top: false,
-          minimum: const EdgeInsets.only(bottom: 4),
-          child: SizedBox(
-            height: DashboardMobileBottomNav.barHeight,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Row(
+    return ColoredBox(
+      color: canvas,
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+        child: SizedBox(
+          height: DashboardMobileBottomNav.barHeight,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned.fill(
+                top: 16,
+                child: Material(
+                  color: panel,
+                  elevation: 6,
+                  shadowColor: Colors.black.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(28),
+                ),
+              ),
+              Row(
                 children: [
                   Expanded(
                     child: _BottomBarItem(
@@ -84,7 +88,7 @@ class EmployeeDashboardMobileBottomBar extends StatelessWidget {
                   ),
                 ],
               ),
-            ),
+            ],
           ),
         ),
       ),
@@ -110,47 +114,64 @@ class _BottomBarItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final inactive = AppTheme.dashTextSecondaryOf(context);
-    final fg = selected ? Colors.white : inactive;
+    final accent = AppTheme.primaryNavy;
+    final panel = AppTheme.dashPanelOf(context);
+    final canvas = AppTheme.dashCanvasOf(context);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            decoration: BoxDecoration(
-              color: selected ? AppTheme.primaryNavy : Colors.transparent,
-              borderRadius: BorderRadius.circular(12),
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: InkResponse(
+        onTap: onTap,
+        radius: 34,
+        containedInkWell: true,
+        highlightShape: BoxShape.rectangle,
+        child: Stack(
+          alignment: Alignment.topCenter,
+          children: [
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              top: selected ? 0 : 23,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                width: selected ? 46 : 26,
+                height: selected ? 46 : 26,
+                decoration: BoxDecoration(
+                  color: selected ? panel : Colors.transparent,
+                  shape: BoxShape.circle,
+                  border: selected ? Border.all(color: canvas, width: 5) : null,
+                ),
+                alignment: Alignment.center,
+                child: _IconWithBadge(
+                  icon: icon,
+                  color: selected ? accent : inactive,
+                  badgeCount: badgeCount,
+                ),
+              ),
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _IconWithBadge(icon: icon, color: fg, badgeCount: badgeCount),
-                const SizedBox(height: 2),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: fg,
-                      fontSize: 10.5,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      height: 1.0,
-                      letterSpacing: -0.1,
-                    ),
+            Positioned(
+              left: 4,
+              right: 4,
+              bottom: 7,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: selected ? accent : inactive,
+                    fontSize: 9.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    height: 1,
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );

@@ -31,13 +31,20 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
 
   double get _totalRequested => widget.request.workingDaysApplied ?? 0.0;
 
+  String _formatDays(double value) {
+    final fixed = value.toStringAsFixed(2);
+    if (fixed.endsWith('.00')) return fixed.substring(0, fixed.length - 3);
+    if (fixed.endsWith('0')) return fixed.substring(0, fixed.length - 1);
+    return fixed;
+  }
+
   @override
   void initState() {
     super.initState();
     _withPayController = TextEditingController(
-      text: _totalRequested.toStringAsFixed(1),
+      text: _formatDays(_totalRequested),
     );
-    _withoutPayController = TextEditingController(text: '0.0');
+    _withoutPayController = TextEditingController(text: '0');
     _remarksController = TextEditingController();
   }
 
@@ -59,7 +66,7 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
     if (sum > _totalRequested) {
       return 'Approved with pay + without pay must not exceed total requested ($_totalRequested days).';
     }
-    if (sum != _totalRequested) {
+    if ((sum - _totalRequested).abs() > 0.0001) {
       return 'Approved days must equal total requested ($_totalRequested days).';
     }
     return null;
@@ -87,7 +94,7 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Total Requested: ${_totalRequested.toStringAsFixed(1)} days',
+                  'Total Requested: ${_formatDays(_totalRequested)} days',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,

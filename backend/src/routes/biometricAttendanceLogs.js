@@ -63,6 +63,205 @@ function sortByLoggedAtAsc(items, getLoggedAt) {
   });
 }
 
+function parseExportDate(value) {
+  const normalized = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
+  const date = new Date(`${normalized}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== normalized) {
+    return null;
+  }
+  return date;
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function datCell(value) {
+  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+}
+
+/**
+ * GET /api/biometric-attendance-logs
+ * Paginated admin view of raw punches already synchronized into HRMS.
+ */
+router.get('/', protect, requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const search = String(req.query.search || '').trim();
+    const source = String(req.query.source || '').trim();
+    const dateFrom = String(req.query.date_from || '').trim();
+    const dateTo = String(req.query.date_to || '').trim();
+    const conditions = [];
+    const values = [];
+
+    const addValue = (value) => {
+      values.push(value);
+      return `$${values.length}`;
+    };
+    if (search) {
+      const p = addValue(`%${search}%`);
+      conditions.push(`(
+        l.biometric_user_id ILIKE ${p}
+        OR COALESCE(u.full_name, '') ILIKE ${p}
+        OR COALESCE(u.employee_number::text, '') ILIKE ${p}
+      )`);
+    }
+    if (source) {
+      const p = addValue(source);
+      conditions.push(`l.source_file_name = ${p}`);
+    }
+    if (dateFrom) {
+      const p = addValue(dateFrom);
+      conditions.push(`(l.logged_at AT TIME ZONE 'Asia/Manila')::date >= ${p}::date`);
+    }
+    if (dateTo) {
+      const p = addValue(dateTo);
+      conditions.push(`(l.logged_at AT TIME ZONE 'Asia/Manila')::date <= ${p}::date`);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM biometric_attendance_logs l
+       JOIN users u ON u.id = l.user_id
+       ${where}`,
+      values
+    );
+    const limitParam = addValue(limit);
+    const offsetParam = addValue(offset);
+    const rowsResult = await pool.query(
+      `SELECT l.id, l.user_id, l.biometric_user_id, l.logged_at,
+              l.verify_code, l.punch_code, l.work_code,
+              l.source_file_name, l.imported_at,
+              u.full_name AS employee_name,
+              u.employee_number
+       FROM biometric_attendance_logs l
+       JOIN users u ON u.id = l.user_id
+       ${where}
+       ORDER BY l.logged_at DESC, l.id DESC
+       LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      values
+    );
+
+    res.json({
+      total: countResult.rows[0]?.total || 0,
+      limit,
+      offset,
+      rows: rowsResult.rows,
+    });
+  } catch (err) {
+    console.error('[biometric-attendance-logs GET]', err);
+    res.status(500).json({ error: 'Failed to fetch biometric attendance logs' });
+  }
+});
+
+/**
+ * GET /api/biometric-attendance-logs/export
+ * Download raw biometric punches for a Manila calendar-date range.
+ * Query: date_from, date_to, format=dat|csv
+ */
+router.get('/export', protect, requireAdmin, async (req, res) => {
+  try {
+    const dateFromText = String(req.query.date_from || '').trim();
+    const dateToText = String(req.query.date_to || '').trim();
+    const dateFrom = parseExportDate(dateFromText);
+    const dateTo = parseExportDate(dateToText);
+    const format = String(req.query.format || 'dat').trim().toLowerCase();
+
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'A valid date_from and date_to are required' });
+    }
+    if (dateFrom > dateTo) {
+      return res.status(400).json({ error: 'date_from cannot be later than date_to' });
+    }
+    const inclusiveDays = Math.floor((dateTo - dateFrom) / 86400000) + 1;
+    if (inclusiveDays > 366) {
+      return res.status(400).json({ error: 'Attendance exports are limited to 366 days' });
+    }
+    if (!['dat', 'csv'].includes(format)) {
+      return res.status(400).json({ error: 'format must be dat or csv' });
+    }
+
+    const tz = process.env.HRMS_TIMEZONE || 'Asia/Manila';
+    const result = await pool.query(
+      `SELECT l.biometric_user_id,
+              to_char(l.logged_at AT TIME ZONE $3, 'YYYY-MM-DD HH24:MI:SS') AS logged_at_local,
+              l.verify_code, l.punch_code, l.work_code,
+              l.source_file_name,
+              u.employee_number,
+              u.full_name AS employee_name
+       FROM biometric_attendance_logs l
+       JOIN users u ON u.id = l.user_id
+       WHERE (l.logged_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+       ORDER BY l.logged_at ASC, l.id ASC
+       LIMIT 100001`,
+      [dateFromText, dateToText, tz]
+    );
+    if (result.rows.length > 100000) {
+      return res.status(413).json({
+        error: 'The selected range contains more than 100,000 punches. Select a shorter range.',
+      });
+    }
+
+    const compactFrom = dateFromText.replace(/-/g, '');
+    const compactTo = dateToText.replace(/-/g, '');
+    if (format === 'dat') {
+      const body = result.rows
+        .map((row) => [
+          row.biometric_user_id,
+          row.logged_at_local,
+          row.verify_code,
+          row.punch_code,
+          row.work_code,
+        ].map(datCell).join('\t'))
+        .join('\r\n');
+      const filename = `attlog_${compactFrom}_${compactTo}.dat`;
+      res.set({
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'X-Export-Row-Count': String(result.rows.length),
+        'Access-Control-Expose-Headers': 'Content-Disposition, X-Export-Row-Count',
+      });
+      return res.send(body ? `${body}\r\n` : '');
+    }
+
+    const header = [
+      'biometric_user_id',
+      'employee_number',
+      'employee_name',
+      'logged_at',
+      'verify_code',
+      'punch_code',
+      'work_code',
+      'source',
+    ];
+    const lines = result.rows.map((row) => [
+      row.biometric_user_id,
+      row.employee_number,
+      row.employee_name,
+      row.logged_at_local,
+      row.verify_code,
+      row.punch_code,
+      row.work_code,
+      row.source_file_name,
+    ].map(csvCell).join(','));
+    const filename = `biometric_attendance_${compactFrom}_${compactTo}.csv`;
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'X-Export-Row-Count': String(result.rows.length),
+      'Access-Control-Expose-Headers': 'Content-Disposition, X-Export-Row-Count',
+    });
+    return res.send(`\uFEFF${[header.join(','), ...lines].join('\r\n')}\r\n`);
+  } catch (err) {
+    console.error('[biometric-attendance-logs GET export]', err);
+    return res.status(500).json({ error: 'Failed to export biometric attendance logs' });
+  }
+});
+
 /**
  * GET /api/biometric-attendance-logs/devices
  * Fetch active biometric devices for the external sync service.

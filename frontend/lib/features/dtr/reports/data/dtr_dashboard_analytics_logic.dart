@@ -1,5 +1,6 @@
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_dashboard_analytics_models.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 
 /// Calendar day key YYYY-MM-DD (local).
 String _dayKey(DateTime d) =>
@@ -190,13 +191,7 @@ DtrDashboardAnalyticsSnapshot computeDashboardAnalytics({
 }
 
 String _formatTime(DateTime? dt) {
-  if (dt == null) return '—';
-  final local = dt.toLocal();
-  final h = local.hour;
-  final m = local.minute;
-  final isPm = h >= 12;
-  final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-  return '$h12:${m.toString().padLeft(2, '0')} ${isPm ? 'PM' : 'AM'}';
+  return formatOfficialPhilippineTime(dt);
 }
 
 String _sourceLabel(String? source) {

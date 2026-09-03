@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_notification_navigation.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
@@ -37,8 +36,7 @@ class DashboardNotificationBellButton extends StatefulWidget {
 
 class _DashboardNotificationBellButtonState
     extends State<DashboardNotificationBellButton> {
-  void _openViewAll(BuildContext menuContext) {
-    Navigator.of(menuContext).pop();
+  void _openNotifications() {
     if (widget.onViewAll != null) {
       widget.onViewAll!();
       return;
@@ -47,10 +45,6 @@ class _DashboardNotificationBellButtonState
       if (!mounted) return;
       widget.onNotificationTap?.call(result);
     });
-  }
-
-  void _onHrmsTap(NotificationTapResult? result) {
-    widget.onNotificationTap?.call(result);
   }
 
   @override
@@ -65,51 +59,11 @@ class _DashboardNotificationBellButtonState
       (p) => p.unreadNotificationsCount,
     );
     final unread = hrmsUnread + docUnread;
-    final isAdmin = dashboardDocuTrackerAdminFromAuth(context);
-
-    return PopupMenuButton<void>(
-      offset: const Offset(0, 48),
-      elevation: 16,
-      shadowColor: Colors.black.withValues(alpha: 0.14),
-      constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      padding: EdgeInsets.zero,
-      color: dark ? const Color(0xFF1F2937) : DocuTrackerTokens.surface,
-      onOpened: () {
-        context.read<NotificationProvider>().loadNotifications();
-        context.read<DocuTrackerProvider>().loadNotifications(
-          forceRefresh: true,
-        );
-      },
-      itemBuilder: (menuContext) => [
-        PopupMenuItem<void>(
-          enabled: false,
-          padding: EdgeInsets.zero,
-          child: DashboardNotificationsDropdownPanel(
-            isAdmin: isAdmin,
-            onViewAll: () => _openViewAll(menuContext),
-            onHrmsTap: (result) {
-              Navigator.of(menuContext).pop();
-              _onHrmsTap(result);
-            },
-            onDocuTrackerTap: (n) async {
-              Navigator.of(menuContext).pop();
-              if (!context.mounted) return;
-              await navigateFromDocuTrackerNotification(
-                context,
-                notification: n,
-                isAdmin: isAdmin,
-                afterNavigation: () => refreshDocuTrackerAfterNotificationNav(
-                  context,
-                  isAdmin: isAdmin,
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-      child: Tooltip(
-        message: 'Notifications',
+    return Tooltip(
+      message: 'Open notifications',
+      child: InkWell(
+        onTap: _openNotifications,
+        customBorder: const CircleBorder(),
         child: Stack(
           clipBehavior: Clip.none,
           children: [

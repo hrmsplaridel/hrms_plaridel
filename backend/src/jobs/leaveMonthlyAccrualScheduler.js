@@ -1,6 +1,8 @@
 /**
- * Schedules automatic monthly leave accrual (VL/SL) using the shared service.
- * Cron: 1st of every month at 00:00 Asia/Manila.
+ * Schedules completed-month leave processing using the shared services.
+ * Cron: 1st and 15th of every month at 00:00 Asia/Manila.
+ * Both runs target the month that just ended; they never advance the new month.
+ * The 1st is the initial posting and the 15th is a full reconciliation.
  *
  * Multi-instance: uses PostgreSQL pg_try_advisory_lock so only one worker runs per tick.
  * Disable with LEAVE_ACCRUAL_CRON_ENABLED=false (e.g. local dev or secondary instances).
@@ -13,14 +15,37 @@
 
 const cron = require('node-cron');
 const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
+const {
+  runMonthlyAttendanceDeductions,
+} = require('../services/leaveAttendanceDeduction');
+const {
+  DEFAULT_QUEUE_LIMIT,
+  listPendingReconciliationEmployees,
+  listPendingReconciliationMonths,
+  recordReconciliationFailure,
+} = require('../services/dtrMonthEndReconciliation');
+const {
+  clearBiometricAttendancePolicyCache,
+  processBiometricLogsToSummary,
+} = require('../services/biometricProcessing');
 const { broadcastAppEvent } = require('../websockets/appEvents');
 
 /** Stable key for pg_try_advisory_lock (must not collide with other app locks). */
 const ACCRUAL_CRON_ADVISORY_LOCK_KEY = 918273645;
 
-/** Cron: minute hour day-of-month month day-of-week — 00:00 on the 1st, every month. */
+/** Initial posting: 00:00 on the 1st, every month. */
 const CRON_EXPRESSION = '0 0 1 * *';
+/** Full reconciliation: 00:00 on the 15th, every month. */
+const RECONCILIATION_CRON_EXPRESSION = '0 0 15 * *';
 const CRON_TIMEZONE = 'Asia/Manila';
+const DEFAULT_STARTUP_RECOVERY_DELAY_MS = 15_000;
+const MONTH_END_SCHEDULES = Object.freeze([
+  Object.freeze({ runKind: 'initial', expression: CRON_EXPRESSION }),
+  Object.freeze({
+    runKind: 'reconciliation',
+    expression: RECONCILIATION_CRON_EXPRESSION,
+  }),
+]);
 
 /**
  * Enhancement 7 — How many missed months to catch up per cron tick.
@@ -36,16 +61,25 @@ const CRON_MAX_CATCH_UP_MONTHS = Math.max(
   )
 );
 
+function startupRecoveryDelayMs(value = process.env.LEAVE_ACCRUAL_STARTUP_RECOVERY_DELAY_MS) {
+  if (value == null || String(value).trim() === '') {
+    return DEFAULT_STARTUP_RECOVERY_DELAY_MS;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_STARTUP_RECOVERY_DELAY_MS;
+  return Math.max(0, Math.min(300_000, Math.trunc(parsed)));
+}
+
 /**
- * Current calendar year-month in Asia/Manila as YYYY-MM (for targetMonth).
+ * Calendar year-month in Asia/Manila as YYYY-MM.
  */
-function manilaYearMonthNow() {
+function manilaYearMonthNow(now = new Date()) {
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: CRON_TIMEZONE,
     year: 'numeric',
     month: '2-digit',
   });
-  const parts = fmt.formatToParts(new Date());
+  const parts = fmt.formatToParts(now);
   const y = parts.find((p) => p.type === 'year')?.value;
   const m = parts.find((p) => p.type === 'month')?.value;
   if (!y || !m) {
@@ -54,11 +88,59 @@ function manilaYearMonthNow() {
   return `${y}-${m}`;
 }
 
+/** Previous completed Manila calendar month as YYYY-MM. */
+function manilaCompletedYearMonthNow(now = new Date()) {
+  const current = manilaYearMonthNow(now);
+  const [year, month] = current.split('-').map((value) => parseInt(value, 10));
+  const completed = new Date(year, month - 2, 1);
+  return `${completed.getFullYear()}-${String(completed.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthDateRange(targetMonth) {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(targetMonth || ''));
+  if (!match) throw new Error(`Invalid reconciliation month: ${targetMonth}`);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return {
+    dateFrom: `${match[1]}-${match[2]}-01`,
+    dateTo: `${match[1]}-${match[2]}-${String(lastDay).padStart(2, '0')}`,
+  };
+}
+
+async function rebuildQueuedDtrMonth(
+  targetMonth,
+  employeeIds,
+  { dtrRebuilder, policyCacheInvalidator }
+) {
+  const employees = Array.isArray(employeeIds)
+    ? [...new Set(employeeIds.filter(Boolean).map(String))]
+    : [];
+  if (employees.length === 0) return { inserted: 0, updated: 0 };
+  const range = monthDateRange(targetMonth);
+  for (const employeeId of employees) {
+    policyCacheInvalidator({ employeeId, ...range });
+  }
+  return dtrRebuilder(employees, range.dateFrom, range.dateTo);
+}
+
 function monthlyAccrualAffectedUserIds(result = {}) {
+  const attendanceDetails = Array.isArray(result.attendanceDeductions?.details)
+    ? result.attendanceDeductions.details
+    : [];
   return [
     ...new Set(
-      (Array.isArray(result.details) ? result.details : [])
-        .filter((item) => item.action === 'applied' || item.created_balance_row === true)
+      [
+        ...(Array.isArray(result.details) ? result.details : []),
+        ...attendanceDetails,
+      ]
+        .filter(
+          (item) =>
+            item.action === 'applied' ||
+            item.action === 'adjusted' ||
+            item.created_balance_row === true ||
+            Number(item.balance_delta || 0) !== 0
+        )
         .map((item) => item.user_id)
         .filter(Boolean)
         .map((id) => String(id))
@@ -70,7 +152,16 @@ function broadcastMonthlyAccrualResult(result) {
   if (!result || result.dryRun) return 0;
   const rowsUpdated = Number(result.rowsUpdated || 0);
   const missingBalanceRowsCreated = Number(result.missingBalanceRowsCreated || 0);
-  if (rowsUpdated <= 0 && missingBalanceRowsCreated <= 0) return 0;
+  const attendanceRowsUpdated = Number(
+    result.attendanceDeductions?.rowsUpdated || 0
+  );
+  if (
+    rowsUpdated <= 0 &&
+    missingBalanceRowsCreated <= 0 &&
+    attendanceRowsUpdated <= 0
+  ) {
+    return 0;
+  }
 
   const affectedUserIds = monthlyAccrualAffectedUserIds(result);
   if (affectedUserIds.length === 0) return 0;
@@ -89,6 +180,11 @@ function broadcastMonthlyAccrualResult(result) {
     rowsUpdated: result.rowsUpdated,
     rowsSkipped: result.rowsSkipped,
     missingBalanceRowsCreated,
+    attendanceRowsUpdated,
+    attendanceDeductedDays:
+      result.attendanceDeductions?.totalDeductedDays || 0,
+    attendanceWithoutPayDays:
+      result.attendanceDeductions?.totalWithoutPayDays || 0,
     leaveTypes: result.leaveTypes,
     balanceChanged: true,
   });
@@ -121,6 +217,209 @@ async function withAccrualAdvisoryLock(pool, fn) {
 /**
  * @param {import('pg').Pool} pool
  */
+async function runScheduledCompletedMonthEnd(
+  pool,
+  {
+    runKind = 'initial',
+    now = new Date(),
+    accrualRunner = runLeaveMonthlyAccrual,
+    attendanceRunner = runMonthlyAttendanceDeductions,
+    resultBroadcaster = broadcastMonthlyAccrualResult,
+    queueLoader = listPendingReconciliationMonths,
+    queueEmployeeLoader = listPendingReconciliationEmployees,
+    queueFailureRecorder = recordReconciliationFailure,
+    dtrRebuilder = processBiometricLogsToSummary,
+    policyCacheInvalidator = clearBiometricAttendancePolicyCache,
+    queuedMonthLimit = Math.max(
+      1,
+      Math.min(
+        120,
+        parseInt(
+          process.env.LEAVE_DTR_RECONCILIATION_MAX_MONTHS || DEFAULT_QUEUE_LIMIT,
+          10
+        ) || DEFAULT_QUEUE_LIMIT
+      )
+    ),
+  } = {}
+) {
+  const startedAt = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
+  const ym = manilaCompletedYearMonthNow(now);
+  console.log(
+    `[leaveMonthlyAccrual][cron][${runKind}] tick start at=${startedAt} completedTargetMonth=${ym} tz=${CRON_TIMEZONE}`,
+  );
+
+  let completedResult = null;
+  const lockResult = await withAccrualAdvisoryLock(pool, async () => {
+    const accrualResult = await accrualRunner(pool, {
+      dryRun: false,
+      maxCatchUpMonths: CRON_MAX_CATCH_UP_MONTHS,
+      targetMonth: ym,
+    });
+    const regularQueueEmployees = await queueEmployeeLoader(pool, {
+      serviceMonth: `${ym}-01`,
+    });
+    await rebuildQueuedDtrMonth(ym, regularQueueEmployees, {
+      dtrRebuilder,
+      policyCacheInvalidator,
+    });
+    const attendanceDeductions = await attendanceRunner(pool, {
+      dryRun: false,
+      targetMonth: ym,
+    });
+    completedResult = {
+      ...accrualResult,
+      attendanceDeductions,
+      runKind,
+    };
+    console.log(
+      `[leaveMonthlyAccrual][cron][${runKind}] success`,
+      JSON.stringify({
+        at: new Date().toISOString(),
+        runKind,
+        targetYearMonth: completedResult.targetYearMonth,
+        rowsUpdated: completedResult.rowsUpdated,
+        rowsSkipped: completedResult.rowsSkipped,
+        dryRun: completedResult.dryRun,
+        rate: completedResult.rate,
+        leaveTypes: completedResult.leaveTypes,
+        attendanceRowsUpdated: attendanceDeductions.rowsUpdated,
+        attendanceDeductedDays: attendanceDeductions.totalDeductedDays,
+        attendanceWithoutPayDays: attendanceDeductions.totalWithoutPayDays,
+      }),
+    );
+    const sent = resultBroadcaster(completedResult);
+    if (sent > 0) {
+      console.log(
+        `[leaveMonthlyAccrual][cron][${runKind}] broadcast leave_updated monthly_accrual clients=${sent}`,
+      );
+    }
+
+    const queuedReconciliations = [];
+    const queuedMonths = await queueLoader(pool, {
+      excludeServiceMonth: `${ym}-01`,
+      limit: queuedMonthLimit,
+    });
+    for (const queued of queuedMonths) {
+      const targetMonth = queued.targetMonth || String(queued.serviceMonth).slice(0, 7);
+      try {
+        await rebuildQueuedDtrMonth(targetMonth, queued.employeeIds, {
+          dtrRebuilder,
+          policyCacheInvalidator,
+        });
+        const queuedAttendance = await attendanceRunner(pool, {
+          dryRun: false,
+          targetMonth,
+        });
+        const queuedResult = {
+          targetYearMonth: targetMonth,
+          dryRun: false,
+          rowsUpdated: 0,
+          rowsSkipped: 0,
+          missingBalanceRowsCreated: 0,
+          leaveTypes: [],
+          details: [],
+          attendanceDeductions: queuedAttendance,
+          runKind: 'queued_reconciliation',
+        };
+        resultBroadcaster(queuedResult);
+        queuedReconciliations.push({
+          targetYearMonth: targetMonth,
+          employeeCount: queued.employeeCount || 0,
+          status: 'reconciled',
+          rowsUpdated: queuedAttendance.rowsUpdated || 0,
+        });
+      } catch (error) {
+        try {
+          await queueFailureRecorder(pool, {
+            serviceMonth: queued.serviceMonth,
+            cutoff: queued.cutoff,
+            error,
+          });
+        } catch (recordError) {
+          console.error(
+            `[leaveMonthlyAccrual][cron][${runKind}] failed to record queued reconciliation error month=${targetMonth}`,
+            recordError && recordError.stack ? recordError.stack : recordError
+          );
+        }
+        queuedReconciliations.push({
+          targetYearMonth: targetMonth,
+          employeeCount: queued.employeeCount || 0,
+          status: 'failed',
+          error: error?.message || String(error),
+        });
+        console.error(
+          `[leaveMonthlyAccrual][cron][${runKind}] queued reconciliation failed month=${targetMonth}`,
+          error && error.stack ? error.stack : error
+        );
+      }
+    }
+    completedResult.queuedReconciliations = queuedReconciliations;
+  });
+
+  if (lockResult && !lockResult.ran) {
+    console.log(
+      `[leaveMonthlyAccrual][cron][${runKind}] skipped (${lockResult.reason}); another instance may be running`,
+    );
+  }
+  return {
+    ...lockResult,
+    runKind,
+    targetYearMonth: ym,
+    result: completedResult,
+  };
+}
+
+/**
+ * Reconciles the latest completed month shortly after the API starts. This
+ * recovers a cron tick missed while the backend was offline without delaying
+ * server startup. The shared runner remains protected by the PostgreSQL
+ * advisory lock and its month-level idempotency safeguards.
+ */
+function scheduleLeaveMonthlyAccrualStartupRecovery(
+  pool,
+  {
+    enabled = process.env.LEAVE_ACCRUAL_STARTUP_RECOVERY_ENABLED !== 'false',
+    delayMs = startupRecoveryDelayMs(),
+    timerScheduler = setTimeout,
+    recoveryRunner = runScheduledCompletedMonthEnd,
+  } = {}
+) {
+  if (!enabled) {
+    console.log(
+      '[leaveMonthlyAccrual][startup_recovery] disabled ' +
+        '(LEAVE_ACCRUAL_STARTUP_RECOVERY_ENABLED=false)',
+    );
+    return null;
+  }
+
+  const safeDelayMs = startupRecoveryDelayMs(delayMs);
+  const timer = timerScheduler(async () => {
+    try {
+      const recovery = await recoveryRunner(pool, {
+        runKind: 'startup_recovery',
+      });
+      console.log(
+        '[leaveMonthlyAccrual][startup_recovery] completed',
+        JSON.stringify({
+          ran: recovery?.ran === true,
+          reason: recovery?.reason || null,
+          targetYearMonth: recovery?.targetYearMonth || null,
+        }),
+      );
+    } catch (err) {
+      console.error(
+        '[leaveMonthlyAccrual][startup_recovery] error',
+        err && err.stack ? err.stack : err,
+      );
+    }
+  }, safeDelayMs);
+  if (timer && typeof timer.unref === 'function') timer.unref();
+  console.log(
+    `[leaveMonthlyAccrual][startup_recovery] scheduled delayMs=${safeDelayMs}`,
+  );
+  return timer;
+}
+
 function scheduleLeaveMonthlyAccrualCron(pool) {
   if (process.env.LEAVE_ACCRUAL_CRON_ENABLED === 'false') {
     console.log(
@@ -129,79 +428,50 @@ function scheduleLeaveMonthlyAccrualCron(pool) {
     return null;
   }
 
-  const task = cron.schedule(
-    CRON_EXPRESSION,
-    async () => {
-      const startedAt = new Date().toISOString();
-      let ym;
-      try {
-        ym = manilaYearMonthNow();
-      } catch (e) {
-        console.error('[leaveMonthlyAccrual][cron] failed to resolve Manila YYYY-MM', e);
-        return;
-      }
-
-      console.log(
-        `[leaveMonthlyAccrual][cron] tick start at=${startedAt} targetMonth=${ym} tz=${CRON_TIMEZONE}`,
-      );
-
-      try {
-        const lockResult = await withAccrualAdvisoryLock(pool, async () => {
-          const result = await runLeaveMonthlyAccrual(pool, {
-            dryRun: false,
-            maxCatchUpMonths: CRON_MAX_CATCH_UP_MONTHS,
-            targetMonth: ym,
+  const tasks = {};
+  for (const schedule of MONTH_END_SCHEDULES) {
+    tasks[schedule.runKind] = cron.schedule(
+      schedule.expression,
+      async () => {
+        try {
+          await runScheduledCompletedMonthEnd(pool, {
+            runKind: schedule.runKind,
           });
-          console.log(
-            '[leaveMonthlyAccrual][cron] success',
-            JSON.stringify({
-              at: new Date().toISOString(),
-              targetYearMonth: result.targetYearMonth,
-              rowsUpdated: result.rowsUpdated,
-              rowsSkipped: result.rowsSkipped,
-              dryRun: result.dryRun,
-              rate: result.rate,
-              leaveTypes: result.leaveTypes,
-            }),
-          );
-          const sent = broadcastMonthlyAccrualResult(result);
-          if (sent > 0) {
-            console.log(
-              `[leaveMonthlyAccrual][cron] broadcast leave_updated monthly_accrual clients=${sent}`,
-            );
-          }
-        });
-
-        if (lockResult && !lockResult.ran) {
-          console.log(
-            `[leaveMonthlyAccrual][cron] skipped (${lockResult.reason}); another instance may be running`,
+        } catch (err) {
+          console.error(
+            `[leaveMonthlyAccrual][cron][${schedule.runKind}] error`,
+            err && err.stack ? err.stack : err,
           );
         }
-      } catch (err) {
-        console.error(
-          '[leaveMonthlyAccrual][cron] error',
-          err && err.stack ? err.stack : err,
-        );
-      }
-    },
-    {
-      timezone: CRON_TIMEZONE,
-    },
-  );
-
-  console.log(
-    `[leaveMonthlyAccrual][cron] scheduled expr="${CRON_EXPRESSION}" timezone=${CRON_TIMEZONE} (1st of month 00:00 Manila) maxCatchUpMonths=${CRON_MAX_CATCH_UP_MONTHS}`,
-  );
-  return task;
+      },
+      {
+        timezone: CRON_TIMEZONE,
+      },
+    );
+    console.log(
+      `[leaveMonthlyAccrual][cron] scheduled kind=${schedule.runKind} expr="${schedule.expression}" timezone=${CRON_TIMEZONE} maxCatchUpMonths=${CRON_MAX_CATCH_UP_MONTHS}`,
+    );
+  }
+  tasks.startupRecovery = scheduleLeaveMonthlyAccrualStartupRecovery(pool);
+  return tasks;
 }
 
 module.exports = {
   scheduleLeaveMonthlyAccrualCron,
   /** @internal for tests */
   manilaYearMonthNow,
+  manilaCompletedYearMonthNow,
+  monthDateRange,
+  rebuildQueuedDtrMonth,
+  runScheduledCompletedMonthEnd,
+  scheduleLeaveMonthlyAccrualStartupRecovery,
   monthlyAccrualAffectedUserIds,
   broadcastMonthlyAccrualResult,
   CRON_EXPRESSION,
+  RECONCILIATION_CRON_EXPRESSION,
+  MONTH_END_SCHEDULES,
   CRON_TIMEZONE,
   CRON_MAX_CATCH_UP_MONTHS,
+  DEFAULT_STARTUP_RECOVERY_DELAY_MS,
+  startupRecoveryDelayMs,
 };

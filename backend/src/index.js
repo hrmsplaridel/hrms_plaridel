@@ -57,8 +57,11 @@ const {
 const { isUniSmsConfigured } = require('./utils/uniSmsSms');
 
 const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
+const { validateEmployeeSchema } = require('./services/employeeSchemaValidation');
+const { validateAssignmentSchema } = require('./services/assignmentSchemaValidation');
 
 const app = express();
+app.disable('x-powered-by');
 
 // Behind nginx/Caddy on Kamatera (HTTPS) so req.ip / rate limits see real client IP
 if (process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true') {
@@ -67,6 +70,18 @@ if (process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true') {
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0'; // 0.0.0.0 = accessible from LAN
+
+function assertProductionSecret(name, value, otherValue) {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (!value || value.length < 32 || /change-in-production|your-secret/i.test(value)) {
+    throw new Error(`${name} must be a non-placeholder secret of at least 32 characters`);
+  }
+  if (otherValue && value === otherValue) {
+    throw new Error('JWT_SECRET and JWT_REFRESH_SECRET must be different');
+  }
+}
+assertProductionSecret('JWT_SECRET', process.env.JWT_SECRET, process.env.JWT_REFRESH_SECRET);
+assertProductionSecret('JWT_REFRESH_SECRET', process.env.JWT_REFRESH_SECRET);
 
 if (!process.env.JWT_SECRET) {
   console.warn('[warn] JWT_SECRET not set; auth routes will fail. Add JWT_SECRET to .env');
@@ -82,8 +97,18 @@ const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).fi
 if (corsOrigins && corsOrigins.length > 0) {
   app.use(cors({ origin: corsOrigins }));
 } else {
-  app.use(cors());
+  // Fail closed. Same-origin web requests still work, and native Flutter clients
+  // are not governed by CORS. Cross-origin web deployments must be allowlisted.
+  app.use(cors({ origin: false }));
 }
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  next();
+});
 app.use(express.json({ limit: '15mb' }));
 
 // --- Routes ---
@@ -103,7 +128,7 @@ app.get('/health/db', async (_req, res) => {
     console.error('[health/db]', err.message);
     res.status(503).json({
       ok: false,
-      error: err.message,
+      error: 'Database health check failed',
       message: 'PostgreSQL connection failed',
     });
   }
@@ -148,7 +173,13 @@ app.use('/api/locator-slips', locatorSlipsRoutes);
 app.use('/api/contact', contactPublicRoutes);
 
 // --- Start server ---
-const server = app.listen(PORT, HOST, () => {
+async function startServer() {
+  await validateEmployeeSchema(pool);
+  console.log('[startup] Employee database schema validated.');
+  await validateAssignmentSchema(pool);
+  console.log('[startup] Assignment database schema validated.');
+
+  const server = app.listen(PORT, HOST, () => {
   console.log(`HRMS API listening on http://${HOST}:${PORT}`);
   console.log('  GET  /health           - app health');
   console.log('  GET  /health/db        - database health');
@@ -250,4 +281,12 @@ server.on('upgrade', (req, socket, head) => {
   targetWss.handleUpgrade(req, socket, head, (ws) => {
     targetWss.emit('connection', ws, req);
   });
+});
+
+  return server;
+}
+
+startServer().catch((error) => {
+  console.error(`[startup] ${error.message}`);
+  process.exit(1);
 });

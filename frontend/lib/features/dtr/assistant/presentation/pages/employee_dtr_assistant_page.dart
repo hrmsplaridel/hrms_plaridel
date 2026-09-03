@@ -6,33 +6,44 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_api.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_leave_prefill.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_privacy_consent_storage.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_session_storage.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/dtr_assistant_turn_guard.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_input_bar.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_message_bubble.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_prompt_chips.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
-import 'package:hrms_plaridel/features/dtr/dtr_main.dart';
-import 'package:hrms_plaridel/features/dtr/dtr_routes.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
-import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_main.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/responsive_leave_form_host.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_slip_form_initial_values.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/employee_locator_slip_screen.dart'
     as locator;
+import 'package:hrms_plaridel/features/dtr/reports/presentation/pages/dtr_reports.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 class EmployeeDtrAssistantPage extends StatefulWidget {
-  const EmployeeDtrAssistantPage({super.key, DtrAssistantApi? api})
-    : _api = api;
+  const EmployeeDtrAssistantPage({
+    super.key,
+    DtrAssistantApi? api,
+    this.floating = false,
+    this.onMinimize,
+    this.onClose,
+    this.onExpand,
+  }) : _api = api;
 
   final DtrAssistantApi? _api;
+  final bool floating;
+  final FutureOr<void> Function()? onMinimize;
+  final FutureOr<void> Function()? onClose;
+  final FutureOr<void> Function()? onExpand;
 
   @override
   State<EmployeeDtrAssistantPage> createState() =>
@@ -47,7 +58,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   final _scrollController = ScrollController();
   final _messages = <DtrAssistantMessage>[];
   final _feedbackByMessageId = <String, String>{};
-  final _promptByMessageId = <String, String>{};
   final _autoExecutedActionKeys = <String>{};
   List<DtrAssistantModelProfile> _modelProfiles = const [
     DtrAssistantModelProfile(
@@ -61,10 +71,13 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     ),
   ];
   String _selectedModelProfile = 'tools_ollama';
+  String? _selectedExternalConsentVersion;
   bool _sending = false;
   bool _resettingChat = false;
   bool _sessionLoaded = false;
+  String _conversationId = DtrAssistantSessionStorage.createConversationId();
   final _inputController = TextEditingController();
+  final _turnGuard = DtrAssistantTurnGuard();
   CancelToken? _cancelToken;
 
   @override
@@ -97,9 +110,15 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       return;
     }
 
-    final restored = await DtrAssistantSessionStorage.loadMessages(userId);
+    final conversationId =
+        await DtrAssistantSessionStorage.loadOrCreateConversationId(userId);
+    final restored = await DtrAssistantSessionStorage.loadMessages(
+      userId,
+      conversationId,
+    );
     if (!mounted) return;
     setState(() {
+      _conversationId = conversationId;
       _messages
         ..clear()
         ..addAll(restored.isEmpty ? [_welcomeMessage()] : restored);
@@ -114,20 +133,34 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     if (!mounted || !_sessionLoaded) return;
     final userId = context.read<AuthProvider>().user?.id;
     if (userId == null || userId.isEmpty) return;
-    await DtrAssistantSessionStorage.saveMessages(userId, _messages);
+    await DtrAssistantSessionStorage.saveMessages(
+      userId,
+      _conversationId,
+      _messages,
+    );
   }
 
   Future<void> _startNewChat() async {
     if (_sending || _resettingChat) return;
     final userId = context.read<AuthProvider>().user?.id;
+    final previousConversationId = _conversationId;
     setState(() => _resettingChat = true);
     try {
-      await _api.resetChat();
+      await _api.resetChat(conversationId: previousConversationId);
     } catch (_) {
       // Local reset still helps even if the backend reset fails.
     }
     if (userId != null && userId.isNotEmpty) {
-      await DtrAssistantSessionStorage.clearMessages(userId);
+      await DtrAssistantSessionStorage.clearAllForUser(userId);
+      final nextConversationId =
+          DtrAssistantSessionStorage.createConversationId();
+      await DtrAssistantSessionStorage.saveConversationId(
+        userId,
+        nextConversationId,
+      );
+      _conversationId = nextConversationId;
+    } else {
+      _conversationId = DtrAssistantSessionStorage.createConversationId();
     }
     if (!mounted) return;
     setState(() {
@@ -135,11 +168,38 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ..clear()
         ..add(_welcomeMessage());
       _feedbackByMessageId.clear();
-      _promptByMessageId.clear();
       _autoExecutedActionKeys.clear();
       _resettingChat = false;
     });
     _scrollToBottom();
+  }
+
+  Future<void> _confirmClearChatHistory() async {
+    if (_sending || _resettingChat) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear chat history?'),
+        content: const Text(
+          'This permanently removes your saved HRMS Assistant conversation '
+          'from this device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep history'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.delete_outline_rounded),
+            label: const Text('Clear history'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _startNewChat();
+    }
   }
 
   @override
@@ -175,39 +235,140 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   }
 
   void _stop() {
+    if (!_sending) return;
+    _turnGuard.invalidate();
     _cancelToken?.cancel('Cancelled by user');
-    setState(() => _sending = false);
+    _cancelToken = null;
+    if (mounted) setState(() => _sending = false);
+  }
+
+  Future<void> _handleModelChanged(String id) async {
+    final profile = _modelProfiles.cast<DtrAssistantModelProfile?>().firstWhere(
+      (item) => item?.id == id,
+      orElse: () => null,
+    );
+    if (profile == null || !profile.available) return;
+
+    if (!profile.external || !profile.requiresConsent) {
+      if (!mounted) return;
+      setState(() {
+        _selectedModelProfile = profile.id;
+        _selectedExternalConsentVersion = null;
+      });
+      return;
+    }
+
+    final userId = context.read<AuthProvider>().user?.id ?? '';
+    final consentVersion = profile.consentVersion?.trim() ?? '';
+    final alreadyConsented = await DtrAssistantPrivacyConsentStorage.hasConsent(
+      userId: userId,
+      provider: profile.provider,
+      version: consentVersion,
+    );
+    if (!mounted) return;
+
+    var accepted = alreadyConsented;
+    if (!accepted) {
+      accepted = await _showExternalAiConsentDialog(profile);
+      if (!accepted || !mounted) return;
+      await DtrAssistantPrivacyConsentStorage.grantConsent(
+        userId: userId,
+        provider: profile.provider,
+        version: consentVersion,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _selectedModelProfile = profile.id;
+      _selectedExternalConsentVersion = consentVersion;
+    });
+  }
+
+  Future<bool> _showExternalAiConsentDialog(
+    DtrAssistantModelProfile profile,
+  ) async {
+    final disclosure =
+        profile.dataDisclosure ??
+        'Your question and the minimum HRMS records needed to answer it will be processed by ${profile.provider}.';
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        key: const ValueKey('dtr-assistant-external-ai-consent-dialog'),
+        icon: const Icon(Icons.cloud_outlined),
+        title: Text('Use ${profile.label}?'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Text(
+            '$disclosure\n\nThe local Qwen model remains available if you do not agree.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            key: const ValueKey('dtr-assistant-external-ai-consent-accept'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.cloud_done_outlined),
+            label: const Text('Agree and use cloud AI'),
+          ),
+        ],
+      ),
+    );
+    return accepted == true;
+  }
+
+  Future<void> _runPresentationAction(FutureOr<void> Function()? action) async {
+    if (action == null || _sending || _resettingChat) return;
+    await _persistSession();
+    if (!mounted) return;
+    await action();
   }
 
   Future<void> _send(String text, {String? intent}) async {
     if (_sending) return;
+    final selectedProfile = _modelProfiles.firstWhere(
+      (item) => item.id == _selectedModelProfile,
+      orElse: () => _modelProfiles.first,
+    );
+    if (selectedProfile.external &&
+        selectedProfile.requiresConsent &&
+        _selectedExternalConsentVersion != selectedProfile.consentVersion) {
+      await _handleModelChanged(selectedProfile.id);
+      if (!mounted ||
+          _selectedExternalConsentVersion != selectedProfile.consentVersion) {
+        return;
+      }
+    }
     setState(() {
       _messages.add(DtrAssistantMessage.user(text));
       _sending = true;
     });
+    final turnGeneration = _turnGuard.begin();
     _scrollToBottom();
     unawaited(_persistSession());
-    _cancelToken = CancelToken();
+    final cancelToken = CancelToken();
+    _cancelToken = cancelToken;
 
     try {
       final reply = await _api.sendMessage(
         text,
         intent: intent,
         modelProfile: _selectedModelProfile,
-        cancelToken: _cancelToken,
+        conversationId: _conversationId,
+        externalConsentVersion: _selectedExternalConsentVersion,
+        cancelToken: cancelToken,
       );
-      if (!mounted) return;
+      if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       setState(() {
         _messages.add(reply);
-        final replyId = reply.id;
-        if (replyId != null && replyId.isNotEmpty) {
-          _promptByMessageId[replyId] = text;
-        }
       });
       await _persistSession();
       _runAutoAction(reply);
     } on DioException catch (e) {
-      if (!mounted) return;
+      if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       if (CancelToken.isCancel(e)) return;
       setState(
         () => _messages.add(
@@ -219,7 +380,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ),
       );
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       setState(
         () => _messages.add(
           DtrAssistantMessage(
@@ -230,7 +391,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ),
       );
     } finally {
-      if (mounted) {
+      if (mounted && _turnGuard.isCurrent(turnGeneration)) {
+        if (identical(_cancelToken, cancelToken)) _cancelToken = null;
         setState(() => _sending = false);
         await _persistSession();
         _scrollToBottom();
@@ -263,8 +425,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       await _api.submitFeedback(
         message: message,
         rating: rating,
-        modelProfile: _selectedModelProfile,
-        promptPreview: _promptByMessageId[id],
         comment: comment,
       );
       if (!mounted) return;
@@ -400,10 +560,41 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       ], subject: attachment.filename);
     } catch (e) {
       if (!mounted) return;
+      final unavailable = e is DioException && e.response?.statusCode == 404;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not prepare ${attachment.filename}: $e')),
+        SnackBar(
+          content: Text(
+            unavailable
+                ? 'This export is no longer available.'
+                : 'Could not prepare ${attachment.filename}: $e',
+          ),
+          action: unavailable
+              ? SnackBarAction(
+                  label: 'Regenerate',
+                  onPressed: () => unawaited(
+                    _send(
+                      _regenerateExportPrompt(attachment),
+                      intent: 'dtr_export_guidance',
+                    ),
+                  ),
+                )
+              : null,
+        ),
       );
     }
+  }
+
+  String _regenerateExportPrompt(DtrAssistantAttachment attachment) {
+    final match = RegExp(
+      r'dtr_export_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.',
+    ).firstMatch(attachment.filename);
+    if (match == null) return 'Generate my DTR export again.';
+    final startDate = match.group(1);
+    final endDate = match.group(2);
+    if (startDate == endDate) {
+      return 'Generate my DTR export for $startDate.';
+    }
+    return 'Generate my DTR export from $startDate to $endDate.';
   }
 
   Future<void> _executeAction(
@@ -412,7 +603,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   ) async {
     switch (action.type) {
       case 'send_prompt':
-        final prompt = action.prompt?.trim();
+        final prompt = _resolvedActionPrompt(action);
         if (prompt == null || prompt.isEmpty) return;
         await _send(prompt, intent: action.intent);
         return;
@@ -460,11 +651,25 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         return;
       case 'open_dtr_reports':
         _openStandalonePage(
-          title: 'DTR Reports',
-          child: const DtrMain(section: DtrSection.reports),
+          title: 'My DTR Report',
+          child: const DtrReports(selfService: true),
         );
         return;
     }
+  }
+
+  String? _resolvedActionPrompt(DtrAssistantAction action) {
+    if (action.id == 'generate_dtr_export') {
+      final startDate = action.payload['startDate']?.toString().trim();
+      final endDate = action.payload['endDate']?.toString().trim();
+      if (startDate != null && startDate.isNotEmpty) {
+        if (endDate == null || endDate.isEmpty || endDate == startDate) {
+          return 'Generate my DTR export for $startDate.';
+        }
+        return 'Generate my DTR export from $startDate to $endDate.';
+      }
+    }
+    return action.prompt?.trim();
   }
 
   void _runAutoAction(DtrAssistantMessage message) {
@@ -531,7 +736,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       );
       return;
     }
-    final initialRequest = _initialLeaveRequestFromAction(action, userId);
+    final initialRequest = leaveRequestFromAssistantAction(action, userId);
     final result = await openResponsiveLeaveFormHost<String?>(
       context: context,
       builder: (_) => LeaveRequestFormScreen(
@@ -573,85 +778,51 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     showLeaveFormSuccessSnackBar(context, result);
   }
 
-  LeaveRequest _initialLeaveRequestFromAction(
-    DtrAssistantAction action,
-    String userId,
-  ) {
-    final payload = action.payload;
-    final leaveType = _leaveTypeFromPayload(payload['leaveType']?.toString());
-    final startDate = _dateFromPayload(payload['startDate']);
-    final endDate = _dateFromPayload(payload['endDate']) ?? startDate;
-    final reason = payload['reason']?.toString().trim();
-    final locationDetails = payload['locationDetails']?.toString().trim();
-    final locationOption = _locationOptionFromPayload(
-      payload['locationOption']?.toString(),
-    );
-    return LeaveRequest(
-      userId: userId,
-      leaveType: leaveType,
-      leaveTypeName: leaveType.value,
-      leaveTypeDisplayName: leaveType.displayName,
-      startDate: startDate,
-      endDate: endDate,
-      workingDaysApplied: _calendarDayEstimate(startDate, endDate),
-      reason: reason != null && reason.isNotEmpty ? reason : null,
-      locationOption: locationOption,
-      locationDetails:
-          locationDetails != null && locationDetails.isNotEmpty
-              ? locationDetails
-              : null,
-      status: LeaveRequestStatus.draft,
-    );
-  }
-
-  LeaveLocationOption? _locationOptionFromPayload(String? value) {
-    if (value == null || value.trim().isEmpty) return null;
-    final normalized = value.trim().toLowerCase();
-    if (normalized == 'abroad') return LeaveLocationOption.abroad;
-    if (normalized == 'within_philippines' ||
-        normalized == 'withinphilippines') {
-      return LeaveLocationOption.withinPhilippines;
-    }
-    return leaveLocationOptionFromString(value);
-  }
-
-  LeaveType _leaveTypeFromPayload(String? value) {
-    final normalized = (value ?? '').toLowerCase();
-    if (normalized.contains('sick')) return LeaveType.sickLeave;
-    if (normalized.contains('vacation')) return LeaveType.vacationLeave;
-    return LeaveType.vacationLeave;
-  }
-
-  DateTime? _dateFromPayload(Object? value) {
-    if (value == null) return null;
-    return DateTime.tryParse(value.toString());
-  }
-
-  double? _calendarDayEstimate(DateTime? start, DateTime? end) {
-    if (start == null || end == null) return null;
-    final startOnly = DateTime(start.year, start.month, start.day);
-    final endOnly = DateTime(end.year, end.month, end.day);
-    if (endOnly.isBefore(startOnly)) return null;
-    return endOnly.difference(startOnly).inDays + 1.0;
-  }
-
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
+    final floating = widget.floating;
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
+        automaticallyImplyLeading: !floating,
         title: const Text('HRMS Assistant'),
         backgroundColor: AppTheme.dashPanelOf(context),
         foregroundColor: AppTheme.dashTextPrimaryOf(context),
         elevation: dark ? 0 : 1,
         actions: [
+          if (!floating && widget.onMinimize != null)
+            IconButton(
+              tooltip: 'Minimize to floating assistant',
+              onPressed: (_sending || _resettingChat)
+                  ? null
+                  : () => _runPresentationAction(widget.onMinimize),
+              icon: const Icon(Icons.picture_in_picture_alt_rounded),
+            ),
           IconButton(
-            tooltip: 'New chat',
-            onPressed: (_sending || _resettingChat) ? null : _startNewChat,
-            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Clear chat history',
+            onPressed: (_sending || _resettingChat)
+                ? null
+                : _confirmClearChatHistory,
+            icon: const Icon(Icons.delete_outline_rounded),
           ),
+          if (floating && widget.onExpand != null)
+            IconButton(
+              tooltip: 'Open full assistant',
+              onPressed: (_sending || _resettingChat)
+                  ? null
+                  : () => _runPresentationAction(widget.onExpand),
+              icon: const Icon(Icons.open_in_full_rounded),
+            ),
+          if (floating && widget.onClose != null)
+            IconButton(
+              tooltip: 'Close assistant',
+              onPressed: (_sending || _resettingChat)
+                  ? null
+                  : () => _runPresentationAction(widget.onClose),
+              icon: const Icon(Icons.close_rounded),
+            ),
         ],
       ),
       body: SafeArea(
@@ -660,10 +831,17 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
             Expanded(
               child: ListView(
                 controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                padding: EdgeInsets.fromLTRB(
+                  floating ? 12 : 16,
+                  floating ? 12 : 16,
+                  floating ? 12 : 16,
+                  12,
+                ),
                 children: [
-                  _AssistantHeader(sending: _sending),
-                  const SizedBox(height: 16),
+                  if (!floating) ...[
+                    _AssistantHeader(sending: _sending),
+                    const SizedBox(height: 16),
+                  ],
                   DtrAssistantPromptChips(
                     enabled: !_sending,
                     onSelected: (prompt) =>
@@ -698,7 +876,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
                                           _feedbackByMessageId.remove(
                                             removedId,
                                           );
-                                          _promptByMessageId.remove(removedId);
                                         }
                                       }
                                       _messages.removeRange(
@@ -738,8 +915,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
               sending: _sending,
               modelProfiles: _modelProfiles,
               selectedModelProfile: _selectedModelProfile,
-              onModelChanged: (id) =>
-                  setState(() => _selectedModelProfile = id),
+              onModelChanged: (id) => unawaited(_handleModelChanged(id)),
               onSend: _send,
               onStop: _stop,
               controller: _inputController,
@@ -861,10 +1037,7 @@ class _AssistantActionChips extends StatelessWidget {
 }
 
 class _LocatorActionPage extends StatefulWidget {
-  const _LocatorActionPage({
-    required this.openForm,
-    this.initialValues,
-  });
+  const _LocatorActionPage({required this.openForm, this.initialValues});
 
   final bool openForm;
   final LocatorSlipFormInitialValues? initialValues;

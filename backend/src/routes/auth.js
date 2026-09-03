@@ -16,6 +16,7 @@ const {
 const {
   buildDeviceInfoPayload,
   enrichSessionRow,
+  isMobileClient,
 } = require('../utils/sessionDevice');
 const {
   normalizePhilippinesMobileNumber,
@@ -133,21 +134,6 @@ async function ensurePasswordResetOtpTable() {
   passwordResetOtpTableReady = true;
 }
 
-async function ensurePersonalInfoColumns() {
-  // Safe, idempotent additions so older DBs don't break /auth/me + PATCH /auth/me.
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS middle_name TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS suffix TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS sex TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_number TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS civil_status TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS nationality TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`);
-}
-
 function hashRefreshToken(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
 }
@@ -217,12 +203,15 @@ async function issueTokensForUser(user, req, db = pool) {
  */
 router.post('/register', authRegisterLimiter, async (req, res) => {
   try {
-    const { email, password, fullName, role = 'employee' } = req.body;
+    const { email, password, fullName, role } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
-    if (!['admin', 'employee'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be admin or employee' });
+    if (role && role !== 'employee') {
+      return res.status(403).json({ error: 'Privileged accounts can only be created by an administrator' });
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -231,7 +220,7 @@ router.post('/register', authRegisterLimiter, async (req, res) => {
       `INSERT INTO users (email, password_hash, role, full_name, is_active)
        VALUES ($1, $2, $3, $4, true)
        RETURNING id, email, role, full_name, avatar_path, is_active, created_at`,
-      [email.trim().toLowerCase(), passwordHash, role, fullName || null]
+      [email.trim().toLowerCase(), passwordHash, 'employee', fullName || null]
     );
     const user = result.rows[0];
 
@@ -298,6 +287,17 @@ router.post('/login', authLoginLimiter, async (req, res) => {
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const normalizedRole = String(user.role || '').toLowerCase();
+    const privileged = normalizedRole === 'admin' || normalizedRole === 'hr';
+    if (
+      privileged &&
+      isMobileClient(req.get('user-agent'), req.get('x-hrms-device'))
+    ) {
+      return res.status(403).json({
+        error: 'Admin and HR accounts can only sign in on a desktop computer.',
+      });
     }
 
     const { accessToken, refreshToken } = await issueTokensForUser(user, req);
@@ -377,6 +377,18 @@ router.post('/refresh', authTokenLimiter, async (req, res) => {
       return res.status(403).json({ error: 'Account is deactivated' });
     }
 
+    const normalizedRole = String(user.role || '').toLowerCase();
+    const privileged = normalizedRole === 'admin' || normalizedRole === 'hr';
+    if (
+      privileged &&
+      isMobileClient(req.get('user-agent'), req.get('x-hrms-device'))
+    ) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'Admin and HR accounts can only sign in on a desktop computer.',
+      });
+    }
+
     await client.query(
       `UPDATE auth_refresh_tokens SET revoked_at = now() WHERE id = $1`,
       [rec.id]
@@ -433,18 +445,21 @@ router.post('/logout', authTokenLimiter, async (req, res) => {
  */
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    await ensurePersonalInfoColumns();
     const result = await pool.query(
       `SELECT u.id, u.email, u.role, u.full_name, u.avatar_path, u.is_active,
               u.first_name, u.middle_name, u.last_name, u.suffix,
               u.sex, u.date_of_birth, u.contact_number,
               u.address, u.civil_status, u.nationality, u.created_at,
               u.employee_number, u.date_hired, u.employment_status, u.employment_type,
+              u.leave_credit_eligible,
               d.name AS department_name,
               p.name AS position_name
        FROM users u
        LEFT JOIN assignments a
-         ON a.employee_id = u.id AND a.is_active = true
+         ON a.employee_id = u.id
+        AND a.is_active = true
+        AND a.effective_from <= CURRENT_DATE
+        AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
        LEFT JOIN departments d ON d.id = a.department_id
        LEFT JOIN positions p ON p.id = a.position_id
        WHERE u.id = $1`,
@@ -475,6 +490,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       date_hired: row.date_hired,
       employment_status: row.employment_status,
       employment_type: row.employment_type,
+      leave_credit_eligible: row.leave_credit_eligible !== false,
       department_name: row.department_name,
       position_name: row.position_name,
       user_metadata: {
@@ -536,7 +552,6 @@ router.post('/logout-all', authMiddleware, async (req, res) => {
  */
 router.patch('/me', authMiddleware, async (req, res) => {
   try {
-    await ensurePersonalInfoColumns();
     const {
       first_name,
       middle_name,
@@ -717,7 +732,6 @@ router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
   }
 
   try {
-    await ensurePersonalInfoColumns();
     await ensurePasswordResetOtpTable();
 
     const userResult = await pool.query(

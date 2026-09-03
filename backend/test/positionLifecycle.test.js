@@ -1,0 +1,944 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { withMockedModule } = require('./helpers/moduleMocks');
+const { todayInHrmsTimezone } = require('../src/utils/dateRangeParser');
+
+const {
+  PositionLifecycleError,
+  deleteMistakenPosition,
+  ensureActivePositionDepartmentAllowed,
+  ensurePositionDeactivationAllowed,
+  ensurePositionDepartmentChangeAllowed,
+  positionAuditAction,
+  positionAuditSnapshot,
+  positionDeactivationCountsSql,
+  positionDependencyCountsSql,
+} = require('../src/services/positionLifecycle');
+
+const IDS = {
+  actor: '11111111-1111-4111-8111-111111111111',
+  position: '22222222-2222-4222-8222-222222222222',
+  oldDepartment: '33333333-3333-4333-8333-333333333333',
+  newDepartment: '44444444-4444-4444-8444-444444444444',
+};
+
+function positionRow() {
+  return {
+    id: IDS.position,
+    position_number: 12,
+    name: 'HR Officer',
+    description: null,
+    department_id: IDS.oldDepartment,
+    is_department_head: false,
+    is_active: true,
+  };
+}
+
+function responseRecorder() {
+  return {
+    statusCode: 200,
+    body: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.body = body;
+      return this;
+    },
+  };
+}
+
+test('position audit snapshot includes the managed Department Head period', () => {
+  const period = {
+    id: '55555555-5555-4555-8555-555555555555',
+    position_id: IDS.position,
+    department_id: IDS.oldDepartment,
+    effective_from: '2026-08-01',
+    effective_to: null,
+    is_active: true,
+  };
+
+  assert.deepEqual(positionAuditSnapshot(positionRow(), period), {
+    id: IDS.position,
+    position_number: 12,
+    name: 'HR Officer',
+    description: null,
+    department_id: IDS.oldDepartment,
+    is_department_head: true,
+    department_head_period: {
+      id: period.id,
+      department_id: IDS.oldDepartment,
+      effective_from: '2026-08-01',
+      effective_to: null,
+      is_active: true,
+    },
+    is_active: true,
+  });
+});
+
+test('position audit distinguishes lifecycle and authority changes', () => {
+  const before = positionAuditSnapshot(positionRow());
+  const headPeriod = {
+    id: '55555555-5555-4555-8555-555555555555',
+    department_id: IDS.oldDepartment,
+    effective_from: '2026-08-01',
+    effective_to: null,
+    is_active: true,
+  };
+
+  assert.equal(
+    positionAuditAction(before, { ...before, name: 'HR Management Officer' }),
+    'position_updated'
+  );
+  assert.equal(
+    positionAuditAction(before, { ...before, department_id: IDS.newDepartment }),
+    'position_department_changed'
+  );
+  assert.equal(
+    positionAuditAction(before, positionAuditSnapshot(positionRow(), headPeriod)),
+    'position_department_head_changed'
+  );
+  assert.equal(
+    positionAuditAction(before, { ...before, is_active: false }),
+    'position_deactivated'
+  );
+  assert.equal(
+    positionAuditAction({ ...before, is_active: false }, before),
+    'position_reactivated'
+  );
+});
+
+test('used position cannot be moved to another department', async () => {
+  const calls = [];
+  const db = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.includes('AS dependency_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            dependency_primary_assignments: 2,
+            dependency_additional_positions: 1,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  await assert.rejects(
+    ensurePositionDepartmentChangeAllowed(db, {
+      positionId: IDS.position,
+      nextDepartmentId: IDS.newDepartment,
+    }),
+    (error) => {
+      assert.ok(error instanceof PositionLifecycleError);
+      assert.equal(error.statusCode, 409);
+      assert.deepEqual(error.details.dependencies, {
+        primary_assignments: 2,
+        additional_positions: 1,
+      });
+      return true;
+    }
+  );
+  assert.equal(calls.length, 2);
+});
+
+test('unused position can be moved to another department', async () => {
+  const db = {
+    async query(sql) {
+      const text = String(sql).trim();
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.includes('AS dependency_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            dependency_primary_assignments: 0,
+            dependency_additional_positions: 0,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  const result = await ensurePositionDepartmentChangeAllowed(db, {
+    positionId: IDS.position,
+    nextDepartmentId: IDS.newDepartment,
+  });
+
+  assert.equal(result.id, IDS.position);
+});
+
+test('unchanged department does not require a dependency scan', async () => {
+  let queryCount = 0;
+  const db = {
+    async query(sql) {
+      queryCount += 1;
+      const text = String(sql).trim();
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  await ensurePositionDepartmentChangeAllowed(db, {
+    positionId: IDS.position,
+    nextDepartmentId: IDS.oldDepartment,
+  });
+
+  assert.equal(queryCount, 1);
+});
+
+test('active position requires an active department', async () => {
+  const db = {
+    async query(sql, params) {
+      const text = String(sql).trim();
+      assert.match(text, /FROM departments/);
+      assert.match(text, /FOR SHARE/);
+      assert.deepEqual(params, [IDS.oldDepartment]);
+      return {
+        rowCount: 1,
+        rows: [{ id: IDS.oldDepartment, name: 'Human Resources', is_active: false }],
+      };
+    },
+  };
+
+  await assert.rejects(
+    ensureActivePositionDepartmentAllowed(db, {
+      departmentId: IDS.oldDepartment,
+      positionIsActive: true,
+    }),
+    (error) => {
+      assert.ok(error instanceof PositionLifecycleError);
+      assert.equal(error.statusCode, 409);
+      assert.match(error.message, /inactive Human Resources department/i);
+      assert.equal(error.details.department_id, IDS.oldDepartment);
+      return true;
+    }
+  );
+});
+
+test('inactive position does not require an active department', async () => {
+  let queryCount = 0;
+  const db = {
+    async query() {
+      queryCount += 1;
+      throw new Error('Department lookup must be skipped');
+    },
+  };
+
+  const result = await ensureActivePositionDepartmentAllowed(db, {
+    departmentId: IDS.oldDepartment,
+    positionIsActive: false,
+  });
+
+  assert.equal(result, null);
+  assert.equal(queryCount, 0);
+});
+
+test('expired assignment history does not block position deactivation', async () => {
+  const calls = [];
+  const db = {
+    async query(sql, params) {
+      const text = String(sql).trim();
+      calls.push({ text, params });
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.startsWith('SELECT (') && text.includes('deactivation_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            deactivation_primary_assignments: 0,
+            deactivation_additional_positions: 0,
+            deactivation_department_head_periods: 0,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  const result = await ensurePositionDeactivationAllowed(db, {
+    positionId: IDS.position,
+    effectiveDate: '2026-09-01',
+  });
+
+  assert.equal(result.id, IDS.position);
+  assert.deepEqual(calls.at(-1).params, [IDS.position, '2026-09-01']);
+});
+
+test('current and future position periods block deactivation', async () => {
+  const db = {
+    async query(sql) {
+      const text = String(sql).trim();
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.startsWith('SELECT (') && text.includes('deactivation_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            deactivation_primary_assignments: 2,
+            deactivation_additional_positions: 1,
+            deactivation_department_head_periods: 1,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  await assert.rejects(
+    ensurePositionDeactivationAllowed(db, {
+      positionId: IDS.position,
+      effectiveDate: '2026-09-01',
+    }),
+    (error) => {
+      assert.ok(error instanceof PositionLifecycleError);
+      assert.equal(error.statusCode, 409);
+      assert.equal(error.details.official_date, '2026-09-01');
+      assert.deepEqual(error.details.dependencies, {
+        primary_assignments: 2,
+        additional_positions: 1,
+        department_head_periods: 1,
+      });
+      return true;
+    }
+  );
+});
+
+test('position route rolls back and returns 409 when assignment history blocks movement', async () => {
+  const clientCalls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      clientCalls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.includes('AS dependency_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            dependency_primary_assignments: 1,
+            dependency_additional_positions: 0,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+    async query() {
+      throw new Error('pool.query must not be used inside the update transaction');
+    },
+  };
+
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.put
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      params: { id: IDS.position },
+      user: { id: IDS.actor, role: 'admin' },
+      body: { department_id: IDS.newDepartment },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.error, /assignment history/i);
+    assert.deepEqual(res.body.dependencies, {
+      primary_assignments: 1,
+      additional_positions: 0,
+    });
+    assert.equal(clientCalls[0], 'BEGIN');
+    assert.equal(clientCalls.at(-1), 'ROLLBACK');
+    assert.equal(clientCalls.some((sql) => sql.startsWith('UPDATE positions')), false);
+    assert.equal(released, true);
+  } finally {
+    console.error = originalConsoleError;
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('position route commits a department correction for an unused position', async () => {
+  const clientCalls = [];
+  let auditParams;
+  let released = false;
+  const updated = { ...positionRow(), department_id: IDS.newDepartment };
+  const client = {
+    async query(sql, params) {
+      const text = String(sql).trim();
+      clientCalls.push(text);
+      if (text === 'BEGIN' || text === 'COMMIT') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.includes('AS dependency_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            dependency_primary_assignments: 0,
+            dependency_additional_positions: 0,
+          }],
+        };
+      }
+      if (text.includes('FROM departments') && text.includes('FOR SHARE')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: IDS.newDepartment, name: 'Finance', is_active: true }],
+        };
+      }
+      if (text.startsWith('UPDATE positions')) {
+        return { rowCount: 1, rows: [updated] };
+      }
+      if (text.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.startsWith('INSERT INTO audit_logs')) {
+        auditParams = params;
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+  };
+
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.put
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      params: { id: IDS.position },
+      user: { id: IDS.actor, role: 'admin' },
+      body: { department_id: IDS.newDepartment },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.department_id, IDS.newDepartment);
+    assert.equal(clientCalls[0], 'BEGIN');
+    assert.equal(clientCalls.at(-1), 'COMMIT');
+    assert.equal(clientCalls.some((sql) => sql === 'ROLLBACK'), false);
+    assert.equal(auditParams[1], 'position_department_changed');
+    const auditDetails = JSON.parse(auditParams[3]);
+    assert.equal(auditDetails.before.department_id, IDS.oldDepartment);
+    assert.equal(auditDetails.after.department_id, IDS.newDepartment);
+    assert.equal(released, true);
+  } finally {
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('position dependency projection covers primary and additional assignments', () => {
+  const sql = positionDependencyCountsSql('p');
+  assert.match(sql, /FROM assignments WHERE position_id = p\.id/);
+  assert.match(sql, /FROM employee_other_positions WHERE position_id = p\.id/);
+});
+
+test('position deactivation projection ignores expired history', () => {
+  const sql = positionDeactivationCountsSql('p.id', '$1');
+  assert.match(sql, /FROM assignments a/);
+  assert.match(sql, /FROM employee_other_positions other_position/);
+  assert.match(sql, /FROM position_department_head_periods head_period/);
+  assert.equal((sql.match(/effective_to >= \$1::date/g) || []).length, 3);
+});
+
+test('position route rolls back blocked deactivation', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.startsWith('SELECT (') && text.includes('deactivation_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            deactivation_primary_assignments: 1,
+            deactivation_additional_positions: 0,
+            deactivation_department_head_periods: 0,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = { connect: async () => client };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.put
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      params: { id: IDS.position },
+      user: { id: IDS.actor, role: 'admin' },
+      body: { is_active: false },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.error, /cannot be deactivated/i);
+    assert.equal(res.body.official_date, todayInHrmsTimezone());
+    assert.equal(calls.some((sql) => sql.startsWith('UPDATE positions')), false);
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(released, true);
+  } finally {
+    console.error = originalConsoleError;
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('position create route rejects an inactive department and rolls back', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM departments') && text.includes('FOR SHARE')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: IDS.oldDepartment, name: 'Human Resources', is_active: false }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = { connect: async () => client };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      user: { id: IDS.actor, role: 'admin' },
+      body: {
+        name: 'HR Analyst',
+        department_id: IDS.oldDepartment,
+        is_active: true,
+      },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.error, /inactive Human Resources department/i);
+    assert.equal(calls[0], 'BEGIN');
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(calls.some((sql) => sql.startsWith('INSERT INTO positions')), false);
+    assert.equal(released, true);
+  } finally {
+    console.error = originalConsoleError;
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('position reactivation rejects an inactive department and rolls back', async () => {
+  const calls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [{ ...positionRow(), is_active: false }] };
+      }
+      if (text.includes('FROM departments') && text.includes('FOR SHARE')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: IDS.oldDepartment, name: 'Human Resources', is_active: false }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = { connect: async () => client };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.put
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      params: { id: IDS.position },
+      user: { id: IDS.actor, role: 'admin' },
+      body: { is_active: true },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.error, /inactive Human Resources department/i);
+    assert.equal(calls[0], 'BEGIN');
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(calls.some((sql) => sql.startsWith('UPDATE positions')), false);
+    assert.equal(released, true);
+  } finally {
+    console.error = originalConsoleError;
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('position creation is audited before commit', async () => {
+  const calls = [];
+  let auditParams;
+  let released = false;
+  const created = { ...positionRow(), department_id: null };
+  const client = {
+    async query(sql, params) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'COMMIT') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.startsWith('INSERT INTO positions')) {
+        return { rowCount: 1, rows: [created] };
+      }
+      if (text.startsWith('INSERT INTO audit_logs')) {
+        auditParams = params;
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = { connect: async () => client };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      user: { id: IDS.actor, role: 'admin' },
+      body: { name: 'HR Officer', is_active: true },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(auditParams[1], 'position_created');
+    assert.equal(JSON.parse(auditParams[3]).after.name, 'HR Officer');
+    assert.equal(calls.at(-1), 'COMMIT');
+    assert.equal(released, true);
+  } finally {
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('position creation rolls back when its audit event fails', async () => {
+  const calls = [];
+  let released = false;
+  const created = { ...positionRow(), department_id: null };
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.startsWith('INSERT INTO positions')) {
+        return { rowCount: 1, rows: [created] };
+      }
+      if (text.startsWith('INSERT INTO audit_logs')) {
+        throw new Error('audit unavailable');
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = { connect: async () => client };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      user: { id: IDS.actor, role: 'admin' },
+      body: { name: 'HR Officer', is_active: true },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 500);
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.equal(calls.includes('COMMIT'), false);
+    assert.equal(released, true);
+  } finally {
+    console.error = originalConsoleError;
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
+test('unused mistaken position deletion preserves an audit snapshot', async () => {
+  const calls = [];
+  const db = {
+    async query(sql, params = []) {
+      const text = String(sql).trim();
+      calls.push({ text, params });
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.includes('AS dependency_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            dependency_primary_assignments: 0,
+            dependency_additional_positions: 0,
+          }],
+        };
+      }
+      if (text.startsWith('DELETE FROM positions')) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (text.startsWith('INSERT INTO audit_logs')) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  const result = await deleteMistakenPosition(db, {
+    actorId: IDS.actor,
+    positionId: IDS.position,
+    reason: 'Created under the wrong title',
+  });
+
+  assert.equal(result.position.id, IDS.position);
+  const audit = calls.find(({ text }) => text.startsWith('INSERT INTO audit_logs'));
+  assert.ok(audit);
+  assert.deepEqual(audit.params.slice(0, 3), [
+    IDS.actor,
+    'position_mistake_deleted',
+    IDS.position,
+  ]);
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    reason: 'Created under the wrong title',
+    before: positionRow(),
+    after: null,
+  });
+});
+
+test('used position deletion is rejected with named blockers', async () => {
+  const calls = [];
+  const db = {
+    async query(sql) {
+      const text = String(sql).trim();
+      calls.push(text);
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.includes('AS dependency_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            dependency_primary_assignments: 3,
+            dependency_additional_positions: 1,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  await assert.rejects(
+    deleteMistakenPosition(db, {
+      actorId: IDS.actor,
+      positionId: IDS.position,
+      reason: 'Testing cleanup',
+    }),
+    (error) => {
+      assert.ok(error instanceof PositionLifecycleError);
+      assert.equal(error.statusCode, 409);
+      assert.deepEqual(error.details.blockers, [
+        { key: 'primary_assignments', label: 'primary assignments', count: 3 },
+        { key: 'additional_positions', label: 'additional positions', count: 1 },
+      ]);
+      return true;
+    }
+  );
+  assert.equal(calls.some((sql) => sql.startsWith('DELETE FROM positions')), false);
+  assert.equal(calls.some((sql) => sql.startsWith('INSERT INTO audit_logs')), false);
+});
+
+test('position delete route rolls back and returns blockers for a used position', async () => {
+  const clientCalls = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      const text = String(sql).trim();
+      clientCalls.push(text);
+      if (text === 'BEGIN' || text === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (text.includes('FROM positions') && text.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [positionRow()] };
+      }
+      if (text.includes('AS dependency_primary_assignments')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            dependency_primary_assignments: 1,
+            dependency_additional_positions: 0,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+  };
+
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/positions');
+  delete require.cache[routePath];
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const router = require('../src/routes/positions');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.delete
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const req = {
+      params: { id: IDS.position },
+      user: { id: IDS.actor, role: 'admin' },
+      body: { reason: 'Testing cleanup' },
+    };
+    const res = responseRecorder();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body.error, /cannot be permanently deleted/i);
+    assert.deepEqual(res.body.blockers, [
+      { key: 'primary_assignments', label: 'primary assignments', count: 1 },
+    ]);
+    assert.equal(clientCalls[0], 'BEGIN');
+    assert.equal(clientCalls.at(-1), 'ROLLBACK');
+    assert.equal(clientCalls.some((sql) => sql.startsWith('DELETE FROM positions')), false);
+    assert.equal(released, true);
+  } finally {
+    console.error = originalConsoleError;
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});

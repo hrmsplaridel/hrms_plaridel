@@ -1,5 +1,9 @@
 const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
 const { sameEntityId } = require('../utils/sameEntityId');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const {
+  resolveDepartmentReviewers,
+} = require('./departmentReviewerService');
 
 const VALID_STATUSES = new Set([
   'draft',
@@ -371,6 +375,9 @@ function parseSteps(steps) {
     .map((step) => ({
       step_order: Number(step.step_order ?? step.stepOrder ?? 0),
       assignee_type: String(step.assignee_type ?? step.assigneeType ?? '').trim().toLowerCase(),
+      assignee_source: String(
+        step.assignee_source ?? step.assigneeSource ?? 'specific_users'
+      ).trim().toLowerCase(),
       role_id: step.role_id ?? step.roleId ?? null,
       department_id: step.department_id ?? step.departmentId ?? null,
       label: step.label ?? null,
@@ -655,7 +662,7 @@ async function resolveStepAssignee(client, { explicitAssigneeId, stepConfig, cur
 
 async function loadStepsFromNormalizedTables(client, documentType, workflowVersion) {
   const stepsRes = await client.query(
-    `SELECT id, step_order, department_id, label, enabled
+    `SELECT id, step_order, department_id, assignee_source, label, enabled
      FROM docutracker_workflow_steps
      WHERE document_type = $1
        AND workflow_version = $2
@@ -690,6 +697,7 @@ async function loadStepsFromNormalizedTables(client, documentType, workflowVersi
     .map((row) => ({
       step_order: Number(row.step_order),
       assignee_type: 'user',
+      assignee_source: row.assignee_source || 'specific_users',
       department_id: row.department_id ?? null,
       label: row.label ?? null,
       enabled: row.enabled !== false,
@@ -1067,12 +1075,34 @@ async function canUserPerformGeneralAction(client, { user, documentType, action 
 
 async function resolveStepAssignees(client, { explicitAssigneeId, stepConfig, currentHolderId, documentType, workflowVersion }) {
   const type = String(stepConfig?.assignee_type || '').trim().toLowerCase();
+  const source = String(
+    stepConfig?.assignee_source || stepConfig?.assigneeSource || 'specific_users'
+  ).trim().toLowerCase();
 
   // Explicit assignee (must be pre-sanitized at workflow entry points for non-admins).
   if (explicitAssigneeId) {
     const valid = await validateAssignee(client, explicitAssigneeId);
     if (!valid) throw validationError(`Invalid assignee '${explicitAssigneeId}'`);
     return [explicitAssigneeId];
+  }
+
+  if (source === 'department_reviewers') {
+    if (!stepConfig?.department_id) {
+      throw validationError(
+        `Department reviewer step ${stepConfig?.step_order ?? 'unknown'} has no department`
+      );
+    }
+    const resolved = await resolveDepartmentReviewers(client, {
+      departmentId: stepConfig.department_id,
+      effectiveDate: todayInHrmsTimezone(),
+    });
+    const reviewerIds = resolved.reviewers.map((reviewer) => reviewer.reviewerId);
+    if (!reviewerIds.length) {
+      throw validationError(
+        `No active Department Head or backup reviewer is configured for step ${stepConfig?.step_order ?? 'unknown'}`
+      );
+    }
+    return reviewerIds;
   }
 
   if (type === 'user' || !type) {
@@ -2404,6 +2434,8 @@ module.exports = {
   canUserPerformTypeAction,
   filterDocumentsViewableByUser,
   getEffectivePermissionExplanation,
+  parseSteps,
+  resolveStepAssignees,
   isDraftOrWipDocument,
   listDocuments,
   getDocumentBundle,

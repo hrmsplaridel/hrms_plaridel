@@ -42,6 +42,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   LeaveLedgerResult? _result;
   static const int _pageSize = 25;
   int _currentPage = 0; // 0-indexed
+  String? _employeeBucketFilter;
 
   /// Admin: active filter state (changes trigger an immediate reload).
   String? _draftEmployeeId;
@@ -99,7 +100,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
         if (!event.affectsUser(_currentUserId)) return;
       }
       leaveProvider.invalidateCachedLeaveData();
-      unawaited(_refreshFromRealtime()); 
+      unawaited(_refreshFromRealtime());
     });
   }
 
@@ -120,10 +121,9 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       _employeesError = null;
     });
     try {
-      final deptParam =
-          departmentId != null && departmentId.isNotEmpty
-              ? '&department_id=$departmentId'
-              : '';
+      final deptParam = departmentId != null && departmentId.isNotEmpty
+          ? '&department_id=$departmentId'
+          : '';
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employees?status=Active$deptParam',
       );
@@ -194,17 +194,19 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       _error = null;
     });
     try {
+      final adminEmployeeId =
+          _draftEmployeeId != null && _draftEmployeeId!.isNotEmpty
+          ? _draftEmployeeId
+          : null;
       final q = LeaveLedgerQuery(
-        userId: widget.isAdmin
-            ? (_draftEmployeeId != null && _draftEmployeeId!.isNotEmpty
-                  ? _draftEmployeeId
-                  : null)
-            : null,
+        userId: widget.isAdmin ? adminEmployeeId : null,
+        allUsers: widget.isAdmin && adminEmployeeId == null,
         leaveType: widget.isAdmin
             ? (_draftLeaveType != null && _draftLeaveType!.isNotEmpty
                   ? _draftLeaveType
                   : null)
             : null,
+        affectedBucket: widget.isAdmin ? null : _employeeBucketFilter,
         limit: _pageSize,
         offset: _currentPage * _pageSize,
       );
@@ -225,7 +227,6 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       });
     }
   }
-
 
   int get _totalPages {
     final total = _result?.total ?? 0;
@@ -252,7 +253,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
-        title: const Text('Balance History'),
+        title: const Text('Credit History'),
         backgroundColor: AppTheme.dashPanelOf(context),
         foregroundColor: AppTheme.dashTextPrimaryOf(context),
         elevation: 0,
@@ -299,12 +300,20 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
       );
     }
 
-    final stats = _ledgerSummaryStats(r.rows);
+    final stats = _ledgerSummaryStatsFromResult(r);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _EmployeeSummaryBand(stats: stats),
+        _EmployeeLedgerFilter(
+          selected: _employeeBucketFilter,
+          onSelected: (value) {
+            if (_employeeBucketFilter == value) return;
+            setState(() => _employeeBucketFilter = value);
+            _load(resetPage: true, forceRefresh: true);
+          },
+        ),
         Expanded(
           child: r.rows.isEmpty
               ? const _EmployeeEmptyState()
@@ -566,11 +575,10 @@ class _EmployeeSummaryBand extends StatelessWidget {
       width: double.infinity,
       color: AppTheme.sectionAltOf(context),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final narrow = constraints.maxWidth < 400;
-          final chips = [
-            _EmployeeSummaryChip(
+      child: Row(
+        children: [
+          Expanded(
+            child: _EmployeeSummaryChip(
               amountLabel: _fmtDays(stats.totalEarned),
               caption: 'Earned',
               icon: Icons.arrow_upward_rounded,
@@ -579,7 +587,24 @@ class _EmployeeSummaryBand extends StatelessWidget {
                   : const Color(0xFFE8F5E9),
               iconColor: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
             ),
-            _EmployeeSummaryChip(
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _EmployeeSummaryChip(
+              amountLabel: _fmtDays(stats.totalAdjusted),
+              caption: 'Adjusted',
+              icon: Icons.exposure_rounded,
+              circleColor: dark
+                  ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                  : const Color(0xFFE3F2FD),
+              iconColor: dark
+                  ? AppTheme.primaryNavyLight
+                  : const Color(0xFF1565C0),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _EmployeeSummaryChip(
               amountLabel: _fmtDays(stats.totalUsed),
               caption: 'Used',
               icon: Icons.arrow_downward_rounded,
@@ -588,7 +613,10 @@ class _EmployeeSummaryBand extends StatelessWidget {
                   : const Color(0xFFFFEBEE),
               iconColor: dark ? Colors.red.shade300 : const Color(0xFFC62828),
             ),
-            _EmployeeSummaryChip(
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _EmployeeSummaryChip(
               amountLabel: _fmtDays(stats.totalPending),
               caption: 'Pending',
               icon: Icons.schedule_rounded,
@@ -599,27 +627,8 @@ class _EmployeeSummaryBand extends StatelessWidget {
                   ? Colors.blueGrey.shade300
                   : const Color(0xFF607D8B),
             ),
-          ];
-          if (narrow) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < chips.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 10),
-                  chips[i],
-                ],
-              ],
-            );
-          }
-          return Row(
-            children: [
-              for (var i = 0; i < chips.length; i++) ...[
-                if (i > 0) const SizedBox(width: 10),
-                Expanded(child: chips[i]),
-              ],
-            ],
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -737,7 +746,10 @@ class _EmployeeEmptyState extends StatelessWidget {
 }
 
 DateTime ledgerDisplayDateForHistory(LeaveBalanceLedgerEntry entry) {
-  if (entry.action.toLowerCase() != 'monthly_accrual') {
+  if (!{
+    'monthly_accrual',
+    'monthly_accrual_adjusted',
+  }.contains(entry.action.toLowerCase())) {
     return entry.createdAt;
   }
   final metadata = entry.metadataJson;
@@ -780,8 +792,18 @@ class _EmployeeLedgerRow extends StatelessWidget {
   final LeaveBalanceLedgerEntry entry;
 
   static const List<String> _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
   String _shortDate(DateTime d) =>
@@ -798,7 +820,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
     final a = d.abs();
     final n = a == a.truncateToDouble()
         ? a.toInt().toString()
-        : a.toStringAsFixed(2);
+        : a.toStringAsFixed(3);
     return '$sign$n days';
   }
 
@@ -810,6 +832,24 @@ class _EmployeeLedgerRow extends StatelessWidget {
     final b = entry.affectedBucket.toLowerCase();
     final d = entry.daysChanged;
 
+    if (a == 'monthly_accrual_adjusted') {
+      final positive = d >= 0;
+      return (
+        bg: dark
+            ? (positive ? Colors.green : Colors.red).shade900.withValues(
+                alpha: 0.4,
+              )
+            : positive
+            ? const Color(0xFFE8F5E9)
+            : const Color(0xFFFFEBEE),
+        fg: dark
+            ? (positive ? Colors.green : Colors.red).shade300
+            : positive
+            ? const Color(0xFF2E7D32)
+            : const Color(0xFFC62828),
+        icon: positive ? Icons.add_rounded : Icons.undo_rounded,
+      );
+    }
     if (a == 'monthly_accrual' || a == 'applied' || (d > 0 && b == 'earned')) {
       return (
         bg: dark
@@ -817,6 +857,15 @@ class _EmployeeLedgerRow extends StatelessWidget {
             : const Color(0xFFE8F5E9),
         fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
         icon: Icons.add_rounded,
+      );
+    }
+    if (a == 'attendance_deduction_adjusted') {
+      return (
+        bg: dark
+            ? Colors.green.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFE8F5E9),
+        fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
+        icon: Icons.undo_rounded,
       );
     }
     if (a == 'admin_adjustment' || a.contains('adjust')) {
@@ -867,15 +916,30 @@ class _EmployeeLedgerRow extends StatelessWidget {
   String _actionTitle(String raw) {
     final a = raw.toLowerCase();
     switch (a) {
-      case 'monthly_accrual':   return 'Monthly Accrual';
-      case 'leave_approved':    return 'Leave Approved';
-      case 'admin_adjustment':  return 'Balance Adjustment';
-      case 'leave_submitted':   return 'Leave Filed';
-      case 'forced_leave_deduction': return 'Forced Leave Deduction';
-      case 'leave_cancelled':   return 'Leave Cancelled';
-      case 'leave_rejected':    return 'Leave Not Approved';
-      case 'leave_returned':    return 'Leave Returned';
-      case 'leave_revoked':     return 'Approval Revoked';
+      case 'monthly_accrual':
+        return 'Monthly Accrual';
+      case 'monthly_accrual_adjusted':
+        return 'Monthly Accrual Corrected';
+      case 'leave_approved':
+        return 'Leave Approved';
+      case 'admin_adjustment':
+        return 'Balance Adjustment';
+      case 'leave_submitted':
+        return 'Leave Filed';
+      case 'forced_leave_deduction':
+        return 'Forced Leave Deduction';
+      case 'attendance_deduction':
+        return 'DTR Leave Deduction';
+      case 'attendance_deduction_adjusted':
+        return 'DTR Deduction Corrected';
+      case 'leave_cancelled':
+        return 'Leave Cancelled';
+      case 'leave_rejected':
+        return 'Leave Not Approved';
+      case 'leave_returned':
+        return 'Leave Returned';
+      case 'leave_revoked':
+        return 'Approval Revoked';
       default:
         if (raw.isEmpty) return 'Activity';
         return raw
@@ -894,15 +958,27 @@ class _EmployeeLedgerRow extends StatelessWidget {
     final meta = entry.metadataJson ?? {};
 
     if (a == 'monthly_accrual') {
-      final ym = meta['target_year_month']?.toString() ??
+      final ym =
+          meta['target_year_month']?.toString() ??
           meta['targetYearMonth']?.toString();
       final months = meta['months_credited'];
       if (ym != null && ym.length == 7) {
         final parts = ym.split('-');
         final mIdx = int.tryParse(parts[1]) ?? 0;
         const mNames = [
-          '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+          '',
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
         ];
         final mName = mIdx >= 1 && mIdx <= 12 ? mNames[mIdx] : parts[1];
         final suffix = months != null && months != 1
@@ -911,6 +987,16 @@ class _EmployeeLedgerRow extends StatelessWidget {
         return 'Accrual for $mName ${parts[0]}$suffix';
       }
       return 'Monthly leave accrual';
+    }
+    if (a == 'monthly_accrual_adjusted') {
+      final previous = meta['previous_credited_days'];
+      final expected = meta['expected_credited_days'];
+      if (previous != null && expected != null) {
+        return 'Credit corrected from $previous to $expected days';
+      }
+      return entry.remarks?.trim().isNotEmpty == true
+          ? entry.remarks!.trim()
+          : 'Monthly earned credit recalculated';
     }
 
     if (a == 'leave_approved') {
@@ -943,6 +1029,12 @@ class _EmployeeLedgerRow extends StatelessWidget {
       final r = entry.remarks?.trim();
       return r != null && r.isNotEmpty ? r : 'Forced leave deducted by HR';
     }
+    if (a == 'attendance_deduction' || a == 'attendance_deduction_adjusted') {
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty
+          ? r
+          : 'DTR equivalent-day charge to Vacation Leave';
+    }
 
     if (a == 'leave_cancelled') return 'Leave request cancelled';
     if (a == 'leave_rejected') {
@@ -974,7 +1066,7 @@ class _EmployeeLedgerRow extends StatelessWidget {
   double _effectiveDaysForColor() {
     final bucket = entry.affectedBucket.toLowerCase();
     final d = entry.daysChanged;
-    if (bucket == 'used' && d > 0) return -d;
+    if (bucket == 'used') return -d;
     if (bucket == 'pending') return 0;
     return d;
   }
@@ -987,10 +1079,10 @@ class _EmployeeLedgerRow extends StatelessWidget {
     final amountColor = effective > 0
         ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
         : effective < 0
-            ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
-            : (dark
-                ? AppTheme.dashTextSecondaryOf(context)
-                : AppTheme.dashTextSecondaryOf(context));
+        ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
+        : (dark
+              ? AppTheme.dashTextSecondaryOf(context)
+              : AppTheme.dashTextSecondaryOf(context));
     final lt = _leaveTypeLabel(entry.leaveType);
     final subtitle = _subtitle();
 
@@ -1034,8 +1126,9 @@ class _EmployeeLedgerRow extends StatelessWidget {
                       _shortDate(_displayDate()),
                       style: TextStyle(
                         fontSize: 11,
-                        color: AppTheme.dashTextSecondaryOf(context)
-                            .withValues(alpha: 0.8),
+                        color: AppTheme.dashTextSecondaryOf(
+                          context,
+                        ).withValues(alpha: 0.8),
                       ),
                     ),
                   ],
@@ -1060,8 +1153,9 @@ class _EmployeeLedgerRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
-                      color: AppTheme.dashTextSecondaryOf(context)
-                          .withValues(alpha: 0.85),
+                      color: AppTheme.dashTextSecondaryOf(
+                        context,
+                      ).withValues(alpha: 0.85),
                       height: 1.3,
                     ),
                   ),
@@ -1091,39 +1185,96 @@ class _LedgerSummaryStats {
     required this.totalEarned,
     required this.totalUsed,
     required this.totalPending,
+    required this.totalAdjusted,
   });
 
   final double totalEarned;
   final double totalUsed;
   final double totalPending;
+  final double totalAdjusted;
 }
 
 _LedgerSummaryStats _ledgerSummaryStats(List<LeaveBalanceLedgerEntry> rows) {
   double earned = 0;
   double used = 0;
   double pending = 0;
+  double adjusted = 0;
 
   for (final e in rows) {
     final b = e.affectedBucket.toLowerCase();
     final a = e.action.toLowerCase();
     final d = e.daysChanged;
 
-    if (d > 0 && (b == 'earned' || a == 'monthly_accrual')) {
+    if (b == 'earned' || a == 'monthly_accrual') {
       earned += d;
     }
-    if (d < 0 && b == 'used') {
-      used += -d;
+    if (b == 'used') {
+      used += d;
     }
     if (b == 'pending') {
-      pending += d.abs();
+      pending += d;
+    }
+    if (b == 'adjusted') {
+      adjusted += d;
     }
   }
 
   return _LedgerSummaryStats(
     totalEarned: earned,
-    totalUsed: used,
-    totalPending: pending,
+    totalUsed: used < 0 ? 0 : used,
+    totalPending: pending < 0 ? 0 : pending,
+    totalAdjusted: adjusted,
   );
+}
+
+_LedgerSummaryStats _ledgerSummaryStatsFromResult(LeaveLedgerResult result) {
+  return _LedgerSummaryStats(
+    totalEarned: result.summaryEarned,
+    totalUsed: result.summaryUsed,
+    totalPending: result.summaryPending,
+    totalAdjusted: result.summaryAdjusted,
+  );
+}
+
+class _EmployeeLedgerFilter extends StatelessWidget {
+  const _EmployeeLedgerFilter({
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final String? selected;
+  final ValueChanged<String?> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    const options = <(String?, String)>[
+      (null, 'All'),
+      ('earned', 'Earned'),
+      ('used', 'Used'),
+      ('pending', 'Pending'),
+      ('adjusted', 'Adjusted'),
+    ];
+    return Container(
+      color: AppTheme.sectionAltOf(context),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (var i = 0; i < options.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              ChoiceChip(
+                label: Text(options[i].$2),
+                selected: selected == options[i].$1,
+                onSelected: (_) => onSelected(options[i].$1),
+                showCheckmark: false,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _AdminSummaryChips extends StatelessWidget {
@@ -1174,6 +1325,20 @@ class _AdminSummaryChips extends StatelessWidget {
             iconColor: dark ? Colors.amber.shade300 : const Color(0xFFF9A825),
             valueColor: dark ? Colors.amber.shade200 : const Color(0xFFF57F17),
           ),
+          _SummaryChip(
+            label: 'Adjusted',
+            value: '${_fmt(stats.totalAdjusted)} days',
+            icon: Icons.exposure_rounded,
+            iconBoxColor: dark
+                ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                : const Color(0xFFE3F2FD),
+            iconColor: dark
+                ? AppTheme.primaryNavyLight
+                : const Color(0xFF1565C0),
+            valueColor: dark
+                ? AppTheme.primaryNavyLight
+                : const Color(0xFF1565C0),
+          ),
           if (total != null)
             _SummaryChip(
               label: 'Records',
@@ -1182,7 +1347,9 @@ class _AdminSummaryChips extends StatelessWidget {
               iconBoxColor: dark
                   ? AppTheme.primaryNavy.withValues(alpha: 0.35)
                   : const Color(0xFFE8EAF6),
-              iconColor: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
+              iconColor: dark
+                  ? AppTheme.primaryNavyLight
+                  : AppTheme.primaryNavy,
               valueColor: AppTheme.dashTextPrimaryOf(context),
             ),
         ];
@@ -1268,7 +1435,11 @@ class _SummaryChip extends StatelessWidget {
 }
 
 class _EmployeeOption {
-  const _EmployeeOption({required this.id, required this.name, this.departmentId});
+  const _EmployeeOption({
+    required this.id,
+    required this.name,
+    this.departmentId,
+  });
 
   final String id;
   final String name;
@@ -1400,10 +1571,7 @@ class _AdminFilterCard extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
             const SizedBox(width: 10),
-            Text(
-              'Loading…',
-              style: AppTheme.dashFieldTextStyle(context),
-            ),
+            Text('Loading…', style: AppTheme.dashFieldTextStyle(context)),
           ],
         ),
       );
@@ -1548,8 +1716,9 @@ class _PaginationBar extends StatelessWidget {
         IconButton(
           icon: const Icon(Icons.chevron_left_rounded, size: 20),
           tooltip: 'Previous',
-          onPressed:
-              (loading || currentPage == 0) ? null : () => onPage(currentPage - 1),
+          onPressed: (loading || currentPage == 0)
+              ? null
+              : () => onPage(currentPage - 1),
           color: AppTheme.primaryNavy,
         ),
         const SizedBox(width: 4),
@@ -1592,10 +1761,7 @@ class _PaginationBar extends StatelessWidget {
           SizedBox(
             width: 14,
             height: 14,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: labelColor,
-            ),
+            child: CircularProgressIndicator(strokeWidth: 2, color: labelColor),
           ),
         ],
       ],
@@ -1660,8 +1826,19 @@ class _AdminLedgerTile extends StatelessWidget {
 
   String _fmtDt(DateTime d) {
     const mNames = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${mNames[d.month]} ${d.day}, ${d.year}';
   }
@@ -1674,7 +1851,7 @@ class _AdminLedgerTile extends StatelessWidget {
     final a = d.abs();
     final t = a == a.truncateToDouble()
         ? a.toInt().toString()
-        : a.toStringAsFixed(2);
+        : a.toStringAsFixed(3);
     return '$sign$t days';
   }
 
@@ -1683,6 +1860,24 @@ class _AdminLedgerTile extends StatelessWidget {
     final a = entry.action.toLowerCase();
     final d = entry.daysChanged;
 
+    if (a == 'monthly_accrual_adjusted') {
+      final positive = d >= 0;
+      return (
+        bg: dark
+            ? (positive ? Colors.green : Colors.red).shade900.withValues(
+                alpha: 0.4,
+              )
+            : positive
+            ? const Color(0xFFE8F5E9)
+            : const Color(0xFFFFEBEE),
+        fg: dark
+            ? (positive ? Colors.green : Colors.red).shade300
+            : positive
+            ? const Color(0xFF2E7D32)
+            : const Color(0xFFC62828),
+        icon: positive ? Icons.add_rounded : Icons.undo_rounded,
+      );
+    }
     if (a == 'monthly_accrual' ||
         a == 'applied' ||
         (d > 0 && entry.affectedBucket.toLowerCase() == 'earned')) {
@@ -1692,6 +1887,15 @@ class _AdminLedgerTile extends StatelessWidget {
             : const Color(0xFFE8F5E9),
         fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
         icon: Icons.add_rounded,
+      );
+    }
+    if (a == 'attendance_deduction_adjusted') {
+      return (
+        bg: dark
+            ? Colors.green.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFE8F5E9),
+        fg: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
+        icon: Icons.undo_rounded,
       );
     }
     if (a == 'admin_adjustment' || a.contains('adjust')) {
@@ -1733,15 +1937,30 @@ class _AdminLedgerTile extends StatelessWidget {
   String _actionTitle(String raw) {
     final a = raw.toLowerCase();
     switch (a) {
-      case 'monthly_accrual':        return 'Monthly Accrual';
-      case 'leave_approved':         return 'Leave Approved';
-      case 'admin_adjustment':       return 'Balance Adjustment';
-      case 'leave_submitted':        return 'Leave Filed';
-      case 'forced_leave_deduction': return 'Forced Leave Deduction';
-      case 'leave_cancelled':        return 'Leave Cancelled';
-      case 'leave_rejected':         return 'Leave Not Approved';
-      case 'leave_returned':         return 'Leave Returned';
-      case 'leave_revoked':          return 'Approval Revoked';
+      case 'monthly_accrual':
+        return 'Monthly Accrual';
+      case 'monthly_accrual_adjusted':
+        return 'Monthly Accrual Corrected';
+      case 'leave_approved':
+        return 'Leave Approved';
+      case 'admin_adjustment':
+        return 'Balance Adjustment';
+      case 'leave_submitted':
+        return 'Leave Filed';
+      case 'forced_leave_deduction':
+        return 'Forced Leave Deduction';
+      case 'attendance_deduction':
+        return 'DTR Leave Deduction';
+      case 'attendance_deduction_adjusted':
+        return 'DTR Deduction Corrected';
+      case 'leave_cancelled':
+        return 'Leave Cancelled';
+      case 'leave_rejected':
+        return 'Leave Not Approved';
+      case 'leave_returned':
+        return 'Leave Returned';
+      case 'leave_revoked':
+        return 'Approval Revoked';
       default:
         if (raw.isEmpty) return 'Ledger Entry';
         return raw
@@ -1760,15 +1979,27 @@ class _AdminLedgerTile extends StatelessWidget {
     final meta = entry.metadataJson ?? {};
 
     if (a == 'monthly_accrual') {
-      final ym = meta['target_year_month']?.toString() ??
+      final ym =
+          meta['target_year_month']?.toString() ??
           meta['targetYearMonth']?.toString();
       final months = meta['months_credited'];
       if (ym != null && ym.length == 7) {
         final parts = ym.split('-');
         final year = parts[0];
         const mNames = [
-          '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+          '',
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
         ];
         final mIdx = int.tryParse(parts[1]) ?? 0;
         final mName = mIdx >= 1 && mIdx <= 12 ? mNames[mIdx] : parts[1];
@@ -1778,6 +2009,16 @@ class _AdminLedgerTile extends StatelessWidget {
         return 'Accrual for $mName $year$suffix';
       }
       return 'Monthly leave accrual';
+    }
+    if (a == 'monthly_accrual_adjusted') {
+      final previous = meta['previous_credited_days'];
+      final expected = meta['expected_credited_days'];
+      if (previous != null && expected != null) {
+        return 'Credit corrected from $previous to $expected days';
+      }
+      return entry.remarks?.trim().isNotEmpty == true
+          ? entry.remarks!.trim()
+          : 'Monthly earned credit recalculated';
     }
 
     if (a == 'leave_approved') {
@@ -1806,6 +2047,12 @@ class _AdminLedgerTile extends StatelessWidget {
     if (a == 'forced_leave_deduction') {
       final r = entry.remarks?.trim();
       return r != null && r.isNotEmpty ? r : 'Forced leave deducted by HR';
+    }
+    if (a == 'attendance_deduction' || a == 'attendance_deduction_adjusted') {
+      final r = entry.remarks?.trim();
+      return r != null && r.isNotEmpty
+          ? r
+          : 'DTR equivalent-day charge to Vacation Leave';
     }
     if (a == 'leave_cancelled') {
       final bucket = entry.affectedBucket.toLowerCase();
@@ -1840,7 +2087,7 @@ class _AdminLedgerTile extends StatelessWidget {
   double _effectiveDaysForColor() {
     final bucket = entry.affectedBucket.toLowerCase();
     final d = entry.daysChanged;
-    if (bucket == 'used' && d > 0) return -d;
+    if (bucket == 'used') return -d;
     if (bucket == 'pending') return 0;
     return d;
   }
@@ -1853,8 +2100,8 @@ class _AdminLedgerTile extends StatelessWidget {
     final amountColor = effective > 0
         ? (dark ? Colors.green.shade300 : const Color(0xFF2E7D32))
         : effective < 0
-            ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
-            : AppTheme.dashTextSecondaryOf(context);
+        ? (dark ? Colors.red.shade300 : const Color(0xFFC62828))
+        : AppTheme.dashTextSecondaryOf(context);
 
     final subtitle = _subtitle();
     final employeeName = entry.employeeName?.trim() ?? '';
@@ -1898,8 +2145,9 @@ class _AdminLedgerTile extends StatelessWidget {
                     Text(
                       _fmtDt(_displayDate()),
                       style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context)
-                            .withValues(alpha: 0.8),
+                        color: AppTheme.dashTextSecondaryOf(
+                          context,
+                        ).withValues(alpha: 0.8),
                         fontSize: 11,
                       ),
                     ),
@@ -1925,8 +2173,9 @@ class _AdminLedgerTile extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context)
-                          .withValues(alpha: 0.85),
+                      color: AppTheme.dashTextSecondaryOf(
+                        context,
+                      ).withValues(alpha: 0.85),
                       fontSize: 12,
                       height: 1.3,
                     ),

@@ -7,6 +7,7 @@
 -- For existing databases that predate this file, use backend/scripts/docutracker-install-*.sql instead.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 -- =========================================
 -- SEQUENCES
@@ -40,7 +41,9 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'employee'
     CHECK (role IN ('admin', 'hr', 'employee', 'supervisor', 'mayor')),
 
+  first_name TEXT,
   full_name TEXT NOT NULL,
+  last_name TEXT,
   avatar_path TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
 
@@ -50,6 +53,8 @@ CREATE TABLE IF NOT EXISTS users (
   date_of_birth DATE,
   contact_number TEXT,
   address TEXT,
+  civil_status TEXT,
+  nationality TEXT,
 
   employment_type TEXT
     CHECK (employment_type IN ('regular', 'contractual', 'job_order', 'casual')),
@@ -57,12 +62,34 @@ CREATE TABLE IF NOT EXISTS users (
   date_hired DATE,
   employment_status TEXT DEFAULT 'active'
     CHECK (employment_status IN ('active', 'inactive', 'resigned', 'retired', 'terminated')),
+  leave_credit_eligible BOOLEAN NOT NULL DEFAULT true,
   separation_date DATE,
+  leave_credit_eligible_until DATE,
 
   biometric_user_id TEXT UNIQUE,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT users_nonactive_access_leave_check
+    CHECK (
+      COALESCE(employment_status, 'active') = 'active'
+      OR (is_active = false AND leave_credit_eligible = false)
+    ),
+  CONSTRAINT chk_users_separation_after_hire
+    CHECK (
+      separation_date IS NULL
+      OR date_hired IS NULL
+      OR separation_date >= date_hired
+    ),
+  CONSTRAINT chk_users_credit_eligibility_end
+    CHECK (
+      leave_credit_eligible_until IS NULL
+      OR (
+        separation_date IS NOT NULL
+        AND leave_credit_eligible_until = separation_date
+      )
+    )
 );
 
 -- =========================================
@@ -100,12 +127,16 @@ CREATE TABLE IF NOT EXISTS auth_password_reset_otps (
 CREATE TABLE IF NOT EXISTS departments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   department_number INT UNIQUE DEFAULT nextval('departments_department_number_seq'),
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   description TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_departments_name_not_blank CHECK (BTRIM(name) <> '')
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_departments_name_ci
+  ON departments (LOWER(BTRIM(name)));
 
 -- =========================================
 -- OFFICES (branch / site; DocuTracker office routing + users.office_id)
@@ -134,12 +165,52 @@ CREATE TABLE IF NOT EXISTS positions (
   name TEXT NOT NULL,
   description TEXT,
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  is_department_head BOOLEAN NOT NULL DEFAULT false,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  CONSTRAINT uq_positions_name_department UNIQUE (name, department_id)
+  CONSTRAINT chk_positions_name_not_blank CHECK (BTRIM(name) <> ''),
+  CONSTRAINT chk_position_department_head_department
+    CHECK (is_department_head = false OR department_id IS NOT NULL)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_positions_name_department_ci
+  ON positions (
+    LOWER(BTRIM(name)),
+    (COALESCE(department_id, '00000000-0000-0000-0000-000000000000'::uuid))
+  );
+
+-- Effective-dated official Department Head designations. Position rows retain
+-- is_department_head as a compatibility indicator; authority is resolved here.
+CREATE TABLE IF NOT EXISTS position_department_head_periods (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_id UUID NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
+  department_id UUID NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_position_department_head_period_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+
+ALTER TABLE position_department_head_periods
+  DROP CONSTRAINT IF EXISTS position_department_head_period_no_overlap;
+ALTER TABLE position_department_head_periods
+  ADD CONSTRAINT position_department_head_period_no_overlap
+  EXCLUDE USING gist (
+    department_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (is_active = true);
+
+CREATE INDEX IF NOT EXISTS idx_position_department_head_periods_effective
+  ON position_department_head_periods
+    (position_id, department_id, effective_from, effective_to)
+  WHERE is_active = true;
 
 -- =========================================
 -- SHIFTS / SCHEDULES
@@ -250,9 +321,102 @@ CREATE TABLE IF NOT EXISTS assignments (
     CHECK (effective_to IS NULL OR effective_to >= effective_from)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_assignments_one_active_per_employee
-ON assignments (employee_id)
-WHERE is_active = true;
+DROP INDEX IF EXISTS uq_assignments_one_active_per_employee;
+
+ALTER TABLE assignments
+  DROP CONSTRAINT IF EXISTS assignments_no_overlapping_effective_ranges;
+ALTER TABLE assignments
+  ADD CONSTRAINT assignments_no_overlapping_effective_ranges
+  EXCLUDE USING gist (
+    employee_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (is_active = true);
+
+CREATE INDEX IF NOT EXISTS idx_assignments_employee_effective_range
+  ON assignments (employee_id, effective_from, effective_to)
+  WHERE is_active = true;
+
+-- Effective-dated delegates who may review alongside the official Department
+-- Head. The primary reviewer is always resolved from the assignment history.
+CREATE TABLE IF NOT EXISTS department_reviewer_backups (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  department_id UUID NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  backup_rank INT NOT NULL CHECK (backup_rank > 0),
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  remarks TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_department_reviewer_backup_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+
+ALTER TABLE department_reviewer_backups
+  DROP CONSTRAINT IF EXISTS department_reviewer_backup_rank_no_overlap;
+ALTER TABLE department_reviewer_backups
+  ADD CONSTRAINT department_reviewer_backup_rank_no_overlap
+  EXCLUDE USING gist (
+    department_id WITH =,
+    backup_rank WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (is_active = true);
+
+ALTER TABLE department_reviewer_backups
+  DROP CONSTRAINT IF EXISTS department_reviewer_employee_no_overlap;
+ALTER TABLE department_reviewer_backups
+  ADD CONSTRAINT department_reviewer_employee_no_overlap
+  EXCLUDE USING gist (
+    department_id WITH =,
+    employee_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (is_active = true);
+
+CREATE INDEX IF NOT EXISTS idx_department_reviewer_backups_effective
+  ON department_reviewer_backups
+    (department_id, effective_from, effective_to, backup_rank)
+  WHERE is_active = true;
+
+-- =========================================
+-- EMPLOYEE OTHER POSITIONS / DESIGNATIONS
+-- =========================================
+CREATE TABLE IF NOT EXISTS employee_other_positions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  department_id UUID NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+  position_id UUID NOT NULL REFERENCES positions(id) ON DELETE RESTRICT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  remarks TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_employee_other_position_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_employee_other_positions_employee
+  ON employee_other_positions (employee_id, effective_from DESC);
+
+CREATE INDEX IF NOT EXISTS idx_employee_other_positions_position
+  ON employee_other_positions (position_id);
+
+CREATE INDEX IF NOT EXISTS idx_employee_other_positions_duplicate_lookup
+  ON employee_other_positions (
+    employee_id,
+    department_id,
+    position_id,
+    effective_from,
+    effective_to
+  )
+  WHERE is_active = true;
 
 -- =========================================
 -- POLICY ASSIGNMENTS
@@ -282,6 +446,21 @@ CREATE TABLE IF NOT EXISTS policy_assignments (
   CONSTRAINT chk_policy_assignment_dates
     CHECK (effective_to IS NULL OR effective_to >= effective_from)
 );
+
+ALTER TABLE policy_assignments
+  DROP CONSTRAINT IF EXISTS policy_assignments_no_overlapping_employee_ranges;
+ALTER TABLE policy_assignments
+  ADD CONSTRAINT policy_assignments_no_overlapping_employee_ranges
+  EXCLUDE USING gist (
+    employee_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (
+    is_active = true
+    AND employee_id IS NOT NULL
+    AND department_id IS NULL
+    AND shift_id IS NULL
+  );
 
 -- =========================================
 -- HOLIDAYS
@@ -356,13 +535,21 @@ CREATE TABLE IF NOT EXISTS leave_types (
   max_days NUMERIC,
   minimum_advance_days INTEGER,
   affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
-  balance_ledger_type TEXT NOT NULL DEFAULT 'others',
+  balance_ledger_type TEXT NOT NULL DEFAULT 'none',
+  entitlement_basis TEXT NOT NULL DEFAULT 'per_request',
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
-  accrual_monthly_rate NUMERIC(5,2),
-  accrual_annual_cap NUMERIC(8,2),
+  accrual_monthly_rate NUMERIC(6,3),
+  accrual_annual_cap NUMERIC(10,3),
+  employee_detail_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
   is_system BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_leave_type_employee_detail_schema_array CHECK (
+    jsonb_typeof(employee_detail_schema) = 'array'
+  ),
+  CONSTRAINT chk_leave_type_entitlement_basis CHECK (
+    entitlement_basis IN ('accrual', 'annual', 'per_event', 'per_request', 'compliance')
+  )
 );
 
 -- Seed leave types (names must match Flutter LeaveType enum .value for API lookup).
@@ -442,22 +629,22 @@ SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
     ),
     balance_ledger_type = CASE
       WHEN name = 'mandatoryForcedLeave' THEN 'vacationLeave'
+      WHEN name IN ('vacationLeave', 'sickLeave') THEN name
+      ELSE 'none'
+    END,
+    entitlement_basis = CASE
+      WHEN name IN ('vacationLeave', 'sickLeave') THEN 'accrual'
+      WHEN name IN ('specialPrivilegeLeave', 'soloParentLeave', 'tenDayVawcLeave') THEN 'annual'
+      WHEN name = 'mandatoryForcedLeave' THEN 'compliance'
       WHEN name IN (
-        'vacationLeave',
-        'sickLeave',
         'maternityLeave',
         'paternityLeave',
-        'specialPrivilegeLeave',
-        'soloParentLeave',
-        'studyLeave',
-        'tenDayVawcLeave',
         'rehabilitationPrivilege',
         'specialLeaveBenefitsForWomen',
         'specialEmergencyCalamityLeave',
-        'adoptionLeave',
-        'others'
-      ) THEN name
-      ELSE 'others'
+        'adoptionLeave'
+      ) THEN 'per_event'
+      ELSE 'per_request'
     END,
     accrues_monthly = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN true ELSE false END,
     accrual_monthly_rate = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN 1.25 ELSE NULL END,
@@ -485,8 +672,12 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   attachment_path TEXT,
   attachment_mime_type TEXT,
   attachment_uploaded_at TIMESTAMPTZ,
-  -- Flexible payload for form fields (office_department, position_title, commutation, etc.)
+  -- Whitelisted employee-editable leave-specific fields only.
   details JSONB,
+  -- Server-generated official identity/assignment fields used by forms and exports.
+  employee_official_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  -- Field labels/types frozen with the request for reliable historical display.
+  employee_detail_schema_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN (
       'draft',
@@ -503,7 +694,18 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 
   reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
   reviewer_remarks TEXT,
+  recommendation_remarks TEXT,
+  disapproval_reason TEXT,
   reviewed_at TIMESTAMPTZ,
+
+  -- Review routing is frozen when the employee submits or resubmits.
+  review_department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  assigned_department_head_id UUID REFERENCES users(id) ON DELETE SET NULL,
+
+  -- Authoritative final HR allocation. Only paid days consume leave credits.
+  approved_days_with_pay NUMERIC(5,2),
+  approved_days_without_pay NUMERIC(5,2),
+  approved_other_details TEXT,
 
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
@@ -515,8 +717,41 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   CONSTRAINT chk_leave_total_days CHECK (
     (total_days IS NULL OR total_days >= 0)
     AND (number_of_days IS NULL OR number_of_days >= 0)
+  ),
+  CONSTRAINT chk_leave_employee_official_snapshot_object CHECK (
+    jsonb_typeof(employee_official_snapshot) = 'object'
+  ),
+  CONSTRAINT chk_leave_employee_detail_schema_snapshot_array CHECK (
+    jsonb_typeof(employee_detail_schema_snapshot) = 'array'
+  ),
+  CONSTRAINT chk_leave_approved_days_nonnegative CHECK (
+    (approved_days_with_pay IS NULL OR approved_days_with_pay >= 0)
+    AND (approved_days_without_pay IS NULL OR approved_days_without_pay >= 0)
   )
 );
+CREATE INDEX IF NOT EXISTS idx_leave_requests_review_department
+  ON leave_requests(review_department_id);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_assigned_department_head
+  ON leave_requests(assigned_department_head_id, status);
+
+CREATE TABLE IF NOT EXISTS leave_request_department_reviewers (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leave_request_id UUID NOT NULL REFERENCES leave_requests(id) ON DELETE CASCADE,
+  department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  reviewer_name_snapshot TEXT NOT NULL,
+  reviewer_role TEXT NOT NULL CHECK (reviewer_role IN ('primary', 'backup')),
+  backup_rank INT CHECK (backup_rank IS NULL OR backup_rank > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_leave_reviewer_rank CHECK (
+    (reviewer_role = 'primary' AND backup_rank IS NULL)
+    OR (reviewer_role = 'backup' AND backup_rank IS NOT NULL)
+  ),
+  UNIQUE (leave_request_id, reviewer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_leave_request_department_reviewers_user
+  ON leave_request_department_reviewers(reviewer_id, leave_request_id);
 
 -- =========================================
 -- LEAVE BALANCES
@@ -527,10 +762,10 @@ CREATE TABLE IF NOT EXISTS leave_balances (
   -- leave_type must match a value in leave_types(name).
   -- FK enforces referential integrity; CHECK is a belt-and-suspenders guard.
   leave_type TEXT NOT NULL,
-  earned_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (earned_days >= 0),
-  used_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (used_days >= 0),
-  pending_days NUMERIC(8,2) NOT NULL DEFAULT 0 CHECK (pending_days >= 0),
-  adjusted_days NUMERIC(8,2) NOT NULL DEFAULT 0,
+  earned_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (earned_days >= 0),
+  used_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (used_days >= 0),
+  pending_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (pending_days >= 0),
+  adjusted_days NUMERIC(10,3) NOT NULL DEFAULT 0,
   as_of_date DATE,
   last_accrual_date DATE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -580,6 +815,27 @@ CREATE INDEX IF NOT EXISTS idx_leave_request_history_leave_request_id
   ON leave_request_history(leave_request_id);
 
 -- =========================================
+-- LEAVE ATTACHMENT ACCESS LOG (SENSITIVE-DOCUMENT AUDIT)
+-- =========================================
+CREATE TABLE IF NOT EXISTS leave_attachment_access_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leave_request_id UUID REFERENCES leave_requests(id) ON DELETE SET NULL,
+  attachment_name TEXT,
+  accessed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  actor_role TEXT,
+  access_reason TEXT NOT NULL,
+  access_outcome TEXT NOT NULL
+    CHECK (access_outcome IN ('allowed', 'denied', 'missing_attachment', 'missing_file')),
+  ip_address TEXT,
+  user_agent TEXT,
+  accessed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_leave_attachment_access_request_time
+  ON leave_attachment_access_logs(leave_request_id, accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leave_attachment_access_actor_time
+  ON leave_attachment_access_logs(accessed_by, accessed_at DESC);
+
+-- =========================================
 -- LEAVE BALANCE LEDGER (append-only audit of bucket changes)
 -- =========================================
 -- Distinct from leave_request_history (workflow). Records earned/pending/used/adjusted movements.
@@ -606,6 +862,91 @@ CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_action
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_leave_request
   ON leave_balance_ledger(related_leave_request_id)
   WHERE related_leave_request_id IS NOT NULL;
+
+-- =========================================
+-- MONTHLY LEAVE ACCRUAL POSTINGS
+-- =========================================
+-- One reconcilable earned-credit posting per employee, leave type, and service month.
+CREATE TABLE IF NOT EXISTS leave_monthly_accrual_postings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  service_month DATE NOT NULL,
+  leave_type TEXT NOT NULL,
+  credited_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (credited_days >= 0),
+  accrual_rate NUMERIC(6,3) NOT NULL CHECK (accrual_rate >= 0),
+  metadata_json JSONB,
+  posted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_leave_monthly_accrual_posting
+    UNIQUE (user_id, service_month, leave_type),
+  CONSTRAINT chk_leave_monthly_accrual_service_month
+    CHECK (EXTRACT(DAY FROM service_month) = 1),
+  CONSTRAINT fk_leave_monthly_accrual_posting_leave_type
+    FOREIGN KEY (leave_type) REFERENCES leave_types(name)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_leave_monthly_accrual_postings_month
+  ON leave_monthly_accrual_postings(service_month, user_id);
+
+-- =========================================
+-- MONTH-END DTR LEAVE DEDUCTIONS
+-- =========================================
+-- One idempotent Vacation Leave posting per employee and completed service month.
+CREATE TABLE IF NOT EXISTS leave_attendance_deductions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  service_month DATE NOT NULL,
+  leave_type TEXT NOT NULL DEFAULT 'vacationLeave',
+  late_minutes INT NOT NULL DEFAULT 0 CHECK (late_minutes >= 0),
+  undertime_minutes INT NOT NULL DEFAULT 0 CHECK (undertime_minutes >= 0),
+  absence_minutes INT NOT NULL DEFAULT 0 CHECK (absence_minutes >= 0),
+  computed_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (computed_days >= 0),
+  deducted_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (deducted_days >= 0),
+  without_pay_days NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (without_pay_days >= 0),
+  source_record_count INT NOT NULL DEFAULT 0 CHECK (source_record_count >= 0),
+  metadata_json JSONB,
+  posted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_leave_attendance_deduction_month
+    UNIQUE (user_id, service_month, leave_type),
+  CONSTRAINT chk_leave_attendance_service_month
+    CHECK (EXTRACT(DAY FROM service_month) = 1),
+  CONSTRAINT chk_leave_attendance_vacation_only
+    CHECK (leave_type = 'vacationLeave'),
+  CONSTRAINT fk_leave_attendance_deduction_leave_type
+    FOREIGN KEY (leave_type) REFERENCES leave_types(name)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_leave_attendance_deductions_month
+  ON leave_attendance_deductions(service_month, user_id);
+
+-- Completed DTR months changed after posting are reconciled on the next
+-- scheduled or manual month-end run. One row per employee/month is reopened
+-- whenever another correction occurs.
+CREATE TABLE IF NOT EXISTS dtr_month_end_reconciliation_queue (
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  service_month DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'reconciled')),
+  reason TEXT NOT NULL,
+  metadata_json JSONB,
+  required_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_attempt_at TIMESTAMPTZ,
+  attempt_count INT NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  last_error TEXT,
+  reconciled_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (employee_id, service_month),
+  CONSTRAINT chk_dtr_reconciliation_service_month
+    CHECK (EXTRACT(DAY FROM service_month) = 1)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_reconciliation_pending_month
+  ON dtr_month_end_reconciliation_queue(service_month, required_at)
+  WHERE status = 'pending';
 
 -- =========================================
 -- IN-APP NOTIFICATIONS (DTR / leave / future modules)
@@ -692,12 +1033,27 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  assigned_department_head_id UUID REFERENCES users(id) ON DELETE SET NULL,
   slip_date DATE NOT NULL,
   am_in BOOLEAN NOT NULL DEFAULT false,
   am_out BOOLEAN NOT NULL DEFAULT false,
   pm_in BOOLEAN NOT NULL DEFAULT false,
   pm_out BOOLEAN NOT NULL DEFAULT false,
   request_type TEXT NOT NULL DEFAULT 'locator',
+  request_type_label_snapshot TEXT,
+  request_type_short_label_snapshot TEXT,
+  request_type_location_label_snapshot TEXT,
+  request_type_location_hint_snapshot TEXT,
+  request_type_dtr_slot_label_snapshot TEXT,
+  request_type_dtr_print_label_snapshot TEXT,
+  request_type_requires_attachment_snapshot BOOLEAN,
+  request_type_coverage_mode_snapshot TEXT
+    CONSTRAINT chk_locator_type_coverage_snapshot
+    CHECK (
+      request_type_coverage_mode_snapshot IS NULL
+      OR request_type_coverage_mode_snapshot IN ('manual', 'wfh')
+    ),
+  request_type_snapshot_at TIMESTAMPTZ,
   office TEXT NOT NULL,
   reason TEXT NOT NULL,
   attachment_name TEXT,
@@ -709,7 +1065,9 @@ CREATE TABLE IF NOT EXISTS locator_slips (
       'pending',
       'pending_department_head',
       'pending_hr',
+      'returned_for_correction',
       'approved',
+      'revoked',
       'rejected_by_department_head',
       'rejected_by_hr',
       'cancelled'
@@ -720,8 +1078,35 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   hr_reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
   hr_reviewed_at TIMESTAMPTZ,
   hr_remarks TEXT,
+  is_retroactive_correction BOOLEAN NOT NULL DEFAULT false,
+  retroactive_correction_reason TEXT,
+  retroactive_corrected_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  retroactive_corrected_at TIMESTAMPTZ,
+  revoked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  revoked_at TIMESTAMPTZ,
+  revocation_reason TEXT,
+  month_end_reconciliation_required BOOLEAN NOT NULL DEFAULT false,
+  month_end_reconciled_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_locator_correction_audit CHECK (
+    is_retroactive_correction = false
+    OR (
+      retroactive_correction_reason IS NOT NULL
+      AND char_length(btrim(retroactive_correction_reason)) BETWEEN 10 AND 1000
+      AND retroactive_corrected_by IS NOT NULL
+      AND retroactive_corrected_at IS NOT NULL
+    )
+  ),
+  CONSTRAINT chk_locator_revocation_audit CHECK (
+    status <> 'revoked'
+    OR (
+      revoked_by IS NOT NULL
+      AND revoked_at IS NOT NULL
+      AND revocation_reason IS NOT NULL
+      AND char_length(btrim(revocation_reason)) BETWEEN 10 AND 1000
+    )
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_locator_slips_employee
@@ -730,12 +1115,86 @@ CREATE INDEX IF NOT EXISTS idx_locator_slips_status
   ON locator_slips(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_department
   ON locator_slips(department_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_locator_slips_assigned_department_head
+  ON locator_slips(assigned_department_head_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_date
   ON locator_slips(slip_date DESC);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_request_type
   ON locator_slips(request_type);
 CREATE INDEX IF NOT EXISTS idx_locator_request_types_active
   ON locator_request_types(is_active, sort_order, label);
+
+CREATE TABLE IF NOT EXISTS locator_slip_department_reviewers (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  locator_slip_id UUID NOT NULL REFERENCES locator_slips(id) ON DELETE CASCADE,
+  department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  reviewer_name_snapshot TEXT NOT NULL,
+  reviewer_role TEXT NOT NULL CHECK (reviewer_role IN ('primary', 'backup')),
+  backup_rank INT CHECK (backup_rank IS NULL OR backup_rank > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_locator_reviewer_rank CHECK (
+    (reviewer_role = 'primary' AND backup_rank IS NULL)
+    OR (reviewer_role = 'backup' AND backup_rank IS NOT NULL)
+  ),
+  UNIQUE (locator_slip_id, reviewer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_locator_slip_department_reviewers_user
+  ON locator_slip_department_reviewers(reviewer_id, locator_slip_id);
+
+-- =========================================
+-- LOCATOR WORKFLOW HISTORY (APPEND-ONLY)
+-- =========================================
+CREATE TABLE IF NOT EXISTS locator_slip_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  locator_slip_id UUID NOT NULL REFERENCES locator_slips(id) ON DELETE RESTRICT,
+  action TEXT NOT NULL CHECK (char_length(btrim(action)) > 0),
+  from_status TEXT,
+  to_status TEXT,
+  actor_id UUID,
+  actor_name_snapshot TEXT,
+  actor_role TEXT,
+  remarks TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_locator_slip_history_request_time
+  ON locator_slip_history(locator_slip_id, created_at, id);
+
+CREATE OR REPLACE FUNCTION prevent_locator_slip_history_mutation()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'locator_slip_history is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_prevent_locator_slip_history_mutation
+  ON locator_slip_history;
+CREATE TRIGGER trg_prevent_locator_slip_history_mutation
+BEFORE UPDATE OR DELETE ON locator_slip_history
+FOR EACH ROW EXECUTE FUNCTION prevent_locator_slip_history_mutation();
+
+-- =========================================
+-- LOCATOR ATTACHMENT ACCESS LOG
+-- =========================================
+CREATE TABLE IF NOT EXISTS locator_attachment_access_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  locator_slip_id UUID REFERENCES locator_slips(id) ON DELETE SET NULL,
+  attachment_name TEXT,
+  accessed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  actor_role TEXT,
+  access_reason TEXT NOT NULL,
+  access_outcome TEXT NOT NULL
+    CHECK (access_outcome IN ('allowed', 'denied', 'missing_attachment', 'missing_file')),
+  ip_address TEXT,
+  user_agent TEXT,
+  accessed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_locator_attachment_access_request_time
+  ON locator_attachment_access_logs(locator_slip_id, accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_locator_attachment_access_actor_time
+  ON locator_attachment_access_logs(accessed_by, accessed_at DESC);
 
 -- =========================================
 -- DTR ASSISTANT FEEDBACK
@@ -753,6 +1212,7 @@ CREATE TABLE IF NOT EXISTS dtr_assistant_feedback (
   model_profile TEXT,
   prompt_preview TEXT,
   prompt_hash TEXT,
+  response_hash TEXT,
   intent_confidence NUMERIC(5,4),
   intent_source TEXT,
   content_preview TEXT,
@@ -767,6 +1227,9 @@ CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_user_created
 
 CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_rating_created
   ON dtr_assistant_feedback(rating, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_created
+  ON dtr_assistant_feedback(created_at);
 
 CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_prompt_hash
   ON dtr_assistant_feedback(prompt_hash)
@@ -864,6 +1327,131 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT uq_dtr_daily_summary_employee_date UNIQUE (employee_id, attendance_date)
+);
+
+CREATE OR REPLACE FUNCTION queue_completed_month_dtr_reconciliation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  affected_employee UUID;
+  affected_date DATE;
+  operation_reason TEXT;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    affected_employee := OLD.employee_id;
+    affected_date := OLD.attendance_date;
+  ELSE
+    affected_employee := NEW.employee_id;
+    affected_date := NEW.attendance_date;
+  END IF;
+  operation_reason := 'dtr_' || lower(TG_OP);
+
+  IF affected_date <
+     date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date THEN
+    INSERT INTO dtr_month_end_reconciliation_queue (
+      employee_id, service_month, status, reason, metadata_json,
+      required_at, reconciled_at, updated_at
+    ) VALUES (
+      affected_employee,
+      date_trunc('month', affected_date)::date,
+      'pending',
+      operation_reason,
+      jsonb_build_object('attendance_date', affected_date, 'operation', TG_OP),
+      now(), NULL, now()
+    )
+    ON CONFLICT (employee_id, service_month) DO UPDATE
+      SET status = 'pending',
+          reason = EXCLUDED.reason,
+          metadata_json = EXCLUDED.metadata_json,
+          required_at = now(),
+          last_error = NULL,
+          reconciled_at = NULL,
+          updated_at = now();
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    IF (OLD.employee_id, OLD.attendance_date)
+       IS DISTINCT FROM (NEW.employee_id, NEW.attendance_date)
+       AND OLD.attendance_date <
+           date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date THEN
+      INSERT INTO dtr_month_end_reconciliation_queue (
+        employee_id, service_month, status, reason, metadata_json,
+        required_at, reconciled_at, updated_at
+      ) VALUES (
+        OLD.employee_id,
+        date_trunc('month', OLD.attendance_date)::date,
+        'pending',
+        operation_reason,
+        jsonb_build_object('attendance_date', OLD.attendance_date, 'operation', TG_OP),
+        now(), NULL, now()
+      )
+      ON CONFLICT (employee_id, service_month) DO UPDATE
+        SET status = 'pending',
+            reason = EXCLUDED.reason,
+            metadata_json = EXCLUDED.metadata_json,
+            required_at = now(),
+            last_error = NULL,
+            reconciled_at = NULL,
+            updated_at = now();
+    END IF;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_queue_completed_month_dtr_reconciliation
+  ON dtr_daily_summary;
+
+CREATE TRIGGER trg_queue_completed_month_dtr_reconciliation
+AFTER INSERT OR UPDATE OR DELETE ON dtr_daily_summary
+FOR EACH ROW
+EXECUTE FUNCTION queue_completed_month_dtr_reconciliation();
+
+-- Deleting a processed DTR entry must not destroy its raw biometric evidence.
+-- These immutable snapshots also suppress automatic recreation for the same day.
+CREATE TABLE IF NOT EXISTS dtr_daily_summary_deletions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  deleted_dtr_summary_id UUID NOT NULL,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  attendance_date DATE NOT NULL,
+  source TEXT NOT NULL,
+  reason TEXT NOT NULL CHECK (btrim(reason) <> ''),
+  deleted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  record_snapshot JSONB NOT NULL,
+  deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  restored_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  restoration_reason TEXT CHECK (
+    restoration_reason IS NULL OR btrim(restoration_reason) <> ''
+  ),
+  restored_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_summary_deletions_employee_date
+  ON dtr_daily_summary_deletions(employee_id, attendance_date);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_summary_deletions_deleted_at
+  ON dtr_daily_summary_deletions(deleted_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_summary_deletions_active
+  ON dtr_daily_summary_deletions(employee_id, attendance_date)
+  WHERE restored_at IS NULL;
+
+-- Approved leave is an overlay on DTR. Keeping it separate preserves punches,
+-- holidays, absences, and incomplete records when approval is later revoked.
+CREATE TABLE IF NOT EXISTS dtr_leave_coverage (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leave_request_id UUID NOT NULL REFERENCES leave_requests(id) ON DELETE CASCADE,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attendance_date DATE NOT NULL,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_dtr_leave_coverage_request_date
+    UNIQUE (leave_request_id, attendance_date),
+  CONSTRAINT uq_dtr_leave_coverage_employee_date
+    UNIQUE (employee_id, attendance_date)
 );
 
 -- =========================================
@@ -1449,6 +2037,8 @@ CREATE TABLE IF NOT EXISTS docutracker_workflow_steps (
   workflow_version INT NOT NULL DEFAULT 1,
   step_order INT NOT NULL CHECK (step_order > 0),
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  assignee_source TEXT NOT NULL DEFAULT 'specific_users'
+    CHECK (assignee_source IN ('specific_users', 'department_reviewers')),
   label TEXT,
   enabled BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1973,9 +2563,15 @@ CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_users_employment_status
   ON users (employment_status)
   WHERE employment_status IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible
+  ON users (leave_credit_eligible)
+  WHERE leave_credit_eligible = true;
 CREATE INDEX IF NOT EXISTS idx_users_separation_date
   ON users (separation_date)
   WHERE separation_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_leave_credit_eligible_until
+  ON users (leave_credit_eligible_until)
+  WHERE leave_credit_eligible_until IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_user_id ON auth_refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_expires_at ON auth_refresh_tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_revoked_at ON auth_refresh_tokens(revoked_at);
@@ -2008,6 +2604,14 @@ CREATE INDEX IF NOT EXISTS idx_policy_assignments_employee_id ON policy_assignme
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_department_id ON policy_assignments(department_id);
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_shift_id ON policy_assignments(shift_id);
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_policy_id ON policy_assignments(attendance_policy_id);
+CREATE INDEX IF NOT EXISTS idx_policy_assignments_employee_effective_range
+  ON policy_assignments (employee_id, effective_from, effective_to)
+  WHERE (
+    is_active = true
+    AND employee_id IS NOT NULL
+    AND department_id IS NULL
+    AND shift_id IS NULL
+  );
 
 CREATE INDEX IF NOT EXISTS idx_holidays_date_range ON holidays(date_from, date_to);
 CREATE INDEX IF NOT EXISTS idx_holidays_type ON holidays(holiday_type);
@@ -2051,6 +2655,10 @@ CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date_time
 ON dtr_daily_summary(attendance_date DESC, time_in DESC);
 CREATE INDEX IF NOT EXISTS idx_dtr_daily_summary_date_employee
 ON dtr_daily_summary(attendance_date, employee_id);
+CREATE INDEX IF NOT EXISTS idx_dtr_leave_coverage_employee_date
+ON dtr_leave_coverage(employee_id, attendance_date);
+CREATE INDEX IF NOT EXISTS idx_dtr_leave_coverage_request
+ON dtr_leave_coverage(leave_request_id);
 
 CREATE INDEX IF NOT EXISTS idx_locator_slips_status_employee_date
 ON locator_slips(status, employee_id, slip_date);

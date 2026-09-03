@@ -2,9 +2,9 @@
  * Export thumbs-down DTR assistant feedback so it can be promoted into the
  * golden set (scripts/eval-intents.data.js).
  *
- * New feedback rows store prompt_preview and prompt_hash. Older rows may only
- * have the assistant's reply (content_preview), the classified intent, and the
- * user's comment, so those still need a human to reconstruct the prompt.
+ * Feedback stores hashes rather than employee prompt/response text. Use the
+ * optional employee comment and aggregate metadata to identify regressions
+ * without exporting private HR conversations.
  *
  * Recommended workflow:
  *   1. Run:  npm run eval:export-feedback
@@ -39,11 +39,10 @@ async function main() {
         provider,
         model,
         model_profile,
-        prompt_preview,
         prompt_hash,
+        response_hash,
         intent_confidence,
         intent_source,
-        content_preview,
         comment,
         created_at
        FROM dtr_assistant_feedback
@@ -74,29 +73,17 @@ async function main() {
     console.log(`  classified intent : ${row.intent || '(none)'}`);
     console.log(`  decision          : ${row.intent_source || '(unknown)'}${row.intent_confidence == null ? '' : ` @ ${Number(row.intent_confidence).toFixed(2)}`}`);
     console.log(`  model             : ${row.model || '(none)'}  [${row.provider || '-'} / ${row.model_profile || '-'}]`);
-    if (row.prompt_preview) {
-      console.log(`  user asked        :`);
-      const prompt = String(row.prompt_preview || '').slice(0, 400);
-      for (const line of prompt.split('\n')) {
-        console.log(`      ${line}`);
-      }
-    } else if (row.prompt_hash) {
-      console.log(`  user prompt hash  : ${row.prompt_hash}`);
-    }
+    console.log(`  user prompt hash  : ${row.prompt_hash || '(not recorded)'}`);
+    console.log(`  response hash     : ${row.response_hash || '(not recorded)'}`);
     if (row.comment) {
       console.log(`  user comment      : ${row.comment}`);
-    }
-    console.log(`  assistant replied :`);
-    const preview = String(row.content_preview || '(no preview stored)').slice(0, 400);
-    for (const line of preview.split('\n')) {
-      console.log(`      ${line}`);
     }
     console.log('');
   }
 
   console.log('='.repeat(70));
-  console.log('Next step: append failed user prompts to scripts/eval-intents.data.js');
-  console.log('with the correct expected intent, then run:');
+  console.log('Next step: use aggregate failures and employee comments to add');
+  console.log('anonymized regression cases, then run:');
   console.log('  npm run eval:intents');
   console.log('');
 

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/services/desktop_lifecycle.dart';
 import 'package:hrms_plaridel/firebase_options.dart';
 
 @pragma('vm:entry-point')
@@ -44,6 +45,14 @@ class PushNotificationService {
     if (_initialized) return;
     _initialized = true;
 
+    if (_isLocalNotificationSupported) {
+      try {
+        await _initLocalNotifications();
+      } catch (e) {
+        debugPrint('Local notification initialization skipped: $e');
+      }
+    }
+
     if (!_isMessagingSupported) return;
 
     try {
@@ -51,7 +60,12 @@ class PushNotificationService {
         options: DefaultFirebaseOptions.currentPlatform,
       );
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-      await _initLocalNotifications();
+      await FirebaseMessaging.instance
+          .setForegroundNotificationPresentationOptions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
       _firebaseReady = true;
     } catch (e) {
       debugPrint('PushNotificationService.init skipped: $e');
@@ -71,12 +85,24 @@ class PushNotificationService {
   Future<void> _initLocalNotifications() async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const darwin = DarwinInitializationSettings();
-    const settings = InitializationSettings(
+    final windows = WindowsInitializationSettings(
+      appName: 'HRMS Plaridel',
+      appUserModelId: 'MunicipalityOfPlaridel.HRMS',
+      guid: 'ec0e2e3a-2e0e-4ed7-a71c-b1dc2f587426',
+      iconPath: DesktopLifecycleService.instance.notificationIconPath,
+    );
+    final settings = InitializationSettings(
       android: android,
       iOS: darwin,
       macOS: darwin,
+      windows: windows,
     );
-    await _localNotifications.initialize(settings: settings);
+    await _localNotifications.initialize(
+      settings: settings,
+      onDidReceiveNotificationResponse: (_) {
+        unawaited(DesktopLifecycleService.instance.showWindow());
+      },
+    );
 
     if (defaultTargetPlatform == TargetPlatform.android) {
       await _localNotifications
@@ -85,13 +111,6 @@ class PushNotificationService {
           >()
           ?.createNotificationChannel(_androidChannel);
     }
-
-    await FirebaseMessaging.instance
-        .setForegroundNotificationPresentationOptions(
-          alert: true,
-          badge: true,
-          sound: true,
-        );
   }
 
   Future<void> _showForegroundNotification(RemoteMessage message) async {
@@ -123,6 +142,23 @@ class PushNotificationService {
     );
   }
 
+  Future<void> showDesktopNotification({
+    required String id,
+    required String title,
+    String? body,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) return;
+    await _localNotifications.show(
+      id: id.hashCode & 0x7fffffff,
+      title: title.isEmpty ? 'HRMS Plaridel' : title,
+      body: body ?? '',
+      notificationDetails: const NotificationDetails(
+        windows: WindowsNotificationDetails(),
+      ),
+      payload: id,
+    );
+  }
+
   Future<void> syncTokenWithBackend() async {
     if (!_firebaseReady) return;
 
@@ -135,12 +171,10 @@ class PushNotificationService {
 
       if (settings.authorizationStatus == AuthorizationStatus.denied) return;
 
-      final token = await FirebaseMessaging.instance
-          .getToken()
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () => null,
-          );
+      final token = await FirebaseMessaging.instance.getToken().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => null,
+      );
       if (token == null || token.isEmpty) return;
       await _registerToken(token);
     } catch (e) {
@@ -202,6 +236,14 @@ class PushNotificationService {
     return defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.macOS;
+  }
+
+  bool get _isLocalNotificationSupported {
+    if (kIsWeb) return false;
+    return defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows;
   }
 
   Future<void> dispose() async {

@@ -8,7 +8,7 @@ import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_import_pr
 import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_import_result.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_matched_employee.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/data/repositories/biometric_import_repository.dart';
-import 'package:hrms_plaridel/features/dtr/attendance/utils/biometric_dat_parser.dart';
+import 'package:hrms_plaridel/features/dtr/attendance/utils/biometric_attendance_log_parser.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 
@@ -63,8 +63,14 @@ class _ImportBiometricAttendanceLogsDialogState
       _matchingError == null &&
       _matchedCount >= 1;
 
-  static bool _isDatFileName(String name) =>
-      name.toLowerCase().endsWith('.dat');
+  static const _supportedExtensions = ['dat', 'txt', 'csv'];
+
+  static bool _isSupportedFileName(String name) {
+    final lower = name.toLowerCase();
+    return _supportedExtensions.any(
+      (extension) => lower.endsWith('.$extension'),
+    );
+  }
 
   void _resetSelection() {
     setState(() {
@@ -83,11 +89,11 @@ class _ImportBiometricAttendanceLogsDialogState
     setState(() => _validationError = msg);
   }
 
-  Future<void> _pickDatFile() async {
+  Future<void> _pickLogFile() async {
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: false,
       type: FileType.custom,
-      allowedExtensions: const ['dat'],
+      allowedExtensions: _supportedExtensions,
       withData: true,
     );
 
@@ -100,35 +106,39 @@ class _ImportBiometricAttendanceLogsDialogState
     final file = result.files.single;
     final name = file.name;
 
-    if (!_isDatFileName(name)) {
+    if (!_isSupportedFileName(name)) {
       _resetSelection();
-      _setValidationError('Invalid file type. Please upload a `.dat` file.');
+      _setValidationError(
+        'Invalid file type. Please upload a DAT, TXT, or CSV file.',
+      );
       return;
     }
 
-    await _readAndPreviewDatFile(name: name, platformFile: file);
+    await _readAndPreviewLogFile(name: name, platformFile: file);
   }
 
   void _handleDroppedPayload(Object payload) {
     // Best-effort drag-and-drop support: only validates extension + captures name/size.
     if (payload is PlatformFile) {
       final name = payload.name;
-      if (!_isDatFileName(name)) {
+      if (!_isSupportedFileName(name)) {
         _resetSelection();
-        _setValidationError('Invalid file type. Please upload a `.dat` file.');
+        _setValidationError(
+          'Invalid file type. Please upload a DAT, TXT, or CSV file.',
+        );
         return;
       }
-      _readAndPreviewDatFile(name: name, platformFile: payload);
+      _readAndPreviewLogFile(name: name, platformFile: payload);
       return;
     }
 
     _resetSelection();
     _setValidationError(
-      'Unsupported drop payload. Please upload a `.dat` file.',
+      'Unsupported drop payload. Please upload a DAT, TXT, or CSV file.',
     );
   }
 
-  Future<void> _readAndPreviewDatFile({
+  Future<void> _readAndPreviewLogFile({
     required String name,
     required PlatformFile platformFile,
   }) async {
@@ -154,7 +164,7 @@ class _ImportBiometricAttendanceLogsDialogState
       }
 
       final content = utf8.decode(bytes, allowMalformed: true);
-      final preview = BiometricDatParser.parse(
+      final preview = BiometricAttendanceLogParser.parse(
         content: content,
         fileName: name,
       );
@@ -164,7 +174,7 @@ class _ImportBiometricAttendanceLogsDialogState
         _preview = preview;
         _parseError = hasAtLeastOneValidRow
             ? null
-            : 'No valid biometric rows were found. Expected tab-separated columns where column 1 is biometric user id and column 2 is timestamp.';
+            : 'No valid biometric rows were found. Column 1 must be the biometric user ID and column 2 the timestamp.';
         _isReading = false;
         _matchedEmployees = null;
         _matchingError = null;
@@ -179,7 +189,7 @@ class _ImportBiometricAttendanceLogsDialogState
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _parseError = 'Failed to parse the selected `.dat` file: $e';
+        _parseError = 'Failed to parse the selected attendance log: $e';
         _isReading = false;
       });
     }
@@ -437,13 +447,13 @@ class _ImportBiometricAttendanceLogsDialogState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Upload exported attendance log files from biometric devices (.dat format).',
+              'Upload a text attendance export in DAT, TXT, or CSV format.',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
             ),
             const SizedBox(height: 16),
             _DatFileDropArea(
               selectedFileName: _selectedFileName,
-              onPickFile: _pickDatFile,
+              onPickFile: _pickLogFile,
               onDropPayload: _handleDroppedPayload,
             ),
             if (_validationError != null) ...[
@@ -506,6 +516,11 @@ class _ImportBiometricAttendanceLogsDialogState
                     ),
                     const SizedBox(height: 10),
                     _PreviewRow(label: 'File', value: _preview!.fileName),
+                    const SizedBox(height: 6),
+                    _PreviewRow(
+                      label: 'Detected format',
+                      value: _preview!.detectedFormat,
+                    ),
                     const SizedBox(height: 6),
                     _PreviewRow(
                       label: 'Non-empty rows',
@@ -667,7 +682,7 @@ class _DatFileDropArea extends StatelessWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Click to select file or drag and drop (.dat)',
+                        'Click to select file or drag and drop (DAT, TXT, CSV)',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,

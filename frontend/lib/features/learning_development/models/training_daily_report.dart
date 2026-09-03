@@ -18,6 +18,7 @@ class TrainingDailyReport {
     this.attachmentName,
     this.attachmentType,
     this.attachmentPath,
+    this.attachmentToken,
   });
 
   final String id;
@@ -31,10 +32,11 @@ class TrainingDailyReport {
   final String? attachmentName;
   final String? attachmentType;
   final String? attachmentPath;
+  final String? attachmentToken;
 
-  String? get attachmentUrl => attachmentId == null
+  String? get attachmentUrl => attachmentId == null || attachmentToken == null
       ? null
-      : '${ApiConfig.baseUrl}/api/files/training-report/$attachmentId';
+      : '${ApiConfig.baseUrl}/api/files/training-report/$attachmentId?token=${Uri.encodeQueryComponent(attachmentToken!)}';
 
   factory TrainingDailyReport.fromJson(Map<String, dynamic> json) {
     return TrainingDailyReport(
@@ -51,6 +53,7 @@ class TrainingDailyReport {
       attachmentName: json['attachment_name'] as String?,
       attachmentType: json['attachment_type'] as String?,
       attachmentPath: json['attachment_path'] as String?,
+      attachmentToken: json['attachment_token'] as String?,
     );
   }
 }

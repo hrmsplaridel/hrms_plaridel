@@ -1,4 +1,4 @@
-let admin = null;
+let messaging = null;
 let initAttempted = false;
 
 const pushEnabledCategories = new Set([
@@ -20,28 +20,25 @@ function parseServiceAccount(raw) {
 }
 
 function getFirebaseAdmin() {
-  if (initAttempted) return admin;
+  if (initAttempted) return messaging;
   initAttempted = true;
 
-  let firebaseAdmin;
+  let firebaseApp;
+  let firebaseMessaging;
   try {
-    firebaseAdmin = require('firebase-admin');
+    firebaseApp = require('firebase-admin/app');
+    firebaseMessaging = require('firebase-admin/messaging');
   } catch (_) {
     console.warn('[fcmPushService] firebase-admin is not installed; push notifications disabled.');
     return null;
   }
 
   try {
-    if (firebaseAdmin.apps.length > 0) {
-      admin = firebaseAdmin;
-      return admin;
-    }
-
     const serviceAccount = parseServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
     const credential = serviceAccount
-      ? firebaseAdmin.credential.cert(serviceAccount)
+      ? firebaseApp.cert(serviceAccount)
       : process.env.GOOGLE_APPLICATION_CREDENTIALS
-        ? firebaseAdmin.credential.applicationDefault()
+        ? firebaseApp.applicationDefault()
         : null;
 
     if (!credential) {
@@ -51,12 +48,14 @@ function getFirebaseAdmin() {
       return null;
     }
 
-    firebaseAdmin.initializeApp({
-      credential,
-      projectId: process.env.FIREBASE_PROJECT_ID || serviceAccount?.project_id,
-    });
-    admin = firebaseAdmin;
-    return admin;
+    if (firebaseApp.getApps().length === 0) {
+      firebaseApp.initializeApp({
+        credential,
+        projectId: process.env.FIREBASE_PROJECT_ID || serviceAccount?.project_id,
+      });
+    }
+    messaging = firebaseMessaging.getMessaging();
+    return messaging;
   } catch (err) {
     console.error('[fcmPushService] Firebase Admin init failed', err);
     return null;
@@ -142,8 +141,8 @@ async function sendPushForNotification(db, row) {
     return;
   }
 
-  const firebaseAdmin = getFirebaseAdmin();
-  if (!firebaseAdmin || !row?.user_id) return;
+  const firebaseMessaging = getFirebaseAdmin();
+  if (!firebaseMessaging || !row?.user_id) return;
 
   const tokens = await listActiveTokens(db, row.user_id);
   if (tokens.length === 0) return;
@@ -172,7 +171,7 @@ async function sendPushForNotification(db, row) {
   };
 
   try {
-    const response = await firebaseAdmin.messaging().sendEachForMulticast(message);
+    const response = await firebaseMessaging.sendEachForMulticast(message);
     const invalidTokens = [];
     response.responses.forEach((result, index) => {
       if (result.success) return;

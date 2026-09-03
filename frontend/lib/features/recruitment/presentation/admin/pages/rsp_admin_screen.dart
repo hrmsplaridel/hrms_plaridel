@@ -1749,6 +1749,7 @@ Widget _rspMcqQuestionsPanel({
                   ),
                 ),
                 const SizedBox(height: 8),
+                // ignore: deprecated_member_use
                 RadioGroup<int>(
                   groupValue: item.correctIndex,
                   onChanged: (v) {
@@ -2926,6 +2927,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                           ),
                         ),
                         const SizedBox(height: 6),
+                        // ignore: deprecated_member_use
                         RadioGroup<String>(
                           groupValue: _relationship,
                           onChanged: (v) => setState(() => _relationship = v!),
@@ -11655,6 +11657,7 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // ignore: deprecated_member_use
                     RadioListTile<_AdminPassScoreMode>(
                       value: _AdminPassScoreMode.perfect,
                       groupValue: _mode,
@@ -11663,6 +11666,7 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                     ),
+                    // ignore: deprecated_member_use
                     RadioListTile<_AdminPassScoreMode>(
                       value: _AdminPassScoreMode.custom,
                       groupValue: _mode,
@@ -11868,48 +11872,7 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
   }
 }
 
-class _AdminBypassExamChip extends StatelessWidget {
-  const _AdminBypassExamChip({required this.label, required this.score});
-
-  final String label;
-  final String score;
-
-  @override
-  Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: accent.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            score,
-            style: TextStyle(
-              color: accent,
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// _AdminBypassExamChip was removed because it was not referenced anywhere.
 
 class _EditApplicantBasicDialog extends StatefulWidget {
   const _EditApplicantBasicDialog({required this.app});

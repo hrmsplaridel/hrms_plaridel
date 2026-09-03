@@ -30,6 +30,7 @@ class DtrTimeLogMobileCard extends StatelessWidget {
     required this.remarkChip,
     required this.source,
     required this.showActions,
+    required this.isLeaveCovered,
     required this.onEdit,
     required this.onDelete,
   });
@@ -45,6 +46,7 @@ class DtrTimeLogMobileCard extends StatelessWidget {
   final Widget remarkChip;
   final String? source;
   final bool showActions;
+  final bool isLeaveCovered;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -103,7 +105,11 @@ class DtrTimeLogMobileCard extends StatelessWidget {
               remarkChip,
               if (showActions) ...[
                 const SizedBox(width: 4),
-                _DtrTimeLogMobileActions(onEdit: onEdit, onDelete: onDelete),
+                _DtrTimeLogMobileActions(
+                  isLeaveCovered: isLeaveCovered,
+                  onEdit: onEdit,
+                  onDelete: onDelete,
+                ),
               ],
             ],
           ),
@@ -154,10 +160,12 @@ class DtrTimeLogMobileCard extends StatelessWidget {
 
 class _DtrTimeLogMobileActions extends StatelessWidget {
   const _DtrTimeLogMobileActions({
+    required this.isLeaveCovered,
     required this.onEdit,
     required this.onDelete,
   });
 
+  final bool isLeaveCovered;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -188,22 +196,27 @@ class _DtrTimeLogMobileActions extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Text(
-                'Edit',
+                isLeaveCovered ? 'Edit underlying attendance' : 'Edit',
                 style: TextStyle(color: AppTheme.dashTextPrimaryOf(ctx)),
               ),
             ],
           ),
         ),
-        PopupMenuItem<String>(
-          value: 'delete',
-          child: Row(
-            children: [
-              Icon(Icons.delete_rounded, size: 20, color: Colors.red.shade700),
-              const SizedBox(width: 12),
-              Text('Delete', style: TextStyle(color: Colors.red.shade700)),
-            ],
+        if (!isLeaveCovered)
+          PopupMenuItem<String>(
+            value: 'delete',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.delete_rounded,
+                  size: 20,
+                  color: Colors.red.shade700,
+                ),
+                const SizedBox(width: 12),
+                Text('Delete', style: TextStyle(color: Colors.red.shade700)),
+              ],
+            ),
           ),
-        ),
       ],
     );
   }

@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart'
-    show DtrProvider, DtrUpdateEvent, EmployeeOption;
+    show DtrProvider, DtrUpdateEvent, EmployeeOption, EmployeeShiftForDate;
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/mobile/widgets/dtr_time_logs_mobile_list.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_source_badge.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/import_biometric_attendance_logs_dialog.dart';
@@ -258,6 +260,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   StreamSubscription? _wsSub;
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
+  static const int _recordPageSize = 100;
+  int _recordPage = 0;
 
   /// When non-null and >= 1, filter to this day only (realtime-style single-day view).
   int? _selectedDay;
@@ -381,10 +385,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   Future<void> _load() async {
     if (!mounted) return;
     final dtr = context.read<DtrProvider>();
-    await Future.wait([
-      dtr.loadEmployees(departmentId: _selectedDepartmentId),
-      dtr.loadDepartments(),
-    ]);
+    await dtr.loadDepartments();
     if (!mounted) return;
     await _applyFilters();
   }
@@ -392,8 +393,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   Future<void> _applyFilters({
     bool silent = false,
     bool forceRefresh = false,
+    bool resetPage = false,
   }) async {
     if (!mounted) return;
+    if (resetPage && _recordPage != 0) {
+      setState(() => _recordPage = 0);
+    }
     final dayBefore = _selectedDay;
     _clampSelectedDayIfNeeded();
     if (dayBefore != _selectedDay && mounted) {
@@ -414,6 +419,16 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       start = DateTime(_selectedYear, _selectedMonth, 1);
       end = DateTime(_selectedYear, _selectedMonth + 1, 0);
     }
+    await dtr.loadEmployees(
+      departmentId: _selectedDepartmentId,
+      startDate: start,
+      endDate: end,
+    );
+    if (!mounted) return;
+    if (_selectedUserId != null &&
+        !dtr.employees.any((employee) => employee.id == _selectedUserId)) {
+      setState(() => _selectedUserId = null);
+    }
     await dtr.loadTimeRecordsForAdmin(
       startDate: start,
       endDate: end,
@@ -421,6 +436,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       departmentId: _selectedDepartmentId?.isEmpty == true
           ? null
           : _selectedDepartmentId,
+      limit: _recordPageSize,
+      offset: _recordPage * _recordPageSize,
       silent: silent,
       forceRefresh: forceRefresh,
     );
@@ -434,6 +451,39 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     final ampm = h >= 12 ? 'PM' : 'AM';
     final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
     return '$h12:${m.toString().padLeft(2, '0')} $ampm';
+  }
+
+  static bool _isOvernightShift(EmployeeShiftForDate? shift) {
+    final start = shift?.startMinutes;
+    final end = shift?.endMinutes;
+    return start != null && end != null && end <= start;
+  }
+
+  static int? _orderedPunchMinutes(
+    int? value, {
+    required int? after,
+    required bool overnight,
+  }) {
+    if (value == null) return null;
+    return overnight && after != null && value <= after ? value + 1440 : value;
+  }
+
+  static DateTime _manualPunchTimestamp({
+    required DateTime attendanceDate,
+    required TimeOfDay time,
+    required EmployeeShiftForDate? shift,
+    bool mayFallOnNextDay = false,
+  }) {
+    final minutes = time.hour * 60 + time.minute;
+    final nextDay =
+        mayFallOnNextDay &&
+        _isOvernightShift(shift) &&
+        shift?.endMinutes != null &&
+        minutes <= shift!.endMinutes!;
+    final date = nextDay
+        ? attendanceDate.add(const Duration(days: 1))
+        : attendanceDate;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
   }
 
   static String _formatDate(DateTime d) {
@@ -666,7 +716,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Showing sample data. DTR data comes from the backend (dtr_daily_summary). Add records via Clock In or admin Time Logs to see live data.',
+                      'Showing sample data. DTR data comes from biometric attendance and manual Admin/HR Time Logs entries.',
                       style: TextStyle(
                         color: dark
                             ? Colors.blue.shade100
@@ -790,7 +840,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               _clampSelectedDayIfNeeded();
                             });
                           }
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<int>(
@@ -825,7 +875,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               _clampSelectedDayIfNeeded();
                             });
                           }
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<int?>(
@@ -859,7 +909,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ],
                         onChanged: (v) {
                           setState(() => _selectedDay = v);
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<String?>(
@@ -888,16 +938,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             ),
                           ),
                         ],
-                        onChanged: (v) async {
-                          final dtr = context.read<DtrProvider>();
+                        onChanged: (v) {
                           setState(() {
                             _selectedDepartmentId = v;
                             _selectedUserId = null;
                           });
-                          await dtr.loadEmployees(departmentId: v);
-                          if (!mounted) return;
-                          setState(() {});
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       DropdownButton<String?>(
@@ -928,13 +974,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         ],
                         onChanged: (v) {
                           setState(() => _selectedUserId = v);
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                       ),
                       OutlinedButton(
-                        onPressed: () async {
+                        onPressed: () {
                           final now = DateTime.now();
-                          final dtr = context.read<DtrProvider>();
                           setState(() {
                             _searchController.clear();
                             _selectedMonth = now.month;
@@ -943,9 +988,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             _selectedUserId = null;
                             _selectedDepartmentId = null;
                           });
-                          await dtr.loadEmployees();
-                          if (!mounted) return;
-                          _applyFilters();
+                          _applyFilters(resetPage: true);
                         },
                         style: OutlinedButton.styleFrom(
                           backgroundColor: dark
@@ -974,6 +1017,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               break;
                             case 'import':
                               _showImportBiometricLogsDialog();
+                              break;
+                            case 'deleted':
+                              _showDeletedEntriesPanel(dtr);
                               break;
                           }
                         },
@@ -1004,6 +1050,21 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   ),
                                   const SizedBox(width: 12),
                                   const Text('Import biometric logs'),
+                                ],
+                              ),
+                            ),
+                          if (isAdmin)
+                            PopupMenuItem<String>(
+                              value: 'deleted',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.history_rounded,
+                                    size: 20,
+                                    color: AppTheme.primaryNavy,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  const Text('Deleted entries'),
                                 ],
                               ),
                             ),
@@ -1239,8 +1300,60 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                 );
               },
             ),
+          if (!dtr.loading &&
+              !isHardcodedPreview &&
+              dtr.timeRecordTotal > _recordPageSize) ...[
+            const SizedBox(height: 12),
+            _buildTimeLogPagination(context, dtr),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildTimeLogPagination(BuildContext context, DtrProvider dtr) {
+    final totalPages = (dtr.timeRecordTotal / _recordPageSize).ceil();
+    final currentPage = _recordPage.clamp(0, totalPages - 1).toInt();
+    final firstRow = currentPage * _recordPageSize + 1;
+    final lastRow = (firstRow + dtr.timeRecords.length - 1)
+        .clamp(firstRow, dtr.timeRecordTotal)
+        .toInt();
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Text(
+          '$firstRow-$lastRow of ${dtr.timeRecordTotal}',
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 12),
+        IconButton(
+          tooltip: 'Previous page',
+          onPressed: currentPage > 0
+              ? () {
+                  setState(() => _recordPage = currentPage - 1);
+                  _applyFilters();
+                }
+              : null,
+          icon: const Icon(Icons.chevron_left_rounded),
+        ),
+        Text(
+          '${currentPage + 1} of $totalPages',
+          style: TextStyle(color: AppTheme.dashTextPrimaryOf(context)),
+        ),
+        IconButton(
+          tooltip: 'Next page',
+          onPressed: currentPage + 1 < totalPages
+              ? () {
+                  setState(() => _recordPage = currentPage + 1);
+                  _applyFilters();
+                }
+              : null,
+          icon: const Icon(Icons.chevron_right_rounded),
+        ),
+      ],
     );
   }
 
@@ -1288,7 +1401,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               isHoliday: record.status == 'holiday' || record.holidayId != null,
             ),
             source: record.source,
-            showActions: !isHardcodedPreview,
+            showActions: !isHardcodedPreview && record.id != null,
+            isLeaveCovered: record.isLeaveCovered,
             onEdit: () => _showEditDialog(dtr, record),
             onDelete: () => _confirmDelete(dtr, record),
           ),
@@ -1304,6 +1418,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     required DtrProvider dtr,
     required bool isHardcodedPreview,
   }) {
+    final isLeaveCovered = record.isLeaveCovered;
     final dark = AppTheme.dashIsDark(context);
     final cellStyle = TextStyle(
       fontSize: 13,
@@ -1448,61 +1563,90 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
             Expanded(
               flex: 1,
               child: Center(
-                child: PopupMenuButton<String>(
-                  icon: Icon(
-                    Icons.more_vert,
-                    size: 22,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  tooltip: 'Actions',
-                  onSelected: (value) {
-                    if (value == 'edit') {
-                      _showEditDialog(dtr, record);
-                    } else if (value == 'delete') {
-                      _confirmDelete(dtr, record);
-                    }
-                  },
-                  itemBuilder: (ctx) => [
-                    PopupMenuItem<String>(
-                      value: 'edit',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.edit_rounded,
-                            size: 20,
-                            color: AppTheme.dashTextPrimaryOf(ctx),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Edit',
-                            style: TextStyle(
-                              color: AppTheme.dashTextPrimaryOf(ctx),
+                child: record.id == null
+                    ? const SizedBox.shrink()
+                    : PopupMenuButton<String>(
+                        icon: Icon(
+                          Icons.more_vert,
+                          size: 22,
+                          color: AppTheme.dashTextSecondaryOf(context),
+                        ),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Actions',
+                        onSelected: (value) {
+                          if (value == 'edit') {
+                            _showEditDialog(dtr, record);
+                          } else if (value == 'recalculate') {
+                            _recalculateRecord(dtr, record);
+                          } else if (value == 'delete') {
+                            _confirmDelete(dtr, record);
+                          }
+                        },
+                        itemBuilder: (ctx) => [
+                          PopupMenuItem<String>(
+                            value: 'edit',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.edit_rounded,
+                                  size: 20,
+                                  color: AppTheme.dashTextPrimaryOf(ctx),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  isLeaveCovered
+                                      ? 'Edit underlying attendance'
+                                      : 'Edit',
+                                  style: TextStyle(
+                                    color: AppTheme.dashTextPrimaryOf(ctx),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
+                          if (!isLeaveCovered)
+                            PopupMenuItem<String>(
+                              value: 'recalculate',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.refresh_rounded,
+                                    size: 20,
+                                    color: AppTheme.dashTextPrimaryOf(ctx),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Recalculate',
+                                    style: TextStyle(
+                                      color: AppTheme.dashTextPrimaryOf(ctx),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (!isLeaveCovered)
+                            PopupMenuItem<String>(
+                              value: 'delete',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.delete_rounded,
+                                    size: 20,
+                                    color: Colors.red.shade700,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Delete',
+                                    style: TextStyle(
+                                      color: Colors.red.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
-                    ),
-                    PopupMenuItem<String>(
-                      value: 'delete',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.delete_rounded,
-                            size: 20,
-                            color: Colors.red.shade700,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Delete',
-                            style: TextStyle(color: Colors.red.shade700),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
               ),
             ),
         ],
@@ -1598,15 +1742,28 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       if (!context.mounted) return;
     }
 
+    // Use the currently selected day/month/year so manual entry goes to the right date
+    final day = _selectedDay;
+    final lastDay = _lastDayOfSelectedMonth;
+    DateTime recordDate = (day != null && day >= 1 && day <= lastDay)
+        ? DateTime(_selectedYear, _selectedMonth, day)
+        : DateTime.now();
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    if (recordDate.isAfter(todayDate)) recordDate = todayDate;
     var addDeptId = _selectedDepartmentId;
-    await dtr.loadEmployees(departmentId: addDeptId);
+    await dtr.loadEmployees(
+      departmentId: addDeptId,
+      startDate: recordDate,
+      endDate: recordDate,
+    );
     if (!context.mounted) return;
 
     if (dtr.employees.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'No employees for this department filter. Try All departments or add employee profiles.',
+            'No employees for this department and date. Try All departments or another date.',
           ),
         ),
       );
@@ -1614,658 +1771,178 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     }
 
     String? userId = _pickUserIdForEmployeeList(dtr.employees, _selectedUserId);
-    // Use the currently selected day/month/year so manual entry goes to the right date
-    final day = _selectedDay;
-    final lastDay = _lastDayOfSelectedMonth;
-    DateTime recordDate = (day != null && day >= 1 && day <= lastDay)
-        ? DateTime(_selectedYear, _selectedMonth, day)
-        : DateTime.now();
     TimeOfDay? timeIn;
     TimeOfDay? breakOut;
     TimeOfDay? breakIn;
     TimeOfDay? timeOut;
     var employeesLoading = false;
+    var shiftLoading = false;
+    EmployeeShiftForDate? selectedShift;
+    String? shiftLookupError;
+    var submitting = false;
+    String? submissionError;
+
+    void retainExpectedPunches(EmployeeShiftForDate shift) {
+      if (!shift.expectedPunches.contains('time_in')) timeIn = null;
+      if (!shift.expectedPunches.contains('break_out')) breakOut = null;
+      if (!shift.expectedPunches.contains('break_in')) breakIn = null;
+      if (!shift.expectedPunches.contains('time_out')) timeOut = null;
+    }
+
+    final initialEmployeeId = userId;
+    if (initialEmployeeId != null) {
+      try {
+        selectedShift = await dtr.fetchEmployeeShiftForDate(
+          employeeId: initialEmployeeId,
+          date: recordDate,
+        );
+      } catch (e) {
+        shiftLookupError = userFacingApiError(e);
+      }
+      if (!context.mounted) return;
+    }
 
     bool? updated;
     try {
-      updated = await showDialog<bool>(
+      updated = await openResponsiveRightSidePanel<bool>(
         context: context,
+        barrierLabel: 'Close add time entry',
+        breakpoint: 0,
+        minWidth: 520,
+        initialWidthFraction: 0.36,
         builder: (ctx) {
           return StatefulBuilder(
             builder: (ctx, setState) {
-              final hasAnyTime =
-                  timeIn != null ||
-                  breakOut != null ||
-                  breakIn != null ||
-                  timeOut != null;
-              final screenH = MediaQuery.sizeOf(ctx).height;
+              Future<void> refreshSelectedShift() async {
+                final selectedEmployeeId = userId;
+                if (selectedEmployeeId == null) {
+                  setState(() {
+                    selectedShift = null;
+                    shiftLookupError = null;
+                    shiftLoading = false;
+                  });
+                  return;
+                }
+                setState(() {
+                  shiftLoading = true;
+                  shiftLookupError = null;
+                });
+                try {
+                  final shift = await dtr.fetchEmployeeShiftForDate(
+                    employeeId: selectedEmployeeId,
+                    date: recordDate,
+                  );
+                  if (!ctx.mounted) return;
+                  setState(() {
+                    selectedShift = shift;
+                    retainExpectedPunches(shift);
+                    shiftLoading = false;
+                  });
+                } catch (e) {
+                  if (!ctx.mounted) return;
+                  setState(() {
+                    selectedShift = null;
+                    shiftLookupError = userFacingApiError(e);
+                    shiftLoading = false;
+                  });
+                }
+              }
+
               final empList = dtr.employees;
               final String? employeeDropdownValue = empList.isEmpty
                   ? null
                   : (userId != null && empList.any((e) => e.id == userId))
                   ? userId
                   : empList.first.id;
-              final canSubmit =
-                  !employeesLoading &&
-                  employeeDropdownValue != null &&
-                  empList.isNotEmpty;
-              return Dialog(
-                backgroundColor: AppTheme.dashPanelOf(ctx),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: AppTheme.dashHairlineOf(ctx)),
-                ),
-                insetPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 24,
-                ),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: 440,
-                    maxHeight: screenH * 0.92,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryNavy.withValues(
-                                  alpha: 0.12,
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(
-                                Icons.edit_calendar_rounded,
-                                color: AppTheme.primaryNavy,
-                                size: 24,
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Add time entry',
-                                    style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.dashTextPrimaryOf(ctx),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Department filters the list below (defaults to your Time Logs filter). One employee, one date; empty punches stay blank.',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      height: 1.35,
-                                      color: AppTheme.dashTextSecondaryOf(
-                                        ctx,
-                                      ).withValues(alpha: 0.95),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Flexible(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              DropdownButtonFormField<String?>(
-                                initialValue: addDeptId,
-                                isExpanded: true,
-                                dropdownColor: AppTheme.dashPanelOf(ctx),
-                                style: AppTheme.dashFieldTextStyle(ctx),
-                                decoration: AppTheme.dashInputDecoration(
-                                  ctx,
-                                  labelText: 'Department',
-                                  radius: 12,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 14,
-                                  ),
-                                ),
-                                items: [
-                                  const DropdownMenuItem<String?>(
-                                    value: null,
-                                    child: Text('All departments'),
-                                  ),
-                                  ...dtr.departments.map(
-                                    (d) => DropdownMenuItem<String?>(
-                                      value: d.id,
-                                      child: Text(
-                                        d.name,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                onChanged: employeesLoading
-                                    ? null
-                                    : (v) async {
-                                        addDeptId = v;
-                                        setState(() => employeesLoading = true);
-                                        await dtr.loadEmployees(
-                                          departmentId: v,
-                                        );
-                                        if (!ctx.mounted) return;
-                                        setState(() {
-                                          employeesLoading = false;
-                                          userId = _pickUserIdForEmployeeList(
-                                            dtr.employees,
-                                            userId,
-                                          );
-                                        });
-                                      },
-                              ),
-                              const SizedBox(height: 10),
-                              if (employeesLoading)
-                                const Padding(
-                                  padding: EdgeInsets.only(bottom: 8),
-                                  child: LinearProgressIndicator(minHeight: 3),
-                                ),
-                              if (!employeesLoading && empList.isEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: Text(
-                                    'No employees in this department. Choose All departments or another office.',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.orange.shade800,
-                                    ),
-                                  ),
-                                ),
-                              DropdownButtonFormField<String>(
-                                initialValue: employeeDropdownValue,
-                                isExpanded: true,
-                                dropdownColor: AppTheme.dashPanelOf(ctx),
-                                style: AppTheme.dashFieldTextStyle(ctx),
-                                decoration: AppTheme.dashInputDecoration(
-                                  ctx,
-                                  labelText: 'Employee',
-                                  radius: 12,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 14,
-                                  ),
-                                ),
-                                items: empList
-                                    .map(
-                                      (e) => DropdownMenuItem(
-                                        value: e.id,
-                                        child: Text(
-                                          e.fullName,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: employeesLoading || empList.isEmpty
-                                    ? null
-                                    : (v) {
-                                        if (v != null) {
-                                          setState(() => userId = v);
-                                        }
-                                      },
-                              ),
-                              const SizedBox(height: 14),
-                              Material(
-                                color: AppTheme.dashInputFillOf(ctx),
-                                borderRadius: BorderRadius.circular(12),
-                                child: InkWell(
-                                  onTap: () async {
-                                    final d = await showDatePicker(
-                                      context: ctx,
-                                      initialDate: recordDate,
-                                      firstDate: DateTime(2020),
-                                      lastDate: DateTime(2030),
-                                    );
-                                    if (d != null) {
-                                      setState(() => recordDate = d);
-                                    }
-                                  },
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 14,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          Icons.calendar_today_rounded,
-                                          size: 20,
-                                          color: AppTheme.dashIsDark(ctx)
-                                              ? AppTheme.primaryNavyLight
-                                              : AppTheme.primaryNavy,
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Date',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w600,
-                                                  color:
-                                                      AppTheme.dashTextSecondaryOf(
-                                                        ctx,
-                                                      ),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                _formatDateWithWeekday(
-                                                  recordDate,
-                                                ),
-                                                style: TextStyle(
-                                                  fontSize: 15,
-                                                  fontWeight: FontWeight.w600,
-                                                  color:
-                                                      AppTheme.dashTextPrimaryOf(
-                                                        ctx,
-                                                      ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Icon(
-                                          Icons.chevron_right_rounded,
-                                          color: AppTheme.dashTextSecondaryOf(
-                                            ctx,
-                                          ).withValues(alpha: 0.7),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 18),
-                              Text(
-                                'Morning',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.4,
-                                  color: AppTheme.dashTextSecondaryOf(
-                                    ctx,
-                                  ).withValues(alpha: 0.9),
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              _manualEntryPunchTile(
-                                ctx,
-                                label: 'AM In (time in)',
-                                value: timeIn,
-                                icon: Icons.wb_sunny_outlined,
-                                onTap: () async {
-                                  final t = await showTimePicker(
-                                    context: ctx,
-                                    initialTime: timeIn ?? TimeOfDay.now(),
-                                  );
-                                  if (t != null) setState(() => timeIn = t);
-                                },
-                              ),
-                              const SizedBox(height: 8),
-                              _manualEntryPunchTile(
-                                ctx,
-                                label: 'AM Out (break out)',
-                                value: breakOut,
-                                icon: Icons.restaurant_outlined,
-                                onTap: () async {
-                                  final t = await showTimePicker(
-                                    context: ctx,
-                                    initialTime: breakOut ?? TimeOfDay.now(),
-                                  );
-                                  if (t != null) setState(() => breakOut = t);
-                                },
-                              ),
-                              const SizedBox(height: 18),
-                              Text(
-                                'Afternoon',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.4,
-                                  color: AppTheme.dashTextSecondaryOf(
-                                    ctx,
-                                  ).withValues(alpha: 0.9),
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              _manualEntryPunchTile(
-                                ctx,
-                                label: 'PM In (break in)',
-                                value: breakIn,
-                                icon: Icons.nightlight_outlined,
-                                onTap: () async {
-                                  final t = await showTimePicker(
-                                    context: ctx,
-                                    initialTime: breakIn ?? TimeOfDay.now(),
-                                  );
-                                  if (t != null) setState(() => breakIn = t);
-                                },
-                              ),
-                              const SizedBox(height: 8),
-                              _manualEntryPunchTile(
-                                ctx,
-                                label: 'PM Out (time out)',
-                                value: timeOut,
-                                icon: Icons.logout_rounded,
-                                onTap: () async {
-                                  final t = await showTimePicker(
-                                    context: ctx,
-                                    initialTime: timeOut ?? TimeOfDay.now(),
-                                  );
-                                  if (t != null) setState(() => timeOut = t);
-                                },
-                              ),
-                              if (hasAnyTime) ...[
-                                const SizedBox(height: 8),
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: TextButton(
-                                    onPressed: () => setState(() {
-                                      timeIn = null;
-                                      breakOut = null;
-                                      breakIn = null;
-                                      timeOut = null;
-                                    }),
-                                    child: const Text('Clear all times'),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
-                      Divider(height: 1, color: AppTheme.dashHairlineOf(ctx)),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('Cancel'),
-                            ),
-                            const SizedBox(width: 8),
-                            FilledButton(
-                              onPressed: !canSubmit
-                                  ? null
-                                  : () {
-                                      userId = employeeDropdownValue;
-                                      Navigator.pop(ctx, true);
-                                    },
-                              style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.primaryNavy,
-                                foregroundColor: AppTheme.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                              child: const Text('Add entry'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      );
-    } finally {
-      if (mounted) {
-        await dtr.loadEmployees(departmentId: _selectedDepartmentId);
-      }
-    }
-
-    final uid = userId;
-    if (updated == true && uid != null && uid.isNotEmpty) {
-      final date = DateTime(recordDate.year, recordDate.month, recordDate.day);
-      DateTime? tin;
-      DateTime? bo;
-      DateTime? bi;
-      DateTime? tout;
-      if (timeIn != null) {
-        tin = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeIn!.hour,
-          timeIn!.minute,
-        );
-      }
-      if (breakOut != null) {
-        bo = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakOut!.hour,
-          breakOut!.minute,
-        );
-      }
-      if (breakIn != null) {
-        bi = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakIn!.hour,
-          breakIn!.minute,
-        );
-      }
-      if (timeOut != null) {
-        tout = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeOut!.hour,
-          timeOut!.minute,
-        );
-      }
-      double? hours;
-      if (tin != null && bo != null && bi != null && tout != null) {
-        hours =
-            (bo.difference(tin).inMinutes + tout.difference(bi).inMinutes) /
-            60.0;
-      } else if (tin != null && tout != null) {
-        hours = tout.difference(tin).inMinutes / 60.0;
-      }
-      final record = TimeRecord(
-        userId: uid,
-        recordDate: date,
-        timeIn: tin,
-        breakOut: bo,
-        breakIn: bi,
-        timeOut: tout,
-        totalHours: hours,
-        status: 'present',
-      );
-      await dtr.addManualEntry(record);
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Time entry added.')));
-      }
-    }
-  }
-
-  Future<void> _showImportBiometricLogsDialog() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => ImportBiometricAttendanceLogsDialog(
-        onCancel: () => Navigator.of(ctx).pop(),
-        onImportSuccess: () => Navigator.of(ctx).pop(true),
-      ),
-    );
-    if (ok == true && mounted) {
-      context.read<DtrProvider>().invalidateCachedDtrData();
-      _applyFilters(forceRefresh: true);
-    }
-  }
-
-  Future<void> _showEditDialog(
-    DtrProvider dtr,
-    TimeRecord r,
-  ) async {
-    final timeInLocal = r.timeIn?.toLocal();
-    final breakOutLocal = r.breakOut?.toLocal();
-    final breakInLocal = r.breakIn?.toLocal();
-    final timeOutLocal = r.timeOut?.toLocal();
-    TimeOfDay? timeIn = timeInLocal != null
-        ? TimeOfDay(hour: timeInLocal.hour, minute: timeInLocal.minute)
-        : null;
-    TimeOfDay? breakOut = breakOutLocal != null
-        ? TimeOfDay(hour: breakOutLocal.hour, minute: breakOutLocal.minute)
-        : null;
-    TimeOfDay? breakIn = breakInLocal != null
-        ? TimeOfDay(hour: breakInLocal.hour, minute: breakInLocal.minute)
-        : null;
-    TimeOfDay? timeOut = timeOutLocal != null
-        ? TimeOfDay(hour: timeOutLocal.hour, minute: timeOutLocal.minute)
-        : null;
-    DateTime recordDate = r.recordDate;
-    final originalRecordDate = recordDate;
-    final originalTimeIn = timeIn;
-    final originalBreakOut = breakOut;
-    final originalBreakIn = breakIn;
-    final originalTimeOut = timeOut;
-
-    // Derive shift-awareness flags once (r is immutable, so these never change).
-    final punchMode = r.shiftPunchMode;
-    final isAmOnly = punchMode == 'am_only';
-    final isPmOnly = punchMode == 'pm_only';
-    final isSingleSession = punchMode == 'single_session';
-
-    if (!mounted) return;
-    final updated = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setState) {
-            int? minutes(TimeOfDay? t) =>
-                t == null ? null : (t.hour * 60) + t.minute;
-
-            Future<void> pickTime(
-              TimeOfDay? current,
-              void Function(TimeOfDay value) assign,
-            ) async {
-              final t = await showTimePicker(
-                context: ctx,
-                initialTime: current ?? TimeOfDay.now(),
-              );
-              if (t != null) setState(() => assign(t));
-            }
-
-            final amInM = minutes(timeIn);
-            final amOutM = minutes(breakOut);
-            final pmInM = minutes(breakIn);
-            final pmOutM = minutes(timeOut);
-            String? validationMessage;
-            if (isAmOnly) {
-              if (amInM != null && amOutM != null && amOutM <= amInM) {
+              final punchMode = selectedShift?.punchMode ?? 'auto';
+              final isAmOnly = punchMode == 'am_only';
+              final isPmOnly = punchMode == 'pm_only';
+              final isSingleSession = punchMode == 'single_session';
+              final isOvernight = _isOvernightShift(selectedShift);
+              final hasAnyTime = isAmOnly
+                  ? timeIn != null || breakOut != null
+                  : isPmOnly
+                  ? breakIn != null || timeOut != null
+                  : isSingleSession
+                  ? timeIn != null || timeOut != null
+                  : timeIn != null ||
+                        breakOut != null ||
+                        breakIn != null ||
+                        timeOut != null;
+              int? minutes(TimeOfDay? time) =>
+                  time == null ? null : (time.hour * 60) + time.minute;
+              final amInMinutes = minutes(timeIn);
+              final amOutMinutes = minutes(breakOut);
+              final pmInMinutes = minutes(breakIn);
+              final pmOutMinutes = minutes(timeOut);
+              String? validationMessage;
+              if (isAmOnly &&
+                  amInMinutes != null &&
+                  amOutMinutes != null &&
+                  amOutMinutes <= amInMinutes) {
                 validationMessage = 'AM Out must be later than AM In.';
-              }
-            } else if (isPmOnly) {
-              if (pmInM != null && pmOutM != null && pmOutM <= pmInM) {
+              } else if (isPmOnly &&
+                  pmInMinutes != null &&
+                  pmOutMinutes != null &&
+                  (_orderedPunchMinutes(
+                            pmOutMinutes,
+                            after: pmInMinutes,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutMinutes) <=
+                      pmInMinutes) {
                 validationMessage = 'PM Out must be later than PM In.';
-              }
-            } else if (isSingleSession) {
-              if (amInM != null && pmOutM != null && pmOutM <= amInM) {
+              } else if (isSingleSession &&
+                  amInMinutes != null &&
+                  pmOutMinutes != null &&
+                  (_orderedPunchMinutes(
+                            pmOutMinutes,
+                            after: amInMinutes,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutMinutes) <=
+                      amInMinutes) {
                 validationMessage = 'Time Out must be later than Time In.';
-              }
-            } else {
-              if (amInM != null && amOutM != null && amOutM <= amInM) {
-                validationMessage = 'AM Out must be later than AM In.';
-              } else if (pmInM != null && pmOutM != null && pmOutM <= pmInM) {
-                validationMessage = 'PM Out must be later than PM In.';
-              } else if (amOutM != null && pmInM != null && pmInM < amOutM) {
-                validationMessage = 'PM In should not be earlier than AM Out.';
-              }
-            }
-
-            var workedMinutes = 0;
-            if (validationMessage == null) {
-              if (isAmOnly) {
-                if (amInM != null && amOutM != null) {
-                  workedMinutes = amOutM - amInM;
-                }
-              } else if (isPmOnly) {
-                if (pmInM != null && pmOutM != null) {
-                  workedMinutes = pmOutM - pmInM;
-                }
-              } else if (isSingleSession) {
-                if (amInM != null && pmOutM != null) {
-                  workedMinutes = pmOutM - amInM;
-                }
-              } else {
-                if (amInM != null && amOutM != null) {
-                  workedMinutes += amOutM - amInM;
-                }
-                if (pmInM != null && pmOutM != null) {
-                  workedMinutes += pmOutM - pmInM;
-                }
-                if (workedMinutes == 0 && amInM != null && pmOutM != null) {
-                  workedMinutes = pmOutM - amInM;
+              } else if (!isAmOnly && !isPmOnly && !isSingleSession) {
+                if (amInMinutes != null &&
+                    amOutMinutes != null &&
+                    amOutMinutes <= amInMinutes) {
+                  validationMessage = 'AM Out must be later than AM In.';
+                } else if (pmInMinutes != null &&
+                    pmOutMinutes != null &&
+                    (_orderedPunchMinutes(
+                              pmOutMinutes,
+                              after: pmInMinutes,
+                              overnight: isOvernight,
+                            ) ??
+                            pmOutMinutes) <=
+                        pmInMinutes) {
+                  validationMessage = 'PM Out must be later than PM In.';
+                } else if (amOutMinutes != null &&
+                    pmInMinutes != null &&
+                    (_orderedPunchMinutes(
+                              pmInMinutes,
+                              after: amOutMinutes,
+                              overnight: isOvernight,
+                            ) ??
+                            pmInMinutes) <
+                        amOutMinutes) {
+                  validationMessage =
+                      'PM In should not be earlier than AM Out.';
                 }
               }
-            }
-
-            final bool hasAnyTime;
-            if (isAmOnly) {
-              hasAnyTime = timeIn != null || breakOut != null;
-            } else if (isPmOnly) {
-              hasAnyTime = breakIn != null || timeOut != null;
-            } else if (isSingleSession) {
-              hasAnyTime = timeIn != null || timeOut != null;
-            } else {
-              hasAnyTime =
-                  timeIn != null ||
-                  breakOut != null ||
-                  breakIn != null ||
-                  timeOut != null;
-            }
-            final canSave = validationMessage == null;
-            final screenH = MediaQuery.sizeOf(ctx).height;
-
-            return Dialog(
-              backgroundColor: AppTheme.dashPanelOf(ctx),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: AppTheme.dashHairlineOf(ctx)),
-              ),
-              insetPadding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 24,
-              ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: 520,
-                  maxHeight: screenH * 0.92,
-                ),
+              final canSubmit =
+                  !submitting &&
+                  !employeesLoading &&
+                  !shiftLoading &&
+                  selectedShift != null &&
+                  shiftLookupError == null &&
+                  employeeDropdownValue != null &&
+                  empList.isNotEmpty &&
+                  hasAnyTime &&
+                  validationMessage == null;
+              return Material(
+                color: AppTheme.dashPanelOf(ctx),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2295,7 +1972,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Edit time entry',
+                                  'Add time entry',
                                   style: TextStyle(
                                     fontSize: 20,
                                     fontWeight: FontWeight.w700,
@@ -2304,7 +1981,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                 ),
                                 const SizedBox(height: 6),
                                 Text(
-                                  r.employeeName ?? r.userId,
+                                  'Department filters the list below (defaults to your Time Logs filter). One employee, one date; empty punches stay blank.',
                                   style: TextStyle(
                                     fontSize: 13,
                                     height: 1.35,
@@ -2312,16 +1989,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                       ctx,
                                     ).withValues(alpha: 0.95),
                                   ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ],
                             ),
-                          ),
-                          IconButton(
-                            tooltip: 'Close',
-                            onPressed: () => Navigator.pop(ctx, false),
-                            icon: const Icon(Icons.close_rounded),
                           ),
                         ],
                       ),
@@ -2332,24 +2002,106 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                _TimeEntryInfoChip(
-                                  icon: Icons.badge_outlined,
-                                  label: r.employeeName ?? r.userId,
+                            DropdownButtonFormField<String?>(
+                              initialValue: addDeptId,
+                              isExpanded: true,
+                              dropdownColor: AppTheme.dashPanelOf(ctx),
+                              style: AppTheme.dashFieldTextStyle(ctx),
+                              decoration: AppTheme.dashInputDecoration(
+                                ctx,
+                                labelText: 'Department',
+                                radius: 12,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
                                 ),
-                                _TimeEntryInfoChip(
-                                  icon: Icons.calendar_today_rounded,
-                                  label: _formatDateWithWeekday(recordDate),
+                              ),
+                              items: [
+                                const DropdownMenuItem<String?>(
+                                  value: null,
+                                  child: Text('All departments'),
                                 ),
-                                if (r.source != null && r.source!.isNotEmpty)
-                                  AttendanceSourceBadge(
-                                    source: r.source,
-                                    compact: true,
+                                ...dtr.departments.map(
+                                  (d) => DropdownMenuItem<String?>(
+                                    value: d.id,
+                                    child: Text(
+                                      d.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
+                                ),
                               ],
+                              onChanged: employeesLoading
+                                  ? null
+                                  : (v) async {
+                                      addDeptId = v;
+                                      setState(() => employeesLoading = true);
+                                      await dtr.loadEmployees(
+                                        departmentId: v,
+                                        startDate: recordDate,
+                                        endDate: recordDate,
+                                      );
+                                      if (!ctx.mounted) return;
+                                      setState(() {
+                                        employeesLoading = false;
+                                        userId = _pickUserIdForEmployeeList(
+                                          dtr.employees,
+                                          userId,
+                                        );
+                                      });
+                                      await refreshSelectedShift();
+                                    },
+                            ),
+                            const SizedBox(height: 10),
+                            if (employeesLoading)
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 8),
+                                child: LinearProgressIndicator(minHeight: 3),
+                              ),
+                            if (!employeesLoading && empList.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Text(
+                                  'No employees in this department. Choose All departments or another office.',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.orange.shade800,
+                                  ),
+                                ),
+                              ),
+                            DropdownButtonFormField<String>(
+                              initialValue: employeeDropdownValue,
+                              isExpanded: true,
+                              dropdownColor: AppTheme.dashPanelOf(ctx),
+                              style: AppTheme.dashFieldTextStyle(ctx),
+                              decoration: AppTheme.dashInputDecoration(
+                                ctx,
+                                labelText: 'Employee',
+                                radius: 12,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                              ),
+                              items: empList
+                                  .map(
+                                    (e) => DropdownMenuItem(
+                                      value: e.id,
+                                      child: Text(
+                                        e.fullName,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: employeesLoading || empList.isEmpty
+                                  ? null
+                                  : (v) async {
+                                      if (v != null) {
+                                        setState(() => userId = v);
+                                        await refreshSelectedShift();
+                                      }
+                                    },
                             ),
                             const SizedBox(height: 14),
                             Material(
@@ -2361,10 +2113,27 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                     context: ctx,
                                     initialDate: recordDate,
                                     firstDate: DateTime(2020),
-                                    lastDate: DateTime(2030),
+                                    lastDate: todayDate,
                                   );
                                   if (d != null) {
-                                    setState(() => recordDate = d);
+                                    setState(() {
+                                      recordDate = d;
+                                      employeesLoading = true;
+                                    });
+                                    await dtr.loadEmployees(
+                                      departmentId: addDeptId,
+                                      startDate: d,
+                                      endDate: d,
+                                    );
+                                    if (!ctx.mounted) return;
+                                    setState(() {
+                                      employeesLoading = false;
+                                      userId = _pickUserIdForEmployeeList(
+                                        dtr.employees,
+                                        userId,
+                                      );
+                                    });
+                                    await refreshSelectedShift();
                                   }
                                 },
                                 borderRadius: BorderRadius.circular(12),
@@ -2389,7 +2158,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              'Correction date',
+                                              'Date',
                                               style: TextStyle(
                                                 fontSize: 12,
                                                 fontWeight: FontWeight.w600,
@@ -2427,77 +2196,21 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 16),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: AppTheme.sectionAltOf(ctx),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: AppTheme.dashHairlineOf(ctx),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.timer_outlined,
-                                    size: 20,
-                                    color: AppTheme.dashTextSecondaryOf(ctx),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      workedMinutes > 0
-                                          ? 'Estimated worked time: ${(workedMinutes / 60).toStringAsFixed(2)} hours'
-                                          : 'Set only the punches that should appear. Empty slots stay blank.',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: AppTheme.dashTextSecondaryOf(
-                                          ctx,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (validationMessage != null) ...[
-                              const SizedBox(height: 10),
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.orange.withValues(
-                                      alpha: 0.25,
-                                    ),
-                                  ),
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(
-                                      Icons.warning_amber_rounded,
-                                      size: 20,
-                                      color: Colors.orange.shade800,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        validationMessage,
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: Colors.orange.shade900,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
                             const SizedBox(height: 18),
-                            // Shift-mode badge — shown when mode restricts fields.
+                            if (shiftLoading) ...[
+                              const LinearProgressIndicator(minHeight: 3),
+                              const SizedBox(height: 12),
+                            ],
+                            if (shiftLookupError != null) ...[
+                              Text(
+                                shiftLookupError!,
+                                style: TextStyle(
+                                  color: Colors.orange.shade900,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                             if (isAmOnly || isPmOnly || isSingleSession) ...[
                               Container(
                                 padding: const EdgeInsets.symmetric(
@@ -2515,37 +2228,42 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                     ),
                                   ),
                                 ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.schedule_rounded,
-                                      size: 16,
-                                      color: AppTheme.dashIsDark(ctx)
-                                          ? AppTheme.primaryNavyLight
-                                          : AppTheme.primaryNavy,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        isAmOnly
-                                            ? 'AM-only shift — only morning punches apply.'
-                                            : isPmOnly
-                                            ? 'PM-only shift — only afternoon punches apply.'
-                                            : 'Single-session shift — no break; time in and time out only.',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: AppTheme.dashIsDark(ctx)
-                                              ? AppTheme.primaryNavyLight
-                                              : AppTheme.primaryNavy,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                                child: Text(
+                                  isAmOnly
+                                      ? 'AM-only shift — only morning punches apply.'
+                                      : isPmOnly
+                                      ? 'PM-only shift — only afternoon punches apply.'
+                                      : 'Single-session shift — no break; time in and time out only.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.dashIsDark(ctx)
+                                        ? AppTheme.primaryNavyLight
+                                        : AppTheme.primaryNavy,
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 14),
                             ],
-                            // Morning section
+                            if (validationMessage != null) ...[
+                              Text(
+                                validationMessage,
+                                style: TextStyle(
+                                  color: Colors.orange.shade900,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            if (submissionError != null) ...[
+                              Text(
+                                submissionError!,
+                                style: TextStyle(
+                                  color: Colors.red.shade700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                             if (!isPmOnly) ...[
                               Text(
                                 isSingleSession ? 'Work Session' : 'Morning',
@@ -2566,11 +2284,13 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                     : 'AM In (time in)',
                                 value: timeIn,
                                 icon: Icons.wb_sunny_outlined,
-                                onTap: () => pickTime(
-                                  timeIn,
-                                  (value) => timeIn = value,
-                                ),
-                                onClear: () => setState(() => timeIn = null),
+                                onTap: () async {
+                                  final t = await showTimePicker(
+                                    context: ctx,
+                                    initialTime: timeIn ?? TimeOfDay.now(),
+                                  );
+                                  if (t != null) setState(() => timeIn = t);
+                                },
                               ),
                               if (!isSingleSession) ...[
                                 const SizedBox(height: 8),
@@ -2579,16 +2299,18 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   label: 'AM Out (break out)',
                                   value: breakOut,
                                   icon: Icons.restaurant_outlined,
-                                  onTap: () => pickTime(
-                                    breakOut,
-                                    (value) => breakOut = value,
-                                  ),
-                                  onClear: () =>
-                                      setState(() => breakOut = null),
+                                  onTap: () async {
+                                    final t = await showTimePicker(
+                                      context: ctx,
+                                      initialTime: breakOut ?? TimeOfDay.now(),
+                                    );
+                                    if (t != null) {
+                                      setState(() => breakOut = t);
+                                    }
+                                  },
                                 ),
                               ],
                             ],
-                            // Afternoon section
                             if (!isAmOnly) ...[
                               SizedBox(height: isPmOnly ? 0 : 18),
                               if (!isSingleSession) ...[
@@ -2609,12 +2331,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   label: 'PM In (break in)',
                                   value: breakIn,
                                   icon: Icons.nightlight_outlined,
-                                  onTap: () => pickTime(
-                                    breakIn,
-                                    (value) => breakIn = value,
-                                  ),
-                                  onClear: () =>
-                                      setState(() => breakIn = null),
+                                  onTap: () async {
+                                    final t = await showTimePicker(
+                                      context: ctx,
+                                      initialTime: breakIn ?? TimeOfDay.now(),
+                                    );
+                                    if (t != null) {
+                                      setState(() => breakIn = t);
+                                    }
+                                  },
                                 ),
                                 const SizedBox(height: 8),
                               ],
@@ -2625,33 +2350,27 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                     : 'PM Out (time out)',
                                 value: timeOut,
                                 icon: Icons.logout_rounded,
-                                onTap: () => pickTime(
-                                  timeOut,
-                                  (value) => timeOut = value,
-                                ),
-                                onClear: () => setState(() => timeOut = null),
+                                onTap: () async {
+                                  final t = await showTimePicker(
+                                    context: ctx,
+                                    initialTime: timeOut ?? TimeOfDay.now(),
+                                  );
+                                  if (t != null) setState(() => timeOut = t);
+                                },
                               ),
                             ],
                             if (hasAnyTime) ...[
                               const SizedBox(height: 8),
                               Align(
                                 alignment: Alignment.centerRight,
-                                child: TextButton.icon(
+                                child: TextButton(
                                   onPressed: () => setState(() {
-                                    if (!isPmOnly) timeIn = null;
-                                    if (!isPmOnly && !isSingleSession) {
-                                      breakOut = null;
-                                    }
-                                    if (!isAmOnly && !isSingleSession) {
-                                      breakIn = null;
-                                    }
-                                    if (!isAmOnly) timeOut = null;
+                                    timeIn = null;
+                                    breakOut = null;
+                                    breakIn = null;
+                                    timeOut = null;
                                   }),
-                                  icon: const Icon(
-                                    Icons.cleaning_services_rounded,
-                                    size: 18,
-                                  ),
-                                  label: const Text('Clear all times'),
+                                  child: const Text('Clear all times'),
                                 ),
                               ),
                             ],
@@ -2663,46 +2382,878 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                       child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           TextButton(
-                            onPressed: () => setState(() {
-                              recordDate = originalRecordDate;
-                              timeIn = originalTimeIn;
-                              breakOut = originalBreakOut;
-                              breakIn = originalBreakIn;
-                              timeOut = originalTimeOut;
-                            }),
-                            child: const Text('Reset'),
-                          ),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
+                            onPressed: submitting
+                                ? null
+                                : () => Navigator.pop(ctx, false),
                             child: const Text('Cancel'),
                           ),
                           const SizedBox(width: 8),
-                          FilledButton.icon(
-                            onPressed: canSave
-                                ? () => Navigator.pop(ctx, true)
-                                : null,
+                          FilledButton(
+                            onPressed: !canSubmit
+                                ? null
+                                : () async {
+                                    final uid = employeeDropdownValue;
+                                    final shift = selectedShift;
+                                    if (shift == null) return;
+
+                                    setState(() {
+                                      submitting = true;
+                                      submissionError = null;
+                                    });
+
+                                    final selectedPunchMode = shift.punchMode;
+                                    final addIsAmOnly =
+                                        selectedPunchMode == 'am_only';
+                                    final addIsPmOnly =
+                                        selectedPunchMode == 'pm_only';
+                                    final addIsSingleSession =
+                                        selectedPunchMode == 'single_session';
+                                    final date = DateTime(
+                                      recordDate.year,
+                                      recordDate.month,
+                                      recordDate.day,
+                                    );
+                                    DateTime? tin;
+                                    DateTime? bo;
+                                    DateTime? bi;
+                                    DateTime? tout;
+                                    if (!addIsPmOnly && timeIn != null) {
+                                      tin = _manualPunchTimestamp(
+                                        attendanceDate: date,
+                                        time: timeIn!,
+                                        shift: shift,
+                                      );
+                                    }
+                                    if (!addIsPmOnly &&
+                                        !addIsSingleSession &&
+                                        breakOut != null) {
+                                      bo = _manualPunchTimestamp(
+                                        attendanceDate: date,
+                                        time: breakOut!,
+                                        shift: shift,
+                                        mayFallOnNextDay: true,
+                                      );
+                                    }
+                                    if (!addIsAmOnly &&
+                                        !addIsSingleSession &&
+                                        breakIn != null) {
+                                      bi = _manualPunchTimestamp(
+                                        attendanceDate: date,
+                                        time: breakIn!,
+                                        shift: shift,
+                                        mayFallOnNextDay: true,
+                                      );
+                                    }
+                                    if (!addIsAmOnly && timeOut != null) {
+                                      tout = _manualPunchTimestamp(
+                                        attendanceDate: date,
+                                        time: timeOut!,
+                                        shift: shift,
+                                        mayFallOnNextDay: true,
+                                      );
+                                    }
+                                    double? hours;
+                                    if (tin != null &&
+                                        bo != null &&
+                                        bi != null &&
+                                        tout != null) {
+                                      hours =
+                                          (bo.difference(tin).inMinutes +
+                                              tout.difference(bi).inMinutes) /
+                                          60.0;
+                                    } else if (tin != null && tout != null) {
+                                      hours =
+                                          tout.difference(tin).inMinutes / 60.0;
+                                    }
+                                    final record = TimeRecord(
+                                      userId: uid,
+                                      recordDate: date,
+                                      timeIn: tin,
+                                      breakOut: bo,
+                                      breakIn: bi,
+                                      timeOut: tout,
+                                      totalHours: hours,
+                                      status: 'present',
+                                      shiftPunchMode: selectedPunchMode,
+                                    );
+                                    final saved = await dtr.addManualEntry(
+                                      record,
+                                    );
+                                    if (!ctx.mounted) return;
+                                    if (saved) {
+                                      Navigator.pop(ctx, true);
+                                      return;
+                                    }
+                                    setState(() {
+                                      submitting = false;
+                                      submissionError =
+                                          dtr.error ??
+                                          'Unable to add this time entry.';
+                                    });
+                                  },
                             style: FilledButton.styleFrom(
                               backgroundColor: AppTheme.primaryNavy,
                               foregroundColor: AppTheme.white,
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 18,
+                                horizontal: 20,
                                 vertical: 12,
                               ),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(10),
                               ),
                             ),
-                            icon: const Icon(Icons.save_rounded, size: 18),
-                            label: const Text('Save changes'),
+                            child: submitting
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppTheme.white,
+                                    ),
+                                  )
+                                : const Text('Add entry'),
                           ),
                         ],
                       ),
                     ),
                   ],
                 ),
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      if (mounted) {
+        final selectedDay = _selectedDay;
+        final start = selectedDay != null
+            ? DateTime(_selectedYear, _selectedMonth, selectedDay)
+            : DateTime(_selectedYear, _selectedMonth, 1);
+        final end = selectedDay != null
+            ? start
+            : DateTime(_selectedYear, _selectedMonth + 1, 0);
+        await dtr.loadEmployees(
+          departmentId: _selectedDepartmentId,
+          startDate: start,
+          endDate: end,
+        );
+      }
+    }
+
+    if (updated == true && mounted) {
+      _showTimeLogSnack('Time entry added.', isSuccess: true);
+    }
+  }
+
+  Future<void> _showImportBiometricLogsDialog() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => ImportBiometricAttendanceLogsDialog(
+        onCancel: () => Navigator.of(ctx).pop(),
+        onImportSuccess: () => Navigator.of(ctx).pop(true),
+      ),
+    );
+    if (ok == true && mounted) {
+      context.read<DtrProvider>().invalidateCachedDtrData();
+      _applyFilters(forceRefresh: true);
+    }
+  }
+
+  Future<void> _showEditDialog(DtrProvider dtr, TimeRecord r) async {
+    final timeInLocal = r.timeIn?.toLocal();
+    final breakOutLocal = r.breakOut?.toLocal();
+    final breakInLocal = r.breakIn?.toLocal();
+    final timeOutLocal = r.timeOut?.toLocal();
+    TimeOfDay? timeIn = timeInLocal != null
+        ? TimeOfDay(hour: timeInLocal.hour, minute: timeInLocal.minute)
+        : null;
+    TimeOfDay? breakOut = breakOutLocal != null
+        ? TimeOfDay(hour: breakOutLocal.hour, minute: breakOutLocal.minute)
+        : null;
+    TimeOfDay? breakIn = breakInLocal != null
+        ? TimeOfDay(hour: breakInLocal.hour, minute: breakInLocal.minute)
+        : null;
+    TimeOfDay? timeOut = timeOutLocal != null
+        ? TimeOfDay(hour: timeOutLocal.hour, minute: timeOutLocal.minute)
+        : null;
+    final recordDate = r.recordDate;
+    EmployeeShiftForDate editShift;
+    try {
+      editShift = await dtr.fetchEmployeeShiftForDate(
+        employeeId: r.userId,
+        date: recordDate,
+      );
+    } catch (e) {
+      if (mounted) _showTimeLogSnack(userFacingApiError(e));
+      return;
+    }
+    final originalTimeIn = timeIn;
+    final originalBreakOut = breakOut;
+    final originalBreakIn = breakIn;
+    final originalTimeOut = timeOut;
+
+    // Derive shift-awareness flags once (r is immutable, so these never change).
+    final punchMode = editShift.punchMode;
+    final isAmOnly = punchMode == 'am_only';
+    final isPmOnly = punchMode == 'pm_only';
+    final isSingleSession = punchMode == 'single_session';
+    final isOvernight = _isOvernightShift(editShift);
+    var submitting = false;
+    String? submissionError;
+
+    if (!mounted) return;
+    final updated = await openResponsiveRightSidePanel<bool>(
+      context: context,
+      barrierLabel: 'Close edit time entry',
+      breakpoint: 0,
+      minWidth: 520,
+      initialWidthFraction: 0.36,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setState) {
+            int? minutes(TimeOfDay? t) =>
+                t == null ? null : (t.hour * 60) + t.minute;
+
+            Future<void> pickTime(
+              TimeOfDay? current,
+              void Function(TimeOfDay value) assign,
+            ) async {
+              final t = await showTimePicker(
+                context: ctx,
+                initialTime: current ?? TimeOfDay.now(),
+              );
+              if (t != null) setState(() => assign(t));
+            }
+
+            final amInM = minutes(timeIn);
+            final amOutM = minutes(breakOut);
+            final pmInM = minutes(breakIn);
+            final pmOutM = minutes(timeOut);
+            String? validationMessage;
+            if (isAmOnly) {
+              if (amInM != null && amOutM != null && amOutM <= amInM) {
+                validationMessage = 'AM Out must be later than AM In.';
+              }
+            } else if (isPmOnly) {
+              if (pmInM != null &&
+                  pmOutM != null &&
+                  (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) <=
+                      pmInM) {
+                validationMessage = 'PM Out must be later than PM In.';
+              }
+            } else if (isSingleSession) {
+              if (amInM != null &&
+                  pmOutM != null &&
+                  (_orderedPunchMinutes(
+                            pmOutM,
+                            after: amInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) <=
+                      amInM) {
+                validationMessage = 'Time Out must be later than Time In.';
+              }
+            } else {
+              if (amInM != null && amOutM != null && amOutM <= amInM) {
+                validationMessage = 'AM Out must be later than AM In.';
+              } else if (pmInM != null &&
+                  pmOutM != null &&
+                  (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) <=
+                      pmInM) {
+                validationMessage = 'PM Out must be later than PM In.';
+              } else if (amOutM != null &&
+                  pmInM != null &&
+                  (_orderedPunchMinutes(
+                            pmInM,
+                            after: amOutM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmInM) <
+                      amOutM) {
+                validationMessage = 'PM In should not be earlier than AM Out.';
+              }
+            }
+
+            final hasAnyTime =
+                timeIn != null ||
+                breakOut != null ||
+                breakIn != null ||
+                timeOut != null;
+            validationMessage ??= hasAnyTime
+                ? null
+                : 'Enter at least one punch. To remove the record, use Delete from its actions menu.';
+
+            var workedMinutes = 0;
+            if (validationMessage == null) {
+              if (isAmOnly) {
+                if (amInM != null && amOutM != null) {
+                  workedMinutes = amOutM - amInM;
+                }
+              } else if (isPmOnly) {
+                if (pmInM != null && pmOutM != null) {
+                  workedMinutes =
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      pmInM;
+                }
+              } else if (isSingleSession) {
+                if (amInM != null && pmOutM != null) {
+                  workedMinutes =
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: amInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      amInM;
+                }
+              } else {
+                if (amInM != null && amOutM != null) {
+                  workedMinutes += amOutM - amInM;
+                }
+                if (pmInM != null && pmOutM != null) {
+                  workedMinutes +=
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: pmInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      pmInM;
+                }
+                if (workedMinutes == 0 && amInM != null && pmOutM != null) {
+                  workedMinutes =
+                      (_orderedPunchMinutes(
+                            pmOutM,
+                            after: amInM,
+                            overnight: isOvernight,
+                          ) ??
+                          pmOutM) -
+                      amInM;
+                }
+              }
+            }
+
+            final canSave = !submitting && validationMessage == null;
+            return Material(
+              color: AppTheme.dashPanelOf(ctx),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.edit_calendar_rounded,
+                            color: AppTheme.primaryNavy,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                r.isLeaveCovered
+                                    ? 'Edit underlying attendance'
+                                    : 'Edit time entry',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.dashTextPrimaryOf(ctx),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                r.employeeName ?? r.userId,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.35,
+                                  color: AppTheme.dashTextSecondaryOf(
+                                    ctx,
+                                  ).withValues(alpha: 0.95),
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: submitting
+                              ? null
+                              : () => Navigator.pop(ctx, false),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _TimeEntryInfoChip(
+                                icon: Icons.badge_outlined,
+                                label: r.employeeName ?? r.userId,
+                              ),
+                              _TimeEntryInfoChip(
+                                icon: Icons.calendar_today_rounded,
+                                label: _formatDateWithWeekday(recordDate),
+                              ),
+                              if (r.source != null && r.source!.isNotEmpty)
+                                AttendanceSourceBadge(
+                                  source: r.source,
+                                  compact: true,
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.sectionAltOf(ctx),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: AppTheme.dashHairlineOf(ctx),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.timer_outlined,
+                                  size: 20,
+                                  color: AppTheme.dashTextSecondaryOf(ctx),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    workedMinutes > 0
+                                        ? 'Estimated worked time: ${(workedMinutes / 60).toStringAsFixed(2)} hours'
+                                        : 'Set only the punches that should appear. Empty slots stay blank.',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: AppTheme.dashTextSecondaryOf(ctx),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (validationMessage != null) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Colors.orange.withValues(alpha: 0.25),
+                                ),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.warning_amber_rounded,
+                                    size: 20,
+                                    color: Colors.orange.shade800,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      validationMessage,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.orange.shade900,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          if (submissionError != null) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Colors.red.withValues(alpha: 0.25),
+                                ),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.error_outline_rounded,
+                                    size: 20,
+                                    color: Colors.red.shade700,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      submissionError!,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.red.shade700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 18),
+                          // Shift-mode badge — shown when mode restricts fields.
+                          if (isAmOnly || isPmOnly || isSingleSession) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 7,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryNavy.withValues(
+                                  alpha: 0.08,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.18,
+                                  ),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.schedule_rounded,
+                                    size: 16,
+                                    color: AppTheme.dashIsDark(ctx)
+                                        ? AppTheme.primaryNavyLight
+                                        : AppTheme.primaryNavy,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      isAmOnly
+                                          ? 'AM-only shift — only morning punches apply.'
+                                          : isPmOnly
+                                          ? 'PM-only shift — only afternoon punches apply.'
+                                          : 'Single-session shift — no break; time in and time out only.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppTheme.dashIsDark(ctx)
+                                            ? AppTheme.primaryNavyLight
+                                            : AppTheme.primaryNavy,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                          // Morning section
+                          if (!isPmOnly) ...[
+                            Text(
+                              isSingleSession ? 'Work Session' : 'Morning',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.4,
+                                color: AppTheme.dashTextSecondaryOf(
+                                  ctx,
+                                ).withValues(alpha: 0.9),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            _manualEntryPunchTile(
+                              ctx,
+                              label: isSingleSession
+                                  ? 'Time In'
+                                  : 'AM In (time in)',
+                              value: timeIn,
+                              icon: Icons.wb_sunny_outlined,
+                              onTap: () =>
+                                  pickTime(timeIn, (value) => timeIn = value),
+                              onClear: () => setState(() => timeIn = null),
+                            ),
+                            if (!isSingleSession) ...[
+                              const SizedBox(height: 8),
+                              _manualEntryPunchTile(
+                                ctx,
+                                label: 'AM Out (break out)',
+                                value: breakOut,
+                                icon: Icons.restaurant_outlined,
+                                onTap: () => pickTime(
+                                  breakOut,
+                                  (value) => breakOut = value,
+                                ),
+                                onClear: () => setState(() => breakOut = null),
+                              ),
+                            ],
+                          ],
+                          // Afternoon section
+                          if (!isAmOnly) ...[
+                            SizedBox(height: isPmOnly ? 0 : 18),
+                            if (!isSingleSession) ...[
+                              Text(
+                                'Afternoon',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.4,
+                                  color: AppTheme.dashTextSecondaryOf(
+                                    ctx,
+                                  ).withValues(alpha: 0.9),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              _manualEntryPunchTile(
+                                ctx,
+                                label: 'PM In (break in)',
+                                value: breakIn,
+                                icon: Icons.nightlight_outlined,
+                                onTap: () => pickTime(
+                                  breakIn,
+                                  (value) => breakIn = value,
+                                ),
+                                onClear: () => setState(() => breakIn = null),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                            _manualEntryPunchTile(
+                              ctx,
+                              label: isSingleSession
+                                  ? 'Time Out'
+                                  : 'PM Out (time out)',
+                              value: timeOut,
+                              icon: Icons.logout_rounded,
+                              onTap: () =>
+                                  pickTime(timeOut, (value) => timeOut = value),
+                              onClear: () => setState(() => timeOut = null),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  Divider(height: 1, color: AppTheme.dashHairlineOf(ctx)),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                    child: Row(
+                      children: [
+                        TextButton(
+                          onPressed: submitting
+                              ? null
+                              : () => setState(() {
+                                  timeIn = originalTimeIn;
+                                  breakOut = originalBreakOut;
+                                  breakIn = originalBreakIn;
+                                  timeOut = originalTimeOut;
+                                  submissionError = null;
+                                }),
+                          child: const Text('Reset'),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: submitting
+                              ? null
+                              : () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          onPressed: canSave
+                              ? () async {
+                                  setState(() {
+                                    submitting = true;
+                                    submissionError = null;
+                                  });
+
+                                  final date = DateTime(
+                                    recordDate.year,
+                                    recordDate.month,
+                                    recordDate.day,
+                                  );
+                                  DateTime? tin;
+                                  DateTime? bo;
+                                  DateTime? bi;
+                                  DateTime? tout;
+                                  if (!isPmOnly && timeIn != null) {
+                                    tin = _manualPunchTimestamp(
+                                      attendanceDate: date,
+                                      time: timeIn!,
+                                      shift: editShift,
+                                    );
+                                  }
+                                  if (!isPmOnly &&
+                                      !isSingleSession &&
+                                      breakOut != null) {
+                                    bo = _manualPunchTimestamp(
+                                      attendanceDate: date,
+                                      time: breakOut!,
+                                      shift: editShift,
+                                      mayFallOnNextDay: true,
+                                    );
+                                  }
+                                  if (!isAmOnly &&
+                                      !isSingleSession &&
+                                      breakIn != null) {
+                                    bi = _manualPunchTimestamp(
+                                      attendanceDate: date,
+                                      time: breakIn!,
+                                      shift: editShift,
+                                      mayFallOnNextDay: true,
+                                    );
+                                  }
+                                  if (!isAmOnly && timeOut != null) {
+                                    tout = _manualPunchTimestamp(
+                                      attendanceDate: date,
+                                      time: timeOut!,
+                                      shift: editShift,
+                                      mayFallOnNextDay: true,
+                                    );
+                                  }
+                                  double? hours;
+                                  if (tin != null &&
+                                      bo != null &&
+                                      bi != null &&
+                                      tout != null) {
+                                    hours =
+                                        (bo.difference(tin).inMinutes +
+                                            tout.difference(bi).inMinutes) /
+                                        60.0;
+                                  } else if (tin != null && tout != null) {
+                                    hours =
+                                        tout.difference(tin).inMinutes / 60.0;
+                                  } else if (tin != null && bo != null) {
+                                    hours = bo.difference(tin).inMinutes / 60.0;
+                                  } else if (bi != null && tout != null) {
+                                    hours =
+                                        tout.difference(bi).inMinutes / 60.0;
+                                  }
+                                  final updatedRecord = TimeRecord(
+                                    id: r.id,
+                                    userId: r.userId,
+                                    recordDate: date,
+                                    timeIn: tin,
+                                    breakOut: bo,
+                                    breakIn: bi,
+                                    timeOut: tout,
+                                    totalHours: hours,
+                                    lateMinutes: r.lateMinutes,
+                                    undertimeMinutes: r.undertimeMinutes,
+                                    status: r.status,
+                                    pmStatus: r.pmStatus,
+                                    remarks: r.remarks,
+                                    holidayId: r.holidayId,
+                                    leaveRequestId: r.leaveRequestId,
+                                    leaveCoverageId: r.leaveCoverageId,
+                                    isLeaveCovered: r.isLeaveCovered,
+                                    createdAt: r.createdAt,
+                                    updatedAt: r.updatedAt,
+                                    employeeName: r.employeeName,
+                                    holidayName: r.holidayName,
+                                    coverage: r.coverage,
+                                    attendanceRemark: r.attendanceRemark,
+                                    leaveTypeName: r.leaveTypeName,
+                                    source: r.source,
+                                    locatorSlipId: r.locatorSlipId,
+                                    locatorSlipRequestType:
+                                        r.locatorSlipRequestType,
+                                    locatorSlipRequestTypeLabel:
+                                        r.locatorSlipRequestTypeLabel,
+                                    locatorSlipDtrSlotLabel:
+                                        r.locatorSlipDtrSlotLabel,
+                                    locatorSlipDtrPrintLabel:
+                                        r.locatorSlipDtrPrintLabel,
+                                    locatorSlipCoverageMode:
+                                        r.locatorSlipCoverageMode,
+                                    locatorSlipSegments: r.locatorSlipSegments,
+                                  );
+                                  final saved = r.id != null
+                                      ? await dtr.updateEntry(
+                                          updatedRecord,
+                                          editUnderlyingAttendance:
+                                              r.isLeaveCovered,
+                                        )
+                                      : await dtr.addManualEntry(updatedRecord);
+                                  if (!ctx.mounted) return;
+                                  if (saved) {
+                                    Navigator.pop(ctx, true);
+                                    return;
+                                  }
+                                  setState(() {
+                                    submitting = false;
+                                    submissionError =
+                                        dtr.error ??
+                                        'Unable to update this time entry.';
+                                  });
+                                }
+                              : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.primaryNavy,
+                            foregroundColor: AppTheme.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          icon: submitting
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppTheme.white,
+                                  ),
+                                )
+                              : const Icon(Icons.save_rounded, size: 18),
+                          label: Text(
+                            submitting ? 'Saving...' : 'Save changes',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             );
           },
@@ -2710,148 +3261,554 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       },
     );
 
-    if (updated == true) {
-      final date = DateTime(recordDate.year, recordDate.month, recordDate.day);
-      DateTime? tin;
-      DateTime? bo;
-      DateTime? bi;
-      DateTime? tout;
-      // Only build fields relevant to the shift's punch mode.
-      if (!isPmOnly && timeIn != null) {
-        tin = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeIn!.hour,
-          timeIn!.minute,
-        );
-      }
-      if (!isPmOnly && !isSingleSession && breakOut != null) {
-        bo = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakOut!.hour,
-          breakOut!.minute,
-        );
-      }
-      if (!isAmOnly && !isSingleSession && breakIn != null) {
-        bi = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          breakIn!.hour,
-          breakIn!.minute,
-        );
-      }
-      if (!isAmOnly && timeOut != null) {
-        tout = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          timeOut!.hour,
-          timeOut!.minute,
-        );
-      }
-      double? hours;
-      if (tin != null && bo != null && bi != null && tout != null) {
-        hours =
-            (bo.difference(tin).inMinutes + tout.difference(bi).inMinutes) /
-            60.0;
-      } else if (tin != null && tout != null) {
-        hours = tout.difference(tin).inMinutes / 60.0;
-      } else if (tin != null && bo != null) {
-        hours = bo.difference(tin).inMinutes / 60.0;
-      } else if (bi != null && tout != null) {
-        hours = tout.difference(bi).inMinutes / 60.0;
-      }
-      final hasAnyTime =
-          tin != null || bo != null || bi != null || tout != null;
-      if (r.id != null && !hasAnyTime) {
-        _showTimeLogSnack('Time entry removed.', isSuccess: true);
-        final removed = await dtr.deleteEntry(r.id!);
-        if (!mounted) return;
-        if (!removed) {
-          _showTimeLogSnack(
-            dtr.error ?? 'Unable to remove this time entry.',
-          );
-        }
-        return;
-      }
-      final updatedRec = TimeRecord(
-        id: r.id,
-        userId: r.userId,
-        recordDate: date,
-        timeIn: tin,
-        breakOut: bo,
-        breakIn: bi,
-        timeOut: tout,
-        totalHours: hours,
-        lateMinutes: r.lateMinutes,
-        undertimeMinutes: r.undertimeMinutes,
-        status: r.status,
-        pmStatus: r.pmStatus,
-        remarks: r.remarks,
-        holidayId: r.holidayId,
-        leaveRequestId: r.leaveRequestId,
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
-        employeeName: r.employeeName,
-        holidayName: r.holidayName,
-        coverage: r.coverage,
-        attendanceRemark: r.attendanceRemark,
-        leaveTypeName: r.leaveTypeName,
-        source: r.source,
-        locatorSlipId: r.locatorSlipId,
-        locatorSlipRequestType: r.locatorSlipRequestType,
-        locatorSlipSegments: r.locatorSlipSegments,
-      );
+    if (updated == true && mounted) {
       _showTimeLogSnack('Time entry updated.', isSuccess: true);
-      final saved = r.id != null
-          ? await dtr.updateEntry(updatedRec)
-          : await dtr.addManualEntry(updatedRec);
-      if (!mounted) return;
-      if (!saved) {
-        _showTimeLogSnack(dtr.error ?? 'Unable to update this time entry.');
-      }
     }
   }
 
-  Future<void> _confirmDelete(
-    DtrProvider dtr,
-    TimeRecord r,
-  ) async {
+  Future<void> _recalculateRecord(DtrProvider dtr, TimeRecord r) async {
+    final id = r.id;
+    if (id == null) {
+      _showTimeLogSnack('This time entry cannot be recalculated yet.');
+      return;
+    }
+    final ok = await dtr.recalculateEntry(id);
     if (!mounted) return;
-    final ok = await showDialog<bool>(
+    if (ok) {
+      _showTimeLogSnack('Time entry recalculated.', isSuccess: true);
+    } else {
+      _showTimeLogSnack(dtr.error ?? 'Unable to recalculate this time entry.');
+    }
+  }
+
+  Future<void> _confirmDelete(DtrProvider dtr, TimeRecord r) async {
+    if (!mounted) return;
+    if (r.isLeaveCovered) {
+      _showTimeLogSnack(
+        'Approved leave covers this date. Revoke the leave before deleting its underlying attendance.',
+      );
+      return;
+    }
+    final reasonController = TextEditingController();
+    final reason = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete time entry?'),
-        content: Text(
-          'Delete record for ${r.employeeName ?? r.userId} on ${_formatDate(r.recordDate)}?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final reasonIsValid = reasonController.text.trim().length >= 3;
+          return AlertDialog(
+            title: const Text('Delete time entry?'),
+            content: SizedBox(
+              width: 440,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Delete the processed record for ${r.employeeName ?? r.userId} on ${_formatDate(r.recordDate)}?',
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Original biometric logs will be preserved for audit and will not recreate this record.',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(ctx),
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: reasonController,
+                    autofocus: true,
+                    minLines: 2,
+                    maxLines: 4,
+                    maxLength: 1000,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Reason for deletion',
+                      hintText:
+                          'Explain why this processed entry is inaccurate',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: reasonIsValid
+                    ? () => Navigator.pop(ctx, reasonController.text.trim())
+                    : null,
+                child: const Text('Delete'),
+              ),
+            ],
+          );
+        },
       ),
     );
-    if (ok == true && r.id != null) {
-      _showTimeLogSnack('Time entry deleted.', isSuccess: true);
-      final deleted = await dtr.deleteEntry(r.id!);
+    reasonController.dispose();
+    if (reason != null && r.id != null) {
+      final deleted = await dtr.deleteEntry(r.id!, reason: reason);
       if (!mounted) return;
-      if (!deleted) {
+      if (deleted) {
+        _showTimeLogSnack('Time entry deleted.', isSuccess: true);
+      } else {
         _showTimeLogSnack(
           dtr.error ?? 'Unable to delete this time log. Please try again.',
         );
       }
     }
+  }
+
+  Future<void> _showDeletedEntriesPanel(DtrProvider dtr) async {
+    if (!mounted) return;
+    final (filterStart, filterEnd) = _getIntendedFilterRange();
+    final filterEmployeeId = _selectedUserId?.trim().isNotEmpty == true
+        ? _selectedUserId!.trim()
+        : null;
+    final selectedEmployee = filterEmployeeId == null
+        ? null
+        : dtr.employees.where((employee) => employee.id == filterEmployeeId);
+    final employeeLabel = selectedEmployee == null || selectedEmployee.isEmpty
+        ? 'All employees'
+        : selectedEmployee.first.fullName;
+    final dateLabel = filterStart == filterEnd
+        ? _formatDate(filterStart)
+        : '${_months[filterStart.month - 1]} ${filterStart.year}';
+    var items = <DeletedTimeRecord>[];
+    var loading = true;
+    var initialLoadStarted = false;
+    var panelActive = true;
+    var showAllHistory = false;
+    var loadVersion = 0;
+    String? error;
+
+    Future<void> load(StateSetter setPanelState) async {
+      final requestVersion = ++loadVersion;
+      setPanelState(() {
+        loading = true;
+        error = null;
+      });
+      try {
+        final result = await TimeRecordRepo.instance.listDeleted(
+          startDate: showAllHistory ? null : filterStart,
+          endDate: showAllHistory ? null : filterEnd,
+          userId: showAllHistory ? null : filterEmployeeId,
+        );
+        if (!panelActive || requestVersion != loadVersion) return;
+        setPanelState(() {
+          items = result;
+          loading = false;
+        });
+      } catch (e) {
+        if (!panelActive || requestVersion != loadVersion) return;
+        setPanelState(() {
+          loading = false;
+          error = userFacingApiError(e);
+        });
+      }
+    }
+
+    await openResponsiveRightSidePanel<void>(
+      context: context,
+      barrierLabel: 'Close deleted time entries',
+      breakpoint: 0,
+      minWidth: 600,
+      initialWidthFraction: 0.44,
+      builder: (panelContext) => StatefulBuilder(
+        builder: (panelContext, setPanelState) {
+          if (!initialLoadStarted) {
+            initialLoadStarted = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              load(setPanelState);
+            });
+          }
+
+          return Material(
+            color: AppTheme.dashPanelOf(panelContext),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 18, 12, 16),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.history_rounded,
+                          color: AppTheme.primaryNavy,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Deleted Time Entries',
+                              style: TextStyle(
+                                color: AppTheme.dashTextPrimaryOf(panelContext),
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              'Processed DTR records preserved for audit and recovery.',
+                              style: TextStyle(
+                                color: AppTheme.dashTextSecondaryOf(
+                                  panelContext,
+                                ),
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Refresh',
+                        onPressed: loading ? null : () => load(setPanelState),
+                        icon: const Icon(Icons.refresh_rounded),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.of(panelContext).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(
+                  height: 1,
+                  color: AppTheme.dashHairlineOf(panelContext),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment<bool>(
+                            value: false,
+                            icon: Icon(Icons.filter_alt_rounded, size: 18),
+                            label: Text('Current filters'),
+                          ),
+                          ButtonSegment<bool>(
+                            value: true,
+                            icon: Icon(Icons.history_rounded, size: 18),
+                            label: Text('All history'),
+                          ),
+                        ],
+                        selected: {showAllHistory},
+                        showSelectedIcon: false,
+                        onSelectionChanged: loading
+                            ? null
+                            : (selection) {
+                                final next = selection.first;
+                                if (next == showAllHistory) return;
+                                setPanelState(() => showAllHistory = next);
+                                load(setPanelState);
+                              },
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        showAllHistory
+                            ? 'Showing deleted entries across all dates and employees.'
+                            : '$dateLabel • $employeeLabel',
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(panelContext),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (loading) const LinearProgressIndicator(minHeight: 2),
+                Expanded(
+                  child: loading && items.isEmpty
+                      ? const Center(child: CircularProgressIndicator())
+                      : error != null
+                      ? _deletedEntriesError(
+                          panelContext,
+                          error!,
+                          () => load(setPanelState),
+                        )
+                      : items.isEmpty
+                      ? _deletedEntriesEmpty(panelContext)
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(20),
+                          itemCount: items.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, index) {
+                            final item = items[index];
+                            return _deletedEntryCard(
+                              panelContext,
+                              item,
+                              onRestore: item.isRestored
+                                  ? null
+                                  : () async {
+                                      final reason =
+                                          await _askForRestorationReason(
+                                            panelContext,
+                                            item,
+                                          );
+                                      if (reason == null) return;
+                                      final restored = await dtr
+                                          .restoreDeletedEntry(
+                                            item.id,
+                                            reason: reason,
+                                          );
+                                      if (!mounted) return;
+                                      if (!restored) {
+                                        _showTimeLogSnack(
+                                          dtr.error ??
+                                              'Unable to restore this time entry.',
+                                        );
+                                        return;
+                                      }
+                                      _showTimeLogSnack(
+                                        'Time entry restored.',
+                                        isSuccess: true,
+                                      );
+                                      await load(setPanelState);
+                                    },
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+    panelActive = false;
+  }
+
+  Widget _deletedEntriesEmpty(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.history_toggle_off_rounded,
+            size: 46,
+            color: AppTheme.dashTextSecondaryOf(context),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No deleted time entries',
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _deletedEntriesError(
+    BuildContext context,
+    String message,
+    VoidCallback retry,
+  ) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: retry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _deletedEntryCard(
+    BuildContext context,
+    DeletedTimeRecord item, {
+    required Future<void> Function()? onRestore,
+  }) {
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final restored = item.isRestored;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.employeeName?.trim().isNotEmpty == true
+                      ? item.employeeName!
+                      : item.userId,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: restored
+                      ? Colors.green.withValues(alpha: 0.14)
+                      : Colors.red.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  restored ? 'Restored' : 'Deleted',
+                  style: TextStyle(
+                    color: restored ? Colors.green.shade500 : Colors.red,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${_formatDateWithWeekday(item.recordDate)}  •  ${item.source.toUpperCase()}',
+            style: TextStyle(color: secondary, fontSize: 13),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Deletion reason',
+            style: TextStyle(
+              color: secondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            item.reason,
+            style: TextStyle(color: AppTheme.dashTextPrimaryOf(context)),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Deleted by ${item.deletedByName ?? 'Unknown user'} • ${_formatDateTime(item.deletedAt)}',
+            style: TextStyle(color: secondary, fontSize: 12),
+          ),
+          if (restored) ...[
+            const SizedBox(height: 12),
+            Divider(color: AppTheme.dashHairlineOf(context)),
+            Text(
+              'Restored by ${item.restoredByName ?? 'Unknown user'} • ${_formatDateTime(item.restoredAt!)}',
+              style: TextStyle(color: secondary, fontSize: 12),
+            ),
+            if (item.restorationReason?.trim().isNotEmpty == true) ...[
+              const SizedBox(height: 4),
+              Text(
+                item.restorationReason!,
+                style: TextStyle(color: AppTheme.dashTextPrimaryOf(context)),
+              ),
+            ],
+          ] else ...[
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: onRestore,
+                icon: const Icon(Icons.restore_rounded, size: 18),
+                label: const Text('Restore'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _formatDateTime(DateTime value) {
+    final local = value.toLocal();
+    return '${_formatDate(local)} ${_formatTime(local)}';
+  }
+
+  Future<String?> _askForRestorationReason(
+    BuildContext context,
+    DeletedTimeRecord item,
+  ) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final valid = controller.text.trim().length >= 3;
+          return AlertDialog(
+            title: const Text('Restore time entry?'),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Restore ${item.employeeName ?? item.userId}\'s processed record for ${_formatDate(item.recordDate)}?',
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    minLines: 2,
+                    maxLines: 4,
+                    maxLength: 1000,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Reason for restoration',
+                      hintText:
+                          'Explain why this deleted entry should be restored',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: valid
+                    ? () => Navigator.of(
+                        dialogContext,
+                      ).pop(controller.text.trim())
+                    : null,
+                icon: const Icon(Icons.restore_rounded, size: 18),
+                label: const Text('Restore'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    controller.dispose();
+    return result;
   }
 
   void _showTimeLogSnack(String message, {bool isSuccess = false}) {

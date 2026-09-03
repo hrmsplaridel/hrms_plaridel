@@ -6,13 +6,17 @@ const {
   assistantGreetingReply,
   buildFastEmployeeAssistantReply,
   requestedLeaveType,
+  requestedLeaveTypeRecord,
   requestedLocatorType,
 } = require('./dtrAssistantFastReply');
 const {
   getAssistantMemory,
   setAssistantMemory,
   clearAssistantMemory,
+  beginAssistantTurn,
+  normalizeConversationId,
 } = require('./dtrAssistantMemoryService');
+const { contextGate } = require('./dtrAssistantContextGate');
 const {
   buildLeaveActionPayload,
   buildLocatorActionPayload,
@@ -32,8 +36,10 @@ const {
 const {
   applyPendingClarificationAnswer,
   evaluateGuidedClarification,
+  interruptsPendingClarification,
 } = require('./dtrAssistantGuidedClarification');
 const {
+  isLeaveCreditRequirementQuestion,
   normalizeIntent,
   scoreEmployeeAssistantIntent,
 } = require('./dtrAssistantIntentService');
@@ -49,24 +55,51 @@ const {
 } = require('./dtrAssistantPrompt');
 const { createDtrExportAttachment } = require('./dtrAssistantExportService');
 const {
+  EXTERNAL_AI_CONSENT_VERSION,
+  assertExternalConsent,
+  buildExternalDirectContext,
+  buildExternalToolData,
+  logExternalDisclosure,
+} = require('./dtrAssistantExternalDataPolicy');
+const {
+  assertAssistantDateRange,
   addDays,
   parseAssistantDateRange,
   todayInHrmsTimezone,
 } = require('../../utils/dateRangeParser');
 
 const MAX_ASSISTANT_REPLY_CHARS = 4000;
+const MAX_LONG_FORM_ASSISTANT_REPLY_CHARS = 12000;
 const MAX_MEMORY_TURNS = 6;
 
 const DEFAULT_MODEL_PROFILE_ID = 'tools_ollama';
+
+function assistantRequestAbortedError() {
+  const error = new Error('Assistant request was cancelled.');
+  error.statusCode = 499;
+  error.code = 'ASSISTANT_REQUEST_ABORTED';
+  return error;
+}
+
+function throwIfAssistantRequestAborted(signal) {
+  if (signal?.aborted) throw assistantRequestAbortedError();
+}
 
 function allowDirectLlm(env = process.env) {
   return /^(1|true|yes)$/i.test(String(env.DTR_ASSISTANT_ALLOW_DIRECT_LLM || ''));
 }
 
+function allowExternalLlm(env = process.env) {
+  return /^(1|true|yes)$/i.test(
+    String(env.DTR_ASSISTANT_ALLOW_EXTERNAL_LLM || '')
+  );
+}
+
 function buildModelProfiles(env = process.env) {
   const config = getLlmConfig(env);
   const groqConfigured = !!config.groq.apiKey;
-  const directEnabled = groqConfigured && allowDirectLlm(env);
+  const externalEnabled = groqConfigured && allowExternalLlm(env);
+  const directEnabled = externalEnabled && allowDirectLlm(env);
 
   return [
     {
@@ -78,6 +111,8 @@ function buildModelProfiles(env = process.env) {
       model: config.ollama.model,
       available: true,
       recommended: true,
+      external: false,
+      requiresConsent: false,
     },
     {
       id: 'tools_groq',
@@ -86,9 +121,18 @@ function buildModelProfiles(env = process.env) {
       engine: 'tools',
       provider: 'groq',
       model: config.groq.model,
-      available: groqConfigured,
+      available: externalEnabled,
       recommended: false,
-      unavailableReason: groqConfigured ? null : 'Set GROQ_API_KEY in backend/.env.',
+      external: true,
+      requiresConsent: true,
+      consentVersion: EXTERNAL_AI_CONSENT_VERSION,
+      dataDisclosure:
+        'Your question and the minimum HRMS records needed for it are processed by Groq.',
+      unavailableReason: externalEnabled
+        ? null
+        : groqConfigured
+          ? 'External AI is disabled by the HRMS administrator.'
+          : 'Set GROQ_API_KEY in backend/.env.',
     },
     {
       id: 'direct_groq',
@@ -99,10 +143,17 @@ function buildModelProfiles(env = process.env) {
       model: config.groq.model,
       available: directEnabled,
       recommended: false,
+      external: true,
+      requiresConsent: true,
+      consentVersion: EXTERNAL_AI_CONSENT_VERSION,
+      dataDisclosure:
+        'Your question and a restricted HRMS policy context are processed by Groq.',
       unavailableReason: directEnabled
         ? null
-        : groqConfigured
+        : externalEnabled
           ? 'Set DTR_ASSISTANT_ALLOW_DIRECT_LLM=true to enable direct mode.'
+          : groqConfigured
+            ? 'External AI is disabled by the HRMS administrator.'
           : 'Set GROQ_API_KEY in backend/.env.',
     },
   ];
@@ -172,7 +223,69 @@ function emptyAssistantContext(dateRange = null) {
   };
 }
 
-function compactAssistantContent(content) {
+function selectAssistantResponseDepth(text, intent) {
+  const value = lower(normalizeAssistantMessageForRules(text));
+  if (
+    /\b(detailed|in detail|full details?|complete details?|comprehensive|explain all|show all|list all|all leave types?|all guidelines?|step by step|breakdown|detalyado|kompletong detalye|lahat ng detalye|tanang detalye)\b/.test(
+      value
+    )
+  ) {
+    return 'detailed';
+  }
+  if (
+    /\b(short answer|brief|briefly|quick answer|quickly|concise|summary only|just the answer|only the answer|mubo lang|diretso lang|maikli lang|maikling sagot)\b/.test(
+      value
+    )
+  ) {
+    return 'short';
+  }
+  const wordCount = value.split(/\s+/).filter(Boolean).length;
+  if (
+    wordCount <= 8 &&
+    [
+      'leave_balance',
+      'today_dtr',
+      'latest_leave_request',
+      'latest_locator_request',
+      'locator_status',
+      'dtr_schedule_context',
+    ].includes(String(intent || '')) &&
+    !/\b(why|ngano|bakit|explain|details?|breakdown)\b/.test(value)
+  ) {
+    return 'short';
+  }
+  if (
+    String(intent || '') === 'leave_guideline_section' &&
+    /\b(all|every|complete|full|guidelines?|rules?)\b/.test(value)
+  ) {
+    return 'detailed';
+  }
+  return 'normal';
+}
+
+function adaptAssistantContentToDepth(content, depth) {
+  const value = String(content || '').trim();
+  if (depth !== 'short' || !value.includes('\n')) return value;
+  const lines = value.split(/\r?\n/);
+  const detailIndex = lines.findIndex((line) =>
+    /^(details|detalye)\s*:/i.test(line.trim())
+  );
+  if (detailIndex <= 0) return value;
+  return lines
+    .slice(0, detailIndex)
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function assistantReplyCharLimit(intent, responseDepth = 'normal') {
+  if (responseDepth === 'short') return 1200;
+  return responseDepth === 'detailed' || intent === 'leave_guideline_section'
+    ? MAX_LONG_FORM_ASSISTANT_REPLY_CHARS
+    : MAX_ASSISTANT_REPLY_CHARS;
+}
+
+function compactAssistantContent(content, maxChars = MAX_ASSISTANT_REPLY_CHARS) {
   const text = String(content || '')
     .replace(/\r\n/g, '\n')
     .split('\n')
@@ -180,8 +293,8 @@ function compactAssistantContent(content) {
     .filter(Boolean)
     .join('\n')
     .trim();
-  if (text.length <= MAX_ASSISTANT_REPLY_CHARS) return text;
-  return `${text.slice(0, MAX_ASSISTANT_REPLY_CHARS - 3).trim()}...`;
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars - 3).trim()}...`;
 }
 
 function isStructuredDtrIntent(intent) {
@@ -309,12 +422,18 @@ function memoryLocatorTypeForIntent(intent, effectiveText, memory) {
 function memoryWithClarificationPatch(memory, patch) {
   if (!patch) return memory;
   const base = memory || {};
+  const hasPendingClarification = Object.prototype.hasOwnProperty.call(
+    patch,
+    'pendingClarification'
+  );
   return {
     ...base,
     leaveType: patch.leaveType || base.leaveType || null,
     locatorType: patch.locatorType || base.locatorType || null,
     dateRange: patch.dateRange || base.dateRange || null,
-    pendingClarification: patch.pendingClarification ?? base.pendingClarification ?? null,
+    pendingClarification: hasPendingClarification
+      ? patch.pendingClarification
+      : base.pendingClarification ?? null,
     dayCount: patch.dayCount ?? base.dayCount ?? null,
     leavePrefill: patch.leavePrefill
       ? mergePrefill(base.leavePrefill || {}, patch.leavePrefill)
@@ -669,11 +788,37 @@ function dateRangePayload(context) {
   };
 }
 
-function actionLeaveType(text) {
-  const type = requestedLeaveType(text);
-  if (type === 'sick') return 'sick';
-  if (type === 'vacation') return 'vacation';
-  return null;
+function canonicalLeaveTypeFromText(text) {
+  const value = lower(normalizeAssistantMessageForRules(text));
+  const types = [
+    ['tenDayVawcLeave', /\b(10[\s-]*day vawc|vawc)\b/],
+    ['specialEmergencyCalamityLeave', /\b(special emergency|calamity)\b/],
+    ['specialLeaveBenefitsForWomen', /\b(special leave benefits for women|special leave for women|gynecological)\b/],
+    ['specialPrivilegeLeave', /\b(special privilege)\b/],
+    ['mandatoryForcedLeave', /\b(mandatory|forced leave)\b/],
+    ['soloParentLeave', /\bsolo parent\b/],
+    ['rehabilitationPrivilege', /\brehabilitation\b/],
+    ['maternityLeave', /\bmaternity\b/],
+    ['paternityLeave', /\bpaternity\b/],
+    ['adoptionLeave', /\badoption\b/],
+    ['studyLeave', /\bstudy leave\b/],
+    ['sickLeave', /\b(sick leave|sick|sl)\b/],
+    ['vacationLeave', /\b(vacation leave|vacation|vl)\b/],
+    ['others', /\b(other leave|others leave)\b/],
+  ];
+  const matches = types
+    .map(([name, pattern]) => {
+      const match = value.match(pattern);
+      return match ? { name, index: match.index ?? Number.MAX_SAFE_INTEGER } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index);
+  return matches[0]?.name || null;
+}
+
+function actionLeaveType(text, context = null) {
+  const record = context ? requestedLeaveTypeRecord(text, context) : null;
+  return record?.name || canonicalLeaveTypeFromText(text);
 }
 
 function actionLocatorType(text) {
@@ -752,7 +897,7 @@ function buildActions(intent, context, text, attachments = [], memory = null) {
   const value = String(intent || '');
   const actions = [];
   const rangePayload = dateRangePayload(context);
-  const leaveType = actionLeaveType(text);
+  const leaveType = actionLeaveType(text, context);
   const locatorType = actionLocatorType(text);
   const exportAttachment = attachments.find((item) => item?.downloadUrl || item?.contentBase64);
 
@@ -857,11 +1002,17 @@ function buildActions(intent, context, text, attachments = [], memory = null) {
       );
     }
     if (value !== 'dtr_export_guidance') {
+      const exportPrompt =
+        rangePayload.startDate && rangePayload.endDate
+          ? rangePayload.startDate === rangePayload.endDate
+            ? `Generate my DTR export for ${rangePayload.startDate}.`
+            : `Generate my DTR export from ${rangePayload.startDate} to ${rangePayload.endDate}.`
+          : 'Generate my DTR export for this period.';
       actions.push(
         action('generate_dtr_export', 'Generate DTR export', 'send_prompt', {
           icon: 'file_download',
           intent: 'dtr_export_guidance',
-          prompt: 'Generate my DTR export for this period.',
+          prompt: exportPrompt,
           payload: rangePayload,
         })
       );
@@ -1032,18 +1183,26 @@ function buildAssistantResult({
   text,
   actions,
   memory,
+  conversationId,
 }) {
   const safeAttachments = attachments || [];
   const safeIntentConfidence = numericConfidence(intentConfidence);
+  const responseDepth = selectAssistantResponseDepth(text, intent);
+  const adaptedContent = adaptAssistantContentToDepth(content, responseDepth);
   return {
     message: {
       id: crypto.randomUUID(),
       role: 'assistant',
-      content: compactAssistantContent(content),
+      content: compactAssistantContent(
+        adaptedContent,
+        assistantReplyCharLimit(intent, responseDepth)
+      ),
       createdAt: new Date().toISOString(),
       intent: intent || null,
       intentConfidence: safeIntentConfidence,
       intentSource: intentSource || null,
+      responseDepth,
+      conversationId: conversationId || null,
       provider: provider || null,
       model: model || null,
       modelProfile: modelProfile || null,
@@ -1059,6 +1218,8 @@ function buildAssistantResult({
     intent: intent || null,
     intentConfidence: safeIntentConfidence,
     intentSource: intentSource || null,
+    responseDepth,
+    conversationId: conversationId || null,
     sources: buildSources(context),
   };
 }
@@ -1103,12 +1264,15 @@ function normalizePlannedDateRange(dateRange) {
   const startDate = String(dateRange.startDate || '').slice(0, 10);
   const endDate = String(dateRange.endDate || startDate).slice(0, 10);
   if (!isIsoDate(startDate) || !isIsoDate(endDate)) return null;
-  if (startDate > endDate) return null;
-  return {
-    label: String(dateRange.label || (startDate === endDate ? startDate : `${startDate} to ${endDate}`)).trim(),
-    startDate,
-    endDate,
-  };
+  try {
+    return assertAssistantDateRange({
+      label: dateRange.label,
+      startDate,
+      endDate,
+    });
+  } catch (_) {
+    return null;
+  }
 }
 
 function parseToolPlanResponse(content) {
@@ -1228,7 +1392,7 @@ function isHowToFileInstructionQuestion(text) {
 }
 
 function isLeaveGuidelineSectionQuestion(text) {
-  return /\b(general rules?|filing deadlines?|deadlines?|supporting documents?|attachments?|leave credits?|credits and limits?|commutation|monetization|monetisation|terminal leave|guidelines?|guideline sections?|guidelines?.*(?:leave types?|types of leave)|leave types?.*guidelines?|types of leave.*guidelines?|explain.*guidelines?|explain.*deadlines?|explain.*credits?|explain.*documents?)\b/.test(
+  return /\b(general rules?|filing deadlines?|deadlines?|supporting documents?|attachments?|leave credits?|monthly credits?|monthly accrual|earned credits?|earned leave|credits and limits?|commutation|monetization|monetisation|terminal leave|guidelines?|guideline sections?|guidelines?.*(?:leave types?|types of leave)|leave types?.*guidelines?|types of leave.*guidelines?|explain.*guidelines?|explain.*deadlines?|explain.*credits?|explain.*documents?)\b|1\.25(?:0)?/.test(
     lower(text)
   );
 }
@@ -1353,7 +1517,11 @@ function isShortDurationAnswer(text) {
 function isShortLeaveTypeAnswer(text) {
   const value = lower(text).trim();
   if (value.split(/\s+/).filter(Boolean).length > 6) return false;
-  if (/\b(how|what|which|why|ngano|unsa|unsay|ano|pila|can|pwede|puwede)\b/.test(value)) {
+  if (
+    /\b(how|what|which|why|when|where|who|ngano|unsa|unsay|ano|pila|asa|kinsa|sino|can|pwede|puwede|status|request|requirements?|attachment|remarks?|reason)\b/.test(
+      value
+    )
+  ) {
     return false;
   }
   return (
@@ -1366,7 +1534,11 @@ function isShortLeaveTypeAnswer(text) {
 function isShortLocatorTypeAnswer(text) {
   const value = lower(text).trim();
   if (value.split(/\s+/).filter(Boolean).length > 6) return false;
-  if (/\b(how|what|which|why|ngano|unsa|unsay|ano|pila|can|pwede|puwede)\b/.test(value)) {
+  if (
+    /\b(how|what|which|why|when|where|who|ngano|unsa|unsay|ano|pila|asa|kinsa|sino|can|pwede|puwede|status|request|requirements?|attachment|remarks?|reason)\b/.test(
+      value
+    )
+  ) {
     return false;
   }
   return /\b(wfh|work from home|official business|ob|pass slip|locator|fieldwork|field work)\b/.test(
@@ -1453,6 +1625,13 @@ function resolveIntentFromMemory(text, memory) {
   }
   const memoryTopic = memory.topic || topicForIntent(memory.intent);
   const explicitTopic = explicitTopicFromText(text);
+  if (
+    isLeaveCreditRequirementQuestion(value) &&
+    (!explicitTopic || explicitTopic === 'leave') &&
+    (memoryTopic === 'leave' || explicitTopic === 'leave')
+  ) {
+    return 'leave_filing_policy';
+  }
   if (isLanguageRestyleRequest(value)) {
     const recent = (memory.history || []).find(
       (item) => item?.intent && !['clarify_filing_topic', 'clarify_status_topic', 'direct_ai'].includes(item.intent)
@@ -2124,10 +2303,14 @@ function buildToolData(intent, context) {
   }
   if (intent === 'leave_availability_check' || intent === 'leave_balance_after_filing') {
     return {
+      employee: context.employee || null,
       balances: context.leave_balances || [],
+      requests: context.recent_leave_requests || [],
+      annualUsage: context.leave_annual_usage || [],
       leaveTypes: context.leave_types || [],
       leaveGuidelines: context.leave_guidelines || [],
       leaveGuidelineCatalog: context.leave_guideline_catalog || [],
+      extraction: context.assistant_extraction || null,
     };
   }
   if (
@@ -2193,7 +2376,14 @@ function buildToolData(intent, context) {
   return {};
 }
 
-async function refineToolAnswerWithLocalAi({ text, intent, toolAnswer, toolData, profile }) {
+async function refineToolAnswerWithLocalAi({
+  text,
+  intent,
+  toolAnswer,
+  toolData,
+  profile,
+  signal,
+}) {
   try {
     const result = await chatCompletion({
       provider: profile?.provider,
@@ -2210,7 +2400,9 @@ async function refineToolAnswerWithLocalAi({ text, intent, toolAnswer, toolData,
         num_predict: 140,
         num_ctx: 1024,
       },
+      signal,
     });
+    throwIfAssistantRequestAborted(signal);
     const content = compactAssistantContent(result.content);
     if (!content) return null;
     return {
@@ -2219,6 +2411,7 @@ async function refineToolAnswerWithLocalAi({ text, intent, toolAnswer, toolData,
       model: result.model,
     };
   } catch (err) {
+    throwIfAssistantRequestAborted(signal);
     console.warn(
       '[dtr-assistant] Tool-answer refinement failed:',
       err.code || err.message
@@ -2227,7 +2420,7 @@ async function refineToolAnswerWithLocalAi({ text, intent, toolAnswer, toolData,
   }
 }
 
-async function classifyIntentWithLocalAi(text, profile) {
+async function classifyIntentWithLocalAi(text, profile, signal) {
   try {
     const result = await chatCompletion({
       provider: profile?.provider,
@@ -2239,13 +2432,16 @@ async function classifyIntentWithLocalAi(text, profile) {
         num_predict: 32,
         num_ctx: 512,
       },
+      signal,
     });
+    throwIfAssistantRequestAborted(signal);
     return {
       intent: parseIntentClassifierResponse(result.content),
       provider: result.provider,
       model: result.model,
     };
   } catch (err) {
+    throwIfAssistantRequestAborted(signal);
     return {
       intent: null,
       provider: err.provider || 'ollama',
@@ -2255,7 +2451,7 @@ async function classifyIntentWithLocalAi(text, profile) {
   }
 }
 
-async function planToolWithLocalAi(text, profile) {
+async function planToolWithLocalAi(text, profile, signal) {
   try {
     const result = await chatCompletion({
       provider: profile?.provider,
@@ -2271,7 +2467,9 @@ async function planToolWithLocalAi(text, profile) {
         num_ctx: 1024,
       },
       maxTokens: 140,
+      signal,
     });
+    throwIfAssistantRequestAborted(signal);
     const plan = parseToolPlanResponse(result.content);
     return {
       intent: plan?.intent || null,
@@ -2282,6 +2480,7 @@ async function planToolWithLocalAi(text, profile) {
       model: result.model,
     };
   } catch (err) {
+    throwIfAssistantRequestAborted(signal);
     return {
       intent: null,
       dateRange: null,
@@ -2293,7 +2492,7 @@ async function planToolWithLocalAi(text, profile) {
   }
 }
 
-async function generateDirectAnswerWithAi({ text, context, profile }) {
+async function generateDirectAnswerWithAi({ text, context, profile, signal }) {
   const result = await chatCompletion({
     provider: profile.provider,
     model: profile.model,
@@ -2305,7 +2504,9 @@ async function generateDirectAnswerWithAi({ text, context, profile }) {
       num_ctx: 2048,
     },
     maxTokens: 240,
+    signal,
   });
+  throwIfAssistantRequestAborted(signal);
 
   return {
     content: compactAssistantContent(result.content),
@@ -2314,19 +2515,55 @@ async function generateDirectAnswerWithAi({ text, context, profile }) {
   };
 }
 
-async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile }) {
+async function chatWithDtrAssistant(
+  pool,
+  {
+    user,
+    message,
+    intent,
+    modelProfile,
+    conversationId,
+    externalConsentVersion,
+    signal,
+  }
+) {
+  throwIfAssistantRequestAborted(signal);
   const text = normalizeMessage(message);
   const profile = resolveModelProfile(modelProfile);
+  assertExternalConsent(profile, externalConsentVersion);
   const scope = getEmployeeSelfScope(user);
-  const memory = getAssistantMemory(scope.userId);
+  const conversationKey = normalizeConversationId(conversationId);
+  const turnGeneration = beginAssistantTurn(scope.userId, conversationKey);
+  const readMemory = () => getAssistantMemory(scope.userId, conversationKey);
+  const saveMemory = (value) =>
+    setAssistantMemory(
+      scope.userId,
+      value,
+      undefined,
+      conversationKey,
+      turnGeneration
+    );
+  const memory = readMemory();
   const normalizedTextForRules = normalizeAssistantMessageForRules(text);
+  const forcedIntent = normalizeIntent(intent);
+  const rawScoredIntent = scoreEmployeeAssistantIntent(
+    normalizedTextForRules,
+    intent
+  );
+  const clarificationInterrupted = Boolean(
+    memory?.pendingClarification &&
+      interruptsPendingClarification(normalizedTextForRules, memory)
+  );
   const clarificationPatch = memory?.pendingClarification
-    ? applyPendingClarificationAnswer(normalizedTextForRules, memory)
+    ? clarificationInterrupted
+      ? { pendingClarification: null }
+      : applyPendingClarificationAnswer(normalizedTextForRules, memory)
     : null;
   const workingMemory = memoryWithClarificationPatch(memory, clarificationPatch);
   const greetingReply = assistantGreetingReply(normalizedTextForRules);
   if (greetingReply) {
     return buildAssistantResult({
+      conversationId: conversationKey,
       content: greetingReply,
       provider: 'hrms',
       model: 'hrms-greeting-rules',
@@ -2343,13 +2580,29 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       memory,
     });
   }
-  const memoryIntent = resolveIntentFromMemory(normalizedTextForRules, workingMemory);
+  const contextDecision = contextGate({
+    message: normalizedTextForRules,
+    memory: workingMemory,
+    scoredIntent: rawScoredIntent,
+    forcedIntent,
+    clarificationInterrupted,
+    clarificationAnswered: Boolean(
+      memory?.pendingClarification &&
+        clarificationPatch &&
+        !clarificationInterrupted
+    ),
+  });
+  const routingMemory = contextDecision.useMemory ? workingMemory : null;
+  const memoryIntent = resolveIntentFromMemory(
+    normalizedTextForRules,
+    routingMemory
+  );
   const effectiveText = enrichMessageWithMemory(
     normalizedTextForRules,
-    workingMemory,
+    routingMemory,
     memoryIntent
   );
-  const clarificationIntent = workingMemory?.pendingClarification
+  const clarificationIntent = routingMemory?.pendingClarification
     ? null
     : clarificationIntentForMessage(
         normalizedTextForRules,
@@ -2360,7 +2613,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     const clarificationContext = emptyAssistantContext(
       parseAssistantDateRange(normalizedTextForRules)
     );
-    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
+    clarificationContext.assistant_context_gate = contextDecision;
+    saveMemory(buildNextAssistantMemory(routingMemory, {
       intent: clarificationIntent,
       text: normalizedTextForRules,
       dateRange: clarificationContext.date_range,
@@ -2371,6 +2625,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     }));
 
     return buildAssistantResult({
+      conversationId: conversationKey,
       content: clarificationContent(clarificationIntent, normalizedTextForRules),
       provider: 'hrms',
       model: 'hrms-clarification-rules',
@@ -2382,7 +2637,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'clarification_rules',
       attachments: [],
       text: normalizedTextForRules,
-      memory: getAssistantMemory(scope.userId),
+      memory: readMemory(),
     });
   }
 
@@ -2391,7 +2646,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     const actionContext = emptyAssistantContext(
       parseAssistantDateRange(normalizedTextForRules)
     );
-    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
+    actionContext.assistant_context_gate = contextDecision;
+    saveMemory(buildNextAssistantMemory(routingMemory, {
       intent: directOpenCommand.intent,
       text: normalizedTextForRules,
       dateRange: actionContext.date_range,
@@ -2402,6 +2658,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     }));
 
     return buildAssistantResult({
+      conversationId: conversationKey,
       content: directOpenCommand.content,
       provider: 'hrms',
       model: 'hrms-action-rules',
@@ -2414,14 +2671,18 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       attachments: [],
       text: normalizedTextForRules,
       actions: directOpenCommand.actions,
-      memory: getAssistantMemory(scope.userId),
+      memory: readMemory(),
     });
   }
 
-  const scoredIntent = scoreEmployeeAssistantIntent(effectiveText, intent);
+  const scoredIntent =
+    effectiveText === normalizedTextForRules
+      ? rawScoredIntent
+      : scoreEmployeeAssistantIntent(effectiveText, intent);
   const fallbackMemoryIntent =
-    memoryIntent || resolveIntentFromMemory(effectiveText, memory);
-  const forcedIntent = normalizeIntent(intent);
+    contextDecision.useMemory
+      ? memoryIntent || resolveIntentFromMemory(effectiveText, routingMemory)
+      : null;
   const shouldPreferMemoryIntent = Boolean(fallbackMemoryIntent && !forcedIntent);
   let resolvedIntent = shouldPreferMemoryIntent
     ? fallbackMemoryIntent
@@ -2459,7 +2720,15 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     intentConfidence,
     intentNeedsAiPlan,
   })) {
-    const planned = await planToolWithLocalAi(effectiveText, profile);
+    logExternalDisclosure({
+      userId: scope.userId,
+      profile,
+      purpose: 'tool_plan',
+      intent: resolvedIntent,
+      data: { employeeQuestion: true },
+    });
+    const planned = await planToolWithLocalAi(effectiveText, profile, signal);
+    throwIfAssistantRequestAborted(signal);
     if (planned.intent) {
       if (!resolvedIntent || intentNeedsAiPlan || intentConfidence < 0.72) {
         resolvedIntent = planned.intent;
@@ -2483,30 +2752,55 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     }
   }
 
+  const detectedMultiIntent = detectMultipleIntents(effectiveText, {
+    explicitIntent: intent,
+  });
+  const contextIntents = detectedMultiIntent.isMulti
+    ? detectedMultiIntent.intents.map((item) => item.intent)
+    : [resolvedIntent].filter(Boolean);
+
   const context = await loadEmployeeAssistantContext(pool, {
     userId: scope.userId,
     message: plannedText,
     dateRange: plannedDateRange,
+    intents: contextIntents,
+    signal,
   });
+  throwIfAssistantRequestAborted(signal);
+  context.assistant_context_gate = contextDecision;
 
   const mergedExtraction = mergePlannerExtraction(
-    extractMessageEntities(plannedText, workingMemory),
+    extractMessageEntities(plannedText, routingMemory),
     plannerExtraction
   );
-  const extractionMemory = memoryWithClarificationPatch(workingMemory, {
+  const extractionMemory = memoryWithClarificationPatch(routingMemory, {
     leaveType: mergedExtraction.leaveType,
     locatorType: mergedExtraction.locatorType,
     dateRange: mergedExtraction.dateRange,
     leavePrefill: mergedExtraction.leavePrefill,
     locatorPrefill: mergedExtraction.locatorPrefill,
-    pendingClarification: workingMemory?.pendingClarification ?? null,
+    pendingClarification: routingMemory?.pendingClarification ?? null,
   });
   if (mergedExtraction.dateRange?.startDate) {
     context.date_range = mergedExtraction.dateRange;
   }
+  context.assistant_extraction = mergedExtraction;
+  context.assistant_memory = extractionMemory;
 
   if (!resolvedIntent) {
-    const classified = await classifyIntentWithLocalAi(plannedText, profile);
+    logExternalDisclosure({
+      userId: scope.userId,
+      profile,
+      purpose: 'intent_classification',
+      intent: null,
+      data: { employeeQuestion: true },
+    });
+    const classified = await classifyIntentWithLocalAi(
+      plannedText,
+      profile,
+      signal
+    );
+    throwIfAssistantRequestAborted(signal);
     resolvedIntent = classified.intent;
     if (resolvedIntent) {
       intentConfidence = 0.76;
@@ -2517,17 +2811,36 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   }
 
   if (profile.engine === 'direct' && !resolvedIntent) {
+    const externalContext = buildExternalDirectContext(context);
+    logExternalDisclosure({
+      userId: scope.userId,
+      profile,
+      purpose: 'direct_answer',
+      intent: 'direct_ai',
+      data: externalContext,
+    });
     const direct = await generateDirectAnswerWithAi({
       text: plannedText,
-      context,
+      context: externalContext,
       profile,
+      signal,
     });
+    throwIfAssistantRequestAborted(signal);
 
-    setAssistantMemory(scope.userId, buildNextAssistantMemory(memory, {
+    saveMemory(buildNextAssistantMemory(routingMemory, {
       intent: 'direct_ai',
       text: plannedText,
-      leaveType: memoryLeaveTypeForIntent('direct_ai', plannedText, context, memory),
-      locatorType: memoryLocatorTypeForIntent('direct_ai', plannedText, memory),
+      leaveType: memoryLeaveTypeForIntent(
+        'direct_ai',
+        plannedText,
+        context,
+        routingMemory
+      ),
+      locatorType: memoryLocatorTypeForIntent(
+        'direct_ai',
+        plannedText,
+        routingMemory
+      ),
       dateRange: context.date_range,
       toolData: {
         modelProfile: profile.id,
@@ -2536,6 +2849,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     }));
 
     return buildAssistantResult({
+      conversationId: conversationKey,
       content: direct.content,
       provider: direct.provider,
       model: direct.model,
@@ -2547,7 +2861,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'direct_ai',
       attachments: [],
       text: plannedText,
-      memory: getAssistantMemory(scope.userId),
+      memory: readMemory(),
     });
   }
 
@@ -2558,8 +2872,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     memory: extractionMemory,
   });
   if (guided?.content) {
-    setAssistantMemory(
-      scope.userId,
+    saveMemory(
       buildNextAssistantMemory(extractionMemory, {
         intent: resolvedIntent,
         text: plannedText,
@@ -2578,6 +2891,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     );
 
     return buildAssistantResult({
+      conversationId: conversationKey,
       content: guided.content,
       provider: 'hrms',
       model: 'hrms-guided-clarification',
@@ -2589,12 +2903,12 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource: 'guided_clarification',
       attachments: [],
       text: plannedText,
-      memory: getAssistantMemory(scope.userId),
+      memory: readMemory(),
     });
   }
 
-  const multi = detectMultipleIntents(effectiveText, { explicitIntent: intent });
-  if (multi.isMulti && multi.intents.length >= 2 && !workingMemory?.pendingClarification) {
+  const multi = detectedMultiIntent;
+  if (multi.isMulti && multi.intents.length >= 2 && !routingMemory?.pendingClarification) {
     const multiReplies = [];
     for (const item of multi.intents) {
       const segmentText = item.segment || plannedText;
@@ -2606,8 +2920,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     if (multiReplies.length >= 2) {
       const combined = combineMultiIntentReplies(multiReplies, effectiveText);
       const primaryIntent = multiReplies[0].intent;
-      setAssistantMemory(
-        scope.userId,
+      saveMemory(
         buildNextAssistantMemory(extractionMemory, {
           intent: primaryIntent,
           text: plannedText,
@@ -2630,7 +2943,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       );
 
       return buildAssistantResult({
-        content: compactAssistantContent(combined),
+        conversationId: conversationKey,
+        content: combined,
         provider: 'hrms',
         model: 'hrms-multi-intent',
         modelProfile: profile.id,
@@ -2641,7 +2955,7 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
         intentSource: 'multi_intent',
         attachments: [],
         text: plannedText,
-        memory: getAssistantMemory(scope.userId),
+        memory: readMemory(),
       });
     }
   }
@@ -2652,8 +2966,19 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     resolvedIntent
   );
   if (fastReply) {
-    const toolData = buildToolData(resolvedIntent, context);
+    const toolData = profile.external
+      ? buildExternalToolData(resolvedIntent, context)
+      : buildToolData(resolvedIntent, context);
     const attachments = buildAttachments(resolvedIntent, context, scope.userId);
+    if (!shouldSkipToolRefinement(resolvedIntent)) {
+      logExternalDisclosure({
+        userId: scope.userId,
+        profile,
+        purpose: 'tool_answer_refinement',
+        intent: resolvedIntent,
+        data: toolData,
+      });
+    }
     const refined = shouldSkipToolRefinement(resolvedIntent)
       ? null
       : await refineToolAnswerWithLocalAi({
@@ -2662,9 +2987,11 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
           toolAnswer: fastReply,
           toolData,
           profile,
+          signal,
         });
+    throwIfAssistantRequestAborted(signal);
 
-    setAssistantMemory(scope.userId, buildNextAssistantMemory(extractionMemory, {
+    saveMemory(buildNextAssistantMemory(extractionMemory, {
       intent: resolvedIntent,
       text: plannedText,
       leaveType: memoryLeaveTypeForIntent(
@@ -2685,7 +3012,8 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
     }));
 
     return buildAssistantResult({
-      content: compactAssistantContent(refined?.content || fastReply),
+      conversationId: conversationKey,
+      content: refined?.content || fastReply,
       provider: refined?.provider || 'hrms',
       model: refined?.model || model,
       modelProfile: profile.id,
@@ -2696,12 +3024,13 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
       intentSource,
       attachments,
       text: plannedText,
-      memory: getAssistantMemory(scope.userId),
+      memory: readMemory(),
     });
   }
 
   const fallbackAttachments = buildAttachments(resolvedIntent, context, scope.userId);
   return buildAssistantResult({
+    conversationId: conversationKey,
     content: gracefulFallbackContent(normalizedTextForRules),
     provider: 'hrms',
     model: 'hrms-graceful-fallback',
@@ -2717,12 +3046,14 @@ async function chatWithDtrAssistant(pool, { user, message, intent, modelProfile 
   });
 }
 
-function resetDtrAssistantChat(user) {
+function resetDtrAssistantChat(user, conversationId) {
   const scope = getEmployeeSelfScope(user);
-  clearAssistantMemory(scope.userId);
+  const conversationKey = normalizeConversationId(conversationId);
+  clearAssistantMemory(scope.userId, conversationKey);
   return {
     ok: true,
     mode: scope.mode,
+    conversationId: conversationKey,
   };
 }
 
@@ -2731,15 +3062,22 @@ module.exports = {
   resetDtrAssistantChat,
   getDtrAssistantModelProfiles,
   __test: {
+    allowExternalLlm,
+    assistantReplyCharLimit,
+    adaptAssistantContentToDepth,
     buildActions,
     buildNextAssistantMemory,
+    buildToolData,
     clarificationContent,
     clarificationIntentForMessage,
+    compactAssistantContent,
     directOpenCommandForMessage,
     enrichMessageWithMemory,
     isAmbiguousFilingQuestion,
     isAmbiguousStatusQuestion,
+    normalizePlannedDateRange,
     resolveIntentFromMemory,
+    selectAssistantResponseDepth,
     topicForIntent,
   },
 };

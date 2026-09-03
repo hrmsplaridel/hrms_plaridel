@@ -71,6 +71,7 @@ class _DocuTrackerWorkflowEditorScreenState
               (s) => WorkflowStep(
                 stepOrder: s.stepOrder,
                 assigneeType: s.assigneeType,
+                assigneeSource: s.assigneeSource,
                 roleId: s.roleId,
                 departmentId: s.departmentId,
                 officeId: s.officeId,
@@ -345,13 +346,15 @@ class _DocuTrackerWorkflowEditorScreenState
           : _assigneeSnapshotsByStepId[stepId];
 
       if (s.assigneeType.trim().toLowerCase() == 'user') {
+        final usesDepartmentReviewers =
+            s.assigneeSource == 'department_reviewers';
         final userIds = (s.userIds ?? [])
             .map((e) => e.trim())
             .where((e) => e.isNotEmpty)
             .toList();
-        if (userIds.isEmpty) {
+        if (!usesDepartmentReviewers && userIds.isEmpty) {
           errors.add('$stepLabel requires at least one assigned user.');
-        } else {
+        } else if (!usesDepartmentReviewers) {
           final primaryId = userIds.first;
           final backups = userIds.skip(1).toList();
           if (backups.contains(primaryId)) {
@@ -428,23 +431,27 @@ class _DocuTrackerWorkflowEditorScreenState
     }
 
     if (step.assigneeType.trim().toLowerCase() == 'user') {
+      final usesDepartmentReviewers =
+          step.assigneeSource == 'department_reviewers';
       final userIds = (step.userIds ?? [])
           .map((e) => e.trim())
           .where((e) => e.isNotEmpty)
           .toList();
-      if (userIds.isEmpty) {
+      if (!usesDepartmentReviewers && userIds.isEmpty) {
         return 'Active selected-user steps need at least one user.';
       }
       if ((step.departmentId ?? '').trim().isEmpty) {
         return 'Selected-user steps require a department scope.';
       }
-      final primary = userIds.first;
-      final backups = userIds.skip(1).toList();
-      if (backups.contains(primary)) {
-        return 'Backup users cannot include the primary user.';
-      }
-      if (backups.length != backups.toSet().length) {
-        return 'Duplicate backup users are not allowed.';
+      if (!usesDepartmentReviewers) {
+        final primary = userIds.first;
+        final backups = userIds.skip(1).toList();
+        if (backups.contains(primary)) {
+          return 'Backup users cannot include the primary user.';
+        }
+        if (backups.length != backups.toSet().length) {
+          return 'Duplicate backup users are not allowed.';
+        }
       }
     }
     return null;
@@ -457,6 +464,7 @@ class _DocuTrackerWorkflowEditorScreenState
         WorkflowStep(
           stepOrder: i + 1,
           assigneeType: _steps[i].assigneeType,
+          assigneeSource: _steps[i].assigneeSource,
           roleId: _steps[i].roleId,
           departmentId: _steps[i].departmentId,
           officeId: _steps[i].officeId,
@@ -2437,6 +2445,9 @@ String _primaryUserLabel(
   WorkflowStep step,
   _WorkflowStepAssigneeSnapshot? snapshot,
 ) {
+  if (step.assigneeSource == 'department_reviewers') {
+    return 'Official Department Head';
+  }
   final snapshotName = snapshot?.primaryUserName?.trim();
   if (snapshotName != null && snapshotName.isNotEmpty) return snapshotName;
 
@@ -2462,6 +2473,9 @@ List<String> _backupUserLabels(
   WorkflowStep step,
   _WorkflowStepAssigneeSnapshot? snapshot,
 ) {
+  if (step.assigneeSource == 'department_reviewers') {
+    return const ['Configured department backups'];
+  }
   if (snapshot != null && snapshot.backupUserNames.isNotEmpty) {
     return snapshot.backupUserNames;
   }

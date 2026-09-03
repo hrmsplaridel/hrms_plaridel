@@ -22,17 +22,33 @@ const double _profileWideBreakpoint = 720;
 
 /// Profile body shown inside the admin/employee dashboard (sidebar stays visible).
 class DashboardProfilePanel extends StatelessWidget {
-  const DashboardProfilePanel({super.key, this.initialTab, this.onBack});
+  const DashboardProfilePanel({
+    super.key,
+    this.initialTab,
+    this.onBack,
+    this.tutorialHeroKey,
+    this.tutorialTabsKey,
+    this.tutorialContentKey,
+  });
 
   final ProfilePageTab? initialTab;
   final VoidCallback? onBack;
+  final GlobalKey? tutorialHeroKey;
+  final GlobalKey? tutorialTabsKey;
+  final GlobalKey? tutorialContentKey;
 
   @override
   Widget build(BuildContext context) {
     return RepaintBoundary(
       child: SizedBox(
         width: double.infinity,
-        child: ProfileContent(initialTab: initialTab, onBack: onBack),
+        child: ProfileContent(
+          initialTab: initialTab,
+          onBack: onBack,
+          tutorialHeroKey: tutorialHeroKey,
+          tutorialTabsKey: tutorialTabsKey,
+          tutorialContentKey: tutorialContentKey,
+        ),
       ),
     );
   }
@@ -85,6 +101,9 @@ class ProfileContent extends StatefulWidget {
     this.showAppSettings = true,
     this.initialTab,
     this.onBack,
+    this.tutorialHeroKey,
+    this.tutorialTabsKey,
+    this.tutorialContentKey,
   });
 
   /// When false, only the password card is shown (e.g. Settings → Password tab).
@@ -100,6 +119,9 @@ class ProfileContent extends StatefulWidget {
 
   /// Pops dashboard settings / returns to the previous screen.
   final VoidCallback? onBack;
+  final GlobalKey? tutorialHeroKey;
+  final GlobalKey? tutorialTabsKey;
+  final GlobalKey? tutorialContentKey;
 
   @override
   State<ProfileContent> createState() => _ProfileContentState();
@@ -1654,40 +1676,43 @@ class _ProfileContentState extends State<ProfileContent> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (showA || showP)
-            ProfileHeroHeader(
-              displayName: _profileDisplayNameFromAuth(user, displayName),
-              email: email,
-              roleLabel: _roleLabel(user),
-              idLabel: idLabel,
-              wideLayout: isWide,
-              onBack: widget.onBack,
-              avatar: SizedBox(
-                width: 104,
-                height: 104,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    _buildAvatarCircle(52, user: user),
-                    if (_imageLoading)
-                      Container(
-                        width: 104,
-                        height: 104,
-                        decoration: const BoxDecoration(
-                          color: Colors.black38,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Center(
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+            KeyedSubtree(
+              key: widget.tutorialHeroKey,
+              child: ProfileHeroHeader(
+                displayName: _profileDisplayNameFromAuth(user, displayName),
+                email: email,
+                roleLabel: _roleLabel(user),
+                idLabel: idLabel,
+                wideLayout: isWide,
+                onBack: widget.onBack,
+                avatar: SizedBox(
+                  width: 104,
+                  height: 104,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      _buildAvatarCircle(52, user: user),
+                      if (_imageLoading)
+                        Container(
+                          width: 104,
+                          height: 104,
+                          decoration: const BoxDecoration(
+                            color: Colors.black38,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
+                onChangePhoto: _imageLoading ? null : _pickAndUploadAvatar,
+                isUploading: _imageLoading,
               ),
-              onChangePhoto: _imageLoading ? null : _pickAndUploadAvatar,
-              isUploading: _imageLoading,
             ),
           ProfileShellBodyPadding(
             isWide: isWide,
@@ -1695,20 +1720,26 @@ class _ProfileContentState extends State<ProfileContent> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (_showTabBar) ...[
-                  ProfileTabBar(
-                    tab: _profileTab,
-                    onChanged: _onProfileTabSelected,
-                    showAccount: showA,
-                    showSecurity: showP,
-                    showAppSettings: showSettings,
+                  KeyedSubtree(
+                    key: widget.tutorialTabsKey,
+                    child: ProfileTabBar(
+                      tab: _profileTab,
+                      onChanged: _onProfileTabSelected,
+                      showAccount: showA,
+                      showSecurity: showP,
+                      showAppSettings: showSettings,
+                    ),
                   ),
                   const SizedBox(height: 20),
                 ],
-                _buildActiveTabBody(
-                  context,
-                  email: email,
-                  user: user,
-                  isWide: isWide,
+                KeyedSubtree(
+                  key: widget.tutorialContentKey,
+                  child: _buildActiveTabBody(
+                    context,
+                    email: email,
+                    user: user,
+                    isWide: isWide,
+                  ),
                 ),
               ],
             ),

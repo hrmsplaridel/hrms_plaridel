@@ -219,7 +219,7 @@ class _EmployeeAttendanceOverviewCardState
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   AttendanceOverviewKpiGrid(
-                    present: summary.present,
+                    present: summary.completedPresent,
                     late: summary.late,
                     absent: summary.absent,
                     undertime: summary.undertime,

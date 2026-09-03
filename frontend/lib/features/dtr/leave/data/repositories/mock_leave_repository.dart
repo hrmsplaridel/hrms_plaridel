@@ -1,6 +1,7 @@
 import 'leave_repository.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
@@ -174,17 +175,25 @@ class MockLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<LeaveBalance> upsertBalance(
-    LeaveBalance balance, {
-    String? remarks,
+  Future<LeaveBalance> applyBalanceAdjustment({
+    required String userId,
+    required LeaveType leaveType,
+    required double adjustmentDays,
+    required String remarks,
+    DateTime? asOfDate,
   }) async {
-    _ensureDefaultBalances(balance.userId);
-    final list = _balancesByUser.putIfAbsent(balance.userId, () => []);
-    final index = list.indexWhere((b) => b.leaveType == balance.leaveType);
-    final saved = balance.copyWith(
-      id: balance.id ?? 'balance_${balance.userId}_${balance.leaveType.value}',
+    _ensureDefaultBalances(userId);
+    final list = _balancesByUser.putIfAbsent(userId, () => []);
+    final index = list.indexWhere((b) => b.leaveType == leaveType);
+    final current = index >= 0
+        ? list[index]
+        : LeaveBalance(userId: userId, leaveType: leaveType);
+    final saved = current.copyWith(
+      id: current.id ?? 'balance_${userId}_${leaveType.value}',
+      adjustedDays: current.adjustedDays + adjustmentDays,
+      asOfDate: asOfDate ?? DateTime.now(),
       updatedAt: DateTime.now(),
-      createdAt: balance.createdAt ?? DateTime.now(),
+      createdAt: current.createdAt ?? DateTime.now(),
     );
     if (index >= 0) {
       list[index] = saved;
@@ -418,9 +427,10 @@ class MockLeaveRepository implements LeaveRepository {
     MonthlyLeaveAccrualInput input,
   ) async {
     final now = DateTime.now();
+    final completedMonth = DateTime(now.year, now.month - 1);
     final targetMonth =
         input.targetMonth ??
-        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
+        '${completedMonth.year.toString().padLeft(4, '0')}-${completedMonth.month.toString().padLeft(2, '0')}';
     final details = <MonthlyLeaveAccrualDetail>[];
 
     for (final entry in _balancesByUser.entries) {
@@ -507,29 +517,42 @@ class MockLeaveRepository implements LeaveRepository {
   void _ensureDefaultBalances(String userId) {
     _balancesByUser.putIfAbsent(userId, () {
       final now = DateTime.now();
-      return LeaveType.values
-          .map(
-            (type) => LeaveBalance(
-              id: 'balance_${userId}_${type.value}',
-              userId: userId,
-              leaveType: type,
-              earnedDays: switch (type) {
-                LeaveType.specialPrivilegeLeave => 3,
-                _ => 0,
-              },
-              usedDays: 0,
-              pendingDays: 0,
-              adjustedDays: 0,
-              asOfDate: now,
-              lastAccrualDate: switch (type) {
-                LeaveType.specialPrivilegeLeave => now,
-                _ => null,
-              },
-              createdAt: now,
-              updatedAt: now,
-            ),
-          )
-          .toList();
+      final creditTypes = [LeaveType.vacationLeave, LeaveType.sickLeave];
+      final annualTypes = <LeaveType, double>{
+        LeaveType.specialPrivilegeLeave: 3,
+        LeaveType.soloParentLeave: 7,
+        LeaveType.tenDayVawcLeave: 10,
+      };
+      return [
+        ...creditTypes.map(
+          (type) => LeaveBalance(
+            id: 'balance_${userId}_${type.value}',
+            userId: userId,
+            leaveType: type,
+            leaveTypeName: type.value,
+            recordKind: 'credit_balance',
+            entitlementBasis: LeaveEntitlementBasis.accrual,
+            asOfDate: now,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        ),
+        ...annualTypes.entries.map(
+          (entry) => LeaveBalance(
+            id: 'synth-${entry.key.value}-${now.year}',
+            userId: userId,
+            leaveType: entry.key,
+            leaveTypeName: entry.key.value,
+            recordKind: 'annual_entitlement',
+            entitlementBasis: LeaveEntitlementBasis.annual,
+            entitlementYear: now.year,
+            earnedDays: entry.value,
+            asOfDate: now,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        ),
+      ];
     });
   }
 
@@ -609,13 +632,20 @@ class MockLeaveRepository implements LeaveRepository {
       limit: query.limit,
       offset: query.offset,
       rows: const [],
+      summaryEarned: 0,
+      summaryUsed: 0,
+      summaryPending: 0,
+      summaryAdjusted: 0,
     );
   }
 
   @override
-  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(int year) async {
+  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(
+    int year,
+  ) async {
     return YearEndForcedLeaveComplianceResult(
       year: year,
+      yearClosed: year < DateTime.now().year,
       requiredDays: 5,
       employees: const [],
       summary: const YearEndForcedLeaveSummary(

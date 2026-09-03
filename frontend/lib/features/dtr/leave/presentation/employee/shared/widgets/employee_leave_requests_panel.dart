@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/desktop/widgets/employee_leave_desktop_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/mobile/widgets/employee_leave_mobile_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/history_timeline.dart';
@@ -231,7 +232,13 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     final reviewed = request.reviewedAt;
     final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
         ? request.reviewerName!.trim()
-        : 'Approver';
+        : 'HR/Admin';
+    final departmentHeadReviewer =
+        (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
+        ? request.departmentHeadReviewerName!.trim()
+        : 'Department Head';
+    final departmentHeadReviewedAt =
+        request.departmentHeadReviewedAt ?? reviewed;
 
     final events = [
       LeaveHistoryEvent(
@@ -245,9 +252,9 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
         dateTime:
             request.status == LeaveRequestStatus.pendingHr ||
                 request.status == LeaveRequestStatus.approved
-            ? reviewed
+            ? departmentHeadReviewedAt
             : null,
-        actor: reviewer,
+        actor: departmentHeadReviewer,
         completed:
             request.status == LeaveRequestStatus.pendingHr ||
             request.status == LeaveRequestStatus.approved,
@@ -257,9 +264,9 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
         dateTime:
             request.status == LeaveRequestStatus.pendingHr ||
                 request.status == LeaveRequestStatus.approved
-            ? reviewed
+            ? departmentHeadReviewedAt
             : null,
-        actor: reviewer,
+        actor: departmentHeadReviewer,
         completed:
             request.status == LeaveRequestStatus.pendingHr ||
             request.status == LeaveRequestStatus.approved,
@@ -451,6 +458,62 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                         label: 'Calamity occurrence date',
                         value: _formatDate(request.calamityDate!),
                       ),
+                    if (request.leaveType == LeaveType.adoptionLeave &&
+                        request.adoptionParentRole != null)
+                      _LeaveDetailTile(
+                        icon: Icons.family_restroom_rounded,
+                        label: 'Adoption eligibility',
+                        value: request.adoptionParentRole!.displayName,
+                      ),
+                    if (request.leaveType == LeaveType.adoptionLeave &&
+                        request.adoptionPlacementDate != null)
+                      _LeaveDetailTile(
+                        icon: Icons.event_available_rounded,
+                        label: 'PAPA / adoption placement date',
+                        value: _formatDate(request.adoptionPlacementDate!),
+                      ),
+                    if (request.leaveType == LeaveType.tenDayVawcLeave &&
+                        request.vawcSupportDocumentType != null)
+                      _LeaveDetailTile(
+                        icon: Icons.verified_user_outlined,
+                        label: 'VAWC supporting document',
+                        value: request.vawcSupportDocumentType!.displayName,
+                      ),
+                    if (request.leaveType == LeaveType.tenDayVawcLeave &&
+                        (request.vawcCaseDetails ?? '').trim().isNotEmpty)
+                      _LeaveDetailTile(
+                        icon: Icons.description_outlined,
+                        label: 'VAWC case details',
+                        value: request.vawcCaseDetails!.trim(),
+                      ),
+                    if (request.leaveType == LeaveType.soloParentLeave &&
+                        (request.soloParentIdNumber ?? '').trim().isNotEmpty)
+                      _LeaveDetailTile(
+                        icon: Icons.badge_outlined,
+                        label: 'Solo Parent ID number',
+                        value: request.soloParentIdNumber!.trim(),
+                      ),
+                    if (request.leaveType == LeaveType.soloParentLeave &&
+                        request.soloParentIdExpiryDate != null)
+                      _LeaveDetailTile(
+                        icon: Icons.event_busy_outlined,
+                        label: 'Solo Parent ID expiry',
+                        value: _formatDate(request.soloParentIdExpiryDate!),
+                      ),
+                    for (final field in request.employeeDetailSchemaSnapshot)
+                      if (request.customDetails[field.key] != null &&
+                          request.customDetails[field.key]
+                              .toString()
+                              .trim()
+                              .isNotEmpty)
+                        _LeaveDetailTile(
+                          icon: Icons.dynamic_form_outlined,
+                          label: field.label,
+                          value: _customLeaveDetailDisplayValue(
+                            field,
+                            request.customDetails[field.key],
+                          ),
+                        ),
                     _LeaveDetailTile(
                       icon: Icons.date_range_rounded,
                       label: 'Date range',
@@ -841,6 +904,20 @@ String _formatDate(DateTime value) {
     'Dec',
   ];
   return '${months[value.month - 1]} ${value.day}, ${value.year}';
+}
+
+String _customLeaveDetailDisplayValue(
+  LeaveCustomFieldDefinition field,
+  dynamic value,
+) {
+  if (field.type == LeaveCustomFieldType.boolean) {
+    return value == true ? 'Yes' : 'No';
+  }
+  if (field.type == LeaveCustomFieldType.date) {
+    final date = DateTime.tryParse(value.toString());
+    if (date != null) return _formatDate(date);
+  }
+  return value.toString();
 }
 
 bool _canEmployeeCancel(LeaveRequest request) {

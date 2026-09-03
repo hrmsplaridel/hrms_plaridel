@@ -1,4 +1,8 @@
-const { parseAssistantDateRange } = require('../../utils/dateRangeParser');
+const {
+  MAX_ASSISTANT_DATE_RANGE_DAYS,
+  assertAssistantDateRange,
+  parseAssistantDateRange,
+} = require('../../utils/dateRangeParser');
 const {
   buildDtrPolicyKnowledge,
   buildLocatorPolicyKnowledge,
@@ -7,6 +11,10 @@ const {
   buildAllLeaveGuidelines,
   buildGuidelinesForTypes,
 } = require('./leaveFilingGuidelines');
+const {
+  normalizeEmployeeDetailSchema,
+  sanitizeEmployeeLeaveDetails,
+} = require('../leaveRequestDetailsPolicy');
 
 function toNumber(value) {
   if (value == null) return null;
@@ -26,6 +34,206 @@ function compactText(value, max = 360) {
   return `${text.slice(0, max - 1)}...`;
 }
 
+function assistantQueryTimeoutMs(env = process.env) {
+  const parsed = Number.parseInt(
+    String(env.DTR_ASSISTANT_QUERY_TIMEOUT_MS || '10000'),
+    10
+  );
+  if (!Number.isFinite(parsed)) return 10000;
+  return Math.max(1000, Math.min(parsed, 60000));
+}
+
+function throwIfAssistantQueryAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('Assistant request was cancelled.');
+  error.statusCode = 499;
+  error.code = 'ASSISTANT_REQUEST_ABORTED';
+  throw error;
+}
+
+function runAssistantQuery(pool, text, values = []) {
+  return pool.query({
+    text,
+    values,
+    query_timeout: assistantQueryTimeoutMs(),
+  });
+}
+
+const ASSISTANT_CONTEXT_SOURCES = [
+  'employee',
+  'dtrRecords',
+  'dtrCalendarDays',
+  'leaveBalances',
+  'leaveRequests',
+  'leaveAnnualUsage',
+  'leaveTypes',
+  'locatorSlips',
+  'locatorTypes',
+];
+
+const DTR_RECORD_INTENTS = new Set([
+  'today_dtr',
+  'missing_logs',
+  'dtr_daily_record',
+  'dtr_range_summary',
+  'dtr_missing_logs',
+  'dtr_missing_log_reason',
+  'dtr_late_summary',
+  'dtr_late_reason',
+  'dtr_undertime_summary',
+  'dtr_overtime_summary',
+  'dtr_absent_summary',
+  'dtr_status_explanation',
+  'dtr_correction_guidance',
+  'dtr_export_guidance',
+  'dtr_hours_summary',
+]);
+
+const LEAVE_REQUEST_INTENTS = new Set([
+  'latest_leave_request',
+  'pending_leave_requests',
+  'approved_leave_requests',
+  'rejected_leave_requests',
+  'leave_history',
+  'leave_overlap_check',
+  'leave_request_summary',
+  'leave_request_lookup',
+  'leave_rejection_reason',
+  'leave_approval_tracker',
+  'leave_approval_history',
+]);
+
+const LEAVE_BALANCE_INTENTS = new Set([
+  'leave_balance',
+  'leave_pending_days_explanation',
+  'leave_balance_after_filing',
+  'leave_balance_projection',
+]);
+
+const LEAVE_FILING_CHECK_INTENTS = new Set([
+  'leave_availability_check',
+  'leave_guided_filing',
+]);
+
+const LOCATOR_HISTORY_INTENTS = new Set([
+  'latest_locator_request',
+  'locator_status',
+  'locator_summary',
+  'locator_rejection_reason',
+  'locator_approval_tracker',
+]);
+
+function allAssistantContextSources() {
+  return Object.fromEntries(
+    ASSISTANT_CONTEXT_SOURCES.map((source) => [source, true])
+  );
+}
+
+function assistantContextLoadPlan(intents) {
+  const normalized = [...new Set(
+    (Array.isArray(intents) ? intents : [intents])
+      .map((intent) => String(intent || '').trim())
+      .filter(Boolean)
+  )];
+  if (
+    normalized.length === 0 ||
+    normalized.some((intent) => intent === 'unknown' || intent === 'direct_ai')
+  ) {
+    return allAssistantContextSources();
+  }
+
+  const plan = Object.fromEntries(
+    ASSISTANT_CONTEXT_SOURCES.map((source) => [source, false])
+  );
+  plan.employee = true;
+
+  for (const intent of normalized) {
+    if (DTR_RECORD_INTENTS.has(intent)) {
+      plan.dtrRecords = true;
+      plan.dtrCalendarDays = true;
+      continue;
+    }
+    if (intent === 'dtr_holiday_check' || intent === 'dtr_schedule_context') {
+      plan.dtrCalendarDays = true;
+      continue;
+    }
+    if (intent === 'dtr_leave_coverage_check') {
+      plan.leaveRequests = true;
+      plan.leaveTypes = true;
+      continue;
+    }
+    if (intent === 'dtr_locator_coverage_check') {
+      plan.dtrCalendarDays = true;
+      plan.locatorSlips = true;
+      plan.locatorTypes = true;
+      continue;
+    }
+    if (intent === 'dtr_policy_guidance') continue;
+
+    if (intent.startsWith('leave_') || LEAVE_REQUEST_INTENTS.has(intent)) {
+      plan.leaveTypes = true;
+      if (LEAVE_REQUEST_INTENTS.has(intent)) plan.leaveRequests = true;
+      if (LEAVE_BALANCE_INTENTS.has(intent)) plan.leaveBalances = true;
+      if (intent === 'leave_pending_days_explanation') {
+        plan.leaveRequests = true;
+      }
+      if (LEAVE_FILING_CHECK_INTENTS.has(intent)) {
+        plan.leaveBalances = true;
+        plan.leaveRequests = true;
+        plan.leaveAnnualUsage = true;
+      }
+      continue;
+    }
+
+    if (intent.startsWith('locator_') || LOCATOR_HISTORY_INTENTS.has(intent)) {
+      plan.locatorTypes = true;
+      if (LOCATOR_HISTORY_INTENTS.has(intent)) plan.locatorSlips = true;
+      if (intent === 'locator_availability_check') {
+        plan.dtrCalendarDays = true;
+        plan.locatorSlips = true;
+      }
+      continue;
+    }
+
+    return allAssistantContextSources();
+  }
+
+  return plan;
+}
+
+const catalogCacheByPool = new WeakMap();
+
+function assistantCatalogCacheMs(env = process.env) {
+  const parsed = Number.parseInt(
+    String(env.DTR_ASSISTANT_CATALOG_CACHE_MS || '60000'),
+    10
+  );
+  if (!Number.isFinite(parsed)) return 60000;
+  return Math.max(0, Math.min(parsed, 5 * 60 * 1000));
+}
+
+async function loadCachedAssistantCatalog(pool, key, loader) {
+  const ttlMs = assistantCatalogCacheMs();
+  if (ttlMs <= 0 || !pool || typeof pool !== 'object') return loader();
+  const now = Date.now();
+  const poolCache = catalogCacheByPool.get(pool) || new Map();
+  const cached = poolCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise || cached.value;
+  }
+  const promise = Promise.resolve().then(loader);
+  poolCache.set(key, { promise, expiresAt: now + ttlMs });
+  catalogCacheByPool.set(pool, poolCache);
+  try {
+    const value = await promise;
+    poolCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    return value;
+  } catch (error) {
+    if (poolCache.get(key)?.promise === promise) poolCache.delete(key);
+    throw error;
+  }
+}
+
 function parseJsonArray(value) {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -41,7 +249,8 @@ function parseJsonArray(value) {
 }
 
 async function loadEmployeeProfile(pool, userId) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT id, full_name, role, sex, civil_status, date_of_birth::text AS date_of_birth
      FROM users
      WHERE id = $1::uuid
@@ -62,32 +271,43 @@ async function loadEmployeeProfile(pool, userId) {
 }
 
 async function loadDtrRecords(pool, userId, dateRange) {
-  const result = await pool.query(
-    `SELECT d.id,
-            d.attendance_date::text AS attendance_date,
+  const result = await runAssistantQuery(
+    pool,
+    `WITH active_leave_coverage AS (
+       SELECT c.*
+       FROM dtr_leave_coverage c
+       JOIN leave_requests request ON request.id = c.leave_request_id
+       WHERE request.status = 'approved'
+     )
+     SELECT COALESCE(d.id, coverage.id) AS id,
+            COALESCE(d.attendance_date, coverage.attendance_date)::text AS attendance_date,
             d.time_in,
             d.break_out,
             d.break_in,
             d.time_out,
             d.total_hours,
-            d.late_minutes,
-            d.undertime_minutes,
-            d.overtime_minutes,
-            d.status,
+            CASE WHEN coverage.id IS NOT NULL THEN 0 ELSE d.late_minutes END AS late_minutes,
+            CASE WHEN coverage.id IS NOT NULL THEN 0 ELSE d.undertime_minutes END AS undertime_minutes,
+            CASE WHEN coverage.id IS NOT NULL THEN 0 ELSE d.overtime_minutes END AS overtime_minutes,
+            CASE WHEN coverage.id IS NOT NULL THEN 'on_leave' ELSE d.status END AS status,
             d.pm_status,
             d.remarks,
-            d.source,
+            CASE WHEN coverage.id IS NOT NULL THEN 'adjusted' ELSE d.source END AS source,
             h.name AS holiday_name,
             h.holiday_type,
             lt.name AS leave_type
      FROM dtr_daily_summary d
+     FULL OUTER JOIN active_leave_coverage coverage
+       ON coverage.employee_id = d.employee_id
+      AND coverage.attendance_date = d.attendance_date
      LEFT JOIN holidays h ON h.id = d.holiday_id
-     LEFT JOIN leave_requests lr ON lr.id = d.leave_request_id
+     LEFT JOIN leave_requests lr
+       ON lr.id = COALESCE(coverage.leave_request_id, d.leave_request_id)
      LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-     WHERE d.employee_id = $1::uuid
-       AND d.attendance_date BETWEEN $2::date AND $3::date
-     ORDER BY d.attendance_date DESC
-     LIMIT 70`,
+     WHERE COALESCE(d.employee_id, coverage.employee_id) = $1::uuid
+       AND COALESCE(d.attendance_date, coverage.attendance_date)
+         BETWEEN $2::date AND $3::date
+     ORDER BY COALESCE(d.attendance_date, coverage.attendance_date) DESC`,
     [userId, dateRange.startDate, dateRange.endDate]
   );
 
@@ -113,7 +333,8 @@ async function loadDtrRecords(pool, userId, dateRange) {
 }
 
 async function loadDtrCalendarDays(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT day.day::date::text AS attendance_date,
             assignment.id AS assignment_id,
             shift.id AS shift_id,
@@ -128,12 +349,18 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
             holiday.name AS holiday_name,
             holiday.holiday_type,
             holiday.coverage AS holiday_coverage
-     FROM generate_series($2::date, $3::date, interval '1 day') AS day(day)
+     FROM generate_series(
+       $2::date,
+       LEAST(
+         $3::date,
+         $2::date + (($4::int - 1) * interval '1 day')
+       ),
+       interval '1 day'
+     ) AS day(day)
      LEFT JOIN LATERAL (
        SELECT a.*
        FROM assignments a
        WHERE a.employee_id = $1::uuid
-         AND (a.is_active IS NULL OR a.is_active = true)
          AND a.effective_from <= day.day::date
          AND (a.effective_to IS NULL OR a.effective_to >= day.day::date)
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
@@ -152,7 +379,12 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
        LIMIT 1
      ) holiday ON true
      ORDER BY day.day ASC`,
-    [userId, dateRange.startDate, dateRange.endDate]
+    [
+      userId,
+      dateRange.startDate,
+      dateRange.endDate,
+      MAX_ASSISTANT_DATE_RANGE_DAYS,
+    ]
   );
 
   return result.rows.map((row) => ({
@@ -174,7 +406,8 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
 }
 
 async function loadLeaveBalances(pool, userId) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT leave_type,
             earned_days,
             used_days,
@@ -208,7 +441,8 @@ async function loadLeaveBalances(pool, userId) {
 }
 
 async function loadRecentLeaveRequests(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT lr.id,
             lr.start_date::text AS start_date,
             lr.end_date::text AS end_date,
@@ -218,7 +452,10 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
             lr.attachment_name,
             lr.attachment_path,
             lr.details,
+            lr.employee_detail_schema_snapshot,
             lr.reviewer_remarks,
+            lr.recommendation_remarks,
+            lr.disapproval_reason,
             lr.reviewed_at,
             lr.approved_at,
             reviewer.full_name AS reviewer_name,
@@ -290,8 +527,16 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
     reason: compactText(row.reason),
     has_attachment: !!row.attachment_path,
     attachment_name: compactText(row.attachment_name, 120),
-    details: row.details && typeof row.details === 'object' ? row.details : {},
+    details: sanitizeEmployeeLeaveDetails(
+      row.details,
+      row.employee_detail_schema_snapshot
+    ),
+    employee_detail_schema_snapshot: normalizeEmployeeDetailSchema(
+      row.employee_detail_schema_snapshot
+    ),
     reviewer_remarks: compactText(row.reviewer_remarks),
+    recommendation_remarks: compactText(row.recommendation_remarks),
+    disapproval_reason: compactText(row.disapproval_reason),
     reviewer_name: row.reviewer_name,
     approver_name: row.approver_name,
     reviewed_at: toIso(row.reviewed_at),
@@ -319,8 +564,59 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
   }));
 }
 
-async function loadLeaveTypes(pool) {
-  const result = await pool.query(
+async function loadAnnualLeaveUsage(pool, userId, dateRange) {
+  const year = parseInt(String(dateRange?.startDate || '').slice(0, 4), 10);
+  if (!Number.isInteger(year)) return [];
+  const trackedTypes = ['specialPrivilegeLeave', 'soloParentLeave', 'tenDayVawcLeave'];
+  const result = await runAssistantQuery(
+    pool,
+    `SELECT lt.name AS leave_type_key,
+            COALESCE(SUM(COALESCE(lr.number_of_days, lr.total_days, 0)), 0)::float8 AS days,
+            COUNT(*)::int AS request_count
+     FROM leave_requests lr
+     INNER JOIN leave_types lt ON lt.id = lr.leave_type_id
+     WHERE (lr.user_id = $1::uuid OR lr.employee_id = $1::uuid)
+       AND lt.name = ANY($2::text[])
+       AND lr.status = ANY($3::text[])
+       AND lr.start_date <= $5::date
+       AND lr.end_date >= $4::date
+     GROUP BY lt.name
+     ORDER BY lt.name ASC`,
+    [
+      userId,
+      trackedTypes,
+      ['pending', 'pending_department_head', 'pending_hr', 'approved'],
+      `${year}-01-01`,
+      `${year}-12-31`,
+    ]
+  );
+
+  const usageByType = new Map(
+    result.rows.map((row) => [
+      row.leave_type_key,
+      {
+        year,
+        leave_type_key: row.leave_type_key,
+        days: toNumber(row.days) || 0,
+        request_count: row.request_count || 0,
+      },
+    ])
+  );
+
+  return trackedTypes.map(
+    (leaveTypeKey) =>
+      usageByType.get(leaveTypeKey) || {
+        year,
+        leave_type_key: leaveTypeKey,
+        days: 0,
+        request_count: 0,
+      }
+  );
+}
+
+async function queryLeaveTypes(pool) {
+  const result = await runAssistantQuery(
+    pool,
     `SELECT id,
             name,
             display_name,
@@ -335,6 +631,8 @@ async function loadLeaveTypes(pool) {
             sex_eligibility,
             affects_dtr_normally,
             balance_ledger_type,
+            entitlement_basis,
+            employee_detail_schema,
             is_active
      FROM leave_types
      WHERE is_active IS NULL OR is_active = true
@@ -357,12 +655,23 @@ async function loadLeaveTypes(pool) {
     sex_eligibility: row.sex_eligibility,
     affects_dtr_normally: row.affects_dtr_normally !== false,
     balance_ledger_type: row.balance_ledger_type,
+    entitlement_basis: row.entitlement_basis,
+    employee_detail_schema: normalizeEmployeeDetailSchema(
+      row.employee_detail_schema
+    ),
     is_active: row.is_active !== false,
   }));
 }
 
+function loadLeaveTypes(pool) {
+  return loadCachedAssistantCatalog(pool, 'leaveTypes', () =>
+    queryLeaveTypes(pool)
+  );
+}
+
 async function loadRecentLocatorSlips(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT ls.id,
             ls.slip_date::text AS slip_date,
             ls.request_type,
@@ -377,23 +686,29 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
             ls.hr_remarks,
             ls.dept_head_reviewed_at,
             ls.hr_reviewed_at,
+            ls.revoked_at,
+            ls.revocation_reason,
+            ls.month_end_reconciliation_required,
+            ls.month_end_reconciled_at,
             ls.attachment_name,
             ls.attachment_path,
             ls.created_at,
             ls.updated_at,
             dept_head.full_name AS dept_head_reviewer_name,
             hr.full_name AS hr_reviewer_name,
-            lrt.label AS request_type_label,
-            lrt.short_label AS request_type_short_label,
-            lrt.location_label AS request_type_location_label,
-            lrt.location_hint AS request_type_location_hint,
-            lrt.dtr_slot_label AS dtr_slot_label,
-            lrt.dtr_print_label AS dtr_print_label,
-            lrt.requires_attachment AS request_type_requires_attachment,
-            lrt.coverage_mode AS request_type_coverage_mode
+            revoker.full_name AS revoked_by_name,
+            COALESCE(ls.request_type_label_snapshot, lrt.label) AS request_type_label,
+            COALESCE(ls.request_type_short_label_snapshot, lrt.short_label) AS request_type_short_label,
+            COALESCE(ls.request_type_location_label_snapshot, lrt.location_label) AS request_type_location_label,
+            COALESCE(ls.request_type_location_hint_snapshot, lrt.location_hint) AS request_type_location_hint,
+            COALESCE(ls.request_type_dtr_slot_label_snapshot, lrt.dtr_slot_label) AS dtr_slot_label,
+            COALESCE(ls.request_type_dtr_print_label_snapshot, lrt.dtr_print_label) AS dtr_print_label,
+            COALESCE(ls.request_type_requires_attachment_snapshot, lrt.requires_attachment, false) AS request_type_requires_attachment,
+            COALESCE(ls.request_type_coverage_mode_snapshot, lrt.coverage_mode) AS request_type_coverage_mode
      FROM locator_slips ls
      LEFT JOIN users dept_head ON dept_head.id = ls.dept_head_reviewer_id
      LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
+     LEFT JOIN users revoker ON revoker.id = ls.revoked_by
      LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
      WHERE ls.employee_id = $1::uuid
      ORDER BY
@@ -434,15 +749,22 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
     hr_remarks: compactText(row.hr_remarks),
     dept_head_reviewer_name: row.dept_head_reviewer_name,
     hr_reviewer_name: row.hr_reviewer_name,
+    revoked_by_name: row.revoked_by_name,
     dept_head_reviewed_at: toIso(row.dept_head_reviewed_at),
     hr_reviewed_at: toIso(row.hr_reviewed_at),
+    revoked_at: toIso(row.revoked_at),
+    revocation_reason: compactText(row.revocation_reason),
+    month_end_reconciliation_required:
+      row.month_end_reconciliation_required === true,
+    month_end_reconciled_at: toIso(row.month_end_reconciled_at),
     created_at: toIso(row.created_at),
     updated_at: toIso(row.updated_at),
   }));
 }
 
-async function loadLocatorTypes(pool) {
-  const result = await pool.query(
+async function queryLocatorTypes(pool) {
+  const result = await runAssistantQuery(
+    pool,
     `SELECT code,
             label,
             short_label,
@@ -475,37 +797,81 @@ async function loadLocatorTypes(pool) {
   }));
 }
 
-async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: dateRangeOverride }) {
-  const dateRange = dateRangeOverride || parseAssistantDateRange(message);
+function loadLocatorTypes(pool) {
+  return loadCachedAssistantCatalog(pool, 'locatorTypes', () =>
+    queryLocatorTypes(pool)
+  );
+}
+
+async function loadEmployeeAssistantContext(
+  pool,
+  { userId, message, dateRange: dateRangeOverride, intents, signal }
+) {
+  throwIfAssistantQueryAborted(signal);
+  const dateRange = assertAssistantDateRange(
+    dateRangeOverride || parseAssistantDateRange(message)
+  );
+  const loadPlan = assistantContextLoadPlan(intents);
   const [
     employee,
     dtrRecords,
     dtrCalendarDays,
     leaveBalances,
     leaveRequests,
+    leaveAnnualUsage,
     leaveTypes,
     locatorSlips,
     locatorTypes,
   ] =
     await Promise.all([
-      loadEmployeeProfile(pool, userId),
-      loadDtrRecords(pool, userId, dateRange),
-      loadDtrCalendarDays(pool, userId, dateRange),
-      loadLeaveBalances(pool, userId),
-      loadRecentLeaveRequests(pool, userId, dateRange),
-      loadLeaveTypes(pool),
-      loadRecentLocatorSlips(pool, userId, dateRange),
-      loadLocatorTypes(pool),
+      loadPlan.employee ? loadEmployeeProfile(pool, userId) : null,
+      loadPlan.dtrRecords ? loadDtrRecords(pool, userId, dateRange) : [],
+      loadPlan.dtrCalendarDays
+        ? loadDtrCalendarDays(pool, userId, dateRange)
+        : [],
+      loadPlan.leaveBalances ? loadLeaveBalances(pool, userId) : [],
+      loadPlan.leaveRequests
+        ? loadRecentLeaveRequests(pool, userId, dateRange)
+        : [],
+      loadPlan.leaveAnnualUsage
+        ? loadAnnualLeaveUsage(pool, userId, dateRange)
+        : [],
+      loadPlan.leaveTypes ? loadLeaveTypes(pool) : [],
+      loadPlan.locatorSlips
+        ? loadRecentLocatorSlips(pool, userId, dateRange)
+        : [],
+      loadPlan.locatorTypes ? loadLocatorTypes(pool) : [],
     ]);
+  throwIfAssistantQueryAborted(signal);
 
   return {
     scope: 'employee_self',
     date_range: dateRange,
+    context_sources: {
+      intents: Array.isArray(intents) ? intents : intents ? [intents] : [],
+      loaded: ASSISTANT_CONTEXT_SOURCES.filter((source) => loadPlan[source]),
+    },
+    data_completeness: {
+      dtr_records: {
+        complete: loadPlan.dtrRecords,
+        capped: false,
+        returned_count: dtrRecords.length,
+      },
+      dtr_calendar_days: {
+        complete: loadPlan.dtrCalendarDays,
+        capped: false,
+        returned_count: dtrCalendarDays.length,
+      },
+      dtr_export: {
+        complete: loadPlan.dtrRecords && loadPlan.dtrCalendarDays,
+      },
+    },
     employee,
     dtr_records: dtrRecords,
     dtr_calendar_days: dtrCalendarDays,
     leave_balances: leaveBalances,
     recent_leave_requests: leaveRequests,
+    leave_annual_usage: leaveAnnualUsage,
     leave_types: leaveTypes,
     leave_guidelines: buildGuidelinesForTypes(leaveTypes),
     leave_guideline_catalog: buildAllLeaveGuidelines(),
@@ -516,4 +882,11 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
   };
 }
 
-module.exports = { loadEmployeeAssistantContext };
+module.exports = {
+  loadEmployeeAssistantContext,
+  __test: {
+    assistantQueryTimeoutMs,
+    assistantCatalogCacheMs,
+    assistantContextLoadPlan,
+  },
+};

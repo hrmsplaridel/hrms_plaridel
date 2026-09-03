@@ -90,12 +90,20 @@ class LeaveLedgerResult {
     required this.limit,
     required this.offset,
     required this.rows,
+    required this.summaryEarned,
+    required this.summaryUsed,
+    required this.summaryPending,
+    required this.summaryAdjusted,
   });
 
   final int total;
   final int limit;
   final int offset;
   final List<LeaveBalanceLedgerEntry> rows;
+  final double summaryEarned;
+  final double summaryUsed;
+  final double summaryPending;
+  final double summaryAdjusted;
 
   factory LeaveLedgerResult.fromJson(Map<String, dynamic> json) {
     final list = json['rows'];
@@ -107,6 +115,13 @@ class LeaveLedgerResult {
         }
       }
     }
+    final summary = json['summary'];
+    final summaryMap = summary is Map ? summary : const <String, dynamic>{};
+    double summaryValue(String key) {
+      final value = summaryMap[key];
+      return value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+    }
+
     return LeaveLedgerResult(
       total: (json['total'] is num)
           ? (json['total'] as num).toInt()
@@ -114,6 +129,10 @@ class LeaveLedgerResult {
       limit: (json['limit'] is num) ? (json['limit'] as num).toInt() : 50,
       offset: (json['offset'] is num) ? (json['offset'] as num).toInt() : 0,
       rows: rows,
+      summaryEarned: summaryValue('earned'),
+      summaryUsed: summaryValue('used'),
+      summaryPending: summaryValue('pending'),
+      summaryAdjusted: summaryValue('adjusted'),
     );
   }
 }
@@ -122,18 +141,25 @@ class LeaveLedgerResult {
 class LeaveLedgerQuery {
   const LeaveLedgerQuery({
     this.userId,
+    this.allUsers = false,
     this.leaveType,
     this.action,
+    this.affectedBucket,
     this.from,
     this.to,
     this.limit = 50,
     this.offset = 0,
   });
 
-  /// Admin/HR only: filter to one employee. Omit for employees (JWT scopes rows).
+  /// Admin/HR only: filter to one employee. Omit for the logged-in user's own ledger.
   final String? userId;
+
+  /// Admin/HR only: explicitly request all employee ledger rows.
+  final bool allUsers;
+
   final String? leaveType;
   final String? action;
+  final String? affectedBucket;
   final String? from;
   final String? to;
   final int limit;
@@ -141,9 +167,13 @@ class LeaveLedgerQuery {
 
   Map<String, dynamic> toQueryParams() => {
     if (userId != null && userId!.trim().isNotEmpty) 'user_id': userId!.trim(),
+    if (allUsers && (userId == null || userId!.trim().isEmpty))
+      'all_users': 'true',
     if (leaveType != null && leaveType!.trim().isNotEmpty)
       'leave_type': leaveType!.trim(),
     if (action != null && action!.trim().isNotEmpty) 'action': action!.trim(),
+    if (affectedBucket != null && affectedBucket!.trim().isNotEmpty)
+      'affected_bucket': affectedBucket!.trim(),
     if (from != null && from!.trim().isNotEmpty) 'from': from!.trim(),
     if (to != null && to!.trim().isNotEmpty) 'to': to!.trim(),
     'limit': limit,

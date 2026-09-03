@@ -501,24 +501,36 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
     super.key,
     required this.canCancel,
     required this.canPrint,
+    required this.canOpenAttachment,
     required this.onHistory,
     required this.onCancel,
     required this.onPrint,
+    required this.onOpenAttachment,
     this.canReject = false,
     this.canApprove = false,
+    this.canReturn = false,
+    this.canCorrect = false,
     this.onReject,
     this.onApprove,
+    this.onReturn,
+    this.onCorrect,
   });
 
   final bool canCancel;
   final bool canPrint;
+  final bool canOpenAttachment;
   final bool canReject;
   final bool canApprove;
+  final bool canReturn;
+  final bool canCorrect;
   final VoidCallback onHistory;
   final VoidCallback onCancel;
   final VoidCallback onPrint;
+  final VoidCallback onOpenAttachment;
   final VoidCallback? onReject;
   final VoidCallback? onApprove;
+  final VoidCallback? onReturn;
+  final VoidCallback? onCorrect;
 
   @override
   Widget build(BuildContext context) {
@@ -555,6 +567,18 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (canOpenAttachment) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onOpenAttachment,
+                      style: secondaryStyle,
+                      icon: const Icon(Icons.visibility_rounded, size: 18),
+                      label: const Text('Open Attachment'),
+                    ),
+                  ),
+                ],
                 if (canPrint) ...[
                   const SizedBox(height: 8),
                   SizedBox(
@@ -564,6 +588,33 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                       style: primaryStyle,
                       icon: const Icon(Icons.print_rounded, size: 18),
                       label: const Text('Print'),
+                    ),
+                  ),
+                ],
+                if (canCorrect) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: onCorrect,
+                      style: primaryStyle,
+                      icon: const Icon(Icons.upload_file_rounded, size: 18),
+                      label: const Text('Correct & Resubmit'),
+                    ),
+                  ),
+                ],
+                if (canReturn) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onReturn,
+                      style: secondaryStyle,
+                      icon: const Icon(
+                        Icons.assignment_return_rounded,
+                        size: 18,
+                      ),
+                      label: const Text('Return for Correction'),
                     ),
                   ),
                 ],
@@ -618,6 +669,13 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     icon: const Icon(Icons.close_rounded, size: 18),
                     label: const Text('Cancel Request'),
                   ),
+                if (canOpenAttachment)
+                  OutlinedButton.icon(
+                    onPressed: onOpenAttachment,
+                    style: secondaryStyle,
+                    icon: const Icon(Icons.visibility_rounded, size: 18),
+                    label: const Text('Open Attachment'),
+                  ),
                 if (canReject)
                   OutlinedButton.icon(
                     onPressed: onReject,
@@ -625,12 +683,26 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     icon: const Icon(Icons.close_rounded, size: 18),
                     label: const Text('Reject'),
                   ),
+                if (canReturn)
+                  OutlinedButton.icon(
+                    onPressed: onReturn,
+                    style: secondaryStyle,
+                    icon: const Icon(Icons.assignment_return_rounded, size: 18),
+                    label: const Text('Return'),
+                  ),
                 if (canApprove)
                   FilledButton.icon(
                     onPressed: onApprove,
                     style: primaryStyle,
                     icon: const Icon(Icons.check_rounded, size: 18),
                     label: const Text('Approve'),
+                  ),
+                if (canCorrect)
+                  FilledButton.icon(
+                    onPressed: onCorrect,
+                    style: primaryStyle,
+                    icon: const Icon(Icons.upload_file_rounded, size: 18),
+                    label: const Text('Correct & Resubmit'),
                   ),
                 if (canPrint)
                   FilledButton.icon(

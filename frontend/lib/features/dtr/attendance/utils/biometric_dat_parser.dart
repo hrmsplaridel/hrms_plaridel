@@ -81,6 +81,7 @@ class BiometricDatParser {
 
     return BiometricImportPreview(
       fileName: fileName,
+      detectedFormat: 'Tab-separated',
       totalNonEmptyRows: totalNonEmptyRows,
       validParsedRows: validParsedRows,
       invalidRows: invalidRows,

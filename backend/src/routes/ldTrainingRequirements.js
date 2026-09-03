@@ -9,6 +9,7 @@ const { requireAdmin } = require('../middleware/rbac');
 const { isLdTrainingRequirementPathAllowed } = require('../utils/ldTrainingRequirementPolicy');
 
 const router = express.Router();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const protect = [authMiddleware];
 const adminProtect = [authMiddleware, requireAdmin];
 
@@ -165,6 +166,26 @@ const ldUpload = multer({
   },
 });
 
+function requireValidRecordId(req, res, next) {
+  if (!UUID_RE.test(String(req.params.recordId || ''))) {
+    return res.status(400).json({ error: 'Invalid recordId' });
+  }
+  next();
+}
+
+function uploadedFileIsPdf(filePath) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const header = Buffer.alloc(5);
+    return fs.readSync(fd, header, 0, 5, 0) === 5 && header.toString() === '%PDF-';
+  } catch (_) {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
 // GET /api/ld/training-requirements — admin list
 router.get('/', adminProtect, async (_req, res) => {
   try {
@@ -255,6 +276,7 @@ router.get('/view-token', protect, async (req, res) => {
 router.post(
   '/:recordId/attachment-file',
   protect,
+  requireValidRecordId,
   ldUpload.single('file'),
   async (req, res) => {
     try {
@@ -262,6 +284,10 @@ router.post(
       const { recordId } = req.params;
       if (!req.file) {
         return res.status(400).json({ error: 'file is required (multipart PDF)' });
+      }
+      if (!uploadedFileIsPdf(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: 'Uploaded file is not a valid PDF' });
       }
       const row = await getRecordById(recordId);
       if (!row) {

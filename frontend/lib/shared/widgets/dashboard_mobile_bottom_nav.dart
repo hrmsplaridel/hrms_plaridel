@@ -38,7 +38,7 @@ class DashboardMobileBottomNav extends StatelessWidget {
   final ValueChanged<int> onSelected;
 
   /// Minimum content height (icon + label + padding), excluding safe area.
-  static const double barHeight = 56;
+  static const double barHeight = 72;
 
   /// Extra scroll padding to reserve above the system home indicator.
   static double scrollPaddingExtra(BuildContext context) =>

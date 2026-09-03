@@ -101,31 +101,12 @@ curl http://localhost:3000/health/db
 
 See [backend/README.md](backend/README.md) for endpoint details and backend-specific setup notes.
 
-## Production Architecture
+## Production Deployment
 
-The current live deployment uses a hybrid Kamatera VPS + office PC setup:
-
-```text
-Users/mobile/web
--> VPS Nginx HTTPS
--> Tailscale private tunnel
--> office Node backend
--> office PostgreSQL
-```
-
-In this architecture:
-
-- The VPS exposes public HTTPS through Nginx.
-- The office PC runs the live Node backend and PostgreSQL database.
-- Tailscale privately connects the VPS to the office backend.
-- PostgreSQL and backend port `3000` are not exposed publicly.
-- Mobile release builds should use `https://YOUR_DOMAIN` as `API_BASE_URL`.
-
-Use [docs/KAMATERA_VPN_DEPLOYMENT.md](docs/KAMATERA_VPN_DEPLOYMENT.md) for the full deployment and rollback guide.
+Production infrastructure, network topology, ports, server directories, and deployment procedures are documented locally under the ignored `docs/private/` directory. They are intentionally excluded from Git.
 
 ## Useful Docs
 
-- [Kamatera VPS deployment](docs/KAMATERA_VPN_DEPLOYMENT.md)
 - [Hybrid health checks](docs/HRMS_HYBRID_HEALTH_CHECKS.md)
 - [Security checks](docs/HRMS_SECURITY_CHECKS.md)
 - [Backend README](backend/README.md)

@@ -47,6 +47,15 @@ String normalizeAttendanceRemark(String remark) {
   return value;
 }
 
+/// Whether a record represents a completed workday attendance. Late and/or
+/// undertime employees were still present; incomplete and invalid logs were not.
+bool isCompletedAttendanceRecord(TimeRecord record) {
+  return switch (getAttendanceRemark(record)) {
+    'On Time' || 'Late' || 'Undertime' || 'Late + Undertime' => true,
+    _ => false,
+  };
+}
+
 /// Display late minutes: "X min", "0 min", or "—" for holiday/leave.
 String formatLateMinutes(TimeRecord r) {
   if (r.status == 'holiday' ||

@@ -3,6 +3,7 @@ import 'biometric_parsed_row.dart';
 class BiometricImportPreview {
   const BiometricImportPreview({
     required this.fileName,
+    required this.detectedFormat,
     required this.totalNonEmptyRows,
     required this.validParsedRows,
     required this.invalidRows,
@@ -15,10 +16,13 @@ class BiometricImportPreview {
 
   final String fileName;
 
+  /// Human-readable format detected from the file contents.
+  final String detectedFormat;
+
   /// Count of all non-empty lines in the file.
   final int totalNonEmptyRows;
 
-  /// Rows that contained at least 2 tab-separated columns and a valid timestamp.
+  /// Rows that contained at least 2 supported delimited columns and a timestamp.
   final int validParsedRows;
 
   /// Rows skipped due to missing columns, empty columns, or invalid timestamps.

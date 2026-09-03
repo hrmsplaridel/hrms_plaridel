@@ -42,6 +42,12 @@ class _ShiftRecord {
     this.shiftNumber,
     this.breakEndTime,
     this.punchMode = 'auto',
+    this.assignmentHistoryCount = 0,
+    this.scheduleEditLocked = false,
+    this.canDeactivate = true,
+    this.deactivationBlockers = const [],
+    this.canPermanentlyDelete = false,
+    this.deleteBlockers = const [],
   });
   final String id;
   final String name;
@@ -53,6 +59,12 @@ class _ShiftRecord {
   final List<int> workingDays;
   final int? shiftNumber;
   final String punchMode;
+  final int assignmentHistoryCount;
+  final bool scheduleEditLocked;
+  final bool canDeactivate;
+  final List<String> deactivationBlockers;
+  final bool canPermanentlyDelete;
+  final List<String> deleteBlockers;
 
   /// Display as SHF-001, SHF-002, etc., or "—" if null.
   String get displayShiftNo => shiftNumber != null
@@ -185,6 +197,32 @@ class _ManageShiftState extends State<ManageShift> {
         final grace = m['grace_period_minutes'];
         final wd = m['working_days'];
         final shiftNum = m['shift_number'];
+        final assignmentHistoryCount =
+            int.tryParse(m['assignment_history_count']?.toString() ?? '') ?? 0;
+        final deactivationBlockers =
+            (m['deactivation_blockers'] as List?)
+                ?.map((item) {
+                  if (item is! Map) return '';
+                  final count =
+                      int.tryParse(item['count']?.toString() ?? '') ?? 0;
+                  final label = item['label']?.toString().trim() ?? '';
+                  return count > 0 && label.isNotEmpty ? '$count $label' : '';
+                })
+                .where((item) => item.isNotEmpty)
+                .toList() ??
+            const <String>[];
+        final deleteBlockers =
+            (m['delete_blockers'] as List?)
+                ?.map((item) {
+                  if (item is! Map) return '';
+                  final count =
+                      int.tryParse(item['count']?.toString() ?? '') ?? 0;
+                  final label = item['label']?.toString().trim() ?? '';
+                  return count > 0 && label.isNotEmpty ? '$count $label' : '';
+                })
+                .where((item) => item.isNotEmpty)
+                .toList() ??
+            const <String>[];
         List<int> days = [1, 2, 3, 4, 5];
         if (wd is List) {
           final parsed = wd
@@ -214,6 +252,15 @@ class _ManageShiftState extends State<ManageShift> {
           shiftNumber: shiftNum is int
               ? shiftNum
               : (shiftNum != null ? int.tryParse(shiftNum.toString()) : null),
+          assignmentHistoryCount: assignmentHistoryCount,
+          scheduleEditLocked:
+              m['schedule_edit_locked'] == true || assignmentHistoryCount > 0,
+          canDeactivate:
+              m['can_deactivate'] != false && deactivationBlockers.isEmpty,
+          deactivationBlockers: deactivationBlockers,
+          canPermanentlyDelete:
+              m['can_permanently_delete'] == true && deleteBlockers.isEmpty,
+          deleteBlockers: deleteBlockers,
         );
       }).toList();
     } on DioException catch (e) {
@@ -233,7 +280,9 @@ class _ManageShiftState extends State<ManageShift> {
       _startTime = s.startTime;
       _endTime = s.endTime;
       _punchMode = s.punchMode;
-      _breakEndTime = _punchMode == 'single_session' ? null : s.breakEndTime;
+      _breakEndTime = _punchMode == 'full_day' || _punchMode == 'auto'
+          ? s.breakEndTime
+          : null;
       _workingDays = s.workingDays.toSet();
     });
   }
@@ -249,6 +298,93 @@ class _ManageShiftState extends State<ManageShift> {
       _workingDays = {1, 2, 3, 4, 5};
       _punchMode = 'auto';
     });
+  }
+
+  bool _validateSameDayShiftRange() {
+    final start = _startTime;
+    final end = _endTime;
+    if (start == null || end == null) return false;
+    final startMinutes = (start.hour * 60) + start.minute;
+    final endMinutes = (end.hour * 60) + end.minute;
+    if (endMinutes > startMinutes) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Overnight shifts are not currently supported. End Time must be later than Start Time.',
+        ),
+      ),
+    );
+    return false;
+  }
+
+  String _resolvedFormPunchMode() {
+    if (_punchMode != 'auto') return _punchMode;
+    final start = _startTime;
+    final end = _endTime;
+    if (start != null && start.hour >= 12) return 'pm_only';
+    final endMinutes = end == null ? null : (end.hour * 60) + end.minute;
+    if (_breakEndTime == null && endMinutes != null && endMinutes <= 13 * 60) {
+      return 'am_only';
+    }
+    return 'full_day';
+  }
+
+  bool get _formUsesPmStart => _resolvedFormPunchMode() == 'full_day';
+
+  bool _validatePunchModeSchedule() {
+    final mode = _resolvedFormPunchMode();
+    final start = _startTime!;
+    final end = _endTime!;
+    final pmStart = _breakEndTime;
+    if (mode == 'full_day') {
+      if (start.hour >= 12) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('A full-day shift must start before 12:00 PM.'),
+          ),
+        );
+        return false;
+      }
+      if (pmStart == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('PM Start is required for a full-day shift.'),
+          ),
+        );
+        return false;
+      }
+      final startMinutes = (start.hour * 60) + start.minute;
+      final endMinutes = (end.hour * 60) + end.minute;
+      final pmStartMinutes = (pmStart.hour * 60) + pmStart.minute;
+      if (pmStartMinutes < 12 * 60 ||
+          pmStartMinutes <= startMinutes ||
+          pmStartMinutes >= endMinutes) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'PM Start must be at or after 12:00 PM and before End Time.',
+            ),
+          ),
+        );
+        return false;
+      }
+    } else if (pmStart != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('PM Start is not used for this punch mode.'),
+        ),
+      );
+      return false;
+    }
+    if (mode == 'pm_only' && start.hour < 12) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('A PM-only shift must start at or after 12:00 PM.'),
+        ),
+      );
+      return false;
+    }
+    return true;
   }
 
   void _toggleWorkingDay(int day) {
@@ -275,6 +411,8 @@ class _ManageShiftState extends State<ManageShift> {
       );
       return false;
     }
+    if (!_validateSameDayShiftRange()) return false;
+    if (!_validatePunchModeSchedule()) return false;
     if (_workingDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select at least one working day.')),
@@ -287,7 +425,7 @@ class _ManageShiftState extends State<ManageShift> {
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
         'punch_mode': _punchMode,
-        if (_breakEndTime != null && _punchMode != 'single_session')
+        if (_breakEndTime != null && _formUsesPmStart)
           'break_end': _timeStr(_breakEndTime!),
         'is_active': true,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
@@ -335,6 +473,8 @@ class _ManageShiftState extends State<ManageShift> {
       );
       return false;
     }
+    if (!_validateSameDayShiftRange()) return false;
+    if (!_validatePunchModeSchedule()) return false;
     if (_workingDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select at least one working day.')),
@@ -347,7 +487,7 @@ class _ManageShiftState extends State<ManageShift> {
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
         'punch_mode': _punchMode,
-        'break_end': _breakEndTime != null && _punchMode != 'single_session'
+        'break_end': _breakEndTime != null && _formUsesPmStart
             ? _timeStr(_breakEndTime!)
             : null,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
@@ -379,6 +519,19 @@ class _ManageShiftState extends State<ManageShift> {
     if (s == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a shift to deactivate.')),
+      );
+      return false;
+    }
+    if (!s.canDeactivate) {
+      final blockers = s.deactivationBlockers.isEmpty
+          ? 'current or future operational periods'
+          : s.deactivationBlockers.join(' and ');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cannot deactivate ${s.name}: $blockers. End or transfer these periods first.',
+          ),
+        ),
       );
       return false;
     }
@@ -425,6 +578,68 @@ class _ManageShiftState extends State<ManageShift> {
             ),
           ),
         );
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _deleteUnusedShift() async {
+    final s = _selectedShift;
+    if (s == null || !s.canPermanentlyDelete) {
+      final blockers = s?.deleteBlockers.join(' and ') ?? '';
+      final detail = blockers.isEmpty ? 'existing shift usage' : blockers;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'This shift cannot be permanently deleted because of $detail.',
+          ),
+        ),
+      );
+      return false;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete unused shift?'),
+        content: Text(
+          'Permanently delete "${s.name}"? This is allowed only because it has no assignment, DTR, or attendance-policy history. This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            icon: const Icon(Icons.delete_forever_rounded, size: 18),
+            label: const Text('Delete'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+
+    try {
+      await ApiClient.instance.delete('/api/shifts/${s.id}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${s.name} was permanently deleted.')),
+        );
+        _clearForm();
+        _loadShifts();
+      }
+      return true;
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final message = data is Map && data['error'] != null
+          ? data['error'].toString()
+          : e.message ?? 'Request failed';
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to delete: $message')));
       }
       return false;
     }
@@ -560,6 +775,21 @@ class _ManageShiftState extends State<ManageShift> {
               },
               icon: const Icon(Icons.person_off_rounded, size: 18),
               label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          if (isEditing && _selectedShift!.canPermanentlyDelete)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deleteUnusedShift();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.delete_forever_rounded, size: 18),
+              label: const Text('Delete Unused Shift'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
@@ -879,18 +1109,22 @@ class _ManageShiftState extends State<ManageShift> {
             'Page ${page + 1} of $pageCount',
             style: TextStyle(fontSize: 12, color: _mutedColor(context)),
           ),
-          const SizedBox(width: 12),
-          OutlinedButton(
-            onPressed: page > 0 ? () => setState(() => _page = page - 1) : null,
-            child: const Text('Previous'),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton(
-            onPressed: page < pageCount - 1
-                ? () => setState(() => _page = page + 1)
-                : null,
-            child: const Text('Next'),
-          ),
+          if (pageCount > 1) ...[
+            const SizedBox(width: 12),
+            OutlinedButton(
+              onPressed: page > 0
+                  ? () => setState(() => _page = page - 1)
+                  : null,
+              child: const Text('Previous'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: page < pageCount - 1
+                  ? () => setState(() => _page = page + 1)
+                  : null,
+              child: const Text('Next'),
+            ),
+          ],
         ],
       ),
     );
@@ -947,7 +1181,7 @@ class _ManageShiftState extends State<ManageShift> {
     );
   }
 
-  Widget _buildPunchModeDropdown() {
+  Widget _buildPunchModeDropdown({bool enabled = true}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: _filterDecoration(context),
@@ -969,14 +1203,16 @@ class _ManageShiftState extends State<ManageShift> {
                 ),
               )
               .toList(),
-          onChanged: (mode) {
-            _updateShiftFormState(() {
-              _punchMode = mode ?? 'auto';
-              if (_punchMode == 'single_session') {
-                _breakEndTime = null;
-              }
-            });
-          },
+          onChanged: enabled
+              ? (mode) {
+                  _updateShiftFormState(() {
+                    _punchMode = mode ?? 'auto';
+                    if (!_formUsesPmStart) {
+                      _breakEndTime = null;
+                    }
+                  });
+                }
+              : null,
         ),
       ),
     );
@@ -984,6 +1220,7 @@ class _ManageShiftState extends State<ManageShift> {
 
   Widget _buildFormPanel({bool framed = true, bool showActions = true}) {
     final dark = _isDark(context);
+    final scheduleLocked = _selectedShift?.scheduleEditLocked ?? false;
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1001,6 +1238,73 @@ class _ManageShiftState extends State<ManageShift> {
           style: AppTheme.dashFieldTextStyle(context),
           decoration: _inputDecoration('Shift Name'),
         ),
+        if (scheduleLocked) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE85D04).withValues(alpha: 0.1),
+              border: Border.all(
+                color: const Color(0xFFE85D04).withValues(alpha: 0.65),
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.lock_outline_rounded,
+                  color: Color(0xFFE85D04),
+                  size: 19,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Schedule locked because this shift has historical assignment, DTR, or attendance-policy usage. Create a new shift and assignment period for schedule changes.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: _headingColor(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (_selectedShift?.isActive == true &&
+            _selectedShift?.canDeactivate == false) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.08),
+              border: Border.all(color: Colors.red.withValues(alpha: 0.55)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.info_outline_rounded,
+                  color: Colors.red,
+                  size: 19,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Deactivation blocked by ${_selectedShift!.deactivationBlockers.join(' and ')}. End or transfer these periods first.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: _headingColor(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 20),
         Text(
           'Start Time',
@@ -1013,7 +1317,11 @@ class _ManageShiftState extends State<ManageShift> {
         const SizedBox(height: 6),
         _buildTimePicker(
           _startTime,
-          (t) => _updateShiftFormState(() => _startTime = t),
+          (t) => _updateShiftFormState(() {
+            _startTime = t;
+            if (!_formUsesPmStart) _breakEndTime = null;
+          }),
+          enabled: !scheduleLocked,
         ),
         const SizedBox(height: 20),
         Text(
@@ -1027,7 +1335,11 @@ class _ManageShiftState extends State<ManageShift> {
         const SizedBox(height: 6),
         _buildTimePicker(
           _endTime,
-          (t) => _updateShiftFormState(() => _endTime = t),
+          (t) => _updateShiftFormState(() {
+            _endTime = t;
+            if (!_formUsesPmStart) _breakEndTime = null;
+          }),
+          enabled: !scheduleLocked,
         ),
         const SizedBox(height: 20),
         Text(
@@ -1047,7 +1359,7 @@ class _ManageShiftState extends State<ManageShift> {
           ),
         ),
         const SizedBox(height: 6),
-        _buildPunchModeDropdown(),
+        _buildPunchModeDropdown(enabled: !scheduleLocked),
         const SizedBox(height: 20),
         Text(
           'PM Start (Break End)',
@@ -1059,9 +1371,9 @@ class _ManageShiftState extends State<ManageShift> {
         ),
         const SizedBox(height: 4),
         Text(
-          _punchMode == 'single_session'
-              ? 'Not used for single-session shifts.'
-              : 'When PM shift starts; used for PM late check. Leave empty if not needed.',
+          _formUsesPmStart
+              ? 'Required scheduled return time after lunch.'
+              : 'Not used for the selected punch mode.',
           style: TextStyle(
             fontSize: 11,
             color: _mutedColor(context).withValues(alpha: 0.8),
@@ -1071,8 +1383,8 @@ class _ManageShiftState extends State<ManageShift> {
         _buildTimePicker(
           _breakEndTime,
           (t) => _updateShiftFormState(() => _breakEndTime = t),
-          allowClear: true,
-          enabled: _punchMode != 'single_session',
+          allowClear: !_formUsesPmStart,
+          enabled: !scheduleLocked && _formUsesPmStart,
         ),
         const SizedBox(height: 20),
         Text(
@@ -1086,6 +1398,7 @@ class _ManageShiftState extends State<ManageShift> {
         const SizedBox(height: 6),
         TextFormField(
           controller: _graceController,
+          enabled: !scheduleLocked,
           keyboardType: TextInputType.number,
           style: AppTheme.dashFieldTextStyle(context),
           decoration: _inputDecoration('0'),
@@ -1117,7 +1430,7 @@ class _ManageShiftState extends State<ManageShift> {
                       : _headingColor(context),
                 ),
               ),
-              onSelected: (_) => _toggleWorkingDay(day),
+              onSelected: scheduleLocked ? null : (_) => _toggleWorkingDay(day),
               selectedColor: dark
                   ? AppTheme.primaryNavy.withValues(alpha: 0.35)
                   : AppTheme.primaryNavy.withValues(alpha: 0.2),
@@ -1187,6 +1500,20 @@ class _ManageShiftState extends State<ManageShift> {
                   elevation: 0,
                 ),
               ),
+              if (_selectedShift?.canPermanentlyDelete == true)
+                OutlinedButton.icon(
+                  onPressed: _deleteUnusedShift,
+                  icon: const Icon(Icons.delete_forever_rounded, size: 18),
+                  label: const Text('Delete Unused Shift'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
             ],
           ),
         ],

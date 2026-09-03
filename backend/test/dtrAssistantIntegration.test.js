@@ -20,6 +20,11 @@ function assistantContext(dateRange, userId) {
   return {
     scope: 'employee_self',
     date_range: dateRange,
+    data_completeness: {
+      dtr_records: { complete: true, capped: false, returned_count: 2 },
+      dtr_calendar_days: { complete: true, capped: false, returned_count: 4 },
+      dtr_export: { complete: true },
+    },
     employee: {
       id: userId,
       full_name: 'Test Employee',
@@ -227,14 +232,28 @@ function assistantContext(dateRange, userId) {
 test('DTR assistant service uses employee-self data for real HRMS scenarios', async (t) => {
   const loaded = [];
   let llmMode = 'throw';
+  let delayNextContext = false;
+  let signalDelayedContextStarted;
+  let releaseDelayedContext;
+  const delayedContextStarted = new Promise((resolve) => {
+    signalDelayedContextStarted = resolve;
+  });
+  const delayedContextRelease = new Promise((resolve) => {
+    releaseDelayedContext = resolve;
+  });
   const restoreData = withMockedModule(
     '../src/services/dtrAssistant/dtrAssistantDataService',
     {
       loadEmployeeAssistantContext: async (
         _pool,
-        { userId, message, dateRange }
+        { userId, message, dateRange, intents }
       ) => {
-        loaded.push({ userId, message, dateRange });
+        loaded.push({ userId, message, dateRange, intents });
+        if (delayNextContext) {
+          delayNextContext = false;
+          signalDelayedContextStarted();
+          await delayedContextRelease;
+        }
         return assistantContext(dateRange, userId);
       },
     }
@@ -279,11 +298,22 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
   });
   assert.equal(malicious.mode, 'employee_self');
   assert.equal(loaded.at(-1).userId, user.id);
+  assert.deepEqual(loaded.at(-1).intents, ['leave_balance']);
   assert.match(malicious.message.content, /0\.75/);
   assert.deepEqual(malicious.sources.leaveRequestIds, [
     'leave-rejected',
     'leave-pending',
   ]);
+
+  const combined = await chatWithDtrAssistant(pool, {
+    user: { ...user, id: `${user.id}-context-union` },
+    message: 'what is my leave balance and show my missing DTR logs?',
+  });
+  assert.equal(combined.intent, 'leave_balance');
+  assert.deepEqual(
+    new Set(loaded.at(-1).intents),
+    new Set(['leave_balance', 'dtr_missing_logs'])
+  );
 
   const absence = await chatWithDtrAssistant(pool, {
     user: { ...user, id: `${user.id}-absence` },
@@ -314,7 +344,7 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
   const leaveFormAction = insufficientLeave.message.actions.find(
     (action) => action.type === 'open_leave_form'
   );
-  assert.equal(leaveFormAction.payload.leaveType, 'sick');
+  assert.equal(leaveFormAction.payload.leaveType, 'sickLeave');
   assert.equal(leaveFormAction.payload.startDate, expectedTomorrowDate());
 
   const rejectedLeave = await chatWithDtrAssistant(pool, {
@@ -389,6 +419,30 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
   });
   assert.equal(malformedFallback.provider, 'hrms');
   assert.match(malformedFallback.message.content, /not sure|help/i);
+
+  const {
+    getAssistantMemory,
+  } = require('../src/services/dtrAssistant/dtrAssistantMemoryService');
+  const turnUser = { ...user, id: `${user.id}-turn-order` };
+  const turnConversation = 'integration-turn-order';
+  delayNextContext = true;
+  const delayedFirst = chatWithDtrAssistant(pool, {
+    user: turnUser,
+    conversationId: turnConversation,
+    message: 'what is my sick leave balance?',
+  });
+  await delayedContextStarted;
+  const newerSecond = await chatWithDtrAssistant(pool, {
+    user: turnUser,
+    conversationId: turnConversation,
+    message: 'show my DTR today',
+  });
+  releaseDelayedContext();
+  const olderFirst = await delayedFirst;
+
+  const orderedMemory = getAssistantMemory(turnUser.id, turnConversation);
+  assert.equal(orderedMemory.intent, newerSecond.intent);
+  assert.notEqual(orderedMemory.intent, olderFirst.intent);
 });
 
 test('DTR assistant full chat pipeline preserves a long mixed-topic conversation', async (t) => {
@@ -460,6 +514,24 @@ test('DTR assistant full chat pipeline preserves a long mixed-topic conversation
     )
   );
 
+  const identity = await chatWithDtrAssistant(pool, {
+    user,
+    message: 'Who are you?',
+  });
+  assert.equal(identity.intent, 'assistant_greeting');
+  assert.match(identity.message.content, /HRMS Assistant/i);
+  assert.doesNotMatch(identity.message.content, /leave request|June 9|reviewer/i);
+
+  const capabilities = await chatWithDtrAssistant(pool, {
+    user,
+    message: 'unsa imong mabuhat?',
+  });
+  assert.equal(capabilities.intent, 'assistant_greeting');
+  assert.match(capabilities.message.content, /DTR ug attendance/i);
+  assert.match(capabilities.message.content, /leave credits/i);
+  assert.match(capabilities.message.content, /locator\/WFH/i);
+  assert.doesNotMatch(capabilities.message.content, /leave request nga gi-file/i);
+
   const bisayaTypo = await chatWithDtrAssistant(pool, {
     user: { ...user, id: `${user.id}-bisaya-typo` },
     message: 'unsaon nko pg file ug sik leev?',
@@ -484,4 +556,149 @@ test('DTR assistant full chat pipeline preserves a long mixed-topic conversation
   });
   assert.equal(mixedLanguage.intent, 'dtr_absent_summary');
   assert.match(mixedLanguage.message.content, /Nakita nako|posibleng absent|Detalye/i);
+});
+
+test('DTR assistant locator prompts yield to new locator and DTR questions', async (t) => {
+  const restoreData = withMockedModule(
+    '../src/services/dtrAssistant/dtrAssistantDataService',
+    {
+      loadEmployeeAssistantContext: async (
+        _pool,
+        { userId, dateRange }
+      ) => assistantContext(dateRange, userId),
+    }
+  );
+  const restoreLlm = withMockedModule('../src/services/llm/llmClient', {
+    chatCompletion: async () => {
+      const error = new Error('AI disabled in deterministic integration test');
+      error.code = 'AI_LOCAL_UNAVAILABLE';
+      throw error;
+    },
+  });
+  clearModule('../src/services/dtrAssistant/dtrAssistantService');
+  const {
+    chatWithDtrAssistant,
+  } = require('../src/services/dtrAssistant/dtrAssistantService');
+
+  t.after(() => {
+    clearModule('../src/services/dtrAssistant/dtrAssistantService');
+    restoreLlm();
+    restoreData();
+  });
+
+  const pool = { query: async () => ({ rows: [] }) };
+  const baseUser = {
+    id: '88888888-8888-4888-8888-888888888888',
+    role: 'employee',
+  };
+
+  const creditUser = { ...baseUser, id: `${baseUser.id}-credit` };
+  const creditQuestion = await chatWithDtrAssistant(pool, {
+    user: creditUser,
+    message: 'ang locator need ug credits?',
+  });
+  assert.equal(creditQuestion.intent, 'locator_requirements');
+  assert.match(creditQuestion.message.content, /^Dili\./i);
+  assert.match(creditQuestion.message.content, /dili mogamit ug dili mobawas/i);
+  assert.doesNotMatch(
+    creditQuestion.message.content,
+    /Tubag sa imong mga pangutana|Here are the leave balances|0\.75|16 days/i
+  );
+  assert.ok(
+    creditQuestion.message.actions.some(
+      (action) => action.type === 'open_locator_form'
+    )
+  );
+
+  const requirementsUser = { ...baseUser, id: `${baseUser.id}-requirements` };
+  const locatorPrompt = await chatWithDtrAssistant(pool, {
+    user: requirementsUser,
+    message: 'can I file a locator?',
+  });
+  assert.equal(locatorPrompt.intent, 'locator_availability_check');
+  assert.match(locatorPrompt.message.content, /locator type|Official Business|WFH/i);
+
+  const requirements = await chatWithDtrAssistant(pool, {
+    user: requirementsUser,
+    message: 'unsa requirements sa WFH?',
+  });
+  assert.equal(requirements.intent, 'locator_requirements');
+  assert.match(requirements.message.content, /Work From Home|WFH/i);
+  assert.doesNotMatch(requirements.message.content, /Which workday|Asa nga workday/i);
+
+  const dtrUser = { ...baseUser, id: `${baseUser.id}-dtr-switch` };
+  const datePrompt = await chatWithDtrAssistant(pool, {
+    user: dtrUser,
+    message: 'can I file WFH?',
+  });
+  assert.equal(datePrompt.intent, 'locator_availability_check');
+  assert.match(datePrompt.message.content, /workday|petsa|date/i);
+
+  const dtrQuestion = await chatWithDtrAssistant(pool, {
+    user: dtrUser,
+    message: 'ngano absent ko gahapon?',
+  });
+  assert.equal(dtrQuestion.intent, 'dtr_status_explanation');
+  assert.doesNotMatch(dtrQuestion.message.content, /locator type|Which workday/i);
+
+  const destinationUser = { ...baseUser, id: `${baseUser.id}-destination` };
+  const destinationPrompt = await chatWithDtrAssistant(pool, {
+    user: destinationUser,
+    message: 'can I file official business tomorrow?',
+  });
+  assert.equal(destinationPrompt.intent, 'locator_availability_check');
+  assert.match(destinationPrompt.message.content, /destination|office/i);
+
+  const destinationAnswer = await chatWithDtrAssistant(pool, {
+    user: destinationUser,
+    message: 'Cebu City Hall',
+  });
+  assert.equal(destinationAnswer.intent, 'locator_availability_check');
+  assert.doesNotMatch(destinationAnswer.message.content, /What destination|Asa ang imong destination/i);
+  const locatorAction = destinationAnswer.message.actions.find(
+    (action) => action.type === 'open_locator_form'
+  );
+  assert.equal(locatorAction.payload.locatorType, 'locator');
+  assert.equal(locatorAction.payload.destination, 'Cebu City Hall');
+
+  const statusUser = { ...baseUser, id: `${baseUser.id}-status` };
+  const statusPrompt = await chatWithDtrAssistant(pool, {
+    user: statusUser,
+    message: 'can I file official business tomorrow?',
+  });
+  assert.equal(statusPrompt.intent, 'locator_availability_check');
+  assert.match(statusPrompt.message.content, /destination|office/i);
+  const {
+    getAssistantMemory,
+  } = require('../src/services/dtrAssistant/dtrAssistantMemoryService');
+  const {
+    interruptsPendingClarification,
+  } = require('../src/services/dtrAssistant/dtrAssistantGuidedClarification');
+  const statusMemory = getAssistantMemory(statusUser.id);
+  assert.equal(statusMemory.pendingClarification?.field, 'destination');
+  assert.equal(
+    interruptsPendingClarification(
+      'asa na akong locator request?',
+      statusMemory
+    ),
+    true
+  );
+  const statusQuestion = await chatWithDtrAssistant(pool, {
+    user: statusUser,
+    message: 'asa na akong locator request?',
+  });
+  assert.equal(
+    statusQuestion.intent,
+    'locator_approval_tracker',
+    JSON.stringify(
+      {
+        prompt: statusPrompt.message,
+        question: statusQuestion.message,
+      },
+      null,
+      2
+    )
+  );
+  assert.doesNotMatch(statusQuestion.message.content, /destination\/office/i);
+
 });

@@ -8,6 +8,8 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/config.dart';
 import 'package:hrms_plaridel/core/api/token_storage.dart';
 import 'package:hrms_plaridel/core/services/push_notification_service.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_session_storage.dart';
+import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 
 /// Central auth state. Uses API (JWT) instead of Supabase.
 /// Exposes current user, displayName, email, avatarPath. Call [refreshUser] after
@@ -49,8 +51,23 @@ class AuthProvider extends ChangeNotifier {
   String? get avatarPath => _user?.avatarPath;
 
   void replaceUser(AppUser user) {
+    _invalidateLocatorCacheForIdentityChange(user);
+    final previousUserId = (_user?.id ?? '').trim();
+    if (previousUserId.isNotEmpty && previousUserId != user.id.trim()) {
+      unawaited(DtrAssistantSessionStorage.clearAllForUser(previousUserId));
+    }
     _user = user;
     notifyListeners();
+  }
+
+  void _invalidateLocatorCacheForIdentityChange(AppUser? nextUser) {
+    final currentId = (_user?.id ?? '').trim();
+    final nextId = (nextUser?.id ?? '').trim();
+    final currentRole = (_user?.role ?? '').trim().toLowerCase();
+    final nextRole = (nextUser?.role ?? '').trim().toLowerCase();
+    if (currentId != nextId || currentRole != nextRole) {
+      LocatorSlipDataCache.instance.invalidateAll();
+    }
   }
 
   /// Restore session from stored JWT. Call before runApp.
@@ -80,7 +97,14 @@ class AuthProvider extends ChangeNotifier {
       );
       final data = res.data;
       if (data != null) {
-        _user = AppUser.fromJson(data);
+        final restoredUser = AppUser.fromJson(data);
+        _invalidateLocatorCacheForIdentityChange(restoredUser);
+        final previousUserId = (_user?.id ?? '').trim();
+        if (previousUserId.isNotEmpty &&
+            previousUserId != restoredUser.id.trim()) {
+          await DtrAssistantSessionStorage.clearAllForUser(previousUserId);
+        }
+        _user = restoredUser;
         await PushNotificationService.instance.syncTokenWithBackend();
         notifyListeners();
       }
@@ -113,10 +137,17 @@ class AuthProvider extends ChangeNotifier {
 
       final refresh = data['refreshToken'] as String?;
       await TokenStorage.instance.setTokens(access: token, refresh: refresh);
+      LocatorSlipDataCache.instance.invalidateAll();
 
       final userData = data['user'] as Map<String, dynamic>?;
       if (userData != null) {
-        _user = AppUser.fromJson(userData);
+        final authenticatedUser = AppUser.fromJson(userData);
+        final previousUserId = (_user?.id ?? '').trim();
+        if (previousUserId.isNotEmpty &&
+            previousUserId != authenticatedUser.id.trim()) {
+          await DtrAssistantSessionStorage.clearAllForUser(previousUserId);
+        }
+        _user = authenticatedUser;
       }
       await refreshUser();
       // Do NOT await — FCM getToken() can hang indefinitely when the phone
@@ -124,10 +155,7 @@ class AuthProvider extends ChangeNotifier {
       unawaited(
         PushNotificationService.instance
             .syncTokenWithBackend()
-            .timeout(
-              const Duration(seconds: 10),
-              onTimeout: () {},
-            )
+            .timeout(const Duration(seconds: 10), onTimeout: () {})
             .catchError((_) {}),
       );
       notifyListeners();
@@ -178,7 +206,14 @@ class AuthProvider extends ChangeNotifier {
       );
       final data = res.data;
       if (data != null) {
-        _user = AppUser.fromJson(data);
+        final refreshedUser = AppUser.fromJson(data);
+        _invalidateLocatorCacheForIdentityChange(refreshedUser);
+        final previousUserId = (_user?.id ?? '').trim();
+        if (previousUserId.isNotEmpty &&
+            previousUserId != refreshedUser.id.trim()) {
+          await DtrAssistantSessionStorage.clearAllForUser(previousUserId);
+        }
+        _user = refreshedUser;
         notifyListeners();
       }
     } catch (e) {
@@ -188,8 +223,10 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> signOut() async {
     if (_isSigningOut) return;
+    final signedOutUserId = (_user?.id ?? '').trim();
     _isSigningOut = true;
     notifyListeners();
+    LocatorSlipDataCache.instance.invalidateAll();
     try {
       await PushNotificationService.instance.unregisterCurrentToken();
       final refresh = await TokenStorage.instance.getRefreshToken();
@@ -202,9 +239,12 @@ class AuthProvider extends ChangeNotifier {
           );
         } catch (_) {}
       }
-      await TokenStorage.instance.clearAllTokens();
-      _user = null;
     } finally {
+      await TokenStorage.instance.clearAllTokens();
+      if (signedOutUserId.isNotEmpty) {
+        await DtrAssistantSessionStorage.clearAllForUser(signedOutUserId);
+      }
+      _user = null;
       _isSigningOut = false;
       notifyListeners();
     }

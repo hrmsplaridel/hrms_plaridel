@@ -1,0 +1,108 @@
+part of '../pages/manage_assignment.dart';
+
+/// Employee summary for assignment list.
+class _EmployeeSummary {
+  const _EmployeeSummary({
+    required this.id,
+    required this.fullName,
+    this.employeeNumber,
+  });
+  final String id;
+  final String fullName;
+  final int? employeeNumber;
+
+  String get displayEmployeeNo => employeeNumber != null
+      ? 'EMP-${employeeNumber!.toString().padLeft(3, '0')}'
+      : '—';
+
+  String get compactEmployeeNo =>
+      employeeNumber != null ? employeeNumber!.toString().padLeft(3, '0') : '—';
+}
+
+/// Assignment record for display/CRUD (Schema v2: effective_from/to, override times).
+class _AssignmentRecord {
+  const _AssignmentRecord({
+    required this.id,
+    required this.departmentId,
+    required this.positionId,
+    required this.shiftId,
+    required this.departmentName,
+    required this.positionName,
+    required this.shiftName,
+    required this.startTime,
+    required this.endTime,
+    required this.effectiveFrom,
+    this.effectiveTo,
+    required this.isActive,
+    required this.computedStatus,
+    required this.canPermanentlyDelete,
+    this.remarks,
+  });
+  final String id;
+  final String? departmentId;
+  final String? positionId;
+  final String? shiftId;
+  final String departmentName;
+  final String positionName;
+  final String shiftName;
+  final TimeOfDay startTime;
+  final TimeOfDay endTime;
+  final DateTime effectiveFrom;
+  final DateTime? effectiveTo;
+  final bool isActive;
+  final String computedStatus;
+  final bool canPermanentlyDelete;
+  final String? remarks;
+}
+
+/// One non-overlapping employee-level attendance-policy period.
+class _PolicyAssignmentRecord {
+  const _PolicyAssignmentRecord({
+    required this.id,
+    required this.policyId,
+    required this.policyName,
+    required this.effectiveFrom,
+    this.effectiveTo,
+    required this.isActive,
+    required this.computedStatus,
+  });
+
+  final String id;
+  final String policyId;
+  final String policyName;
+  final DateTime effectiveFrom;
+  final DateTime? effectiveTo;
+  final bool isActive;
+  final String computedStatus;
+}
+
+/// Extra role/designation record that can coexist with the primary assignment.
+class _DesignationRecord {
+  const _DesignationRecord({
+    required this.id,
+    required this.employeeId,
+    this.departmentId,
+    this.positionId,
+    required this.effectiveFrom,
+    this.effectiveTo,
+    required this.isActive,
+    required this.computedStatus,
+    required this.canPermanentlyDelete,
+    this.remarks,
+    this.departmentName,
+    this.positionName,
+  });
+
+  final String id;
+  final String employeeId;
+  final String? departmentId;
+  final String? positionId;
+  final DateTime effectiveFrom;
+  final DateTime? effectiveTo;
+  final bool isActive;
+  final String computedStatus;
+  final bool canPermanentlyDelete;
+  final String? remarks;
+  final String? departmentName;
+  final String? positionName;
+}

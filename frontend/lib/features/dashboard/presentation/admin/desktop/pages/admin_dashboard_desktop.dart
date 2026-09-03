@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
@@ -451,14 +452,18 @@ class _AdminDashboardState extends State<AdminDashboard>
       GlobalKey<_DtrContentState>();
   static const _settingsPanelKey = PageStorageKey<String>('admin_settings');
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+  late final Widget _settingsPanelWidget;
 
-  Widget _settingsPanel() =>
-      DashboardProfilePanel(key: _settingsPanelKey, onBack: _closeMyProfile);
+  Widget _settingsPanel() => _settingsPanelWidget;
   Timer? _notificationPollTimer;
 
   @override
   void initState() {
     super.initState();
+    _settingsPanelWidget = DashboardProfilePanel(
+      key: _settingsPanelKey,
+      onBack: _closeMyProfile,
+    );
     WidgetsBinding.instance.addObserver(this);
     unawaited(FormPdf.warmupPrintAssets());
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1402,59 +1407,28 @@ class _SummaryCardsState extends State<_SummaryCards> {
     final w = MediaQuery.of(context).size.width;
     final isWide = w > 700;
     final isSingleColumn = w < 480;
-    final cards =
-        _cards ??
-        [
-          _SummaryData(
-            title: 'New Applicants',
-            value: 'â€¦',
-            subtitle: 'Loading',
-            color: _DashboardColors.cardBlue,
-            iconColor: _DashboardColors.accentBlue,
-            icon: Icons.person_add_rounded,
-          ),
-          _SummaryData(
-            title: 'Pending Applications',
-            value: 'â€¦',
-            subtitle: 'Loading',
-            color: _DashboardColors.cardGreen,
-            iconColor: _DashboardColors.accentGreen,
-            icon: Icons.pending_actions_rounded,
-          ),
-          _SummaryData(
-            title: 'Job Vacancies',
-            value: 'â€¦',
-            subtitle: 'â€¦',
-            color: _DashboardColors.cardAmber,
-            iconColor: _DashboardColors.accentAmber,
-            icon: Icons.work_rounded,
-          ),
-          _SummaryData(
-            title: 'Hiring Status',
-            value: 'â€¦',
-            subtitle: 'â€¦',
-            color: _DashboardColors.cardHiring,
-            iconColor: _DashboardColors.accentNavy,
-            icon: Icons.campaign_rounded,
-          ),
-        ];
+    final cards = _cards;
+
+    Widget cardAt(int index) => cards == null
+        ? const _SummaryCardSkeleton()
+        : _SummaryCard(data: cards[index]);
 
     Widget content;
     if (isWide) {
       content = Row(
         children: [
-          for (int i = 0; i < cards.length; i++) ...[
-            Expanded(child: _SummaryCard(data: cards[i])),
-            if (i < cards.length - 1) const SizedBox(width: 18),
+          for (int i = 0; i < 4; i++) ...[
+            Expanded(child: cardAt(i)),
+            if (i < 3) const SizedBox(width: 18),
           ],
         ],
       );
     } else if (isSingleColumn) {
       content = Column(
         children: [
-          for (int i = 0; i < cards.length; i++) ...[
-            _SummaryCard(data: cards[i]),
-            if (i < cards.length - 1) const SizedBox(height: 14),
+          for (int i = 0; i < 4; i++) ...[
+            cardAt(i),
+            if (i < 3) const SizedBox(height: 14),
           ],
         ],
       );
@@ -1463,17 +1437,17 @@ class _SummaryCardsState extends State<_SummaryCards> {
         children: [
           Row(
             children: [
-              Expanded(child: _SummaryCard(data: cards[0])),
+              Expanded(child: cardAt(0)),
               const SizedBox(width: 18),
-              Expanded(child: _SummaryCard(data: cards[1])),
+              Expanded(child: cardAt(1)),
             ],
           ),
           const SizedBox(height: 18),
           Row(
             children: [
-              Expanded(child: _SummaryCard(data: cards[2])),
+              Expanded(child: cardAt(2)),
               const SizedBox(width: 16),
-              Expanded(child: _SummaryCard(data: cards[3])),
+              Expanded(child: cardAt(3)),
             ],
           ),
         ],
@@ -1584,6 +1558,130 @@ class _SummaryCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AdminDashboardShimmer extends StatelessWidget {
+  const _AdminDashboardShimmer({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    return Shimmer.fromColors(
+      baseColor: dark
+          ? const Color(0xFF2A3140)
+          : AppTheme.lightGray.withValues(alpha: 0.55),
+      highlightColor: dark ? const Color(0xFF3D4451) : AppTheme.white,
+      period: const Duration(milliseconds: 1200),
+      child: child,
+    );
+  }
+}
+
+class _AdminDashboardBone extends StatelessWidget {
+  const _AdminDashboardBone({
+    required this.height,
+    this.width,
+    this.radius = 7,
+  });
+
+  final double height;
+  final double? width;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: width,
+    height: height,
+    decoration: BoxDecoration(
+      color: AppTheme.dashMutedSurfaceOf(context),
+      borderRadius: BorderRadius.circular(radius),
+    ),
+  );
+}
+
+class _SummaryCardSkeleton extends StatelessWidget {
+  const _SummaryCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 118,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(_AdminDashUi.radiusMd),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: const _AdminDashboardShimmer(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _AdminDashboardBone(width: 104, height: 11),
+                  SizedBox(height: 12),
+                  _AdminDashboardBone(width: 54, height: 27),
+                  SizedBox(height: 9),
+                  _AdminDashboardBone(width: 126, height: 10),
+                ],
+              ),
+            ),
+            SizedBox(width: 12),
+            _AdminDashboardBone(width: 48, height: 48, radius: 14),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecruitmentHubLoadingSkeleton extends StatelessWidget {
+  const _RecruitmentHubLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return _AdminDashboardShimmer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: const [
+              _AdminDashboardBone(width: 150, height: 42, radius: 12),
+              _AdminDashboardBone(width: 130, height: 42, radius: 12),
+              _AdminDashboardBone(width: 145, height: 42, radius: 12),
+            ],
+          ),
+          const SizedBox(height: 18),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 760;
+              const panel = _AdminDashboardBone(height: 285, radius: 14);
+              if (compact) {
+                return const Column(
+                  children: [panel, SizedBox(height: 16), panel],
+                );
+              }
+              return const Row(
+                children: [
+                  Expanded(child: panel),
+                  SizedBox(width: 16),
+                  Expanded(child: panel),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+          const _AdminDashboardBone(height: 126, radius: 14),
+        ],
       ),
     );
   }
@@ -1755,12 +1853,7 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
           const SizedBox(height: 16),
           const SizedBox(height: 8),
           if (_loading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
-                child: CircularProgressIndicator(),
-              ),
-            )
+            const _RecruitmentHubLoadingSkeleton()
           else if (_error != null)
             Container(
               width: double.infinity,
@@ -2042,11 +2135,15 @@ class _DtrContent extends StatefulWidget {
 }
 
 class _DtrContentState extends State<_DtrContent> {
+  static const int _maxCachedFeatures = 4;
+
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
   /// 12 = Locator Slip Management
   int _dtrSectionIndex = 0;
+  final Map<int, _DtrFeatureCacheEntry> _featureCache = {};
+  int _featureCacheClock = 0;
 
   /// When opening **Assignment** from Employees, pre-select this employee once.
   String? _prefillAssignmentEmployeeId;
@@ -2065,6 +2162,8 @@ class _DtrContentState extends State<_DtrContent> {
     if (!mounted) return;
     setState(() {
       _prefillAssignmentEmployeeId = employeeId;
+      // Assignment must be rebuilt so the new one-time prefill reaches it.
+      _featureCache.remove(4);
     });
     _openDtrSection(4);
   }
@@ -2079,6 +2178,71 @@ class _DtrContentState extends State<_DtrContent> {
     }
     if (_dtrSectionIndex == index) return;
     setState(() => _dtrSectionIndex = index);
+  }
+
+  Widget _buildDtrFeature(int index) {
+    if (index == 1) return DtrMain(section: DtrSection.timeLogs);
+    if (index == 2) return DtrMain(section: DtrSection.reports);
+    if (index == 8) return const LeaveMain(isAdmin: true);
+    if (index == 11) return const ManageBiometricDevices();
+    if (index == 12) return const AdminLocatorManagementScreen();
+    return _ManageContent(
+      subIndex: index - 3,
+      onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
+      prefillAssignmentEmployeeId: index == 4
+          ? _prefillAssignmentEmployeeId
+          : null,
+      onPrefillAssignmentConsumed: () {
+        if (_prefillAssignmentEmployeeId != null) {
+          setState(() => _prefillAssignmentEmployeeId = null);
+        }
+      },
+    );
+  }
+
+  void _ensureActiveFeatureCached() {
+    final index = _dtrSectionIndex;
+    if (index == 0) return;
+    final existing = _featureCache[index];
+    if (existing != null) {
+      existing.lastUsed = ++_featureCacheClock;
+      return;
+    }
+    _featureCache[index] = _DtrFeatureCacheEntry(
+      index: index,
+      child: KeyedSubtree(
+        key: ValueKey<String>('dtr_feature_$index'),
+        child: _buildDtrFeature(index),
+      ),
+      lastUsed: ++_featureCacheClock,
+    );
+    if (_featureCache.length <= _maxCachedFeatures) return;
+    final removable =
+        _featureCache.values.where((entry) => entry.index != index).toList()
+          ..sort((a, b) => a.lastUsed.compareTo(b.lastUsed));
+    while (_featureCache.length > _maxCachedFeatures && removable.isNotEmpty) {
+      _featureCache.remove(removable.removeAt(0).index);
+    }
+  }
+
+  Widget _buildCachedFeatureStack() {
+    _ensureActiveFeatureCached();
+    final entries = _featureCache.values.toList()
+      ..sort((a, b) => a.lastUsed.compareTo(b.lastUsed));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final entry in entries)
+          Offstage(
+            offstage: entry.index != _dtrSectionIndex,
+            child: TickerMode(
+              enabled: entry.index == _dtrSectionIndex,
+              child: entry.child,
+            ),
+          ),
+      ],
+    );
   }
 
   @override
@@ -2220,35 +2384,26 @@ class _DtrContentState extends State<_DtrContent> {
                     ),
                   ],
                 ),
-              ] else if (_dtrSectionIndex == 1)
-                DtrMain(section: DtrSection.timeLogs)
-              else if (_dtrSectionIndex == 2)
-                DtrMain(section: DtrSection.reports)
-              else if (_dtrSectionIndex == 8)
-                const LeaveMain(isAdmin: true)
-              else if (_dtrSectionIndex == 11)
-                const ManageBiometricDevices()
-              else if (_dtrSectionIndex == 12)
-                const AdminLocatorManagementScreen()
-              else
-                _ManageContent(
-                  subIndex: _dtrSectionIndex - 3,
-                  onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
-                  prefillAssignmentEmployeeId: _dtrSectionIndex == 4
-                      ? _prefillAssignmentEmployeeId
-                      : null,
-                  onPrefillAssignmentConsumed: () {
-                    if (_prefillAssignmentEmployeeId != null) {
-                      setState(() => _prefillAssignmentEmployeeId = null);
-                    }
-                  },
-                ),
+              ] else
+                _buildCachedFeatureStack(),
             ],
           );
         },
       ),
     );
   }
+}
+
+class _DtrFeatureCacheEntry {
+  _DtrFeatureCacheEntry({
+    required this.index,
+    required this.child,
+    required this.lastUsed,
+  });
+
+  final int index;
+  final Widget child;
+  int lastUsed;
 }
 
 /// Create Account: full form displayed directly (single place for adding employees).

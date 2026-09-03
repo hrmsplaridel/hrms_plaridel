@@ -1,4 +1,5 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const trainingNotifications = require('../services/trainingNotifications');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
@@ -10,6 +11,13 @@ const protect = [authMiddleware];
 // Helper to map a DB row to API DTO.
 function mapReportRow(row) {
   if (!row) return null;
+  const attachmentToken = row.attachment_id && process.env.JWT_SECRET
+    ? jwt.sign(
+        { typ: 'training_attachment', attachmentId: String(row.attachment_id) },
+        process.env.JWT_SECRET,
+        { expiresIn: '15m' },
+      )
+    : null;
   return {
     id: row.id,
     employee_id: row.employee_id,
@@ -22,6 +30,7 @@ function mapReportRow(row) {
     attachment_name: row.attachment_name,
     attachment_type: row.attachment_type,
     attachment_path: row.attachment_path,
+    attachment_token: attachmentToken,
     seen_by_admin: row.seen_by_admin,
     seen_at: row.seen_at,
     reviewed_by: row.reviewed_by,
@@ -40,6 +49,12 @@ router.post('/', protect, async (req, res) => {
 
     if (!title || typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ error: 'title is required' });
+    }
+    if (
+      attachment_path != null &&
+      !/^training-reports\/[0-9a-f-]{36}\.(?:jpg|jpeg|png|pdf)$/i.test(String(attachment_path))
+    ) {
+      return res.status(400).json({ error: 'Invalid training report attachment path' });
     }
 
     const result = await pool.query(

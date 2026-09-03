@@ -2,6 +2,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/biometric_devices/widgets/biometric_attendance_logs_panel.dart';
+
+enum _BiometricManagementView { devices, attendanceLogs }
 
 /// If [last_sync_at] is older than this, show "Stale" (adjust to match your ingest interval).
 const Duration _kBiometricStaleAfter = Duration(hours: 1);
@@ -44,7 +47,9 @@ Widget _buildVendorBadge(String vendor) {
     decoration: BoxDecoration(
       color: const Color(0xFFF3E5F5),
       borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: const Color(0xFF7B1FA2).withValues(alpha: 0.35)),
+      border: Border.all(
+        color: const Color(0xFF7B1FA2).withValues(alpha: 0.35),
+      ),
     ),
     child: Text(
       label,
@@ -205,6 +210,7 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
   int _page = 0;
   List<_DeviceRecord> _devices = [];
   bool _loading = false;
+  _BiometricManagementView _activeView = _BiometricManagementView.devices;
   _DeviceRecord? _selectedDevice;
   StateSetter? _drawerSetState;
 
@@ -661,28 +667,53 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                 ),
               ),
             ),
-            FilledButton.icon(
-              onPressed: () => _openDeviceDrawer(),
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Add Device'),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFE85D04),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 12,
+            if (_activeView == _BiometricManagementView.devices)
+              FilledButton.icon(
+                onPressed: () => _openDeviceDrawer(),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Add Device'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFE85D04),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 12,
+                  ),
                 ),
               ),
-            ),
           ],
         ),
         const SizedBox(height: 8),
         Text(
-          'Register and manage biometric devices for time logging. (Optional)',
+          _activeView == _BiometricManagementView.devices
+              ? 'Register and manage biometric devices used for attendance synchronization.'
+              : 'Review raw attendance punches synchronized from biometric devices.',
           style: TextStyle(color: _mutedColor(context), fontSize: 14),
         ),
+        const SizedBox(height: 16),
+        SegmentedButton<_BiometricManagementView>(
+          segments: const [
+            ButtonSegment(
+              value: _BiometricManagementView.devices,
+              icon: Icon(Icons.fingerprint_rounded),
+              label: Text('Devices'),
+            ),
+            ButtonSegment(
+              value: _BiometricManagementView.attendanceLogs,
+              icon: Icon(Icons.access_time_rounded),
+              label: Text('Attendance Logs'),
+            ),
+          ],
+          selected: {_activeView},
+          onSelectionChanged: (selection) {
+            setState(() => _activeView = selection.first);
+          },
+        ),
         const SizedBox(height: 20),
-        _buildListPanel(filtered),
+        if (_activeView == _BiometricManagementView.devices)
+          _buildListPanel(filtered)
+        else
+          const BiometricAttendanceLogsPanel(),
       ],
     );
   }
@@ -888,18 +919,22 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
             'Page ${page + 1} of $pageCount',
             style: TextStyle(fontSize: 12, color: _mutedColor(context)),
           ),
-          const SizedBox(width: 12),
-          OutlinedButton(
-            onPressed: page > 0 ? () => setState(() => _page = page - 1) : null,
-            child: const Text('Previous'),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton(
-            onPressed: page < pageCount - 1
-                ? () => setState(() => _page = page + 1)
-                : null,
-            child: const Text('Next'),
-          ),
+          if (pageCount > 1) ...[
+            const SizedBox(width: 12),
+            OutlinedButton(
+              onPressed: page > 0
+                  ? () => setState(() => _page = page - 1)
+                  : null,
+              child: const Text('Previous'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: page < pageCount - 1
+                  ? () => setState(() => _page = page + 1)
+                  : null,
+              child: const Text('Next'),
+            ),
+          ],
         ],
       ),
     );

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/notifications/data/notification_provider.dart';
 import 'app_realtime_provider.dart';
+import 'push_notification_service.dart';
 
 class AppRealtimeBridge extends StatefulWidget {
   const AppRealtimeBridge({super.key, required this.child});
@@ -40,6 +41,18 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
       return;
     }
     if (event.name != 'notification_created') return;
+
+    final rawNotification = event.payload['notification'];
+    if (rawNotification is Map) {
+      final notification = Map<String, dynamic>.from(rawNotification);
+      unawaited(
+        PushNotificationService.instance.showDesktopNotification(
+          id: notification['id']?.toString() ?? '',
+          title: notification['title']?.toString() ?? 'HRMS Plaridel',
+          body: notification['body']?.toString(),
+        ),
+      );
+    }
 
     final notifications = context.read<NotificationProvider>();
     if (notifications.items.isEmpty) {

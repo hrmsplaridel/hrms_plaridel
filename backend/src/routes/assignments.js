@@ -2,9 +2,89 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  assignmentAccessDeniedForRows,
+  filterAssignmentRowsForAccess,
+  resolveAssignmentEmployeeAccess,
+} = require('../services/assignmentAccess');
+const {
+  AssignmentTransitionError,
+  createAssignmentTransition,
+  updateAssignmentTransition,
+} = require('../services/assignmentTransition');
+const {
+  AssignmentHistoryError,
+  deactivateAssignmentRecord,
+  normalizeChangeReason,
+  permanentlyDeleteFutureAssignment,
+  repairPrimaryPredecessorAfterFutureChange,
+  writeAssignmentHistoryAudit,
+} = require('../services/assignmentHistory');
+const {
+  EmployeePolicyAssignmentError,
+  upsertEmployeePolicyAssignment,
+} = require('../services/employeePolicyAssignment');
+const {
+  queueAssignmentReconciliation,
+  rebuildAfterAssignmentCommit,
+} = require('../services/assignmentReconciliation');
+const {
+  AssignmentStatusError,
+  assignmentDatePickerContext,
+  assignmentStatusContext,
+  assignmentStatusWhereSql,
+  computedAssignmentStatusSql,
+} = require('../services/assignmentStatus');
 
 const router = express.Router();
 const protect = [authMiddleware];
+
+// GET /api/assignments/context?employee_id=uuid
+router.get('/context', protect, async (req, res) => {
+  try {
+    const access = resolveAssignmentEmployeeAccess(req.user, req.query.employee_id);
+    if (!access.allowed) {
+      return res.status(access.statusCode).json({ error: access.error });
+    }
+    const result = await pool.query(
+      `SELECT u.id,
+              u.date_hired::text AS date_hired,
+              u.separation_date::text AS separation_date,
+              history.earliest_effective_date
+         FROM users u
+         LEFT JOIN LATERAL (
+           SELECT MIN(period.effective_from)::text AS earliest_effective_date
+             FROM (
+               SELECT effective_from FROM assignments WHERE employee_id = u.id
+               UNION ALL
+               SELECT effective_from FROM policy_assignments WHERE employee_id = u.id
+               UNION ALL
+               SELECT effective_from FROM employee_other_positions WHERE employee_id = u.id
+             ) period
+         ) history ON true
+        WHERE u.id = $1::uuid`,
+      [access.employeeId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    const row = result.rows[0];
+    const context = assignmentDatePickerContext({
+      dateHired: row.date_hired,
+      separationDate: row.separation_date,
+      earliestEffectiveDate: row.earliest_effective_date,
+    });
+    res.json({
+      official_date: context.officialDate,
+      first_date: context.firstDate,
+      last_date: context.lastDate,
+      future_horizon_years: context.futureHorizonYears,
+    });
+  } catch (err) {
+    console.error('[assignments context GET]', err);
+    res.status(500).json({ error: 'Failed to load assignment date context' });
+  }
+});
 
 function parseDate(val) {
   if (!val) return null;
@@ -34,28 +114,62 @@ function effectiveToBeforeFrom(ef, et) {
   return ef != null && et != null && et < ef;
 }
 
-// GET /api/assignments?employee_id=uuid - list assignments for employee (Schema v2: effective_from/to, override times)
+function assignmentComputationChanged(before, after) {
+  if (!before || !after) return true;
+  return [
+    'department_id',
+    'position_id',
+    'shift_id',
+    'effective_from',
+    'effective_to',
+    'is_active',
+  ].some((key) => String(before[key] ?? '') !== String(after[key] ?? ''));
+}
+
+// GET /api/assignments?employee_id=uuid&status=Current|Upcoming|Expired|Archived|All
 router.get('/', protect, async (req, res) => {
   try {
-    const employeeId = req.query.employee_id;
-    const status = req.query.status || 'Active';
-
-    if (!employeeId) {
-      return res.status(400).json({ error: 'employee_id is required' });
+    const access = resolveAssignmentEmployeeAccess(req.user, req.query.employee_id);
+    if (!access.allowed) {
+      return res.status(access.statusCode).json({ error: access.error });
     }
-
-    let statusWhere = '';
-    if (status === 'Active') statusWhere = 'AND (a.is_active IS NULL OR a.is_active = true)';
-    else if (status === 'Inactive') statusWhere = 'AND a.is_active = false';
+    const employeeId = access.employeeId;
+    const statusContext = assignmentStatusContext(req.query.status);
+    const statusWhere = assignmentStatusWhereSql(
+      'a',
+      statusContext.status,
+      '$2'
+    );
 
     const result = await pool.query(
       `SELECT a.id, a.employee_id, a.department_id, a.position_id, a.shift_id,
-              a.override_start_time, a.override_end_time,
+              a.override_start_time, a.override_end_time, a.override_break_end,
               a.effective_from::text AS effective_from,
               a.effective_to::text AS effective_to,
               a.is_active, a.remarks,
+              ${computedAssignmentStatusSql('a', '$2')} AS computed_status,
+              (
+                a.effective_from > $2::date
+                AND NOT EXISTS (
+                  SELECT 1 FROM dtr_daily_summary dtr
+                   WHERE dtr.assignment_id = a.id
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM leave_requests lr
+                   WHERE lr.employee_id = a.employee_id
+                     AND lr.end_date >= a.effective_from
+                     AND lr.start_date <= COALESCE(a.effective_to, 'infinity'::date)
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM locator_slips ls
+                   WHERE ls.employee_id = a.employee_id
+                     AND ls.slip_date >= a.effective_from
+                     AND ls.slip_date <= COALESCE(a.effective_to, 'infinity'::date)
+                )
+              ) AS can_permanently_delete,
               d.name AS department_name, p.name AS position_name, s.name AS shift_name,
               s.start_time AS shift_start_time, s.end_time AS shift_end_time,
+              s.break_end AS shift_break_end, s.punch_mode,
               s.working_days AS shift_working_days
        FROM assignments a
        LEFT JOIN departments d ON a.department_id = d.id
@@ -63,10 +177,17 @@ router.get('/', protect, async (req, res) => {
        LEFT JOIN shifts s ON a.shift_id = s.id
        WHERE a.employee_id = $1 ${statusWhere}
        ORDER BY a.effective_from DESC`,
-      [employeeId]
+      [employeeId, statusContext.today]
     );
 
-    res.json(result.rows.map((r) => {
+    const visibleRows = await filterAssignmentRowsForAccess(pool, access, result.rows);
+    if (assignmentAccessDeniedForRows(access, result.rows, visibleRows)) {
+      return res.status(403).json({
+        error: 'You can only view assignments within your supervised departments',
+      });
+    }
+
+    res.json(visibleRows.map((r) => {
       const wd = r.shift_working_days;
       const workingDays = Array.isArray(wd)
         ? wd.map((x) => (typeof x === 'number' ? x : parseInt(x, 10))).filter((x) => Number.isFinite(x))
@@ -80,17 +201,25 @@ router.get('/', protect, async (req, res) => {
         effective_from: r.effective_from,
         effective_to: r.effective_to,
         is_active: r.is_active ?? true,
+        computed_status: r.computed_status,
+        official_date: statusContext.today,
+        can_permanently_delete: r.can_permanently_delete === true,
         remarks: r.remarks,
         department_name: r.department_name,
         position_name: r.position_name,
         shift_name: r.shift_name,
         start_time: r.override_start_time || r.shift_start_time,
         end_time: r.override_end_time || r.shift_end_time,
+        break_end: r.override_break_end || r.shift_break_end,
+        punch_mode: r.punch_mode || 'auto',
         date_assigned: r.effective_from,
         working_days: workingDays?.length ? workingDays : [1, 2, 3, 4, 5],
       };
     }));
   } catch (err) {
+    if (err instanceof AssignmentStatusError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[assignments GET]', err);
     res.status(500).json({ error: 'Failed to fetch assignments' });
   }
@@ -98,8 +227,24 @@ router.get('/', protect, async (req, res) => {
 
 // POST /api/assignments - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
-    const { employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active = true, remarks } = req.body;
+    client = await pool.connect();
+    const {
+      employee_id,
+      department_id,
+      position_id,
+      shift_id,
+      effective_from,
+      effective_to,
+      is_active = true,
+      remarks,
+      attendance_policy_id,
+    } = req.body;
+    const hasPolicyChange = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      'attendance_policy_id'
+    );
     if (!employee_id || !effective_from) {
       return res.status(400).json({ error: 'employee_id and effective_from are required' });
     }
@@ -111,131 +256,395 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'effective_to must be on or after effective_from' });
     }
 
-    await pool.query('BEGIN');
+    await client.query('BEGIN');
     try {
-      if (is_active) {
-        await pool.query(
-          `UPDATE assignments SET is_active = false, effective_to = $1::date, updated_at = now()
-           WHERE employee_id = $2 AND is_active = true AND (effective_to IS NULL OR effective_to >= $1::date)`,
-          [ef, employee_id]
-        );
+      const assignmentTransition = await createAssignmentTransition(client, {
+        employeeId: employee_id,
+        departmentId: department_id,
+        positionId: position_id,
+        shiftId: shift_id,
+        effectiveFrom: ef,
+        effectiveTo: et,
+        isActive: is_active === true,
+        remarks,
+        includeTransition: true,
+      });
+      const assignment = assignmentTransition.assignment;
+      const policyTransition = hasPolicyChange
+        ? await upsertEmployeePolicyAssignment(client, {
+            employeeId: employee_id,
+            attendancePolicyId: attendance_policy_id,
+            effectiveFrom: assignment.effective_from,
+            effectiveTo: assignment.effective_to,
+            isActive: assignment.is_active !== false,
+            includeTransition: true,
+          })
+        : null;
+      const policyAssignment = policyTransition?.assignment || null;
+      const auditReason = String(remarks || '').trim() || 'Primary assignment created';
+      await writeAssignmentHistoryAudit(client, {
+        actorId: req.user?.id,
+        recordType: 'primary',
+        recordId: assignment.id,
+        action: 'assignment_created',
+        reason: auditReason,
+        before: null,
+        after: assignment,
+      });
+      if (assignmentTransition.closedPredecessor) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: assignmentTransition.closedPredecessor.after.id,
+          action: 'assignment_predecessor_closed',
+          reason: `New primary assignment starts ${assignment.effective_from}`,
+          before: assignmentTransition.closedPredecessor.before,
+          after: assignmentTransition.closedPredecessor.after,
+        });
       }
-      const result = await pool.query(
-        `INSERT INTO assignments (employee_id, department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks)
-         VALUES ($1, $2, $3, $4, $5::date, $6::date, $7, $8)
-         RETURNING id, employee_id, department_id, position_id, shift_id,
-                   effective_from::text AS effective_from,
-                   effective_to::text AS effective_to,
-                   is_active, remarks`,
-        [employee_id, department_id || null, position_id || null, shift_id || null, ef, et, !!is_active, remarks?.trim() || null]
+      if (policyTransition) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'policy',
+          recordId: policyAssignment?.id || policyTransition.before[0]?.id || null,
+          action: 'employee_policy_assignment_updated',
+          reason: 'Initial attendance policy saved with primary assignment',
+          before: policyTransition.before,
+          after: policyTransition.after,
+        });
+      }
+      const queued = await queueAssignmentReconciliation(client, {
+        employeeId: assignment.employee_id,
+        before: null,
+        after: assignment,
+        reason: 'assignment_created',
+        metadata: { assignment_id: assignment.id },
+      });
+      await client.query('COMMIT');
+      const reconciliation = await rebuildAfterAssignmentCommit(
+        assignment.employee_id,
+        queued
       );
-      await pool.query('COMMIT');
-      res.status(201).json(result.rows[0]);
+      res.status(201).json({
+        ...assignment,
+        policy_assignment: policyAssignment,
+        reconciliation,
+      });
     } catch (e) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw e;
     }
   } catch (err) {
+    if (
+      err instanceof AssignmentTransitionError ||
+      err instanceof EmployeePolicyAssignmentError
+    ) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.code === '23P01') {
+      return res.status(409).json({ error: 'Assignment dates overlap an existing assignment' });
+    }
+    if (err.code === '22P02' || err.code === '23503') {
+      return res.status(400).json({ error: 'Invalid assignment selection' });
+    }
     console.error('[assignments POST]', err);
     res.status(500).json({ error: 'Failed to create assignment' });
+  } finally {
+    client?.release();
   }
 });
 
 // PUT /api/assignments/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
+    client = await pool.connect();
     const { id } = req.params;
-    const { department_id, position_id, shift_id, effective_from, effective_to, is_active, remarks } = req.body;
-
-    const updates = [];
-    const values = [];
-    let i = 1;
-
-    if (department_id !== undefined) { updates.push(`department_id = $${i++}`); values.push(department_id || null); }
-    if (position_id !== undefined) { updates.push(`position_id = $${i++}`); values.push(position_id || null); }
-    if (shift_id !== undefined) { updates.push(`shift_id = $${i++}`); values.push(shift_id || null); }
-    if (effective_from !== undefined) {
-      const ef = parseDate(effective_from);
-      if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
-      updates.push(`effective_from = $${i++}::date`); values.push(ef);
-    }
-    if (effective_to !== undefined) {
-      const et = effective_to === null || effective_to === '' ? null : parseDate(effective_to);
-      if (effective_to !== null && effective_to !== '' && !et) return res.status(400).json({ error: 'Invalid effective_to' });
-      updates.push(`effective_to = $${i++}::date`); values.push(et);
-    }
-    if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(!!is_active); }
-    if (remarks !== undefined) { updates.push(`remarks = $${i++}`); values.push(remarks?.trim() || null); }
-
-    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
-
-    const existing = await pool.query(
-      `SELECT id, employee_id,
-              effective_from::text AS effective_from,
-              effective_to::text AS effective_to,
-              is_active
-       FROM assignments
-       WHERE id = $1`,
-      [id]
+    const {
+      department_id,
+      position_id,
+      shift_id,
+      effective_from,
+      effective_to,
+      is_active,
+      remarks,
+      change_reason,
+      attendance_policy_id,
+    } = req.body;
+    const hasPolicyChange = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      'attendance_policy_id'
     );
-    if (existing.rows.length === 0) return res.status(404).json({ error: 'Assignment not found' });
-    const row = existing.rows[0];
-
-    const mergedEffectiveFrom =
-      effective_from !== undefined ? parseDate(effective_from) : dateFromRow(row.effective_from);
-    const mergedEffectiveTo =
-      effective_to !== undefined
-        ? (effective_to === null || effective_to === '' ? null : parseDate(effective_to))
-        : dateFromRow(row.effective_to);
-    const mergedIsActive =
-      is_active !== undefined ? !!is_active : (row.is_active == null || row.is_active === true);
-
-    if (effectiveToBeforeFrom(mergedEffectiveFrom, mergedEffectiveTo)) {
-      return res.status(400).json({ error: 'effective_to must be on or after effective_from' });
+    if (
+      department_id === undefined &&
+      position_id === undefined &&
+      shift_id === undefined &&
+      effective_from === undefined &&
+      effective_to === undefined &&
+      is_active === undefined &&
+      remarks === undefined
+    ) {
+      return res.status(400).json({ error: 'No fields to update' });
     }
 
-    await pool.query('BEGIN');
-    try {
-      if (mergedIsActive && mergedEffectiveFrom) {
-        await pool.query(
-          `UPDATE assignments SET is_active = false, effective_to = $1::date, updated_at = now()
-           WHERE employee_id = $2 AND id <> $3::uuid AND is_active = true
-             AND (effective_to IS NULL OR effective_to >= $1::date)`,
-          [mergedEffectiveFrom, row.employee_id, id]
-        );
-      }
+    const parsedEffectiveFrom = effective_from === undefined
+      ? undefined
+      : parseDate(effective_from);
+    if (effective_from !== undefined && !parsedEffectiveFrom) {
+      return res.status(400).json({ error: 'Invalid effective_from' });
+    }
+    const parsedEffectiveTo = effective_to === undefined
+      ? undefined
+      : (effective_to === null || effective_to === '' ? null : parseDate(effective_to));
+    if (effective_to !== undefined && effective_to !== null && effective_to !== '' && !parsedEffectiveTo) {
+      return res.status(400).json({ error: 'Invalid effective_to' });
+    }
 
-      updates.push('updated_at = now()');
-      values.push(id);
-      const result = await pool.query(
-        `UPDATE assignments SET ${updates.join(', ')} WHERE id = $${i}
-         RETURNING id, employee_id, department_id, position_id, shift_id,
-                   effective_from::text AS effective_from,
-                   effective_to::text AS effective_to,
-                   is_active, remarks`,
-        values
+    await client.query('BEGIN');
+    try {
+      const beforeResult = await client.query(
+        `SELECT id, employee_id, department_id, position_id, shift_id,
+                effective_from::text AS effective_from,
+                effective_to::text AS effective_to, is_active, remarks
+           FROM assignments
+          WHERE id = $1::uuid`,
+        [id]
       );
-      await pool.query('COMMIT');
-      res.json(result.rows[0]);
+      if (beforeResult.rowCount === 0) {
+        throw new AssignmentTransitionError('Assignment not found', 404);
+      }
+      const before = beforeResult.rows[0];
+      const isDeactivating = is_active === false && before.is_active !== false;
+      const deactivationReason = isDeactivating
+        ? normalizeChangeReason(change_reason)
+        : null;
+      const assignmentTransition = await updateAssignmentTransition(client, {
+        assignmentId: id,
+        changes: {
+          departmentId: department_id,
+          positionId: position_id,
+          shiftId: shift_id,
+          effectiveFrom: parsedEffectiveFrom,
+          effectiveTo: parsedEffectiveTo,
+          isActive: is_active === undefined ? undefined : is_active === true,
+          remarks,
+        },
+        includeTransition: true,
+      });
+      const assignment = assignmentTransition.assignment;
+      const shouldRepairPredecessor =
+        isDeactivating ||
+        (
+          assignment.is_active !== false &&
+          assignment.effective_from > before.effective_from
+        );
+      const restoredPredecessor = shouldRepairPredecessor
+        ? await repairPrimaryPredecessorAfterFutureChange(client, {
+            previousRecord: before,
+            replacementRecord: assignment,
+          })
+        : null;
+      const policyTransition = hasPolicyChange
+        ? await upsertEmployeePolicyAssignment(client, {
+            employeeId: assignment.employee_id,
+            attendancePolicyId: attendance_policy_id,
+            effectiveFrom: assignment.effective_from,
+            effectiveTo: assignment.effective_to,
+            isActive: assignment.is_active !== false,
+            includeTransition: true,
+          })
+        : null;
+      const policyAssignment = policyTransition?.assignment || null;
+      if (isDeactivating) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: id,
+          action: 'assignment_deactivated',
+          reason: deactivationReason,
+          before,
+          after: assignment,
+        });
+      }
+      if (restoredPredecessor) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: restoredPredecessor.after.id,
+          action: 'assignment_predecessor_restored',
+          reason:
+            deactivationReason ||
+            String(change_reason || '').trim() ||
+            'Future assignment effective date changed',
+          before: restoredPredecessor.before,
+          after: restoredPredecessor.after,
+        });
+      }
+      if (assignmentTransition.closedPredecessor) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: assignmentTransition.closedPredecessor.after.id,
+          action: 'assignment_predecessor_closed',
+          reason:
+            String(change_reason || '').trim() ||
+            `Updated primary assignment starts ${assignment.effective_from}`,
+          before: assignmentTransition.closedPredecessor.before,
+          after: assignmentTransition.closedPredecessor.after,
+        });
+      }
+      if (!isDeactivating) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: id,
+          action: 'assignment_updated',
+          reason:
+            String(change_reason || '').trim() ||
+            String(remarks || '').trim() ||
+            'Primary assignment updated',
+          before,
+          after: assignment,
+        });
+      }
+      if (policyTransition) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'policy',
+          recordId: policyAssignment?.id || policyTransition.before[0]?.id || null,
+          action: 'employee_policy_assignment_updated',
+          reason: 'Attendance policy updated with primary assignment',
+          before: policyTransition.before,
+          after: policyTransition.after,
+        });
+      }
+      const needsReconciliation =
+        assignmentComputationChanged(before, assignment) || hasPolicyChange;
+      const queued = needsReconciliation
+        ? await queueAssignmentReconciliation(client, {
+            employeeId: assignment.employee_id,
+            before,
+            after: assignment,
+            reason: 'assignment_updated',
+            metadata: { assignment_id: assignment.id },
+          })
+        : { range: null, count: 0, months: [] };
+      await client.query('COMMIT');
+      const reconciliation = await rebuildAfterAssignmentCommit(
+        assignment.employee_id,
+        queued
+      );
+      res.json({
+        ...assignment,
+        policy_assignment: policyAssignment,
+        predecessor_restored: restoredPredecessor?.after || null,
+        reconciliation,
+      });
     } catch (e) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw e;
     }
   } catch (err) {
+    if (
+      err instanceof AssignmentTransitionError ||
+      err instanceof AssignmentHistoryError ||
+      err instanceof EmployeePolicyAssignmentError
+    ) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    if (err.code === '23P01') {
+      return res.status(409).json({ error: 'Assignment dates overlap an existing assignment' });
+    }
+    if (err.code === '22P02' || err.code === '23503') {
+      return res.status(400).json({ error: 'Invalid assignment selection' });
+    }
     console.error('[assignments PUT]', err);
     res.status(500).json({ error: 'Failed to update assignment' });
+  } finally {
+    client?.release();
   }
 });
 
-// DELETE /api/assignments/:id (admin only)
+// DELETE /api/assignments/:id - archive without erasing history (admin only)
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
-    const result = await pool.query('DELETE FROM assignments WHERE id = $1 RETURNING id', [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Assignment not found' });
-    res.status(204).send();
+    client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      const result = await deactivateAssignmentRecord(client, {
+        actorId: req.user?.id,
+        recordType: 'primary',
+        recordId: req.params.id,
+        reason: req.body?.reason,
+      });
+      const queued = result.changed
+        ? await queueAssignmentReconciliation(client, {
+            employeeId: result.record.employee_id,
+            before: result.before,
+            after: result.record,
+            reason: 'assignment_deactivated',
+            metadata: { assignment_id: result.record.id },
+          })
+        : { range: null, count: 0, months: [] };
+      await client.query('COMMIT');
+      const reconciliation = await rebuildAfterAssignmentCommit(
+        result.record.employee_id,
+        queued
+      );
+      res.json({
+        message: result.changed
+          ? 'Assignment deactivated and retained in history'
+          : 'Assignment is already inactive',
+        assignment: result.record,
+        predecessor_restored: result.restoredPredecessor?.after || null,
+        reconciliation,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
   } catch (err) {
+    if (err instanceof AssignmentHistoryError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[assignments DELETE]', err);
-    res.status(500).json({ error: 'Failed to delete assignment' });
+    res.status(500).json({ error: 'Failed to deactivate assignment' });
+  } finally {
+    client?.release();
+  }
+});
+
+// DELETE /api/assignments/:id/permanent - remove an unused future mistake only
+router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      const result = await permanentlyDeleteFutureAssignment(client, {
+        actorId: req.user?.id,
+        recordType: 'primary',
+        recordId: req.params.id,
+        reason: req.body?.reason,
+      });
+      await client.query('COMMIT');
+      res.json({
+        message: 'Mistaken future assignment permanently deleted',
+        restored_previous_assignment: result.restoredPredecessor?.after || null,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  } catch (err) {
+    if (err instanceof AssignmentHistoryError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    console.error('[assignments permanent DELETE]', err);
+    res.status(500).json({ error: 'Failed to permanently delete assignment' });
+  } finally {
+    client?.release();
   }
 });
 

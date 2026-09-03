@@ -5,6 +5,7 @@ const {
   normalizeLeaveTypeHint,
   normalizeLocatorTypeHint,
 } = require('./dtrAssistantMessageExtraction');
+const { isLeaveCreditRequirementQuestion } = require('./dtrAssistantIntentService');
 const { parseAssistantDateRange } = require('../../utils/dateRangeParser');
 
 const GUIDED_FILING_INTENTS = new Set([
@@ -66,14 +67,30 @@ function hasDayCountHint(text, memory) {
   );
 }
 
+function isSingleDayRange(range) {
+  const startDate = String(range?.startDate || '').slice(0, 10);
+  const endDate = String(range?.endDate || startDate).slice(0, 10);
+  return Boolean(startDate && endDate === startDate);
+}
+
+function hasSingleDayDateHint(text, memory, context, dateKnown) {
+  if (!dateKnown) return false;
+  const parsed = parseAssistantDateRange(String(text || ''));
+  if (isSingleDayRange(parsed)) return true;
+  if (isSingleDayRange(memory?.dateRange)) return true;
+  return isSingleDayRange(context?.date_range);
+}
+
 function missingLeaveFields({ text, memory, context, intent }) {
   const fields = [];
   const leaveType = resolveLeaveType(text, memory, context);
+  const dateKnown = hasDateHint(text, memory, context);
   if (!leaveType) fields.push('leaveType');
-  if (!hasDateHint(text, memory, context)) fields.push('date');
+  if (!dateKnown) fields.push('date');
   if (
     (intent === 'leave_availability_check' || intent === 'leave_guided_filing') &&
-    !hasDayCountHint(text, memory)
+    !hasDayCountHint(text, memory) &&
+    !hasSingleDayDateHint(text, memory, context, dateKnown)
   ) {
     fields.push('days');
   }
@@ -83,11 +100,16 @@ function missingLeaveFields({ text, memory, context, intent }) {
 function missingLocatorFields({ text, memory, context, intent }) {
   const fields = [];
   const locatorType = resolveLocatorType(text, memory);
+  const storedDestination =
+    memory?.topics?.locator?.locatorPrefill?.destination ||
+    memory?.locatorPrefill?.destination ||
+    null;
   if (!locatorType) fields.push('locatorType');
   if (!hasDateHint(text, memory, context)) fields.push('date');
   if (
     (intent === 'locator_availability_check' || intent === 'locator_guided_filing') &&
     locatorType === 'locator' &&
+    !storedDestination &&
     !extractMessageEntities(text, memory).locatorPrefill.destination
   ) {
     fields.push('destination');
@@ -264,8 +286,79 @@ function clarificationQuestion(field, topic, language) {
   return null;
 }
 
+function isPendingClarificationAnswer(text, memory) {
+  const pending = memory?.pendingClarification;
+  if (!pending?.field) return false;
+
+  const value = String(text || '').trim();
+  const normalized = lower(value);
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+  const asksForInformation =
+    /\b(requirements?|attachment|documents?|status|remarks?|reason|why|ngano|bakit|how to|unsaon|paano|who|kinsa|sino|policy|rules?|balance|credits?)\b/.test(
+      normalized
+    );
+  const mentionsLeave =
+    /\b(leave|sick|vacation|maternity|paternity|adoption|solo parent|vawc|calamity|vl|sl)\b/.test(
+      normalized
+    );
+  const mentionsLocator =
+    /\b(locator|locator slip|pass slip|wfh|work from home|official business|fieldwork)\b/.test(
+      normalized
+    );
+  const mentionsDtr =
+    /\b(dtr|attendance|time[\s-]?in|time[\s-]?out|late|undertime|overtime|absent|missing log|pm out|am out|pm in|am in)\b/.test(
+      normalized
+    );
+  const changesTopic =
+    (pending.topic === 'leave' && (mentionsLocator || mentionsDtr)) ||
+    (pending.topic === 'locator' && (mentionsLeave || mentionsDtr)) ||
+    (pending.topic === 'dtr' && (mentionsLeave || mentionsLocator));
+  if (asksForInformation || changesTopic) return false;
+
+  if (pending.field === 'leaveType') {
+    return Boolean(normalizeLeaveTypeHint(value));
+  }
+  if (pending.field === 'locatorType') {
+    return Boolean(normalizeLocatorTypeHint(value));
+  }
+  if (pending.field === 'date') {
+    const hasExplicitDateText =
+      /\b(today|tomorrow|yesterday|karon|ugma|gahapon|kagahapon|ngayon|bukas|kahapon|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|week|month|semana|semanaha|bulan|bulana|buwan|buwana|pay\s*period|cutoff|next day|following day|sunod adlaw|previous day|day before)\b/.test(
+        normalized
+      ) ||
+      /\b\d{4}-\d{2}-\d{2}\b/.test(normalized) ||
+      /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}\b/.test(
+        normalized
+      );
+    return hasExplicitDateText && Boolean(parseAssistantDateRange(value)?.startDate);
+  }
+  if (pending.field === 'days') {
+    return wordCount <= 8 && extractDayCount(value) != null;
+  }
+  if (pending.field === 'destination') {
+    return wordCount <= 12 && !/[?]$/.test(normalized);
+  }
+  if (pending.field === 'slot') {
+    return /\b(am in|am out|pm in|pm out|time in|time out)\b/.test(normalized);
+  }
+  return false;
+}
+
+function interruptsPendingClarification(text, memory) {
+  if (!memory?.pendingClarification?.field) return false;
+  if (isPendingClarificationAnswer(text, memory)) return false;
+  const value = lower(text);
+  return (
+    /[?]$/.test(value.trim()) ||
+    /\b(what|why|how|when|where|who|which|can|could|do i|does|is|are|need|unsa|ngano|pila|asa|kinsa|pwede|puwede|kinahanglan|ano|bakit|ilan|saan|sino|kailangan)\b/.test(
+      value
+    )
+  );
+}
+
 function evaluateGuidedClarification({ intent, text, context, memory }) {
   if (!GUIDED_FILING_INTENTS.has(intent)) return null;
+  if (isLeaveCreditRequirementQuestion(text)) return null;
 
   const language = detectAssistantLanguage(text);
   let topic = 'leave';
@@ -334,14 +427,28 @@ function applyPendingClarificationAnswer(text, memory) {
     dateRange: null,
     pendingClarification: null,
   };
+  if (!isPendingClarificationAnswer(text, memory)) {
+    patch.pendingClarification = { ...pending };
+    return patch;
+  }
 
   const value = String(text || '').trim();
+  const entities = extractMessageEntities(value);
+  const parsedDateRange = parseAssistantDateRange(value);
+  const suppliedDateRange = hasDateHint(
+    value,
+    null,
+    { date_range: parsedDateRange }
+  )
+    ? parsedDateRange
+    : null;
+
   if (pending.field === 'leaveType') {
     patch.leaveType = normalizeLeaveTypeHint(value) || pending.leaveType;
   } else if (pending.field === 'locatorType') {
     patch.locatorType = normalizeLocatorTypeHint(value) || pending.locatorType;
   } else if (pending.field === 'date') {
-    patch.dateRange = parseAssistantDateRange(value);
+    patch.dateRange = parsedDateRange;
   } else if (pending.field === 'days') {
     const dayCount = extractDayCount(value);
     if (dayCount == null) {
@@ -357,7 +464,9 @@ function applyPendingClarificationAnswer(text, memory) {
     }
     patch.dayCount = dayCount;
   } else if (pending.field === 'destination') {
-    patch.locatorPrefill = { destination: value };
+    patch.locatorPrefill = {
+      destination: entities.locatorPrefill?.destination || value,
+    };
   } else if (pending.field === 'slot') {
     const slot = lower(value);
     if (slot.includes('am in')) patch.dtrSlot = 'AM in';
@@ -366,7 +475,45 @@ function applyPendingClarificationAnswer(text, memory) {
     else if (slot.includes('pm out')) patch.dtrSlot = 'PM out';
   }
 
-  const remaining = pending.fieldsRemaining || [];
+  if (pending.topic === 'leave') {
+    patch.leaveType = patch.leaveType || entities.leaveType || pending.leaveType || null;
+    patch.dateRange = patch.dateRange || suppliedDateRange;
+    if (entities.dayCount != null) patch.dayCount = entities.dayCount;
+    if (patch.dayCount == null && isSingleDayRange(patch.dateRange)) {
+      patch.dayCount = 1;
+    }
+    if (Object.keys(entities.leavePrefill || {}).length > 0) {
+      patch.leavePrefill = entities.leavePrefill;
+    }
+  } else if (pending.topic === 'locator') {
+    patch.locatorType =
+      patch.locatorType || entities.locatorType || pending.locatorType || null;
+    patch.dateRange = patch.dateRange || suppliedDateRange;
+    if (Object.keys(entities.locatorPrefill || {}).length > 0) {
+      patch.locatorPrefill = {
+        ...(patch.locatorPrefill || {}),
+        ...entities.locatorPrefill,
+      };
+    }
+  } else if (pending.topic === 'dtr') {
+    patch.dateRange = patch.dateRange || suppliedDateRange;
+    patch.dtrSlot = patch.dtrSlot || entities.dtrSlot || null;
+  }
+
+  const fieldResolved = (field) => {
+    if (field === 'leaveType') return Boolean(patch.leaveType);
+    if (field === 'locatorType') return Boolean(patch.locatorType);
+    if (field === 'date') return Boolean(patch.dateRange?.startDate);
+    if (field === 'days') return Number(patch.dayCount) > 0;
+    if (field === 'destination') {
+      return Boolean(patch.locatorPrefill?.destination);
+    }
+    if (field === 'slot') return Boolean(patch.dtrSlot);
+    return false;
+  };
+  const remaining = (pending.fieldsRemaining || []).filter(
+    (field) => !fieldResolved(field)
+  );
   if (remaining.length > 0) {
     patch.pendingClarification = {
       topic: pending.topic,
@@ -385,4 +532,6 @@ module.exports = {
   GUIDED_FILING_INTENTS,
   applyPendingClarificationAnswer,
   evaluateGuidedClarification,
+  interruptsPendingClarification,
+  isPendingClarificationAnswer,
 };

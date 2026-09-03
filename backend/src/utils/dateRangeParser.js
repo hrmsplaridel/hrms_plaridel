@@ -1,8 +1,88 @@
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
+const MAX_ASSISTANT_DATE_RANGE_DAYS = 366;
 
-function todayInHrmsTimezone(now = new Date()) {
+function isValidIsoCalendarDate(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const monthLengths = [
+    31,
+    year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return day <= monthLengths[month - 1];
+}
+
+function isoDateEpochDay(value) {
+  const [year, month, day] = String(value).split('-').map(Number);
+  const date = new Date(0);
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCFullYear(year, month - 1, day);
+  return Math.floor(date.getTime() / 86400000);
+}
+
+function assistantDateRangeError(message, code) {
+  const err = new Error(message);
+  err.statusCode = 400;
+  err.code = code;
+  return err;
+}
+
+function assertAssistantDateRange(
+  range,
+  { maxDays = MAX_ASSISTANT_DATE_RANGE_DAYS } = {}
+) {
+  const startDate = String(range?.startDate || '').trim();
+  const endDate = String(range?.endDate || startDate).trim();
+  if (!isValidIsoCalendarDate(startDate) || !isValidIsoCalendarDate(endDate)) {
+    throw assistantDateRangeError(
+      'Use a real attendance date in YYYY-MM-DD format.',
+      'ASSISTANT_DATE_INVALID'
+    );
+  }
+  if (startDate > endDate) {
+    throw assistantDateRangeError(
+      'The attendance start date must be on or before the end date.',
+      'ASSISTANT_DATE_RANGE_REVERSED'
+    );
+  }
+  const dayCount = isoDateEpochDay(endDate) - isoDateEpochDay(startDate) + 1;
+  if (!Number.isInteger(dayCount) || dayCount < 1) {
+    throw assistantDateRangeError(
+      'The attendance date range is invalid.',
+      'ASSISTANT_DATE_INVALID'
+    );
+  }
+  if (dayCount > maxDays) {
+    throw assistantDateRangeError(
+      `The chatbot can load up to ${maxDays} days per request. Choose a shorter period.`,
+      'ASSISTANT_DATE_RANGE_TOO_LARGE'
+    );
+  }
+  return {
+    label: String(
+      range?.label || (startDate === endDate ? startDate : `${startDate} to ${endDate}`)
+    ).trim(),
+    startDate,
+    endDate,
+  };
+}
+
+function todayInHrmsTimezone(now = new Date(), timeZone = HRMS_TIMEZONE) {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: HRMS_TIMEZONE,
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -107,15 +187,34 @@ const WEEKDAYS = {
 
 const NUMBER_WORDS = {
   one: 1,
+  isa: 1,
+  usa: 1,
+  uno: 1,
   two: 2,
+  duha: 2,
+  dos: 2,
+  dalawa: 2,
   three: 3,
+  tulo: 3,
+  tres: 3,
+  tatlo: 3,
   four: 4,
+  upat: 4,
+  kwatro: 4,
+  apat: 4,
   five: 5,
+  lima: 5,
+  singko: 5,
   six: 6,
+  unom: 6,
   seven: 7,
+  pito: 7,
   eight: 8,
+  walo: 8,
   nine: 9,
+  siyam: 9,
   ten: 10,
+  napulo: 10,
 };
 
 function parsedCount(value) {
@@ -257,11 +356,93 @@ function weekdayDate(today, targetWeekday, mode = 'next') {
   return addDays(today, offset);
 }
 
-function parseAssistantDateRange(message, options = {}) {
+function parseAssistantDateRangeUnchecked(message, options = {}) {
   const text = String(message || '').toLowerCase();
   const today = options.today || todayInHrmsTimezone(options.now);
   const monthNames = Object.keys(MONTHS).join('|');
   const weekdayNames = Object.keys(WEEKDAYS).join('|');
+  const countToken = `(\\d{1,2}|${Object.keys(NUMBER_WORDS).join('|')})`;
+  const dayUnit = '(?:days?|(?:ka\\s+)?adlaw|araw)';
+
+  if (!options.skipDurationRange) {
+    const resolveDurationAnchor = (value) => {
+      const anchor = String(value || '')
+        .trim()
+        .replace(/^(?:on|sa|ng|nga)\s+/, '');
+      if (!anchor) return null;
+
+      const bareWeekday = anchor.match(
+        new RegExp(`^(?:this\\s+|current\\s+)?(${weekdayNames})\\b`)
+      );
+      if (bareWeekday) {
+        const currentWeekday = dayOfWeekMondayIndex(today);
+        const targetWeekday = WEEKDAYS[bareWeekday[1]];
+        const offset = (targetWeekday - currentWeekday + 7) % 7;
+        const date = addDays(today, offset);
+        return {
+          label: bareWeekday[1],
+          startDate: date,
+          endDate: date,
+        };
+      }
+
+      const hasAnchorSignal = new RegExp(
+        `\\b(today|tomorrow|yesterday|karon|ugma|bukas|ngayon|gahapon|kagahapon|kahapon|next\\s+(?:day|${weekdayNames})|last\\s+${weekdayNames}|previous\\s+${weekdayNames}|sunod\\s+(?:adlaw|${weekdayNames})|${monthNames}|\\d{4}-\\d{2}-\\d{2})\\b`
+      ).test(anchor);
+      if (!hasAnchorSignal) return null;
+
+      return parseAssistantDateRange(anchor, {
+        ...options,
+        today,
+        skipDurationRange: true,
+      });
+    };
+
+    const durationStarting = text.match(
+      new RegExp(
+        `\\b${countToken}\\s+${dayUnit}\\s+(?:starting(?:\\s+(?:on|from))?|from|beginning(?:\\s+(?:on|from))?|sugod(?:\\s+(?:sa|ug|karong))?|simula(?:\\s+(?:sa|ng))?)\\s+(.+)$`
+      )
+    );
+    const anchorThenDuration = text.match(
+      new RegExp(`^(.+?)\\s+for\\s+${countToken}\\s+${dayUnit}\\b`)
+    );
+    const count = durationStarting
+      ? parsedCount(durationStarting[1])
+      : anchorThenDuration
+        ? parsedCount(anchorThenDuration[2])
+        : null;
+    const anchor = durationStarting
+      ? durationStarting[2]
+      : anchorThenDuration
+        ? anchorThenDuration[1]
+        : null;
+    const anchorRange = count ? resolveDurationAnchor(anchor) : null;
+    if (anchorRange?.startDate && count > 0) {
+      return {
+        label: `${count} ${count === 1 ? 'day' : 'days'} starting ${anchorRange.label}`,
+        startDate: anchorRange.startDate,
+        endDate: addDays(anchorRange.startDate, count - 1),
+      };
+    }
+  }
+
+  const yearPhrase = text.match(
+    /\b(this|current|last|previous|next)\s+year\b|\b(karong|karon nga|niining)\s+tuiga?\b|\b(niaging|miaging)\s+tuiga?\b|\bngayong\s+taon\b|\bnakaraang\s+taon\b|\bsusunod\s+na\s+taon\b|\bsunod\s+tuiga?\b/
+  );
+  if (yearPhrase) {
+    let year = Number(today.slice(0, 4));
+    if (/\b(last|previous)\s+year\b|\b(niaging|miaging)\s+tuiga?\b|\bnakaraang\s+taon\b/.test(text)) {
+      year -= 1;
+    } else if (/\bnext\s+year\b|\bsusunod\s+na\s+taon\b|\bsunod\s+tuiga?\b/.test(text)) {
+      year += 1;
+    }
+    return {
+      label: `${year}`,
+      startDate: `${year}-01-01`,
+      endDate: `${year}-12-31`,
+    };
+  }
+
   const explicitRange = text.match(
     /\b(\d{4}-\d{2}-\d{2})\s*(?:to|until|through|-|–)\s*(\d{4}-\d{2}-\d{2})\b/
   );
@@ -432,7 +613,6 @@ function parseAssistantDateRange(message, options = {}) {
     return { label: 'yesterday', startDate: date, endDate: date };
   }
 
-  const countToken = '(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)';
   const daysAgo = text.match(new RegExp(`\\b${countToken}\\s+days?\\s+ago\\b`));
   if (daysAgo) {
     const count = parsedCount(daysAgo[1]);
@@ -557,9 +737,19 @@ function parseAssistantDateRange(message, options = {}) {
   };
 }
 
+function parseAssistantDateRange(message, options = {}) {
+  return assertAssistantDateRange(
+    parseAssistantDateRangeUnchecked(message, options),
+    { maxDays: options.maxDays || MAX_ASSISTANT_DATE_RANGE_DAYS }
+  );
+}
+
 module.exports = {
+  MAX_ASSISTANT_DATE_RANGE_DAYS,
   addDays,
   addMonths,
+  assertAssistantDateRange,
+  isValidIsoCalendarDate,
   parseAssistantDateRange,
   todayInHrmsTimezone,
 };

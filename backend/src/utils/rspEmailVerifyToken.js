@@ -47,8 +47,33 @@ function verifyRspEmailVerificationToken(token, normalizedEmail) {
   }
 }
 
+function signRspApplicantAccessToken(applicationId, normalizedEmail) {
+  const secret = getSecret();
+  if (!secret) throw new Error('RSP applicant token secret is required');
+  return jwt.sign(
+    { typ: 'rsp_applicant', applicationId: String(applicationId), email: normalizedEmail },
+    secret,
+    { expiresIn: '24h' },
+  );
+}
+
+function verifyRspApplicantAccessToken(token, applicationId, normalizedEmail) {
+  const secret = getSecret();
+  if (!secret || !token) return false;
+  try {
+    const payload = jwt.verify(String(token).trim(), secret);
+    return payload.typ === 'rsp_applicant' &&
+      String(payload.applicationId) === String(applicationId) &&
+      String(payload.email || '').trim().toLowerCase() === String(normalizedEmail || '').trim().toLowerCase();
+  } catch (_) {
+    return false;
+  }
+}
+
 module.exports = {
   signRspEmailVerificationToken,
   verifyRspEmailVerificationToken,
+  signRspApplicantAccessToken,
+  verifyRspApplicantAccessToken,
   getRspEmailVerifySecretConfigured: () => !!getSecret(),
 };

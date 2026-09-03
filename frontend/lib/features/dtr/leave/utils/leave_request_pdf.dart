@@ -8,6 +8,7 @@ import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 
 /// Loaded once; kept for the app lifetime. [pw.Page.build] runs **lazily** on
 /// `doc.save()` / print — must not rely on fonts that were cleared after
@@ -235,6 +236,40 @@ class LeaveRequestPdf {
     );
   }
 
+  static pw.Widget _approvalValueLine({
+    required String? value,
+    required String label,
+    double valueWidth = 42,
+    double fontSize = 10.2,
+  }) {
+    final displayedValue = value?.trim() ?? '';
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.end,
+      children: [
+        pw.Container(
+          width: valueWidth,
+          padding: const pw.EdgeInsets.only(bottom: 1),
+          alignment: pw.Alignment.bottomCenter,
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              bottom: pw.BorderSide(color: _borderColor, width: 0.7),
+            ),
+          ),
+          child: pw.Text(
+            displayedValue.isEmpty ? ' ' : displayedValue,
+            textAlign: pw.TextAlign.center,
+            style: pw.TextStyle(fontSize: fontSize),
+            maxLines: 1,
+          ),
+        ),
+        pw.SizedBox(width: 3),
+        pw.Expanded(
+          child: pw.Text(label, style: pw.TextStyle(fontSize: fontSize)),
+        ),
+      ],
+    );
+  }
+
   static Future<pw.Document> buildPdf({
     required LeaveRequest request,
     List<LeaveBalance>? balances,
@@ -322,6 +357,7 @@ class LeaveRequestPdf {
     final slDeduction = leaveType == LeaveType.sickLeave ? wdCert : 0.0;
 
     String formatDays(double d) => d == 0 ? '—' : d.toStringAsFixed(3);
+    String formatBalance(double d) => d.toStringAsFixed(3);
 
     final hasDateRange = _isValidDateRange(request.startDate, request.endDate);
     final startStr = request.startDate != null
@@ -946,7 +982,7 @@ class LeaveRequestPdf {
                                     pw.Padding(
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
-                                        formatDays(
+                                        formatBalance(
                                           vlBal.remainingDays - vlDeduction,
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
@@ -955,7 +991,7 @@ class LeaveRequestPdf {
                                     pw.Padding(
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
-                                        formatDays(
+                                        formatBalance(
                                           slBal.remainingDays - slDeduction,
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
@@ -1156,35 +1192,22 @@ class LeaveRequestPdf {
                                       crossAxisAlignment:
                                           pw.CrossAxisAlignment.start,
                                       children: [
-                                        pw.Text(
-                                          request.approvedDaysWithPay != null
-                                              ? '${request.approvedDaysWithPay!.toStringAsFixed(1)} days with pay'
-                                              : '_______ days with pay',
-                                          style: const pw.TextStyle(
-                                            fontSize: 10.2,
-                                          ),
+                                        _approvalValueLine(
+                                          value: request.approvedDaysWithPay
+                                              ?.toStringAsFixed(1),
+                                          label: 'days with pay',
                                         ),
                                         pw.SizedBox(height: 8),
-                                        pw.Text(
-                                          request.approvedDaysWithoutPay != null
-                                              ? '${request.approvedDaysWithoutPay!.toStringAsFixed(1)} days without pay'
-                                              : '_______ days without pay',
-                                          style: const pw.TextStyle(
-                                            fontSize: 10.2,
-                                          ),
+                                        _approvalValueLine(
+                                          value: request.approvedDaysWithoutPay
+                                              ?.toStringAsFixed(1),
+                                          label: 'days without pay',
                                         ),
                                         pw.SizedBox(height: 8),
-                                        pw.Text(
-                                          request.approvedOtherDetails
-                                                      ?.trim()
-                                                      .isNotEmpty ==
-                                                  true
-                                              ? request.approvedOtherDetails!
-                                                    .trim()
-                                              : '_______ others (Specify)',
-                                          style: const pw.TextStyle(
-                                            fontSize: 10.2,
-                                          ),
+                                        _approvalValueLine(
+                                          value: request.approvedOtherDetails,
+                                          label: 'others (Specify)',
+                                          valueWidth: 58,
                                         ),
                                       ],
                                     ),
@@ -1351,6 +1374,19 @@ class _LeaveRequestPdfFixedEngine {
     return '${d.year}-$mm-$dd';
   }
 
+  static String _customDetailValue(
+    LeaveCustomFieldDefinition field,
+    dynamic value,
+  ) {
+    if (field.type == LeaveCustomFieldType.boolean) {
+      return value == true ? 'Yes' : 'No';
+    }
+    if (field.type == LeaveCustomFieldType.date) {
+      return _fmtDate(DateTime.tryParse(value.toString()));
+    }
+    return value.toString();
+  }
+
   static ({String last, String first, String middle}) _nameParts(String full) {
     final parts = full
         .trim()
@@ -1432,6 +1468,39 @@ class _LeaveRequestPdfFixedEngine {
           style: const pw.TextStyle(fontSize: _fontSize),
         ),
       );
+
+  static pw.Widget _approvalValueLine({
+    required String? value,
+    required String label,
+    double valueWidth = 34,
+  }) {
+    final displayedValue = value?.trim() ?? '';
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.end,
+      children: [
+        pw.Container(
+          width: valueWidth,
+          padding: const pw.EdgeInsets.only(bottom: 0.5),
+          alignment: pw.Alignment.bottomCenter,
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              bottom: pw.BorderSide(color: _borderColor, width: 0.7),
+            ),
+          ),
+          child: pw.Text(
+            displayedValue.isEmpty ? ' ' : displayedValue,
+            textAlign: pw.TextAlign.center,
+            style: const pw.TextStyle(fontSize: _small),
+            maxLines: 1,
+          ),
+        ),
+        pw.SizedBox(width: 3),
+        pw.Expanded(
+          child: pw.Text(label, style: const pw.TextStyle(fontSize: _small)),
+        ),
+      ],
+    );
+  }
 
   static pw.Widget _sectionHeader(String t) => pw.Container(
     // padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
@@ -1608,6 +1677,18 @@ class _LeaveRequestPdfFixedEngine {
     final disapprovalReason = request.status.isRejected
         ? _s(request.disapprovalReason)
         : '';
+    final customDetails = request.employeeDetailSchemaSnapshot
+        .where((field) {
+          final value = request.customDetails[field.key];
+          return value != null && value.toString().trim().isNotEmpty;
+        })
+        .map(
+          (field) => (
+            label: field.label,
+            value: _customDetailValue(field, request.customDetails[field.key]),
+          ),
+        )
+        .toList(growable: false);
 
     final vlDed =
         (request.leaveType == LeaveType.vacationLeave ||
@@ -1616,6 +1697,7 @@ class _LeaveRequestPdfFixedEngine {
         : 0.0;
     final slDed = request.leaveType == LeaveType.sickLeave ? (wd ?? 0.0) : 0.0;
     String d3(double v) => v == 0 ? '' : v.toStringAsFixed(3);
+    String balanceD3(double v) => v.toStringAsFixed(3);
 
     final fonts = await _leavePdfThemeAndFonts();
     pw.ImageProvider? logoProvider;
@@ -2432,7 +2514,7 @@ class _LeaveRequestPdfFixedEngine {
                                                         3,
                                                       ),
                                                   child: pw.Text(
-                                                    d3(
+                                                    balanceD3(
                                                       (vl?.remainingDays ?? 0) -
                                                           vlDed,
                                                     ),
@@ -2447,7 +2529,7 @@ class _LeaveRequestPdfFixedEngine {
                                                         3,
                                                       ),
                                                   child: pw.Text(
-                                                    d3(
+                                                    balanceD3(
                                                       (sl?.remainingDays ?? 0) -
                                                           slDed,
                                                     ),
@@ -2619,34 +2701,23 @@ class _LeaveRequestPdfFixedEngine {
                                         children: [
                                           _sectionHeader('7.C APPROVED FOR'),
                                           pw.SizedBox(height: 2),
-                                          pw.Text(
-                                            request.approvedDaysWithPay != null
-                                                ? '_____ ${request.approvedDaysWithPay!.toStringAsFixed(1)} days with pay'
-                                                : '_____ days with pay',
-                                            style: const pw.TextStyle(
-                                              fontSize: _small,
-                                            ),
+                                          _approvalValueLine(
+                                            value: request.approvedDaysWithPay
+                                                ?.toStringAsFixed(1),
+                                            label: 'days with pay',
                                           ),
                                           pw.SizedBox(height: 2),
-                                          pw.Text(
-                                            request.approvedDaysWithoutPay !=
-                                                    null
-                                                ? '_____ ${request.approvedDaysWithoutPay!.toStringAsFixed(1)} days without pay'
-                                                : '_____ days without pay',
-                                            style: const pw.TextStyle(
-                                              fontSize: _small,
-                                            ),
+                                          _approvalValueLine(
+                                            value: request
+                                                .approvedDaysWithoutPay
+                                                ?.toStringAsFixed(1),
+                                            label: 'days without pay',
                                           ),
                                           pw.SizedBox(height: 2),
-                                          pw.Text(
-                                            _s(
-                                                  request.approvedOtherDetails,
-                                                ).isNotEmpty
-                                                ? '_____ ${_s(request.approvedOtherDetails)}'
-                                                : '_____ others (Specify)',
-                                            style: const pw.TextStyle(
-                                              fontSize: _small,
-                                            ),
+                                          _approvalValueLine(
+                                            value: request.approvedOtherDetails,
+                                            label: 'others (Specify)',
+                                            valueWidth: 52,
                                           ),
                                         ],
                                       ),
@@ -2755,6 +2826,50 @@ class _LeaveRequestPdfFixedEngine {
         },
       ),
     );
+    if (customDetails.isNotEmpty) {
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat(612, 1008, marginAll: 28),
+          build: (_) => [
+            pw.Text(
+              'ADDITIONAL LEAVE INFORMATION',
+              style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text(
+              '${request.leaveTypeLabel} - $fullName',
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+            pw.SizedBox(height: 16),
+            pw.Table(
+              border: pw.TableBorder.all(color: _borderColor, width: 0.6),
+              columnWidths: const {
+                0: pw.FlexColumnWidth(1.1),
+                1: pw.FlexColumnWidth(2.4),
+              },
+              children: [
+                for (final detail in customDetails)
+                  pw.TableRow(
+                    children: [
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(8),
+                        child: pw.Text(
+                          detail.label,
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                        ),
+                      ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(8),
+                        child: pw.Text(detail.value),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
     return doc;
   }
 

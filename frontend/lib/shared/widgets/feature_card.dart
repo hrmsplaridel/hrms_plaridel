@@ -68,7 +68,7 @@ class FeatureCard extends StatefulWidget {
   final IconData icon;
   final VoidCallback onTap;
 
-  /// Shown on the bottom row (defaults to "Open"), aligned right.
+  /// Optional action shown on the bottom row, aligned right.
   final String? actionLabel;
 
   /// Lines of subtitle before ellipsis.
@@ -129,7 +129,7 @@ class _FeatureCardState extends State<FeatureCard>
 
   Widget _buildCard({required double width, required double height}) {
     final navy = AppTheme.primaryNavy;
-    final action = widget.actionLabel ?? 'Open';
+    final action = widget.actionLabel;
     final dark = AppTheme.dashIsDark(context);
     final cardBg = dark ? const Color(0xFF1E2430) : AppTheme.white;
     final hoverCardBg = dark ? const Color(0xFF232A38) : AppTheme.white;
@@ -312,39 +312,48 @@ class _FeatureCardState extends State<FeatureCard>
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                  const SizedBox(height: 10),
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          action,
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 13,
-                                            letterSpacing: 0.15,
-                                            color: navy.withValues(
-                                              alpha: actionAlpha,
-                                            ),
-                                          ),
-                                        ),
-                                        if (widget.showActionArrow) ...[
-                                          const SizedBox(width: 4),
-                                          Transform.translate(
-                                            offset: Offset(arrowOffset * 20, 0),
-                                            child: Icon(
-                                              Icons.arrow_forward_rounded,
-                                              size: 20,
+                                  if (action != null) ...[
+                                    const SizedBox(height: 10),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            action,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 13,
+                                              letterSpacing: 0.15,
                                               color: navy.withValues(
-                                                alpha: lerpDouble(0.72, 1, t)!,
+                                                alpha: actionAlpha,
                                               ),
                                             ),
                                           ),
+                                          if (widget.showActionArrow) ...[
+                                            const SizedBox(width: 4),
+                                            Transform.translate(
+                                              offset: Offset(
+                                                arrowOffset * 20,
+                                                0,
+                                              ),
+                                              child: Icon(
+                                                Icons.arrow_forward_rounded,
+                                                size: 20,
+                                                color: navy.withValues(
+                                                  alpha: lerpDouble(
+                                                    0.72,
+                                                    1,
+                                                    t,
+                                                  )!,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ],
-                                      ],
+                                      ),
                                     ),
-                                  ),
+                                  ],
                                 ],
                               ),
                             ),

@@ -73,7 +73,7 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     const extOk = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.originalname || '');
     const mimeOk = /^image\/(jpeg|png|gif|webp)$/i.test(file.mimetype || '');
-    cb(null, extOk || mimeOk);
+    cb(null, extOk && mimeOk);
   },
 });
 
@@ -98,6 +98,26 @@ const trainingUpload = multer({
   },
 });
 
+function fileSignatureMatches(filePath, ext) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const header = Buffer.alloc(12);
+    const count = fs.readSync(fd, header, 0, header.length, 0);
+    const hex = header.subarray(0, count).toString('hex');
+    if (ext === '.pdf') return header.subarray(0, 5).toString() === '%PDF-';
+    if (ext === '.png') return hex.startsWith('89504e470d0a1a0a');
+    if (ext === '.jpg' || ext === '.jpeg') return hex.startsWith('ffd8ff');
+    if (ext === '.gif') return header.subarray(0, 6).toString() === 'GIF87a' || header.subarray(0, 6).toString() === 'GIF89a';
+    if (ext === '.webp') return header.subarray(0, 4).toString() === 'RIFF' && header.subarray(8, 12).toString() === 'WEBP';
+    return false;
+  } catch (_) {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
 /**
  * POST /api/upload/avatar
  * multipart/form-data: file (image)
@@ -108,6 +128,10 @@ router.post('/avatar', authMiddleware, upload.single('file'), async (req, res) =
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
+    }
+    if (!fileSignatureMatches(req.file.path, path.extname(req.file.filename).toLowerCase())) {
+      removeAvatarFile(req.file.path, 'invalid avatar upload');
+      return res.status(400).json({ error: 'Uploaded file content does not match its image type' });
     }
 
     const relPath = `${AVATAR_SUBDIR}/${req.file.filename}`;
@@ -189,6 +213,15 @@ router.post(
     try {
       if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });
+      }
+      if (!fileSignatureMatches(req.file.path, path.extname(req.file.filename).toLowerCase())) {
+        removeAvatarFile(req.file.path, 'invalid avatar upload');
+        return res.status(400).json({ error: 'Uploaded file content does not match its image type' });
+      }
+      const ext = path.extname(req.file.filename).toLowerCase();
+      if (!fileSignatureMatches(req.file.path, ext)) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: 'Uploaded file content does not match its file type' });
       }
 
       const relPath = `${TRAINING_REPORT_SUBDIR}/${req.file.filename}`;

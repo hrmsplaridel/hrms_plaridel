@@ -204,7 +204,7 @@ class AppTheme {
   ];
 
   // Typography
-  static const String fontFamily = 'Roboto';
+  static const String fontFamily = 'NotoSans';
   static const double heroTitleSize = 32.0;
   static const double sectionTitleSize = 24.0;
   static const double cardTitleSize = 18.0;
@@ -214,6 +214,7 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
+      fontFamily: fontFamily,
       colorScheme: ColorScheme.fromSeed(
         seedColor: primaryNavy,
         primary: primaryNavy,
@@ -264,6 +265,7 @@ class AppTheme {
     const canvas = Color(0xFF12151C);
     return ThemeData(
       useMaterial3: true,
+      fontFamily: fontFamily,
       brightness: Brightness.dark,
       colorScheme: ColorScheme.dark(
         primary: primaryNavyLight,

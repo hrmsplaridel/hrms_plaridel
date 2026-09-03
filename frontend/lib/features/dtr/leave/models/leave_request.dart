@@ -1,4 +1,5 @@
 import 'leave_type.dart';
+import 'leave_type_definition.dart';
 
 /// Workflow status for one leave request.
 enum LeaveRequestStatus {
@@ -120,12 +121,20 @@ class LeaveRequest {
     this.childDeliveryDate,
     this.accidentDate,
     this.calamityDate,
+    this.adoptionParentRole,
+    this.adoptionPlacementDate,
+    this.vawcSupportDocumentType,
+    this.vawcCaseDetails,
+    this.soloParentIdNumber,
+    this.soloParentIdExpiryDate,
     this.womenIllnessDetails,
     this.studyPurpose,
     this.studyPurposeDetails,
     this.otherPurpose,
     this.otherPurposeDetails,
     this.commutation = LeaveCommutationOption.notRequested,
+    this.customDetails = const {},
+    this.employeeDetailSchemaSnapshot = const [],
     this.attachmentPath,
     this.attachmentName,
     this.status = LeaveRequestStatus.pending,
@@ -178,12 +187,20 @@ class LeaveRequest {
   final DateTime? childDeliveryDate;
   final DateTime? accidentDate;
   final DateTime? calamityDate;
+  final AdoptionParentRole? adoptionParentRole;
+  final DateTime? adoptionPlacementDate;
+  final VawcSupportDocumentType? vawcSupportDocumentType;
+  final String? vawcCaseDetails;
+  final String? soloParentIdNumber;
+  final DateTime? soloParentIdExpiryDate;
   final String? womenIllnessDetails;
   final StudyLeavePurpose? studyPurpose;
   final String? studyPurposeDetails;
   final LeaveOtherPurpose? otherPurpose;
   final String? otherPurposeDetails;
   final LeaveCommutationOption commutation;
+  final Map<String, dynamic> customDetails;
+  final List<LeaveCustomFieldDefinition> employeeDetailSchemaSnapshot;
 
   /// Supporting documents uploaded by the employee.
   final String? attachmentPath;
@@ -259,6 +276,42 @@ class LeaveRequest {
             json['calamity_occurrence_date'] ??
             json['calamityOccurrenceDate'],
       ),
+      adoptionParentRole: adoptionParentRoleFromString(
+        json['adoption_parent_role']?.toString() ??
+            json['adoptionParentRole']?.toString() ??
+            json['adoptive_parent_role']?.toString() ??
+            json['adoptiveParentRole']?.toString(),
+      ),
+      adoptionPlacementDate: _parseDate(
+        json['adoption_placement_date'] ??
+            json['adoptionPlacementDate'] ??
+            json['adoption_finalization_date'] ??
+            json['adoptionFinalizationDate'] ??
+            json['papa_date'] ??
+            json['papaDate'],
+      ),
+      vawcSupportDocumentType: vawcSupportDocumentTypeFromString(
+        json['vawc_support_document_type']?.toString() ??
+            json['vawcSupportDocumentType']?.toString() ??
+            json['vawc_document_type']?.toString() ??
+            json['vawcDocumentType']?.toString(),
+      ),
+      vawcCaseDetails:
+          json['vawc_case_details']?.toString() ??
+          json['vawcCaseDetails']?.toString() ??
+          json['vawc_protection_order_details']?.toString() ??
+          json['vawcProtectionOrderDetails']?.toString(),
+      soloParentIdNumber:
+          json['solo_parent_id_number']?.toString() ??
+          json['soloParentIdNumber']?.toString() ??
+          json['solo_parent_id']?.toString() ??
+          json['soloParentId']?.toString(),
+      soloParentIdExpiryDate: _parseDate(
+        json['solo_parent_id_expiry_date'] ??
+            json['soloParentIdExpiryDate'] ??
+            json['solo_parent_id_valid_until'] ??
+            json['soloParentIdValidUntil'],
+      ),
       womenIllnessDetails: json['women_illness_details']?.toString(),
       studyPurpose: studyLeavePurposeFromString(
         json['study_purpose']?.toString(),
@@ -270,6 +323,13 @@ class LeaveRequest {
       otherPurposeDetails: json['other_purpose_details']?.toString(),
       commutation: leaveCommutationOptionFromString(
         json['commutation']?.toString(),
+      ),
+      customDetails: _parseDetailsMap(
+        json['custom_details'] ?? json['customDetails'],
+      ),
+      employeeDetailSchemaSnapshot: leaveCustomFieldDefinitionsFromJson(
+        json['employee_detail_schema_snapshot'] ??
+            json['employeeDetailSchemaSnapshot'],
       ),
       attachmentPath: json['attachment_path']?.toString(),
       attachmentName: json['attachment_name']?.toString(),
@@ -323,12 +383,19 @@ class LeaveRequest {
       'child_delivery_date': _dateOnly(childDeliveryDate),
       'accident_date': _dateOnly(accidentDate),
       'calamity_date': _dateOnly(calamityDate),
+      'adoption_parent_role': adoptionParentRole?.value,
+      'adoption_placement_date': _dateOnly(adoptionPlacementDate),
+      'vawc_support_document_type': vawcSupportDocumentType?.value,
+      'vawc_case_details': _trimOrNull(vawcCaseDetails),
+      'solo_parent_id_number': _trimOrNull(soloParentIdNumber),
+      'solo_parent_id_expiry_date': _dateOnly(soloParentIdExpiryDate),
       'women_illness_details': _trimOrNull(womenIllnessDetails),
       'study_purpose': studyPurpose?.value,
       'study_purpose_details': _trimOrNull(studyPurposeDetails),
       'other_purpose': otherPurpose?.value,
       'other_purpose_details': _trimOrNull(otherPurposeDetails),
       'commutation': commutation.value,
+      'details': customDetails,
       'attachment_path': attachmentPath,
       'attachment_name': attachmentName,
       'status': status.value,
@@ -378,12 +445,20 @@ class LeaveRequest {
     DateTime? childDeliveryDate,
     DateTime? accidentDate,
     DateTime? calamityDate,
+    AdoptionParentRole? adoptionParentRole,
+    DateTime? adoptionPlacementDate,
+    VawcSupportDocumentType? vawcSupportDocumentType,
+    String? vawcCaseDetails,
+    String? soloParentIdNumber,
+    DateTime? soloParentIdExpiryDate,
     String? womenIllnessDetails,
     StudyLeavePurpose? studyPurpose,
     String? studyPurposeDetails,
     LeaveOtherPurpose? otherPurpose,
     String? otherPurposeDetails,
     LeaveCommutationOption? commutation,
+    Map<String, dynamic>? customDetails,
+    List<LeaveCustomFieldDefinition>? employeeDetailSchemaSnapshot,
     String? attachmentPath,
     String? attachmentName,
     LeaveRequestStatus? status,
@@ -432,12 +507,24 @@ class LeaveRequest {
       childDeliveryDate: childDeliveryDate ?? this.childDeliveryDate,
       accidentDate: accidentDate ?? this.accidentDate,
       calamityDate: calamityDate ?? this.calamityDate,
+      adoptionParentRole: adoptionParentRole ?? this.adoptionParentRole,
+      adoptionPlacementDate:
+          adoptionPlacementDate ?? this.adoptionPlacementDate,
+      vawcSupportDocumentType:
+          vawcSupportDocumentType ?? this.vawcSupportDocumentType,
+      vawcCaseDetails: vawcCaseDetails ?? this.vawcCaseDetails,
+      soloParentIdNumber: soloParentIdNumber ?? this.soloParentIdNumber,
+      soloParentIdExpiryDate:
+          soloParentIdExpiryDate ?? this.soloParentIdExpiryDate,
       womenIllnessDetails: womenIllnessDetails ?? this.womenIllnessDetails,
       studyPurpose: studyPurpose ?? this.studyPurpose,
       studyPurposeDetails: studyPurposeDetails ?? this.studyPurposeDetails,
       otherPurpose: otherPurpose ?? this.otherPurpose,
       otherPurposeDetails: otherPurposeDetails ?? this.otherPurposeDetails,
       commutation: commutation ?? this.commutation,
+      customDetails: customDetails ?? this.customDetails,
+      employeeDetailSchemaSnapshot:
+          employeeDetailSchemaSnapshot ?? this.employeeDetailSchemaSnapshot,
       attachmentPath: attachmentPath ?? this.attachmentPath,
       attachmentName: attachmentName ?? this.attachmentName,
       status: status ?? this.status,
@@ -517,5 +604,10 @@ class LeaveRequest {
     if (value == null) return null;
     if (value is num) return value.toDouble();
     return double.tryParse(value.toString());
+  }
+
+  static Map<String, dynamic> _parseDetailsMap(dynamic value) {
+    if (value is! Map) return const {};
+    return Map<String, dynamic>.unmodifiable(Map<String, dynamic>.from(value));
   }
 }

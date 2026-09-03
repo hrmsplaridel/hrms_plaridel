@@ -20,13 +20,43 @@ function buildLeaveActionPayload({ text, memory, leaveType, rangePayload }) {
     {};
   const extracted = extractLeavePrefill(text, memory);
   const leavePrefill = mergePrefill(stored, extracted);
+  const supportedFields = [
+    'reason',
+    'locationDetails',
+    'locationOption',
+    'sickLeaveNature',
+    'sickIllnessDetails',
+    'expectedDeliveryDate',
+    'maternityDeliveryType',
+    'childDeliveryDate',
+    'adoptionPlacementDate',
+    'adoptionFinalizationDate',
+    'adoptionParentRole',
+    'vawcSupportDocumentType',
+    'vawcCaseDetails',
+    'soloParentIdNumber',
+    'soloParentIdExpiryDate',
+    'accidentDate',
+    'calamityDate',
+    'womenIllnessDetails',
+    'studyPurpose',
+    'studyDetails',
+    'studyPurposeDetails',
+    'otherPurpose',
+    'otherPurposeDetails',
+    'commutation',
+  ];
+  const payloadFields = {};
+  for (const key of supportedFields) {
+    const value = leavePrefill[key];
+    if (value == null || value === '') continue;
+    payloadFields[key] = value;
+  }
 
   return {
     ...rangePayload,
     leaveType,
-    ...(leavePrefill.reason ? { reason: leavePrefill.reason } : {}),
-    ...(leavePrefill.locationDetails ? { locationDetails: leavePrefill.locationDetails } : {}),
-    ...(leavePrefill.locationOption ? { locationOption: leavePrefill.locationOption } : {}),
+    ...payloadFields,
   };
 }
 
@@ -41,7 +71,11 @@ function buildLocatorActionPayload({ text, memory, locatorType, rangePayload }) 
 
   return {
     ...rangePayload,
-    locatorType,
+    locatorType:
+      locatorType ||
+      memory?.topics?.locator?.locatorType ||
+      memory?.locatorType ||
+      null,
     ...(slipDate ? { slipDate } : {}),
     ...(locatorPrefill.reason ? { reason: locatorPrefill.reason } : {}),
     ...(locatorPrefill.destination ? { destination: locatorPrefill.destination } : {}),
@@ -54,10 +88,18 @@ function buildLocatorActionPayload({ text, memory, locatorType, rangePayload }) 
 
 function nextTopicPrefill(topic, text, memory, previousTopicState = {}) {
   if (topic === 'leave') {
-    return mergePrefill(previousTopicState.leavePrefill || {}, extractLeavePrefill(text, memory));
+    const stored = mergePrefill(
+      memory?.leavePrefill || {},
+      previousTopicState.leavePrefill || {}
+    );
+    return mergePrefill(stored, extractLeavePrefill(text, memory));
   }
   if (topic === 'locator') {
-    return mergePrefill(previousTopicState.locatorPrefill || {}, extractLocatorPrefill(text, memory));
+    const stored = mergePrefill(
+      memory?.locatorPrefill || {},
+      previousTopicState.locatorPrefill || {}
+    );
+    return mergePrefill(stored, extractLocatorPrefill(text, memory));
   }
   return null;
 }

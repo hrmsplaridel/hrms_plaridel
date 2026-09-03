@@ -16,9 +16,10 @@ class AdminLeaveSectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(isMobile ? 16 : 24),
       decoration: AppTheme.dashSurfaceCard(context, radius: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

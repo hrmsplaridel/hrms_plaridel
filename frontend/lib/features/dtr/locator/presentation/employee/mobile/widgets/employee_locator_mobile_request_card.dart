@@ -42,7 +42,7 @@ class EmployeeLocatorMobileRequestCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: isSelected ? selectedColor : AppTheme.dashPanelOf(context),
             borderRadius: BorderRadius.circular(12),
@@ -78,7 +78,7 @@ class EmployeeLocatorMobileRequestCard extends StatelessWidget {
                             height: 1.2,
                           ),
                         ),
-                        const SizedBox(height: 5),
+                        const SizedBox(height: 4),
                         Text(
                           dateLabel,
                           style: TextStyle(
@@ -90,11 +90,11 @@ class EmployeeLocatorMobileRequestCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   statusPill,
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 office.trim().isEmpty ? 'Location not set' : office,
                 maxLines: 1,
@@ -118,7 +118,7 @@ class EmployeeLocatorMobileRequestCard extends StatelessWidget {
                   ),
                 ),
               ],
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -150,7 +150,7 @@ class _LocatorMobileMetaChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(8),

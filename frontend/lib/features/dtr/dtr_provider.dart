@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/config.dart';
+import 'package:hrms_plaridel/core/api/token_storage.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/api_leave_repository.dart';
@@ -152,6 +152,7 @@ class _DtrRecordsCacheKey {
     required this.departmentId,
     required this.limit,
     required this.offset,
+    required this.recompute,
   });
 
   final String? startDate;
@@ -160,6 +161,7 @@ class _DtrRecordsCacheKey {
   final String? departmentId;
   final int? limit;
   final int? offset;
+  final bool recompute;
 
   @override
   bool operator ==(Object other) {
@@ -169,32 +171,47 @@ class _DtrRecordsCacheKey {
         other.userId == userId &&
         other.departmentId == departmentId &&
         other.limit == limit &&
-        other.offset == offset;
+        other.offset == offset &&
+        other.recompute == recompute;
   }
 
   @override
-  int get hashCode =>
-      Object.hash(startDate, endDate, userId, departmentId, limit, offset);
+  int get hashCode => Object.hash(
+    startDate,
+    endDate,
+    userId,
+    departmentId,
+    limit,
+    offset,
+    recompute,
+  );
 }
 
 class _EmployeeOptionsCacheKey {
   const _EmployeeOptionsCacheKey({
     required this.departmentId,
     required this.includePrivileged,
+    required this.startDate,
+    required this.endDate,
   });
 
   final String? departmentId;
   final bool includePrivileged;
+  final String? startDate;
+  final String? endDate;
 
   @override
   bool operator ==(Object other) {
     return other is _EmployeeOptionsCacheKey &&
         other.departmentId == departmentId &&
-        other.includePrivileged == includePrivileged;
+        other.includePrivileged == includePrivileged &&
+        other.startDate == startDate &&
+        other.endDate == endDate;
   }
 
   @override
-  int get hashCode => Object.hash(departmentId, includePrivileged);
+  int get hashCode =>
+      Object.hash(departmentId, includePrivileged, startDate, endDate);
 }
 
 class _DateRangeCacheKey {
@@ -221,6 +238,9 @@ class EmployeeOption {
     required this.fullName,
     this.employeeNumber,
     this.departmentName,
+    this.shiftPunchMode = 'auto',
+    this.isActive = true,
+    this.employmentStatus,
   });
   final String id;
   final String fullName;
@@ -231,10 +251,61 @@ class EmployeeOption {
   /// From `current_department_name` when [loadEmployees] runs (for analytics grouping).
   final String? departmentName;
 
+  /// Punch mode of the employee's current assigned shift.
+  /// Values: auto, full_day, am_only, pm_only, single_session.
+  final String shiftPunchMode;
+
+  /// Current account status. Historical report lists may include inactive staff.
+  final bool isActive;
+  final String? employmentStatus;
+
+  String get currentStatusLabel {
+    if (isActive) return 'Active';
+    final value = employmentStatus?.trim() ?? '';
+    if (value.isEmpty || value.toLowerCase() == 'active') return 'Inactive';
+    return value
+        .split(RegExp(r'[\s_-]+'))
+        .where((part) => part.isNotEmpty)
+        .map(
+          (part) =>
+              '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+        )
+        .join(' ');
+  }
+
   /// Display as EMP-001, EMP-002, etc., or "—" if null.
   String get displayEmployeeNo => employeeNumber != null
       ? 'EMP-${employeeNumber!.toString().padLeft(3, '0')}'
       : '—';
+}
+
+class EmployeeShiftForDate {
+  const EmployeeShiftForDate({
+    required this.punchMode,
+    required this.expectedPunches,
+    this.startMinutes,
+    this.endMinutes,
+    this.breakEndMinutes,
+  });
+
+  final String punchMode;
+  final Set<String> expectedPunches;
+  final int? startMinutes;
+  final int? endMinutes;
+  final int? breakEndMinutes;
+
+  factory EmployeeShiftForDate.fromJson(Map<String, dynamic> json) {
+    final punches = json['expected_punches'];
+    return EmployeeShiftForDate(
+      punchMode: json['punch_mode']?.toString() ?? 'auto',
+      expectedPunches: punches is List
+          ? punches.map((value) => value.toString()).toSet()
+          : const <String>{},
+      startMinutes: (json['start_minutes'] as num?)?.toInt(),
+      endMinutes: (json['end_minutes'] as num?)?.toInt(),
+      breakEndMinutes: (json['break_end_minutes'] as num?)?.toInt(),
+    );
+  }
 }
 
 /// Simple department for admin filters.
@@ -264,12 +335,25 @@ class DtrProvider extends ChangeNotifier {
     _initWebSocket();
   }
 
-  void _initWebSocket() {
+  Future<void> _initWebSocket() async {
     if (_disposed) return;
     _wsReconnectTimer?.cancel();
     try {
-      final wsUrl =
-          '${ApiConfig.baseUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://')}/ws/biometrics';
+      final token = await TokenStorage.instance.getToken();
+      if (_disposed) return;
+      if (token == null || token.isEmpty) {
+        _scheduleWebSocketReconnect();
+        return;
+      }
+      final base = Uri.parse(ApiConfig.baseUrl);
+      final wsUrl = base
+          .replace(
+            scheme: base.scheme == 'https' ? 'wss' : 'ws',
+            path:
+                '${base.path.endsWith('/') ? base.path.substring(0, base.path.length - 1) : base.path}/ws/biometrics',
+            queryParameters: {...base.queryParameters, 'token': token},
+          )
+          .toString();
       _closeWebSocket();
       final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       _wsChannel = channel;
@@ -336,6 +420,12 @@ class DtrProvider extends ChangeNotifier {
 
   List<TimeRecord> _timeRecords = [];
   List<TimeRecord> get timeRecords => List.unmodifiable(_timeRecords);
+  int _timeRecordTotal = 0;
+  int get timeRecordTotal => _timeRecordTotal;
+  int _timeRecordLimit = 0;
+  int get timeRecordLimit => _timeRecordLimit;
+  int _timeRecordOffset = 0;
+  int get timeRecordOffset => _timeRecordOffset;
 
   /// Admin dashboard analytics window (last 30 days); isolated from [timeRecords] / Time Logs.
   List<TimeRecord> _dashboardAnalyticsRecords = [];
@@ -357,6 +447,7 @@ class DtrProvider extends ChangeNotifier {
   final LeaveRepository _leaveRepository = const ApiLeaveRepository();
   final Map<_DtrRecordsCacheKey, _DtrCacheEntry<List<TimeRecord>>>
   _recordsCache = {};
+  final Map<_DtrRecordsCacheKey, int> _recordTotalCache = {};
   final Map<_EmployeeOptionsCacheKey, _DtrCacheEntry<List<EmployeeOption>>>
   _employeesCache = {};
   final Map<_DateRangeCacheKey, _DtrCacheEntry<Map<String, double>>>
@@ -404,7 +495,7 @@ class DtrProvider extends ChangeNotifier {
   String? _filterDepartmentId;
   String? get filterDepartmentId => _filterDepartmentId;
 
-  /// Today's record for current user (for clock in/out UI).
+  /// Today's biometric attendance record for the current user.
   TimeRecord? _todayRecord;
   TimeRecord? get todayRecord => _todayRecord;
 
@@ -487,6 +578,7 @@ class DtrProvider extends ChangeNotifier {
     String? departmentId,
     int? limit,
     int? offset,
+    bool recompute = false,
   }) {
     return _DtrRecordsCacheKey(
       startDate: _dateKey(startDate),
@@ -495,6 +587,7 @@ class DtrProvider extends ChangeNotifier {
       departmentId: _normalizeOptional(departmentId),
       limit: limit,
       offset: offset,
+      recompute: recompute,
     );
   }
 
@@ -504,11 +597,16 @@ class DtrProvider extends ChangeNotifier {
     return List<TimeRecord>.from(entry.value);
   }
 
-  void _writeRecordsCache(_DtrRecordsCacheKey key, List<TimeRecord> records) {
+  void _writeRecordsCache(
+    _DtrRecordsCacheKey key,
+    List<TimeRecord> records, {
+    int? total,
+  }) {
     _recordsCache[key] = _DtrCacheEntry<List<TimeRecord>>(
       List<TimeRecord>.unmodifiable(records),
       DateTime.now(),
     );
+    _recordTotalCache[key] = total ?? records.length;
   }
 
   /// Clears cached DTR reads. Call this after writes/imports or external DTR refresh events.
@@ -517,6 +615,7 @@ class DtrProvider extends ChangeNotifier {
     bool notify = false,
   }) {
     _recordsCache.clear();
+    _recordTotalCache.clear();
     _leaveDistributionCache.clear();
     _summaryCache = null;
     if (includeReferenceData) {
@@ -572,9 +671,11 @@ class DtrProvider extends ChangeNotifier {
     String? userId,
     String? departmentId,
     int? limit,
+    int? offset,
     bool silent = false,
     bool forDashboardAnalytics = false,
     bool forceRefresh = false,
+    bool recompute = false,
   }) async {
     if (forDashboardAnalytics) {
       await _loadDashboardAnalyticsData(forceRefresh: forceRefresh);
@@ -588,6 +689,8 @@ class DtrProvider extends ChangeNotifier {
       userId: normalizedUserId,
       departmentId: normalizedDepartmentId,
       limit: limit,
+      offset: offset,
+      recompute: recompute,
     );
     final cached = forceRefresh ? null : _readRecordsCache(cacheKey);
     if (cached != null) {
@@ -598,6 +701,9 @@ class DtrProvider extends ChangeNotifier {
       _filterUserId = normalizedUserId;
       _filterDepartmentId = normalizedDepartmentId;
       _timeRecords = cached;
+      _timeRecordTotal = _recordTotalCache[cacheKey] ?? cached.length;
+      _timeRecordLimit = limit ?? cached.length;
+      _timeRecordOffset = offset ?? 0;
       if (!silent) _loading = false;
       notifyListeners();
       return;
@@ -613,15 +719,20 @@ class DtrProvider extends ChangeNotifier {
       _filterEnd = endDate;
       _filterUserId = normalizedUserId;
       _filterDepartmentId = normalizedDepartmentId;
-      final list = await TimeRecordRepo.instance.listForAdmin(
+      final page = await TimeRecordRepo.instance.listPageForAdmin(
         startDate: startDate,
         endDate: endDate,
         userId: normalizedUserId,
         departmentId: normalizedDepartmentId,
         limit: limit,
+        offset: offset,
+        recompute: recompute,
       );
-      _writeRecordsCache(cacheKey, list);
-      _timeRecords = List<TimeRecord>.from(list);
+      _writeRecordsCache(cacheKey, page.items, total: page.total);
+      _timeRecords = List<TimeRecord>.from(page.items);
+      _timeRecordTotal = page.total;
+      _timeRecordLimit = page.limit;
+      _timeRecordOffset = page.offset;
       if (!silent) _loading = false;
       notifyListeners();
     } catch (e) {
@@ -629,10 +740,12 @@ class DtrProvider extends ChangeNotifier {
         _tableMissing = true;
         _error = null;
         _timeRecords = [];
+        _timeRecordTotal = 0;
       } else {
         _error = e.toString();
         _timeRecords =
             []; // Show sample data on any load failure for flexible UI
+        _timeRecordTotal = 0;
       }
       if (!silent) _loading = false;
       notifyListeners();
@@ -678,7 +791,7 @@ class DtrProvider extends ChangeNotifier {
     notifyListeners();
     try {
       _tableMissing = false;
-      final list = await TimeRecordRepo.instance.listForAdmin(
+      final list = await _loadAllAdminTimeRecordPages(
         startDate: startDay,
         endDate: endDay,
       );
@@ -713,6 +826,31 @@ class DtrProvider extends ChangeNotifier {
       _dashboardAnalyticsLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<List<TimeRecord>> _loadAllAdminTimeRecordPages({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? userId,
+    String? departmentId,
+  }) async {
+    const pageSize = 2000;
+    final records = <TimeRecord>[];
+    var offset = 0;
+    while (true) {
+      final page = await TimeRecordRepo.instance.listPageForAdmin(
+        startDate: startDate,
+        endDate: endDate,
+        userId: userId,
+        departmentId: departmentId,
+        limit: pageSize,
+        offset: offset,
+      );
+      records.addAll(page.items);
+      offset += page.items.length;
+      if (page.items.isEmpty || offset >= page.total) break;
+    }
+    return records;
   }
 
   Future<Map<String, double>> _loadLeaveDistributionForWindow(
@@ -841,7 +979,7 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Load today's record for current user (clock in/out).
+  /// Load today's biometric attendance record for the current user.
   Future<void> loadTodayRecord() async {
     final uid = _userId;
     if (uid == null) return;
@@ -872,6 +1010,19 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
+  Future<EmployeeShiftForDate> fetchEmployeeShiftForDate({
+    required String employeeId,
+    required DateTime date,
+  }) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/dtr-daily-summary/shift-for-date',
+      queryParameters: {'employee_id': employeeId, 'date': _dateKey(date)},
+    );
+    final data = res.data;
+    if (data == null) throw StateError('No shift information returned');
+    return EmployeeShiftForDate.fromJson(data);
+  }
+
   /// Load employee list for admin filter.
   ///
   /// By default this keeps the historical behavior (only regular users).
@@ -879,13 +1030,19 @@ class DtrProvider extends ChangeNotifier {
   /// also appear in the selector.
   Future<void> loadEmployees({
     String? departmentId,
+    DateTime? startDate,
+    DateTime? endDate,
     bool includePrivileged = false,
     bool forceRefresh = false,
   }) async {
     final normalizedDepartmentId = _normalizeOptional(departmentId);
+    final normalizedStartDate = _dateKey(startDate);
+    final normalizedEndDate = _dateKey(endDate);
     final cacheKey = _EmployeeOptionsCacheKey(
       departmentId: normalizedDepartmentId,
       includePrivileged: includePrivileged,
+      startDate: normalizedStartDate,
+      endDate: normalizedEndDate,
     );
     final cached = _employeesCache[cacheKey];
     if (!forceRefresh && cached != null && cached.isFresh(_referenceCacheTtl)) {
@@ -900,6 +1057,10 @@ class DtrProvider extends ChangeNotifier {
       }
       if (normalizedDepartmentId != null) {
         params['department_id'] = normalizedDepartmentId;
+      }
+      if (normalizedStartDate != null && normalizedEndDate != null) {
+        params['start_date'] = normalizedStartDate;
+        params['end_date'] = normalizedEndDate;
       }
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employees',
@@ -916,6 +1077,9 @@ class DtrProvider extends ChangeNotifier {
               ? empNum
               : (empNum != null ? int.tryParse(empNum.toString()) : null),
           departmentName: m['current_department_name']?.toString(),
+          shiftPunchMode: m['current_shift_punch_mode']?.toString() ?? 'auto',
+          isActive: m['is_active'] != false,
+          employmentStatus: m['employment_status']?.toString(),
         );
       }).toList();
       _employeesCache[cacheKey] = _DtrCacheEntry<List<EmployeeOption>>(
@@ -965,231 +1129,6 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Clock in (AM In) for current user.
-  Future<bool> clockIn() async {
-    final uid = _userId;
-    if (uid == null) return false;
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      final existing = await TimeRecordRepo.instance.getTodayForUser(uid);
-      if (existing != null) {
-        _error = 'Already clocked in today.';
-        _loading = false;
-        notifyListeners();
-        return false;
-      }
-      final record = TimeRecord(
-        userId: uid,
-        recordDate: today,
-        timeIn: now,
-        breakOut: null,
-        breakIn: null,
-        timeOut: null,
-        totalHours: null,
-        status: 'present',
-      );
-      await TimeRecordRepo.instance.insert(record);
-      invalidateCachedDtrData();
-      await loadTodayRecord();
-      if (_filterUserId == null && _filterStart == null) {
-        await loadTimeRecordsForAdmin(forceRefresh: true);
-      }
-      _loading = false;
-      notifyListeners();
-      return true;
-    } on DioException catch (e) {
-      _error = (e.response?.data is Map && e.response?.data['error'] != null)
-          ? e.response!.data['error'] as String
-          : e.message ?? 'Clock-in failed.';
-      _loading = false;
-      notifyListeners();
-      return false;
-    } catch (e) {
-      _error = userFacingApiError(e);
-      _loading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Clock AM Out (lunch out).
-  Future<bool> clockAmOut() async {
-    final uid = _userId;
-    if (uid == null) return false;
-    final existing =
-        _todayRecord ?? await TimeRecordRepo.instance.getTodayForUser(uid);
-    if (existing == null || existing.breakOut != null) {
-      _error = existing == null
-          ? 'No clock-in found for today.'
-          : 'Already clocked out (AM Out).';
-      notifyListeners();
-      return false;
-    }
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final now = DateTime.now();
-      final updated = existing.copyWith(breakOut: now);
-      await TimeRecordRepo.instance.update(updated);
-      invalidateCachedDtrData();
-      await loadTodayRecord();
-      await loadTimeRecordsForUser(forceRefresh: true);
-      _loading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = userFacingApiError(e);
-      _loading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// PM In as first punch (afternoon arrival) - no AM punch, AM is absent.
-  Future<bool> clockPmInAsFirst() async {
-    final uid = _userId;
-    if (uid == null) return false;
-    final existing = await TimeRecordRepo.instance.getTodayForUser(uid);
-    if (existing != null) {
-      _error = 'Already have a record for today. Use PM In or PM Out.';
-      notifyListeners();
-      return false;
-    }
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      final record = TimeRecord(
-        userId: uid,
-        recordDate: today,
-        timeIn: null,
-        breakOut: null,
-        breakIn: now,
-        timeOut: null,
-        totalHours: null,
-        status: 'absent',
-      );
-      await TimeRecordRepo.instance.insert(record);
-      invalidateCachedDtrData();
-      await loadTodayRecord();
-      if (_filterUserId == null && _filterStart == null) {
-        await loadTimeRecordsForAdmin(forceRefresh: true);
-      }
-      _loading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = userFacingApiError(e);
-      _loading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Clock PM In (return from lunch).
-  Future<bool> clockPmIn() async {
-    final uid = _userId;
-    if (uid == null) return false;
-    final existing =
-        _todayRecord ?? await TimeRecordRepo.instance.getTodayForUser(uid);
-    if (existing == null ||
-        existing.breakOut == null ||
-        existing.breakIn != null) {
-      _error = existing == null
-          ? 'No clock-in found for today.'
-          : existing.breakOut == null
-          ? 'Please clock AM Out first.'
-          : 'Already clocked in (PM In).';
-      notifyListeners();
-      return false;
-    }
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final now = DateTime.now();
-      final updated = existing.copyWith(breakIn: now);
-      await TimeRecordRepo.instance.update(updated);
-      invalidateCachedDtrData();
-      await loadTodayRecord();
-      await loadTimeRecordsForUser(forceRefresh: true);
-      _loading = false;
-      notifyListeners();
-      return true;
-    } on DioException catch (e) {
-      _error = (e.response?.data is Map && e.response?.data['error'] != null)
-          ? e.response!.data['error'] as String
-          : e.message ?? 'PM clock-in failed.';
-      _loading = false;
-      notifyListeners();
-      return false;
-    } catch (e) {
-      _error = userFacingApiError(e);
-      _loading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Clock out (PM Out) for current user.
-  Future<bool> clockOut() async {
-    final uid = _userId;
-    if (uid == null) return false;
-    final existing =
-        _todayRecord ?? await TimeRecordRepo.instance.getTodayForUser(uid);
-    if (existing == null || existing.timeOut != null) {
-      _error = existing == null
-          ? 'No clock-in found for today.'
-          : 'Already clocked out.';
-      notifyListeners();
-      return false;
-    }
-    if (existing.breakOut != null && existing.breakIn == null) {
-      _error = 'Please clock PM In first.';
-      notifyListeners();
-      return false;
-    }
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      final now = DateTime.now();
-      double? hours;
-      if (existing.timeIn != null) {
-        if (existing.breakOut != null && existing.breakIn != null) {
-          hours =
-              (existing.breakOut!.difference(existing.timeIn!).inMinutes +
-                  now.difference(existing.breakIn!).inMinutes) /
-              60.0;
-        } else {
-          hours = now.difference(existing.timeIn!).inMinutes / 60.0;
-        }
-      } else if (existing.breakIn != null) {
-        hours = now.difference(existing.breakIn!).inMinutes / 60.0;
-      }
-      final updated = existing.copyWith(timeOut: now, totalHours: hours);
-      await TimeRecordRepo.instance.update(updated);
-      invalidateCachedDtrData();
-      await loadTodayRecord();
-      await loadTimeRecordsForUser(forceRefresh: true);
-      _loading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = userFacingApiError(e);
-      _loading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
   /// Add manual entry (admin).
   Future<bool> addManualEntry(TimeRecord record) async {
     _loading = true;
@@ -1218,13 +1157,19 @@ class DtrProvider extends ChangeNotifier {
   }
 
   /// Update entry (admin).
-  Future<bool> updateEntry(TimeRecord record) async {
+  Future<bool> updateEntry(
+    TimeRecord record, {
+    bool editUnderlyingAttendance = false,
+  }) async {
     if (record.id == null) return false;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      await TimeRecordRepo.instance.update(record);
+      await TimeRecordRepo.instance.update(
+        record,
+        editUnderlyingAttendance: editUnderlyingAttendance,
+      );
       invalidateCachedDtrData();
       await loadTimeRecordsForAdmin(
         startDate: _filterStart,
@@ -1245,13 +1190,40 @@ class DtrProvider extends ChangeNotifier {
     }
   }
 
-  /// Delete entry (admin).
-  Future<bool> deleteEntry(String id) async {
+  /// Recalculate one saved DTR entry with the current shift and attendance policy.
+  Future<bool> recalculateEntry(String id) async {
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      await TimeRecordRepo.instance.delete(id);
+      await TimeRecordRepo.instance.recalculate(id);
+      invalidateCachedDtrData();
+      await loadTimeRecordsForAdmin(
+        startDate: _filterStart,
+        endDate: _filterEnd,
+        userId: _filterUserId,
+        departmentId: _filterDepartmentId,
+        forceRefresh: true,
+      );
+      await loadSummary(forceRefresh: true);
+      _loading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = userFacingApiError(e);
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Delete a processed entry with an administrator-provided audit reason.
+  Future<bool> deleteEntry(String id, {required String reason}) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      await TimeRecordRepo.instance.delete(id, reason: reason);
       invalidateCachedDtrData();
       await loadTimeRecordsForAdmin(
         startDate: _filterStart,
@@ -1266,6 +1238,36 @@ class DtrProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _error = e.toString();
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Restore a deleted processed entry from its preserved audit snapshot.
+  Future<bool> restoreDeletedEntry(
+    String deletionId, {
+    required String reason,
+  }) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      await TimeRecordRepo.instance.restoreDeleted(deletionId, reason: reason);
+      invalidateCachedDtrData();
+      await loadTimeRecordsForAdmin(
+        startDate: _filterStart,
+        endDate: _filterEnd,
+        userId: _filterUserId,
+        departmentId: _filterDepartmentId,
+        forceRefresh: true,
+      );
+      await loadSummary(forceRefresh: true);
+      _loading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
       return false;

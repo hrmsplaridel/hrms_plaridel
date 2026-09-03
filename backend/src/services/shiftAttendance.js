@@ -45,6 +45,15 @@ function getShiftType(shiftInfo) {
   return 'full_day';
 }
 
+function getExpectedPmStartMinutes(shiftInfo) {
+  const type = getShiftType(shiftInfo);
+  if (type === 'pm_only') return shiftInfo?.startMinutes ?? null;
+  if (type === 'full_day') {
+    return shiftInfo?.breakEndMinutes ?? ONE_PM_MINUTES;
+  }
+  return null;
+}
+
 function getExpectedWorkMinutes(shiftInfo) {
   if (!shiftInfo || shiftInfo.startMinutes == null || shiftInfo.endMinutes == null) {
     return 0;
@@ -57,6 +66,107 @@ function getExpectedWorkMinutes(shiftInfo) {
       ? Math.max(0, shiftInfo.breakEndMinutes - NOON_MINUTES)
       : 60;
   return Math.max(0, spanMinutes - lunchMinutes);
+}
+
+/** Expected work minutes that remain after a whole- or partial-day holiday. */
+function getExpectedWorkMinutesForCoverage(shiftInfo, coverage) {
+  const fullMinutes = getExpectedWorkMinutes(shiftInfo);
+  const normalizedCoverage = String(coverage || '').trim().toLowerCase();
+  if (!normalizedCoverage || normalizedCoverage === 'none') return fullMinutes;
+  if (normalizedCoverage === 'whole_day') return 0;
+
+  const type = getShiftType(shiftInfo);
+  if (normalizedCoverage === 'am_only') {
+    if (type === 'am_only') return 0;
+    if (type === 'pm_only') return fullMinutes;
+    if (type === 'full_day') {
+      const pmStart = getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
+      return Math.max(0, (shiftInfo.endMinutes ?? pmStart) - pmStart);
+    }
+    if (type === 'single_session') {
+      const start = shiftInfo.startMinutes ?? NOON_MINUTES;
+      const end = shiftInfo.endMinutes ?? start;
+      return Math.max(0, end - Math.max(start, NOON_MINUTES));
+    }
+  }
+
+  if (normalizedCoverage === 'pm_only') {
+    if (type === 'pm_only') return 0;
+    if (type === 'am_only') return fullMinutes;
+    if (type === 'full_day') {
+      return Math.max(0, getExpectedAmEndMinutes(shiftInfo) - shiftInfo.startMinutes);
+    }
+    if (type === 'single_session') {
+      const start = shiftInfo.startMinutes ?? NOON_MINUTES;
+      const end = shiftInfo.endMinutes ?? start;
+      return Math.max(0, Math.min(end, NOON_MINUTES) - start);
+    }
+  }
+
+  return fullMinutes;
+}
+
+function getExpectedAmEndMinutes(shiftInfo) {
+  if (!shiftInfo) return NOON_MINUTES;
+  const configured =
+    shiftInfo.breakStartMinutes ??
+    shiftInfo.break_start_minutes ??
+    shiftInfo.breakStart ??
+    shiftInfo.break_start;
+  const parsed = Number(configured);
+  return Number.isFinite(parsed) ? parsed : NOON_MINUTES;
+}
+
+/**
+ * Calculate undertime from completed clock-out segments.
+ *
+ * Full-day shifts have two possible early departures:
+ * AM Out before the expected AM end, and PM Out before shift end.
+ * The current shift schema does not store break_start, so full-day AM
+ * work ends at noon unless a caller supplies breakStartMinutes.
+ */
+function computeClockOutUndertimeMinutes({
+  shiftInfo,
+  breakOutMinutes = null,
+  timeOutMinutes = null,
+  evaluateAm = true,
+  evaluatePm = true,
+  coveredSegments = [],
+} = {}) {
+  if (!shiftInfo || shiftInfo.endMinutes == null) return 0;
+
+  const type = getShiftType(shiftInfo);
+  const covered = new Set(
+    (Array.isArray(coveredSegments) ? coveredSegments : [])
+      .map((segment) => String(segment).trim().toUpperCase())
+  );
+  const breakOut = breakOutMinutes == null ? null : Number(breakOutMinutes);
+  const timeOut = timeOutMinutes == null ? null : Number(timeOutMinutes);
+  const hasBreakOut = breakOut != null && Number.isFinite(breakOut);
+  const hasTimeOut = timeOut != null && Number.isFinite(timeOut);
+  let total = 0;
+
+  if (type === 'full_day') {
+    if (evaluateAm && !covered.has('AM OUT') && hasBreakOut) {
+      total += Math.max(0, getExpectedAmEndMinutes(shiftInfo) - breakOut);
+    }
+    if (evaluatePm && !covered.has('PM OUT') && hasTimeOut) {
+      total += Math.max(0, shiftInfo.endMinutes - timeOut);
+    }
+    return total;
+  }
+
+  if (type === 'am_only') {
+    if (evaluateAm && !covered.has('AM OUT') && hasBreakOut) {
+      total += Math.max(0, shiftInfo.endMinutes - breakOut);
+    }
+    return total;
+  }
+
+  if (evaluatePm && !covered.has('PM OUT') && hasTimeOut) {
+    total += Math.max(0, shiftInfo.endMinutes - timeOut);
+  }
+  return total;
 }
 
 function getShiftExpectedLogs(shiftInfo) {
@@ -170,9 +280,7 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
   } else {
     const firstPunchMins = minutesFromMidnightInTimeZone(punches[0], timeZone);
     const pmStartThreshold =
-      shiftInfo && Number.isFinite(shiftInfo.breakEndMinutes)
-        ? shiftInfo.breakEndMinutes
-        : NOON_MINUTES;
+      getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
     const isAfternoonFirstPunch =
       firstPunchMins != null && firstPunchMins >= pmStartThreshold;
 
@@ -232,7 +340,11 @@ module.exports = {
   normalizePunchMode,
   ensureShiftPunchModeColumn,
   getShiftType,
+  getExpectedPmStartMinutes,
   getExpectedWorkMinutes,
+  getExpectedWorkMinutesForCoverage,
+  getExpectedAmEndMinutes,
+  computeClockOutUndertimeMinutes,
   getShiftExpectedLogs,
   getExpectedLogsForDay,
   minutesFromMidnightInTimeZone,

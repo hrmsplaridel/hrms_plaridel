@@ -162,6 +162,10 @@ const LEAVE_TYPE_RULES = {
   },
 };
 
+const MATERNITY_MINIMUM_NOTICE_DAYS = 30;
+const ADOPTION_PRIMARY_PARENT_DAYS = 60;
+const ADOPTION_MALE_SPOUSE_DAYS = 7;
+
 /** Purposes under "others" that block employee filing (HR/admin process only). */
 const SPECIAL_PROCESS_PURPOSES = ['monetizationOfLeaveCredits', 'terminalLeave'];
 
@@ -210,6 +214,231 @@ function normalizeIsoDateString(value) {
   return isoDateToUtcDayMs(text) == null ? null : text;
 }
 
+function readDetailValue(details, keys) {
+  if (!details || typeof details !== 'object') return null;
+  for (const key of keys) {
+    const value = details[key];
+    if (value != null && `${value}`.trim() !== '') return `${value}`.trim();
+  }
+  return null;
+}
+
+function normalizeSickLeaveNature(value) {
+  const normalized = (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-/()]/g, '');
+  if (normalized === 'inhospital' || normalized === 'hospital') {
+    return 'inHospital';
+  }
+  if (normalized === 'outpatient' || normalized === 'outpatientcare') {
+    return 'outPatient';
+  }
+  return null;
+}
+
+function normalizeLeaveLocationOption(value) {
+  const normalized = (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-/()]/g, '');
+  if (
+    normalized === 'withinphilippines' ||
+    normalized === 'philippines' ||
+    normalized === 'local'
+  ) {
+    return 'withinPhilippines';
+  }
+  if (normalized === 'abroad' || normalized === 'foreign' || normalized === 'outsidephilippines') {
+    return 'abroad';
+  }
+  return null;
+}
+
+function normalizeAdoptionParentRole(value) {
+  const normalized = (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-/()]/g, '');
+  if (!normalized) return null;
+  if (
+    normalized === 'primaryadoptiveparent' ||
+    normalized === 'adoptivemother' ||
+    normalized === 'mother' ||
+    normalized === 'qualifiedfemale' ||
+    normalized === 'femaleemployee' ||
+    normalized === 'singlemale' ||
+    normalized === 'singlemaleadopter' ||
+    normalized === 'singlemaleemployee'
+  ) {
+    return 'primaryAdoptiveParent';
+  }
+  if (
+    normalized === 'legitimatemalespouse' ||
+    normalized === 'malespouse' ||
+    normalized === 'spouse' ||
+    normalized === 'adoptivefather' ||
+    normalized === 'father'
+  ) {
+    return 'legitimateMaleSpouse';
+  }
+  return null;
+}
+
+function adoptionMaxDaysForParentRole(value) {
+  return normalizeAdoptionParentRole(value) === 'legitimateMaleSpouse'
+    ? ADOPTION_MALE_SPOUSE_DAYS
+    : ADOPTION_PRIMARY_PARENT_DAYS;
+}
+
+function normalizeVawcSupportDocumentType(value) {
+  const normalized = (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-/()]/g, '');
+  if (!normalized) return null;
+  if (normalized === 'protectionorder' || normalized === 'po') {
+    return 'protectionOrder';
+  }
+  if (
+    normalized === 'policereport' ||
+    normalized === 'prosecutorreport' ||
+    normalized === 'policeorprosecutorreport'
+  ) {
+    return 'policeOrProsecutorReport';
+  }
+  if (normalized === 'medicalcertificate') {
+    return 'medicalCertificate';
+  }
+  if (
+    normalized === 'othersupportingdocument' ||
+    normalized === 'other' ||
+    normalized === 'others'
+  ) {
+    return 'otherSupportingDocument';
+  }
+  return null;
+}
+
+function requiredLeaveDetailsFilingError({ leaveType, leaveTypeLabel, details = {} }) {
+  const label = (leaveTypeLabel || leaveType || 'This leave type').toString().trim();
+
+  if (leaveType === 'sickLeave') {
+    const nature = normalizeSickLeaveNature(
+      readDetailValue(details, ['sick_leave_nature', 'sickLeaveNature'])
+    );
+    if (!nature) {
+      return `${label} requires the sick leave nature (In Hospital or Out Patient).`;
+    }
+    const illnessDetails = readDetailValue(details, [
+      'sick_illness_details',
+      'sickIllnessDetails',
+      'illness_details',
+      'illnessDetails',
+    ]);
+    if (!illnessDetails) {
+      return `${label} requires illness details.`;
+    }
+  }
+
+  if (leaveType === 'vacationLeave' || leaveType === 'specialPrivilegeLeave') {
+    const location = normalizeLeaveLocationOption(
+      readDetailValue(details, ['location_option', 'locationOption'])
+    );
+    if (!location) {
+      return `${label} requires a location option (Within the Philippines or Abroad).`;
+    }
+    const locationDetails = readDetailValue(details, [
+      'location_details',
+      'locationDetails',
+    ]);
+    if (!locationDetails) {
+      return `${label} requires location details.`;
+    }
+  }
+
+  if (leaveType === 'adoptionLeave') {
+    const role = normalizeAdoptionParentRole(
+      readDetailValue(details, [
+        'adoption_parent_role',
+        'adoptionParentRole',
+        'adoptive_parent_role',
+        'adoptiveParentRole',
+      ])
+    );
+    if (!role) {
+      return `${label} requires the adoption leave eligibility.`;
+    }
+    const placementDate = normalizeIsoDateString(
+      readDetailValue(details, [
+        'adoption_placement_date',
+        'adoptionPlacementDate',
+        'adoption_finalization_date',
+        'adoptionFinalizationDate',
+        'papa_date',
+        'papaDate',
+      ])
+    );
+    if (!placementDate) {
+      return `${label} requires the PAPA / adoption placement date.`;
+    }
+  }
+
+  if (leaveType === 'tenDayVawcLeave') {
+    const supportType = normalizeVawcSupportDocumentType(
+      readDetailValue(details, [
+        'vawc_support_document_type',
+        'vawcSupportDocumentType',
+        'vawc_document_type',
+        'vawcDocumentType',
+      ])
+    );
+    if (!supportType) {
+      return `${label} requires the VAWC supporting document type.`;
+    }
+    const caseDetails = readDetailValue(details, [
+      'vawc_case_details',
+      'vawcCaseDetails',
+      'vawc_protection_order_details',
+      'vawcProtectionOrderDetails',
+      'protection_order_details',
+      'protectionOrderDetails',
+    ]);
+    if (!caseDetails) {
+      return `${label} requires VAWC case or protection order details.`;
+    }
+  }
+
+  if (leaveType === 'soloParentLeave') {
+    const idNumber = readDetailValue(details, [
+      'solo_parent_id_number',
+      'soloParentIdNumber',
+      'solo_parent_id',
+      'soloParentId',
+    ]);
+    if (!idNumber) {
+      return `${label} requires the Solo Parent ID number.`;
+    }
+    const expiryDate = normalizeIsoDateString(
+      readDetailValue(details, [
+        'solo_parent_id_expiry_date',
+        'soloParentIdExpiryDate',
+        'solo_parent_id_valid_until',
+        'soloParentIdValidUntil',
+      ])
+    );
+    if (!expiryDate) {
+      return `${label} requires a valid Solo Parent ID expiry date.`;
+    }
+  }
+
+  return null;
+}
+
 function leaveEventDateFilingError({
   leaveType,
   leaveTypeLabel,
@@ -227,6 +456,10 @@ function leaveEventDateFilingError({
     if (!expected) {
       return `${label} requires the expected delivery date.`;
     }
+    const noticeDays = calendarDayDifference(expected);
+    if (noticeDays != null && noticeDays < MATERNITY_MINIMUM_NOTICE_DAYS) {
+      return `${label} must be filed at least ${MATERNITY_MINIMUM_NOTICE_DAYS} days before the expected delivery date.`;
+    }
     return null;
   }
 
@@ -243,6 +476,21 @@ function leaveEventDateFilingError({
     }
     if (endDiff > 60) {
       return `${label} must be availed within 60 days from delivery.`;
+    }
+    return null;
+  }
+
+  if (leaveType === 'adoptionLeave') {
+    const placement = normalizeIsoDateString(
+      eventDates.adoptionPlacementDate || eventDates.adoptionFinalizationDate
+    );
+    if (!placement) {
+      return `${label} requires the PAPA / adoption placement date.`;
+    }
+    const startDiff = calendarDaySpan(placement, start);
+    if (startDiff == null) return 'Invalid PAPA / adoption placement date.';
+    if (startDiff < 0) {
+      return `${label} cannot start before the PAPA / adoption placement date.`;
     }
     return null;
   }
@@ -274,6 +522,17 @@ function leaveEventDateFilingError({
     }
     if (endDiff > 30) {
       return `${label} must be used within 30 days from the calamity occurrence.`;
+    }
+    return null;
+  }
+
+  if (leaveType === 'soloParentLeave') {
+    const expiry = normalizeIsoDateString(eventDates.soloParentIdExpiryDate);
+    if (!expiry) return `${label} requires a valid Solo Parent ID expiry date.`;
+    const today = todayIsoDateInTimeZone();
+    if (expiry < today) return 'Solo Parent ID is already expired.';
+    if (expiry < start) {
+      return 'Solo Parent ID must be valid through the start date of the leave.';
     }
     return null;
   }
@@ -314,9 +573,12 @@ function maternityMaxDaysForDeliveryType(value) {
   return normalizeMaternityDeliveryType(value) === 'caesareanSection' ? 115 : 105;
 }
 
-function effectiveMaxDaysForRule({ rule, leaveType, maternityDeliveryType }) {
+function effectiveMaxDaysForRule({ rule, leaveType, maternityDeliveryType, adoptionParentRole }) {
   if (leaveType === 'maternityLeave') {
     return maternityMaxDaysForDeliveryType(maternityDeliveryType);
+  }
+  if (leaveType === 'adoptionLeave') {
+    return adoptionMaxDaysForParentRole(adoptionParentRole);
   }
   const maxDays = rule?.max_days;
   if (maxDays == null || maxDays === '') return null;
@@ -338,6 +600,173 @@ function minimumAdvanceDaysFilingError({ rule, leaveType, leaveTypeLabel, startD
   return `${label} must be filed at least ${minimumDays} ${unit} before the intended leave date.`;
 }
 
+function defaultSexEligibilityForLeaveType(leaveType) {
+  if (
+    leaveType === 'maternityLeave' ||
+    leaveType === 'tenDayVawcLeave' ||
+    leaveType === 'specialLeaveBenefitsForWomen'
+  ) {
+    return 'female';
+  }
+  if (leaveType === 'paternityLeave') return 'male';
+  return 'any';
+}
+
+function normalizeSexEligibilityForLeave(value, leaveType) {
+  const normalized = (value || '').toString().trim().toLowerCase();
+  if (normalized === 'female_only' || normalized === 'femaleonly') return 'female';
+  if (normalized === 'male_only' || normalized === 'maleonly') return 'male';
+  if (normalized === 'both' || normalized === 'all' || normalized === 'bothsexes') {
+    return 'any';
+  }
+  if (normalized === 'female' || normalized === 'male' || normalized === 'any') {
+    return normalized;
+  }
+  return defaultSexEligibilityForLeaveType(leaveType);
+}
+
+function normalizeUserSexForLeave(value) {
+  const normalized = (value || '').toString().trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'f' || normalized === 'female') return 'female';
+  if (normalized === 'm' || normalized === 'male') return 'male';
+  return normalized;
+}
+
+function leaveTypeSexEligibilityError({
+  leaveType,
+  leaveTypeLabel,
+  sexEligibility,
+  userSex,
+}) {
+  const label = (leaveTypeLabel || leaveType || 'This leave type').toString().trim();
+  const sex = normalizeUserSexForLeave(userSex);
+  const eligibility = normalizeSexEligibilityForLeave(sexEligibility, leaveType);
+  if (eligibility === 'female') {
+    if (!sex) {
+      return `${label} requires your profile sex to be set to Female. Please update your profile or contact HR.`;
+    }
+    if (sex !== 'female') return `${label} can only be filed by female accounts.`;
+  }
+  if (eligibility === 'male') {
+    if (!sex) {
+      return `${label} requires your profile sex to be set to Male. Please update your profile or contact HR.`;
+    }
+    if (sex !== 'male') return `${label} can only be filed by male accounts.`;
+  }
+  return null;
+}
+
+function validateEmployeeLeaveRequestWithRule(opts) {
+  const {
+    rule,
+    leaveType,
+    otherPurpose,
+    startDateStr,
+    endDateStr,
+    numberOfDays,
+    userSex,
+    maternityDeliveryType,
+    adoptionParentRole,
+    eventDates,
+    details,
+    enforceEventDateRules = false,
+    enforceRequiredDetails = enforceEventDateRules,
+  } = opts;
+
+  if (!rule) return { valid: true };
+
+  if (Object.prototype.hasOwnProperty.call(opts, 'userSex')) {
+    const sexEligibilityError = leaveTypeSexEligibilityError({
+      leaveType,
+      leaveTypeLabel: rule.display_name,
+      sexEligibility: rule.sex_eligibility,
+      userSex,
+    });
+    if (sexEligibilityError) return { valid: false, error: sexEligibilityError };
+  }
+
+  if (rule.admin_only) {
+    return {
+      valid: false,
+      error: 'This leave type cannot be filed by employees. It is admin-assigned only.',
+    };
+  }
+  if (rule.employee_can_file === false) {
+    return {
+      valid: false,
+      error: 'This leave type is not available for employee filing.',
+    };
+  }
+  if (leaveType === 'others' && otherPurpose) {
+    const purpose = String(otherPurpose).trim().toLowerCase();
+    if (
+      SPECIAL_PROCESS_PURPOSES.some((item) =>
+        purpose.includes(item.toLowerCase().replace(/_/g, ''))
+      )
+    ) {
+      return {
+        valid: false,
+        error:
+          'Monetization of Leave Credits and Terminal Leave are HR/admin processes. Please contact HR.',
+      };
+    }
+  }
+  if (rule.allows_past_dates === false && startDateStr) {
+    const today = todayIsoDateInTimeZone();
+    if (startDateStr < today) {
+      return {
+        valid: false,
+        error: 'Past-date filing is not allowed for this leave type. Please file in advance.',
+      };
+    }
+  }
+
+  const advanceError = minimumAdvanceDaysFilingError({
+    rule,
+    leaveType,
+    leaveTypeLabel: rule.display_name,
+    startDateStr,
+  });
+  if (advanceError) return { valid: false, error: advanceError };
+
+  if (enforceRequiredDetails) {
+    const requiredDetailsError = requiredLeaveDetailsFilingError({
+      leaveType,
+      leaveTypeLabel: rule.display_name,
+      details,
+    });
+    if (requiredDetailsError) return { valid: false, error: requiredDetailsError };
+  }
+  if (enforceEventDateRules) {
+    const eventDateError = leaveEventDateFilingError({
+      leaveType,
+      leaveTypeLabel: rule.display_name,
+      startDateStr,
+      endDateStr,
+      eventDates,
+    });
+    if (eventDateError) return { valid: false, error: eventDateError };
+  }
+
+  const maxDays = effectiveMaxDaysForRule({
+    rule,
+    leaveType,
+    maternityDeliveryType,
+    adoptionParentRole,
+  });
+  if (maxDays != null && numberOfDays != null) {
+    const days = parseFloat(numberOfDays);
+    if (!Number.isNaN(days) && days > maxDays) {
+      return {
+        valid: false,
+        error: `This leave type allows a maximum of ${maxDays} working days. Requested: ${days.toFixed(1)}.`,
+      };
+    }
+  }
+  return { valid: true };
+}
+
 /**
  * Validate leave request for employee filing (draft/submit/put).
  * @param {object} opts
@@ -356,84 +785,27 @@ function validateEmployeeLeaveRequest(opts) {
     startDateStr,
     endDateStr,
     numberOfDays,
-    hasAttachment = false,
     maternityDeliveryType,
+    adoptionParentRole,
     eventDates,
+    details,
+    enforceRequiredDetails = true,
   } = opts;
   const rule = getRule(leaveType);
-
-  if (!rule) {
-    return { valid: true }; // unknown type, skip rule-based validation
-  }
-
-  // Admin-only: employee cannot file
-  if (rule.admin_only) {
-    return { valid: false, error: 'This leave type cannot be filed by employees. It is admin-assigned only.' };
-  }
-
-  // Special process: monetization/terminal under "others"
-  if (leaveType === 'others' && otherPurpose) {
-    const purpose = String(otherPurpose).trim();
-    if (SPECIAL_PROCESS_PURPOSES.some((p) => purpose.toLowerCase().includes(p.toLowerCase().replace(/_/g, '')))) {
-      return {
-        valid: false,
-        error: 'Monetization of Leave Credits and Terminal Leave are HR/admin processes. Please contact HR.',
-      };
-    }
-  }
-
-  if (rule.employee_can_file === false) {
-    return { valid: false, error: 'This leave type is not available for employee filing.' };
-  }
-
-  // Past-date check
-  if (rule.allows_past_dates === false && startDateStr) {
-    const today = todayIsoDateInTimeZone();
-    if (startDateStr < today) {
-      return {
-        valid: false,
-        error: 'Past-date filing is not allowed for this leave type. Please file in advance.',
-      };
-    }
-  }
-
-  const advanceError = minimumAdvanceDaysFilingError({
+  return validateEmployeeLeaveRequestWithRule({
     rule,
     leaveType,
-    startDateStr,
-  });
-  if (advanceError) {
-    return { valid: false, error: advanceError };
-  }
-
-  const eventDateError = leaveEventDateFilingError({
-    leaveType,
-    leaveTypeLabel: rule.display_name,
+    otherPurpose,
     startDateStr,
     endDateStr,
-    eventDates,
-  });
-  if (eventDateError) {
-    return { valid: false, error: eventDateError };
-  }
-
-  // Max days check
-  const maxDays = effectiveMaxDaysForRule({
-    rule,
-    leaveType,
+    numberOfDays,
     maternityDeliveryType,
+    adoptionParentRole,
+    eventDates,
+    details,
+    enforceRequiredDetails,
+    enforceEventDateRules: true,
   });
-  if (maxDays != null && numberOfDays != null) {
-    const days = parseFloat(numberOfDays);
-    if (!Number.isNaN(days) && days > maxDays) {
-      return {
-        valid: false,
-        error: `This leave type allows a maximum of ${maxDays} working days. Requested: ${days.toFixed(1)}.`,
-      };
-    }
-  }
-
-  return { valid: true };
 }
 
 /**
@@ -476,11 +848,18 @@ module.exports = {
   SPECIAL_PROCESS_PURPOSES,
   getRule,
   validateEmployeeLeaveRequest,
+  validateEmployeeLeaveRequestWithRule,
+  leaveTypeSexEligibilityError,
+  normalizeUserSexForLeave,
   minimumAdvanceDaysFilingError,
   leaveEventDateFilingError,
   normalizeMaternityDeliveryType,
   maternityMaxDaysForDeliveryType,
+  normalizeAdoptionParentRole,
+  adoptionMaxDaysForParentRole,
+  normalizeVawcSupportDocumentType,
   effectiveMaxDaysForRule,
+  requiredLeaveDetailsFilingError,
   isEmployeeFileable,
   mustBlockMissingAttachment,
 };

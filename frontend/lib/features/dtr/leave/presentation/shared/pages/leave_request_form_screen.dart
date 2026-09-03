@@ -7,7 +7,9 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_annual_entitlement_preview.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
@@ -44,14 +46,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   static const int _maxAttachmentBytes = 10 * 1024 * 1024;
-
+  static const int _maternityMinimumNoticeDays = 30;
   late LeaveType _leaveType;
   late String _leaveTypeName;
   List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
   List<LeaveBalance> _creditBalances = const [];
-  List<LeaveRequest> _creditRequests = const [];
   bool _loadingLeaveTypes = false;
-  bool _loadingCreditContext = false;
   LeaveLocationOption? _locationOption;
   SickLeaveNature? _sickLeaveNature;
   MaternityDeliveryType? _maternityDeliveryType;
@@ -59,6 +59,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   DateTime? _childDeliveryDate;
   DateTime? _accidentDate;
   DateTime? _calamityDate;
+  AdoptionParentRole? _adoptionParentRole;
+  DateTime? _adoptionPlacementDate;
+  VawcSupportDocumentType? _vawcSupportDocumentType;
+  DateTime? _soloParentIdExpiryDate;
   StudyLeavePurpose? _studyPurpose;
   LeaveOtherPurpose? _otherPurpose;
   LeaveCommutationOption _commutation = LeaveCommutationOption.notRequested;
@@ -73,11 +77,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   bool _workingDaysLoading = false;
   String? _workingDaysHelperText;
   int _workingDaysRequestSerial = 0;
+  LeaveAnnualEntitlementPreview? _annualEntitlementPreview;
+  Map<String, dynamic> _customDetailValues = {};
 
   late final TextEditingController _customLeaveTypeController;
   late final TextEditingController _reasonController;
   late final TextEditingController _locationDetailsController;
   late final TextEditingController _sickIllnessController;
+  late final TextEditingController _vawcCaseDetailsController;
+  late final TextEditingController _soloParentIdNumberController;
   late final TextEditingController _womenIllnessController;
   late final TextEditingController _studyPurposeDetailsController;
   late final TextEditingController _otherPurposeDetailsController;
@@ -97,11 +105,18 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _childDeliveryDate = initial?.childDeliveryDate;
     _accidentDate = initial?.accidentDate;
     _calamityDate = initial?.calamityDate;
+    _adoptionParentRole = initial?.adoptionParentRole;
+    _adoptionPlacementDate = initial?.adoptionPlacementDate;
+    _vawcSupportDocumentType = initial?.vawcSupportDocumentType;
+    _soloParentIdExpiryDate = initial?.soloParentIdExpiryDate;
     _studyPurpose = initial?.studyPurpose;
     _otherPurpose = initial?.otherPurpose;
     _commutation = initial?.commutation ?? LeaveCommutationOption.notRequested;
     _startDate = initial?.startDate;
     _endDate = initial?.endDate;
+    _customDetailValues = Map<String, dynamic>.from(
+      initial?.customDetails ?? const {},
+    );
 
     _customLeaveTypeController = TextEditingController(
       text: initial?.customLeaveTypeText ?? '',
@@ -112,6 +127,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     );
     _sickIllnessController = TextEditingController(
       text: initial?.sickIllnessDetails ?? '',
+    );
+    _vawcCaseDetailsController = TextEditingController(
+      text: initial?.vawcCaseDetails ?? '',
+    );
+    _soloParentIdNumberController = TextEditingController(
+      text: initial?.soloParentIdNumber ?? '',
     );
     _womenIllnessController = TextEditingController(
       text: initial?.womenIllnessDetails ?? '',
@@ -129,9 +150,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _loadLeaveTypes();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadCreditContext();
-      if (_startDate != null &&
-          _endDate != null &&
-          initial?.workingDaysApplied == null) {
+      if (_startDate != null && _endDate != null) {
         _syncWorkingDaysFromDates();
       }
     });
@@ -143,6 +162,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _reasonController.dispose();
     _locationDetailsController.dispose();
     _sickIllnessController.dispose();
+    _vawcCaseDetailsController.dispose();
+    _soloParentIdNumberController.dispose();
     _womenIllnessController.dispose();
     _studyPurposeDetailsController.dispose();
     _otherPurposeDetailsController.dispose();
@@ -172,14 +193,21 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _childDeliveryDate = null;
     _accidentDate = null;
     _calamityDate = null;
+    _adoptionParentRole = null;
+    _adoptionPlacementDate = null;
+    _vawcSupportDocumentType = null;
+    _soloParentIdExpiryDate = null;
     _studyPurpose = null;
     _otherPurpose = null;
     _customLeaveTypeController.clear();
     _locationDetailsController.clear();
     _sickIllnessController.clear();
+    _vawcCaseDetailsController.clear();
+    _soloParentIdNumberController.clear();
     _womenIllnessController.clear();
     _studyPurposeDetailsController.clear();
     _otherPurposeDetailsController.clear();
+    _customDetailValues.clear();
   }
 
   LeaveTypeDefinition? get _selectedLeaveTypeDefinition {
@@ -187,6 +215,59 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       if (item.name == _leaveTypeName) return item;
     }
     return null;
+  }
+
+  List<LeaveCustomFieldDefinition> get _selectedCustomFields =>
+      _selectedLeaveTypeDefinition?.employeeDetailSchema ?? const [];
+
+  Map<String, dynamic> _customDetailsForSubmission() {
+    final output = <String, dynamic>{};
+    for (final field in _selectedCustomFields) {
+      final raw = _customDetailValues[field.key];
+      if (raw == null) continue;
+      if (raw is String) {
+        final value = raw.trim();
+        if (value.isEmpty) continue;
+        output[field.key] = field.type == LeaveCustomFieldType.number
+            ? (num.tryParse(value) ?? value)
+            : value;
+      } else {
+        output[field.key] = raw;
+      }
+    }
+    return output;
+  }
+
+  bool _validateCustomDetails() {
+    for (final field in _selectedCustomFields) {
+      final value = _customDetailValues[field.key];
+      final blank = value == null || (value is String && value.trim().isEmpty);
+      if (field.required && blank) {
+        _showMessage('${field.label} is required.');
+        return false;
+      }
+      if (blank) continue;
+      if ((field.type == LeaveCustomFieldType.text ||
+              field.type == LeaveCustomFieldType.longText) &&
+          value is String &&
+          value.trim().length >
+              (field.maxLength ??
+                  (field.type == LeaveCustomFieldType.longText ? 2000 : 255))) {
+        _showMessage('${field.label} is too long.');
+        return false;
+      }
+      if (field.type == LeaveCustomFieldType.number &&
+          num.tryParse(value.toString()) == null) {
+        _showMessage('${field.label} must be a number.');
+        return false;
+      }
+      if (field.type == LeaveCustomFieldType.select &&
+          !field.options.contains(value.toString())) {
+        _showMessage('Please choose a valid ${field.label}.');
+        return false;
+      }
+    }
+    return true;
   }
 
   String get _selectedLeaveTypeLabel {
@@ -210,15 +291,22 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   double? get _selectedMaxDays {
-    final maternityMaxDays = maxWorkingDaysForLeaveDetails(
+    final detailMaxDays = maxWorkingDaysForLeaveDetails(
       _leaveType,
       maternityDeliveryType: _maternityDeliveryType,
+      adoptionParentRole: _adoptionParentRole,
     );
-    if (_leaveType == LeaveType.maternityLeave) {
-      return maternityMaxDays?.toDouble();
+    if (_leaveType == LeaveType.maternityLeave ||
+        _leaveType == LeaveType.adoptionLeave) {
+      return detailMaxDays?.toDouble();
     }
     final def = _selectedLeaveTypeDefinition;
     return def?.maxDays ?? _leaveType.maxDays?.toDouble();
+  }
+
+  String get _selectedEntitlementBasis {
+    return _selectedLeaveTypeDefinition?.entitlementBasis ??
+        LeaveEntitlementBasis.forLeaveType(_leaveTypeName);
   }
 
   int? get _selectedMinimumAdvanceDays {
@@ -335,6 +423,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           _selectLeaveTypeDefinition(fallback, resetDetails: false);
         }
       });
+      if (_startDate != null && _endDate != null) {
+        _syncWorkingDaysFromDates();
+      }
     } catch (_) {
       if (mounted) setState(() => _loadingLeaveTypes = false);
     }
@@ -343,22 +434,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   Future<void> _loadCreditContext() async {
     final userId = context.read<AuthProvider>().user?.id;
     if (userId == null || userId.isEmpty) return;
-    setState(() => _loadingCreditContext = true);
     try {
       final repository = context.read<LeaveProvider>().repository;
-      final balancesFuture = repository.getBalancesForUser(userId);
-      final requestsFuture = repository.listMyRequests(userId, limit: 500);
-      final balances = await balancesFuture;
-      final requests = await requestsFuture;
+      final balances = await repository.getBalancesForUser(userId);
       if (!mounted) return;
       setState(() {
         _creditBalances = balances;
-        _creditRequests = requests;
-        _loadingCreditContext = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => _loadingCreditContext = false);
-    }
+    } catch (_) {}
   }
 
   void _selectLeaveTypeDefinition(
@@ -447,66 +530,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return null;
   }
 
-  double _specialPrivilegeUsedForYear(int year) {
-    final currentId = (_savedRequest ?? widget.initialRequest)?.id;
-    return _creditRequests
-        .where((request) {
-          if (request.effectiveLeaveTypeName !=
-              LeaveType.specialPrivilegeLeave.value) {
-            return false;
-          }
-          if (currentId != null &&
-              currentId.isNotEmpty &&
-              request.id == currentId) {
-            return false;
-          }
-          if (!(request.status.isPending ||
-              request.status == LeaveRequestStatus.approved)) {
-            return false;
-          }
-          final start = request.startDate;
-          final end = request.endDate;
-          if (start == null || end == null) return false;
-          return start.year <= year && end.year >= year;
-        })
-        .fold<double>(0, (total, request) {
-          final days = _workingDaysInYear(
-            request.startDate,
-            request.endDate,
-            year,
-          );
-          return total + (days > 0 ? days : request.workingDaysApplied ?? 0);
-        });
-  }
-
-  double _workingDaysInYear(DateTime? start, DateTime? end, int year) {
-    if (start == null || end == null) return 0;
-    var d = DateTime(
-      start.year < year ? year : start.year,
-      start.year < year ? 1 : start.month,
-      start.year < year ? 1 : start.day,
-    );
-    final last = DateTime(
-      end.year > year ? year : end.year,
-      end.year > year ? 12 : end.month,
-      end.year > year ? 31 : end.day,
-    );
-    var count = 0;
-    while (!d.isAfter(last)) {
-      if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
-        count += 1;
-      }
-      d = d.add(const Duration(days: 1));
-    }
-    return count.toDouble();
-  }
-
   String _formatDays(double days) {
     return days % 1 == 0 ? days.toStringAsFixed(0) : days.toStringAsFixed(1);
   }
 
   Future<void> _saveDraft() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_validateCustomDetails()) return;
     final accountEligibilityMessage = _selectedAccountEligibilityMessage();
     if (accountEligibilityMessage != null) {
       _showMessage(accountEligibilityMessage);
@@ -551,12 +581,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       return;
     }
 
+    if (!_validateRequiredLeaveDetails()) return;
+
     if (_leaveType == LeaveType.maternityLeave &&
         _maternityDeliveryType == null) {
       _showMessage('Please choose the maternity leave classification.');
       return;
     }
     if (!_validateEventDateRules()) return;
+    if (!_validateAnnualQuotaLimit()) return;
     if (_shouldShowAttachmentSection() && !_hasAttachment()) {
       _showMessage('Attachment is required for this leave type.');
       return;
@@ -599,6 +632,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _workingDaysLoading = false;
         _workingDaysHelperText = 'Select dates to auto-compute';
         _workingDaysController.clear();
+        _annualEntitlementPreview = null;
       });
       return;
     }
@@ -608,6 +642,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _workingDaysLoading = true;
       _workingDaysHelperText = 'Computing from assigned shift and holidays...';
       _workingDaysController.text = fallback?.toString() ?? '';
+      _annualEntitlementPreview = null;
     });
 
     try {
@@ -616,17 +651,27 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         queryParameters: {
           'start_date': _dateOnly(start),
           'end_date': _dateOnly(end),
+          'leave_type': _leaveTypeName,
         },
       );
       final data = res.data ?? const <String, dynamic>{};
       final raw = data['working_days_applied'] ?? data['workingDaysApplied'];
       final days = raw is num ? raw.toDouble() : double.tryParse('$raw');
+      final annualRaw = data['annual_entitlement'];
+      final annualPreview = annualRaw is Map
+          ? LeaveAnnualEntitlementPreview.fromJson(
+              Map<String, dynamic>.from(annualRaw),
+            )
+          : null;
       if (!mounted || serial != _workingDaysRequestSerial) return;
       if (days == null) {
         setState(() {
           _workingDaysLoading = false;
           _workingDaysHelperText =
-              'Could not compute from shift; using Mon-Fri fallback';
+              _selectedEntitlementBasis == LeaveEntitlementBasis.annual
+              ? 'Could not verify shift-aware annual entitlement'
+              : 'Could not compute from shift; using Mon-Fri fallback';
+          _annualEntitlementPreview = null;
         });
         return;
       }
@@ -642,13 +687,17 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _workingDaysLoading = false;
         _workingDaysController.text = _formatWorkingDays(days);
         _workingDaysHelperText = '$helper: ${_formatWorkingDays(days)} day(s)';
+        _annualEntitlementPreview = annualPreview;
       });
     } catch (_) {
       if (!mounted || serial != _workingDaysRequestSerial) return;
       setState(() {
         _workingDaysLoading = false;
         _workingDaysHelperText =
-            'Server estimate unavailable; using Mon-Fri fallback';
+            _selectedEntitlementBasis == LeaveEntitlementBasis.annual
+            ? 'Server estimate unavailable; annual entitlement cannot be verified'
+            : 'Server estimate unavailable; using Mon-Fri fallback';
+        _annualEntitlementPreview = null;
       });
     }
   }
@@ -665,6 +714,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   bool _hasLeaveRequestId() {
     final id = (_savedRequest ?? widget.initialRequest)?.id;
     return id != null && id.trim().isNotEmpty;
+  }
+
+  bool _canModifyAttachment() {
+    final status = (_savedRequest ?? widget.initialRequest)?.status;
+    return status == null ||
+        status == LeaveRequestStatus.draft ||
+        status == LeaveRequestStatus.returned;
   }
 
   /// Visible only when an attachment is mandatory: sick leave ≥5 working days,
@@ -713,6 +769,66 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return true;
   }
 
+  bool _validateRequiredLeaveDetails() {
+    if (_leaveType == LeaveType.sickLeave) {
+      if (_sickLeaveNature == null) {
+        _showMessage('Please choose the sick leave nature.');
+        return false;
+      }
+      if (_sickIllnessController.text.trim().isEmpty) {
+        _showMessage('Please specify the illness details.');
+        return false;
+      }
+    }
+
+    if (_leaveType == LeaveType.vacationLeave ||
+        _leaveType == LeaveType.specialPrivilegeLeave) {
+      if (_locationOption == null) {
+        _showMessage('Please choose the location for this leave request.');
+        return false;
+      }
+      if (_locationDetailsController.text.trim().isEmpty) {
+        _showMessage('Please specify the location details.');
+        return false;
+      }
+    }
+
+    if (_leaveType == LeaveType.adoptionLeave) {
+      if (_adoptionParentRole == null) {
+        _showMessage('Please choose the adoption leave eligibility.');
+        return false;
+      }
+      if (_adoptionPlacementDate == null) {
+        _showMessage('Please enter the PAPA / adoption placement date.');
+        return false;
+      }
+    }
+
+    if (_leaveType == LeaveType.tenDayVawcLeave) {
+      if (_vawcSupportDocumentType == null) {
+        _showMessage('Please choose the VAWC supporting document type.');
+        return false;
+      }
+      if (_vawcCaseDetailsController.text.trim().isEmpty) {
+        _showMessage('Please enter the VAWC case or protection order details.');
+        return false;
+      }
+    }
+
+    if (_leaveType == LeaveType.soloParentLeave) {
+      if (_soloParentIdNumberController.text.trim().isEmpty) {
+        _showMessage('Please enter the Solo Parent ID number.');
+        return false;
+      }
+      if (_soloParentIdExpiryDate == null) {
+        _showMessage('Please enter the Solo Parent ID expiry date.');
+        return false;
+      }
+    }
+
+    return _validateCustomDetails();
+  }
+
   DateTime _onlyDate(DateTime value) =>
       DateTime(value.year, value.month, value.day);
 
@@ -728,6 +844,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       final expected = _expectedDeliveryDate;
       if (expected == null) {
         _showMessage('Please enter the expected delivery date.');
+        return false;
+      }
+      final noticeDays = _calendarDaysFrom(DateTime.now(), expected);
+      if (noticeDays < _maternityMinimumNoticeDays) {
+        _showMessage(
+          'Maternity Leave must be filed at least $_maternityMinimumNoticeDays days before the expected delivery date.',
+        );
         return false;
       }
       return true;
@@ -750,6 +873,22 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       if (endDiff > 60) {
         _showMessage(
           'Paternity Leave must be availed within 60 days from delivery.',
+        );
+        return false;
+      }
+      return true;
+    }
+
+    if (_leaveType == LeaveType.adoptionLeave) {
+      final placement = _adoptionPlacementDate;
+      if (placement == null) {
+        _showMessage('Please enter the PAPA / adoption placement date.');
+        return false;
+      }
+      final startDiff = _calendarDaysFrom(placement, start);
+      if (startDiff < 0) {
+        _showMessage(
+          'Adoption Leave cannot start before the PAPA / adoption placement date.',
         );
         return false;
       }
@@ -800,22 +939,61 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       return true;
     }
 
+    if (_leaveType == LeaveType.soloParentLeave) {
+      final expiry = _soloParentIdExpiryDate;
+      if (expiry == null) {
+        _showMessage('Please enter the Solo Parent ID expiry date.');
+        return false;
+      }
+      final today = _onlyDate(DateTime.now());
+      if (_onlyDate(expiry).isBefore(today)) {
+        _showMessage('Solo Parent ID is already expired.');
+        return false;
+      }
+      if (_onlyDate(expiry).isBefore(_onlyDate(start))) {
+        _showMessage(
+          'Solo Parent ID must be valid through the start date of the leave.',
+        );
+        return false;
+      }
+      return true;
+    }
+
     return true;
+  }
+
+  bool _validateAnnualQuotaLimit() {
+    if (_selectedEntitlementBasis != LeaveEntitlementBasis.annual ||
+        _selectedMaxDays == null) {
+      return true;
+    }
+
+    final preview = _annualEntitlementPreview;
+    if (preview == null || preview.leaveType != _leaveTypeName) {
+      _showMessage(
+        'Annual entitlement could not be verified from your assigned shift and holidays. Please reselect the dates and try again.',
+      );
+      return false;
+    }
+    final rejectedYear = preview.firstRejectedYear;
+    if (rejectedYear == null) return true;
+    _showMessage(
+      rejectedYear.errorMessage ??
+          '$_selectedLeaveTypeLabel exceeds the remaining annual entitlement for ${rejectedYear.year}.',
+    );
+    return false;
   }
 
   String _maternityExpectedDeliveryHelper() {
     final expected = _expectedDeliveryDate;
     if (expected == null) {
-      return 'Used for HR 30-day notice tracking.';
+      return 'Submission requires at least 30 days before the expected delivery date.';
     }
     final diff = _calendarDaysFrom(DateTime.now(), expected);
-    if (diff >= 30) {
+    if (diff >= _maternityMinimumNoticeDays) {
       return 'Meets the 30-day HR notice window.';
     }
-    if (diff >= 0) {
-      return 'Less than 30 days before expected delivery; HR will review the notice context.';
-    }
-    return 'Expected delivery date is already past; HR will review the notice context.';
+    return 'Less than 30 days before expected delivery; submission will be blocked.';
   }
 
   /// Fills CSC header fields (name, office, position, salary, date filed) from
@@ -965,6 +1143,24 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         calamityDate: _leaveType == LeaveType.specialEmergencyCalamityLeave
             ? _calamityDate
             : null,
+        adoptionParentRole: _leaveType == LeaveType.adoptionLeave
+            ? _adoptionParentRole
+            : null,
+        adoptionPlacementDate: _leaveType == LeaveType.adoptionLeave
+            ? _adoptionPlacementDate
+            : null,
+        vawcSupportDocumentType: _leaveType == LeaveType.tenDayVawcLeave
+            ? _vawcSupportDocumentType
+            : null,
+        vawcCaseDetails: _leaveType == LeaveType.tenDayVawcLeave
+            ? _vawcCaseDetailsController.text.trim()
+            : null,
+        soloParentIdNumber: _leaveType == LeaveType.soloParentLeave
+            ? _soloParentIdNumberController.text.trim()
+            : null,
+        soloParentIdExpiryDate: _leaveType == LeaveType.soloParentLeave
+            ? _soloParentIdExpiryDate
+            : null,
         womenIllnessDetails:
             _leaveType == LeaveType.specialLeaveBenefitsForWomen
             ? _womenIllnessController.text.trim()
@@ -974,6 +1170,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         otherPurpose: _leaveType == LeaveType.others ? _otherPurpose : null,
         otherPurposeDetails: _otherPurposeDetailsController.text.trim(),
         commutation: _commutation,
+        customDetails: _customDetailsForSubmission(),
         attachmentName:
             _savedRequest?.attachmentName ?? initial?.attachmentName,
         attachmentPath:
@@ -1123,7 +1320,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                         _leaveType,
                                       );
                                     }
+                                    _annualEntitlementPreview = null;
                                   });
+                                  if (_startDate != null && _endDate != null) {
+                                    _syncWorkingDaysFromDates();
+                                  }
                                 }
                               },
                             ),
@@ -1358,27 +1559,34 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Widget _buildCreditPolicyPanel() {
     final policy = _selectedCreditPolicy;
-    final isSpecialPrivilege =
-        _leaveTypeName == LeaveType.specialPrivilegeLeave.value;
+    final entitlementBasis = _selectedEntitlementBasis;
 
     IconData icon = Icons.info_outline_rounded;
     String title = 'Credit handling';
     String message;
 
-    if (isSpecialPrivilege) {
-      final year = _startDate?.year ?? DateTime.now().year;
-      final used = _specialPrivilegeUsedForYear(year);
-      final remaining = (3 - used).clamp(0, 3).toDouble();
+    if (entitlementBasis == LeaveEntitlementBasis.compliance) {
+      final requiredDays = _selectedMaxDays;
+      icon = Icons.fact_check_outlined;
+      title = 'Mandatory/Forced Leave Compliance';
+      message = requiredDays == null
+          ? 'This is a compliance requirement, not a separate leave credit balance. Approved days are charged against Vacation Leave credits.'
+          : 'Annual compliance requirement: ${_formatDays(requiredDays)} working day(s). '
+                'This is not a separate leave credit balance. Approved days are charged against Vacation Leave credits.';
+    } else if (entitlementBasis == LeaveEntitlementBasis.annual &&
+        policy == 'none') {
+      final preview = _annualEntitlementPreview;
       icon = Icons.event_available_outlined;
-      title = 'Special Privilege Leave';
-      message = _loadingCreditContext
+      title = _selectedLeaveTypeLabel;
+      message = _workingDaysLoading
           ? 'Checking yearly entitlement...'
-          : '${_formatDays(remaining)} of 3 day(s) remaining for $year. This leave does not deduct VL or SL credits.';
-    } else if (policy == 'none') {
-      icon = Icons.remove_done_outlined;
-      message =
-          'No leave credits required. This request will not deduct Vacation or Sick Leave credits.';
-    } else {
+          : _startDate == null || _endDate == null
+          ? 'Select leave dates to check your shift-aware annual entitlement.'
+          : preview == null || preview.leaveType != _leaveTypeName
+          ? 'Annual entitlement information is temporarily unavailable. Reselect the dates before submitting.'
+          : '${preview.years.map((year) => '${year.year}: ${_formatDays(year.limitDays)} entitled, ${_formatDays(year.approvedDays)} approved, ${_formatDays(year.pendingDays)} pending, ${_formatDays(year.requestedDays)} in this request, ${_formatDays(year.remainingAfterRequest)} remaining after this request.').join(' ')} '
+                'Calculated from your assigned shift and holidays. This leave does not deduct VL or SL credits.';
+    } else if (policy != 'none') {
       final bucket = _selectedCreditBucket;
       final balance = _balanceForBucket(bucket);
       final bucketLabel = switch (bucket) {
@@ -1390,6 +1598,28 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       message = balance == null
           ? 'Deducts from $bucketLabel credits. No balance row is available yet.'
           : 'Deducts from $bucketLabel credits. Available: ${balance.availableDays.toStringAsFixed(1)} day(s), pending: ${balance.pendingDays.toStringAsFixed(1)}.';
+    } else if (entitlementBasis == LeaveEntitlementBasis.perEvent) {
+      final maximum = _selectedMaxDays;
+      icon = Icons.event_note_outlined;
+      title = 'Event-based entitlement';
+      message = maximum == null
+          ? 'Available only for a qualifying event, subject to its requirements and approval. This is not a leave credit balance and does not deduct VL or SL credits.'
+          : 'Maximum: up to ${_formatDays(maximum)} working day(s) per qualifying event, subject to its requirements and approval. '
+                'This is not a leave credit balance and does not deduct VL or SL credits.';
+    } else if (entitlementBasis == LeaveEntitlementBasis.perRequest) {
+      final maximum = _selectedMaxDays;
+      icon = Icons.description_outlined;
+      title = 'Request-based entitlement';
+      message = maximum == null
+          ? 'Eligibility and approval are evaluated for each request. This is not a leave credit balance and does not deduct VL or SL credits.'
+          : 'Maximum: up to ${_formatDays(maximum)} working day(s) per approved request. '
+                'This is not a leave credit balance and does not deduct VL or SL credits.';
+    } else if (policy == 'none') {
+      icon = Icons.remove_done_outlined;
+      message =
+          'No leave credits required. This request will not deduct Vacation or Sick Leave credits.';
+    } else {
+      message = 'Leave policy information is not available.';
     }
 
     return Container(
@@ -1684,6 +1914,120 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           'Special Emergency Leave must be used within 30 days from this occurrence.',
         ),
       ]);
+    } else if (_leaveType == LeaveType.adoptionLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        _buildDatePicker(
+          label: 'PAPA / Adoption Placement Date',
+          value: _adoptionPlacementDate,
+          onChanged: (d) => setState(() => _adoptionPlacementDate = d),
+        ),
+        _buildHelperText('Required supporting date for adoption leave review.'),
+        const SizedBox(height: 16),
+        Text(
+          'Adoption Leave Eligibility',
+          style: TextStyle(
+            fontWeight: FontWeight.w500,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final option in AdoptionParentRole.values)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => setState(() => _adoptionParentRole = option),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _adoptionParentRole == option
+                        ? AppTheme.primaryNavy
+                        : AppTheme.dashHairlineOf(context),
+                  ),
+                  color: _adoptionParentRole == option
+                      ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+                      : AppTheme.dashPanelOf(context),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _adoptionParentRole == option
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: _adoptionParentRole == option
+                          ? AppTheme.primaryNavy
+                          : AppTheme.dashTextSecondaryOf(context),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(option.displayName)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ]);
+    } else if (_leaveType == LeaveType.tenDayVawcLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        DropdownButtonFormField<VawcSupportDocumentType>(
+          initialValue: _vawcSupportDocumentType,
+          decoration: _inputDecoration('Supporting document type'),
+          isExpanded: true,
+          items: VawcSupportDocumentType.values
+              .map(
+                (option) => DropdownMenuItem(
+                  value: option,
+                  child: Text(option.displayName),
+                ),
+              )
+              .toList(),
+          onChanged: (value) =>
+              setState(() => _vawcSupportDocumentType = value),
+          validator: (_) =>
+              _leaveType == LeaveType.tenDayVawcLeave &&
+                  _vawcSupportDocumentType == null
+              ? 'Required'
+              : null,
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: _vawcCaseDetailsController,
+          maxLines: 2,
+          decoration: _inputDecoration('Case / protection order details'),
+          validator: (v) =>
+              _leaveType == LeaveType.tenDayVawcLeave &&
+                  (v == null || v.trim().isEmpty)
+              ? 'Required'
+              : null,
+        ),
+      ]);
+    } else if (_leaveType == LeaveType.soloParentLeave) {
+      children.addAll([
+        const SizedBox(height: 16),
+        TextFormField(
+          controller: _soloParentIdNumberController,
+          decoration: _inputDecoration('Solo Parent ID Number'),
+          validator: (v) =>
+              _leaveType == LeaveType.soloParentLeave &&
+                  (v == null || v.trim().isEmpty)
+              ? 'Required'
+              : null,
+        ),
+        const SizedBox(height: 12),
+        _buildDatePicker(
+          label: 'Solo Parent ID Expiry Date',
+          value: _soloParentIdExpiryDate,
+          onChanged: (d) => setState(() => _soloParentIdExpiryDate = d),
+        ),
+        _buildHelperText('Solo Parent ID must be valid for the leave date.'),
+      ]);
     } else if (_leaveType == LeaveType.specialLeaveBenefitsForWomen) {
       children.addAll([
         const SizedBox(height: 16),
@@ -1729,6 +2073,24 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       ]);
     }
 
+    if (_selectedCustomFields.isNotEmpty) {
+      children.addAll([
+        const Divider(height: 32),
+        Text(
+          'Additional Fields',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 12),
+        for (final field in _selectedCustomFields) ...[
+          _buildCustomDetailField(field),
+          const SizedBox(height: 12),
+        ],
+      ]);
+    }
+
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1737,8 +2099,104 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     );
   }
 
+  Widget _buildCustomDetailField(LeaveCustomFieldDefinition field) {
+    final label = field.required ? '${field.label} *' : field.label;
+    final value = _customDetailValues[field.key];
+    switch (field.type) {
+      case LeaveCustomFieldType.date:
+        return _buildDatePicker(
+          label: label,
+          value: value == null ? null : DateTime.tryParse(value.toString()),
+          onChanged: (date) => setState(() {
+            if (date == null) {
+              _customDetailValues.remove(field.key);
+            } else {
+              _customDetailValues[field.key] = _dateOnly(date);
+            }
+          }),
+        );
+      case LeaveCustomFieldType.boolean:
+        return DropdownButtonFormField<bool>(
+          key: ValueKey('custom-$_leaveTypeName-${field.key}'),
+          initialValue: value is bool ? value : null,
+          decoration: _inputDecoration(label),
+          items: const [
+            DropdownMenuItem(value: true, child: Text('Yes')),
+            DropdownMenuItem(value: false, child: Text('No')),
+          ],
+          onChanged: (next) => setState(() {
+            if (next == null) {
+              _customDetailValues.remove(field.key);
+            } else {
+              _customDetailValues[field.key] = next;
+            }
+          }),
+          validator: (next) => field.required && next == null
+              ? '${field.label} is required'
+              : null,
+        );
+      case LeaveCustomFieldType.select:
+        final selected = field.options.contains(value?.toString())
+            ? value.toString()
+            : null;
+        return DropdownButtonFormField<String>(
+          key: ValueKey('custom-$_leaveTypeName-${field.key}-$selected'),
+          initialValue: selected,
+          isExpanded: true,
+          decoration: _inputDecoration(label),
+          items: field.options
+              .map(
+                (option) =>
+                    DropdownMenuItem(value: option, child: Text(option)),
+              )
+              .toList(),
+          onChanged: (next) => setState(() {
+            if (next == null) {
+              _customDetailValues.remove(field.key);
+            } else {
+              _customDetailValues[field.key] = next;
+            }
+          }),
+          validator: (next) => field.required && (next ?? '').isEmpty
+              ? '${field.label} is required'
+              : null,
+        );
+      case LeaveCustomFieldType.number:
+      case LeaveCustomFieldType.text:
+      case LeaveCustomFieldType.longText:
+        return TextFormField(
+          key: ValueKey('custom-$_leaveTypeName-${field.key}'),
+          initialValue: value?.toString() ?? '',
+          keyboardType: field.type == LeaveCustomFieldType.number
+              ? const TextInputType.numberWithOptions(decimal: true)
+              : TextInputType.text,
+          maxLines: field.type == LeaveCustomFieldType.longText ? 4 : 1,
+          maxLength:
+              field.type == LeaveCustomFieldType.text ||
+                  field.type == LeaveCustomFieldType.longText
+              ? field.maxLength
+              : null,
+          decoration: _inputDecoration(label),
+          onChanged: (next) => _customDetailValues[field.key] = next,
+          validator: (next) {
+            final text = next?.trim() ?? '';
+            if (field.required && text.isEmpty) {
+              return '${field.label} is required';
+            }
+            if (field.type == LeaveCustomFieldType.number &&
+                text.isNotEmpty &&
+                num.tryParse(text) == null) {
+              return 'Enter a valid number';
+            }
+            return null;
+          },
+        );
+    }
+  }
+
   Widget _buildAttachmentSection() {
     final current = _savedRequest ?? widget.initialRequest;
+    final canModifyAttachment = _canModifyAttachment();
     final pendingName = _pendingAttachmentName?.trim();
     final hasPendingAttachment =
         pendingName != null &&
@@ -1827,39 +2285,40 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               ],
             ),
           ),
-        Row(
-          children: [
-            OutlinedButton.icon(
-              onPressed: (_busy || _attachmentUploading)
-                  ? null
-                  : _pickAndUploadAttachment,
-              icon: _attachmentUploading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.upload_file, size: 18),
-              label: Text(hasAttachment ? 'Replace File' : 'Upload File'),
-            ),
-            if (hasAttachment) ...[
-              const SizedBox(width: 12),
-              TextButton(
+        if (canModifyAttachment)
+          Row(
+            children: [
+              OutlinedButton.icon(
                 onPressed: (_busy || _attachmentUploading)
                     ? null
-                    : _removeAttachment,
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
-                child: const Text('Remove'),
+                    : _pickAndUploadAttachment,
+                icon: _attachmentUploading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.upload_file, size: 18),
+                label: Text(hasAttachment ? 'Replace File' : 'Upload File'),
               ),
+              if (hasAttachment) ...[
+                const SizedBox(width: 12),
+                TextButton(
+                  onPressed: (_busy || _attachmentUploading)
+                      ? null
+                      : _removeAttachment,
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  child: const Text('Remove'),
+                ),
+              ],
             ],
-          ],
-        ),
+          ),
       ],
     );
   }
 
   Future<void> _pickAndUploadAttachment() async {
-    if (!_shouldShowAttachmentSection()) return;
+    if (!_shouldShowAttachmentSection() || !_canModifyAttachment()) return;
 
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -1952,7 +2411,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Future<void> _removeAttachment() async {
-    if (!_shouldShowAttachmentSection()) return;
+    if (!_shouldShowAttachmentSection() || !_canModifyAttachment()) return;
 
     final current = _savedRequest ?? widget.initialRequest;
     final requestId = current?.id;

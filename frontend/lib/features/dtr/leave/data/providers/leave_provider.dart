@@ -6,30 +6,16 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dar
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
-/// Mandatory/forced leave has no separate balance row; it uses vacation credits (CSC).
+/// Credit balances and explicitly marked annual-entitlement summaries are shown.
+/// Event, request, and compliance limits are not balance rows.
 List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
-  const noCreditSystemTypes = {
-    'mandatoryForcedLeave',
-    'maternityLeave',
-    'paternityLeave',
-    'specialPrivilegeLeave',
-    'soloParentLeave',
-    'studyLeave',
-    'tenDayVawcLeave',
-    'rehabilitationPrivilege',
-    'specialLeaveBenefitsForWomen',
-    'specialEmergencyCalamityLeave',
-    'adoptionLeave',
-    'others',
-  };
-  return raw.where((b) {
-    final typeName = b.effectiveLeaveTypeName;
-    if (typeName == LeaveType.vacationLeave.value ||
-        typeName == LeaveType.sickLeave.value) {
-      return true;
-    }
-    return !noCreditSystemTypes.contains(typeName);
-  }).toList();
+  return raw
+      .where(
+        (balance) =>
+            balance.effectiveLeaveTypeName != 'others' &&
+            (balance.isCreditBalance || balance.isAnnualEntitlement),
+      )
+      .toList();
 }
 
 class _LeaveCacheEntry<T> {
@@ -192,8 +178,10 @@ class LeaveProvider extends ChangeNotifier {
   static String _ledgerKey(LeaveLedgerQuery query) {
     return [
       _normalize(query.userId) ?? '',
+      query.allUsers ? 'all' : 'self',
       _normalize(query.leaveType) ?? '',
       _normalize(query.action) ?? '',
+      _normalize(query.affectedBucket) ?? '',
       _normalize(query.from) ?? '',
       _normalize(query.to) ?? '',
       query.limit.toString(),
@@ -332,11 +320,12 @@ class LeaveProvider extends ChangeNotifier {
         _requests = List<LeaveRequest>.from(fresh);
       }
     } catch (e) {
-      _requests = [];
+      // Keep the currently displayed queue if a background refresh fails.
       _error = e.toString();
+    } finally {
+      _loading = false;
+      notifyListeners();
     }
-    _loading = false;
-    notifyListeners();
   }
 
   Future<void> loadPendingRequests({bool forceRefresh = false}) async {
@@ -708,7 +697,9 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  Future<YearEndForcedLeaveComplianceResult?> getYearEndForcedLeaveCompliance(int year) async {
+  Future<YearEndForcedLeaveComplianceResult?> getYearEndForcedLeaveCompliance(
+    int year,
+  ) async {
     _reviewing = true;
     _error = null;
     notifyListeners();
@@ -746,16 +737,25 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  /// Admin/HR: create or overwrite one [LeaveBalance] row for an employee.
-  Future<LeaveBalance?> upsertBalance(
-    LeaveBalance balance, {
-    String? remarks,
+  /// Admin/HR: apply an audited correction without overwriting derived buckets.
+  Future<LeaveBalance?> applyBalanceAdjustment({
+    required String userId,
+    required LeaveType leaveType,
+    required double adjustmentDays,
+    required String remarks,
+    DateTime? asOfDate,
   }) async {
     _submitting = true;
     _error = null;
     notifyListeners();
     try {
-      final saved = await _repository.upsertBalance(balance, remarks: remarks);
+      final saved = await _repository.applyBalanceAdjustment(
+        userId: userId,
+        leaveType: leaveType,
+        adjustmentDays: adjustmentDays,
+        remarks: remarks,
+        asOfDate: asOfDate,
+      );
       _notifyMutation();
       return saved;
     } catch (e) {
@@ -892,11 +892,12 @@ class LeaveProvider extends ChangeNotifier {
         _requests = List<LeaveRequest>.from(fresh);
       }
     } catch (e) {
-      _requests = [];
+      // Keep the currently displayed queue if a background refresh fails.
       _error = e.toString();
+    } finally {
+      _loading = false;
+      notifyListeners();
     }
-    _loading = false;
-    notifyListeners();
   }
 
   Future<LeaveRequest?> departmentHeadApprove(
@@ -982,6 +983,10 @@ class LeaveProvider extends ChangeNotifier {
         limit: value.limit,
         offset: value.offset,
         rows: List<LeaveBalanceLedgerEntry>.from(value.rows),
+        summaryEarned: value.summaryEarned,
+        summaryUsed: value.summaryUsed,
+        summaryPending: value.summaryPending,
+        summaryAdjusted: value.summaryAdjusted,
       );
     }
     final fresh = await _repository.getLeaveLedger(query);
@@ -991,6 +996,10 @@ class LeaveProvider extends ChangeNotifier {
         limit: fresh.limit,
         offset: fresh.offset,
         rows: List<LeaveBalanceLedgerEntry>.unmodifiable(fresh.rows),
+        summaryEarned: fresh.summaryEarned,
+        summaryUsed: fresh.summaryUsed,
+        summaryPending: fresh.summaryPending,
+        summaryAdjusted: fresh.summaryAdjusted,
       ),
       DateTime.now(),
     );

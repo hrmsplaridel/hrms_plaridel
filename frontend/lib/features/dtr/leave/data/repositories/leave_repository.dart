@@ -162,9 +162,13 @@ class MonthlyLeaveAccrualDetail {
     this.reason,
     this.monthsCredited,
     this.daysAdded,
+    this.balanceDelta,
+    this.previousDays,
+    this.expectedDays,
     this.lastAccrualDate,
     this.createdBalanceRow = false,
     this.hireProrated = false,
+    this.separationProrated = false,
     this.daysWorked,
     this.daysInMonth,
   });
@@ -176,13 +180,23 @@ class MonthlyLeaveAccrualDetail {
   final String? reason;
   final int? monthsCredited;
   final double? daysAdded;
+  final double? balanceDelta;
+  final double? previousDays;
+  final double? expectedDays;
   final String? lastAccrualDate;
   final bool createdBalanceRow;
   final bool hireProrated;
+  final bool separationProrated;
   final int? daysWorked;
   final int? daysInMonth;
 
-  bool get willChangeBalance => action == 'would_apply' || action == 'applied';
+  bool get willChangeBalance =>
+      action == 'would_apply' ||
+      action == 'applied' ||
+      action == 'would_adjust' ||
+      action == 'adjusted';
+
+  double get earnedMovement => balanceDelta ?? daysAdded ?? 0;
 
   factory MonthlyLeaveAccrualDetail.fromJson(Map<String, dynamic> json) {
     return MonthlyLeaveAccrualDetail(
@@ -193,11 +207,116 @@ class MonthlyLeaveAccrualDetail {
       reason: json['reason']?.toString(),
       monthsCredited: _parseInt(json['months_credited']),
       daysAdded: _parseDoubleValue(json['days_added']),
+      balanceDelta: _parseDoubleValue(json['balance_delta']),
+      previousDays: _parseDoubleValue(json['previous_days']),
+      expectedDays: _parseDoubleValue(json['expected_days']),
       lastAccrualDate: json['last_accrual_date']?.toString(),
       createdBalanceRow: json['created_balance_row'] == true,
       hireProrated: json['hire_prorated'] == true,
+      separationProrated: json['separation_prorated'] == true,
       daysWorked: _parseInt(json['days_worked']),
       daysInMonth: _parseInt(json['days_in_month']),
+    );
+  }
+}
+
+class MonthlyAttendanceDeductionDetail {
+  const MonthlyAttendanceDeductionDetail({
+    required this.userId,
+    required this.employeeName,
+    required this.action,
+    required this.computedDays,
+    required this.deductedDays,
+    required this.withoutPayDays,
+    required this.balanceDelta,
+    required this.lateMinutes,
+    required this.undertimeMinutes,
+    required this.absenceMinutes,
+  });
+
+  final String userId;
+  final String employeeName;
+  final String action;
+  final double computedDays;
+  final double deductedDays;
+  final double withoutPayDays;
+  final double balanceDelta;
+  final int lateMinutes;
+  final int undertimeMinutes;
+  final int absenceMinutes;
+
+  bool get willChangeBalance =>
+      action == 'would_apply' ||
+      action == 'applied' ||
+      action == 'adjusted' ||
+      balanceDelta != 0;
+
+  factory MonthlyAttendanceDeductionDetail.fromJson(Map<String, dynamic> json) {
+    return MonthlyAttendanceDeductionDetail(
+      userId: json['user_id']?.toString() ?? '',
+      employeeName: json['employee_name']?.toString() ?? 'Unnamed employee',
+      action: json['action']?.toString() ?? '',
+      computedDays: _parseDoubleValue(json['computed_days']) ?? 0,
+      deductedDays: _parseDoubleValue(json['deducted_days']) ?? 0,
+      withoutPayDays: _parseDoubleValue(json['without_pay_days']) ?? 0,
+      balanceDelta: _parseDoubleValue(json['balance_delta']) ?? 0,
+      lateMinutes: _parseInt(json['late_minutes']) ?? 0,
+      undertimeMinutes: _parseInt(json['undertime_minutes']) ?? 0,
+      absenceMinutes: _parseInt(json['absence_minutes']) ?? 0,
+    );
+  }
+}
+
+class MonthlyAttendanceDeductionResult {
+  const MonthlyAttendanceDeductionResult({
+    required this.rowsUpdated,
+    required this.rowsSkipped,
+    required this.totalComputedDays,
+    required this.totalDeductedDays,
+    required this.totalWithoutPayDays,
+    required this.details,
+  });
+
+  final int rowsUpdated;
+  final int rowsSkipped;
+  final double totalComputedDays;
+  final double totalDeductedDays;
+  final double totalWithoutPayDays;
+  final List<MonthlyAttendanceDeductionDetail> details;
+
+  factory MonthlyAttendanceDeductionResult.fromJson(Map<String, dynamic> json) {
+    final rawDetails = json['details'];
+    return MonthlyAttendanceDeductionResult(
+      rowsUpdated:
+          _parseInt(json['rowsUpdated']) ??
+          _parseInt(json['rows_updated']) ??
+          0,
+      rowsSkipped:
+          _parseInt(json['rowsSkipped']) ??
+          _parseInt(json['rows_skipped']) ??
+          0,
+      totalComputedDays:
+          _parseDoubleValue(json['totalComputedDays']) ??
+          _parseDoubleValue(json['total_computed_days']) ??
+          0,
+      totalDeductedDays:
+          _parseDoubleValue(json['totalDeductedDays']) ??
+          _parseDoubleValue(json['total_deducted_days']) ??
+          0,
+      totalWithoutPayDays:
+          _parseDoubleValue(json['totalWithoutPayDays']) ??
+          _parseDoubleValue(json['total_without_pay_days']) ??
+          0,
+      details: rawDetails is List
+          ? rawDetails
+                .whereType<Map>()
+                .map(
+                  (item) => MonthlyAttendanceDeductionDetail.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .toList()
+          : const <MonthlyAttendanceDeductionDetail>[],
     );
   }
 }
@@ -215,6 +334,7 @@ class MonthlyLeaveAccrualResult {
     required this.missingBalanceRowsCreated,
     required this.missingBalanceRowsDetected,
     required this.details,
+    this.attendanceDeductions,
   });
 
   final String targetYearMonth;
@@ -227,6 +347,10 @@ class MonthlyLeaveAccrualResult {
   final int missingBalanceRowsCreated;
   final int missingBalanceRowsDetected;
   final List<MonthlyLeaveAccrualDetail> details;
+  final MonthlyAttendanceDeductionResult? attendanceDeductions;
+
+  int get totalRowsUpdated =>
+      rowsUpdated + (attendanceDeductions?.rowsUpdated ?? 0);
 
   factory MonthlyLeaveAccrualResult.fromJson(Map<String, dynamic> json) {
     final rawLeaveTypes = json['leaveTypes'] ?? json['leave_types'];
@@ -273,6 +397,15 @@ class MonthlyLeaveAccrualResult {
                 )
                 .toList()
           : const <MonthlyLeaveAccrualDetail>[],
+      attendanceDeductions: json['attendanceDeductions'] is Map
+          ? MonthlyAttendanceDeductionResult.fromJson(
+              Map<String, dynamic>.from(json['attendanceDeductions'] as Map),
+            )
+          : json['attendance_deductions'] is Map
+          ? MonthlyAttendanceDeductionResult.fromJson(
+              Map<String, dynamic>.from(json['attendance_deductions'] as Map),
+            )
+          : null,
     );
   }
 }
@@ -291,7 +424,13 @@ class YearEndForcedLeaveEmployee {
     required this.forcedDaysUsed,
     required this.requiredDays,
     required this.suggestedDeduction,
+    required this.actualDeduction,
+    required this.unresolvedShortfall,
     required this.vlAvailable,
+    required this.vlAccumulated,
+    required this.eligible,
+    required this.eligibilityStatus,
+    required this.eligibilityReason,
     required this.alreadyDeducted,
     required this.canApply,
     required this.status,
@@ -311,7 +450,13 @@ class YearEndForcedLeaveEmployee {
   final double forcedDaysUsed;
   final double requiredDays;
   final double suggestedDeduction;
+  final double actualDeduction;
+  final double unresolvedShortfall;
   final double vlAvailable;
+  final double vlAccumulated;
+  final bool eligible;
+  final String eligibilityStatus;
+  final String eligibilityReason;
   final bool alreadyDeducted;
   final bool canApply;
 
@@ -323,7 +468,8 @@ class YearEndForcedLeaveEmployee {
 
   // Set when this row comes from an apply result:
   final double? daysToDeduct;
-  final String? applyStatus; // 'applied' | 'would_apply' | 'already_deducted' | 'compliant' | 'insufficient_balance' | 'error'
+  final String?
+  applyStatus; // 'applied' | 'would_apply' | 'already_deducted' | 'compliant' | 'insufficient_balance' | 'error'
   final String? applyError;
   final DateTime? appliedAt;
 
@@ -336,7 +482,13 @@ class YearEndForcedLeaveEmployee {
       forcedDaysUsed: _pd(j['forced_leave_days_used']),
       requiredDays: _pd(j['required_days']) == 0 ? 5 : _pd(j['required_days']),
       suggestedDeduction: _pd(j['suggested_deduction']),
+      actualDeduction: _pd(j['actual_deduction'] ?? j['days_to_deduct']),
+      unresolvedShortfall: _pd(j['unresolved_shortfall']),
       vlAvailable: _pd(j['vl_available']),
+      vlAccumulated: _pd(j['vl_accumulated'] ?? j['vl_available']),
+      eligible: j['eligible'] == true,
+      eligibilityStatus: j['eligibility_status']?.toString() ?? 'needs_review',
+      eligibilityReason: j['eligibility_reason']?.toString() ?? '',
       alreadyDeducted: j['already_deducted'] == true,
       canApply: j['can_apply'] == true,
       status: j['status']?.toString() ?? 'pending',
@@ -349,10 +501,12 @@ class YearEndForcedLeaveEmployee {
     );
   }
 
-  static double _pd(dynamic v) =>
-      v == null ? 0 : (v is num ? v.toDouble() : double.tryParse(v.toString()) ?? 0);
-  static double? _pd2(dynamic v) =>
-      v == null ? null : (v is num ? v.toDouble() : double.tryParse(v.toString()));
+  static double _pd(dynamic v) => v == null
+      ? 0
+      : (v is num ? v.toDouble() : double.tryParse(v.toString()) ?? 0);
+  static double? _pd2(dynamic v) => v == null
+      ? null
+      : (v is num ? v.toDouble() : double.tryParse(v.toString()));
   static DateTime? _parseDate(dynamic v) =>
       v == null ? null : DateTime.tryParse(v.toString());
 }
@@ -370,6 +524,10 @@ class YearEndForcedLeaveSummary {
     this.errors = 0,
     this.totalEligible = 0,
     this.wouldApply = 0,
+    this.partial = 0,
+    this.optionalReview = 0,
+    this.partiallyApplied = 0,
+    this.monitoring = 0,
   });
 
   final int total;
@@ -381,6 +539,10 @@ class YearEndForcedLeaveSummary {
   final int errors;
   final int totalEligible;
   final int wouldApply;
+  final int partial;
+  final int optionalReview;
+  final int partiallyApplied;
+  final int monitoring;
 
   factory YearEndForcedLeaveSummary.fromJson(Map<String, dynamic> j) {
     return YearEndForcedLeaveSummary(
@@ -393,6 +555,10 @@ class YearEndForcedLeaveSummary {
       errors: _pi(j['errors']),
       totalEligible: _pi(j['total_eligible']),
       wouldApply: _pi(j['would_apply']),
+      partial: _pi(j['partial']),
+      optionalReview: _pi(j['optional_review']),
+      partiallyApplied: _pi(j['partially_applied']),
+      monitoring: _pi(j['monitoring']),
     );
   }
 
@@ -405,12 +571,14 @@ class YearEndForcedLeaveComplianceResult {
   const YearEndForcedLeaveComplianceResult({
     required this.year,
     required this.requiredDays,
+    required this.yearClosed,
     required this.employees,
     required this.summary,
   });
 
   final int year;
   final double requiredDays;
+  final bool yearClosed;
   final List<YearEndForcedLeaveEmployee> employees;
   final YearEndForcedLeaveSummary summary;
 
@@ -419,14 +587,21 @@ class YearEndForcedLeaveComplianceResult {
     return YearEndForcedLeaveComplianceResult(
       year: (j['year'] as num?)?.toInt() ?? DateTime.now().year,
       requiredDays: (j['required_days'] as num?)?.toDouble() ?? 5,
+      yearClosed: j['year_closed'] == true,
       summary: YearEndForcedLeaveSummary.fromJson(
-        j['summary'] is Map ? Map<String, dynamic>.from(j['summary'] as Map) : {},
+        j['summary'] is Map
+            ? Map<String, dynamic>.from(j['summary'] as Map)
+            : {},
       ),
       employees: rawEmployees is List
           ? rawEmployees
-              .whereType<Map>()
-              .map((e) => YearEndForcedLeaveEmployee.fromJson(Map<String, dynamic>.from(e)))
-              .toList()
+                .whereType<Map>()
+                .map(
+                  (e) => YearEndForcedLeaveEmployee.fromJson(
+                    Map<String, dynamic>.from(e),
+                  ),
+                )
+                .toList()
           : const [],
     );
   }
@@ -452,13 +627,19 @@ class YearEndForcedLeaveApplyResult {
       dryRun: j['dry_run'] == true,
       year: (j['year'] as num?)?.toInt() ?? DateTime.now().year,
       summary: YearEndForcedLeaveSummary.fromJson(
-        j['summary'] is Map ? Map<String, dynamic>.from(j['summary'] as Map) : {},
+        j['summary'] is Map
+            ? Map<String, dynamic>.from(j['summary'] as Map)
+            : {},
       ),
       results: rawResults is List
           ? rawResults
-              .whereType<Map>()
-              .map((e) => YearEndForcedLeaveEmployee.fromJson(Map<String, dynamic>.from(e)))
-              .toList()
+                .whereType<Map>()
+                .map(
+                  (e) => YearEndForcedLeaveEmployee.fromJson(
+                    Map<String, dynamic>.from(e),
+                  ),
+                )
+                .toList()
           : const [],
     );
   }
@@ -544,8 +725,15 @@ abstract class LeaveRepository {
     LeaveType leaveType,
   );
 
-  /// Create or update a balance record.
-  Future<LeaveBalance> upsertBalance(LeaveBalance balance, {String? remarks});
+  /// Apply an audited positive or negative correction without replacing
+  /// workflow-derived earned, used, or pending buckets.
+  Future<LeaveBalance> applyBalanceAdjustment({
+    required String userId,
+    required LeaveType leaveType,
+    required double adjustmentDays,
+    required String remarks,
+    DateTime? asOfDate,
+  });
 
   /// Approve a request and apply any balance changes required by policy.
   Future<LeaveRequest> approveRequest(LeaveApprovalInput input);
@@ -613,7 +801,9 @@ abstract class LeaveRepository {
   );
 
   /// Fetch year-end forced leave compliance for all active employees.
-  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(int year);
+  Future<YearEndForcedLeaveComplianceResult> getYearEndForcedLeaveCompliance(
+    int year,
+  );
 
   /// Preview or apply year-end forced leave deductions in bulk.
   Future<YearEndForcedLeaveApplyResult> applyYearEndForcedLeaveDeductions(

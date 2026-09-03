@@ -6,7 +6,14 @@ import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/desktop
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/pages/employee_locator_slip_mobile_page.dart';
 
 class EmployeeLocatorSlipScreen extends StatefulWidget {
-  const EmployeeLocatorSlipScreen({super.key});
+  const EmployeeLocatorSlipScreen({
+    super.key,
+    this.tutorialHeaderKey,
+    this.tutorialRequestsKey,
+  });
+
+  final GlobalKey? tutorialHeaderKey;
+  final GlobalKey? tutorialRequestsKey;
 
   @override
   State<EmployeeLocatorSlipScreen> createState() =>
@@ -36,8 +43,16 @@ class EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   @override
   Widget build(BuildContext context) {
     final child = PlatformLayout.isMobile(context)
-        ? EmployeeLocatorSlipMobilePage(key: _mobileKey)
-        : desktop.EmployeeLocatorSlipScreen(key: _desktopKey);
+        ? EmployeeLocatorSlipMobilePage(
+            key: _mobileKey,
+            tutorialHeaderKey: widget.tutorialHeaderKey,
+            tutorialRequestsKey: widget.tutorialRequestsKey,
+          )
+        : desktop.EmployeeLocatorSlipScreen(
+            key: _desktopKey,
+            tutorialHeaderKey: widget.tutorialHeaderKey,
+            tutorialRequestsKey: widget.tutorialRequestsKey,
+          );
     return child;
   }
 }

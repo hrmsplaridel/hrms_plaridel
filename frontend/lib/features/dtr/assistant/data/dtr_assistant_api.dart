@@ -14,6 +14,8 @@ class DtrAssistantApi {
     String message, {
     String? intent,
     String? modelProfile,
+    String? conversationId,
+    String? externalConsentVersion,
     CancelToken? cancelToken,
   }) async {
     final res = await _client.post<Map<String, dynamic>>(
@@ -22,6 +24,9 @@ class DtrAssistantApi {
         'message': message,
         if (intent != null) 'intent': intent,
         if (modelProfile != null) 'modelProfile': modelProfile,
+        if (conversationId != null) 'conversationId': conversationId,
+        if (externalConsentVersion != null)
+          'externalConsentVersion': externalConsentVersion,
       },
       cancelToken: cancelToken,
       // Ollama can take up to 90s to generate a free-form answer locally.
@@ -40,8 +45,11 @@ class DtrAssistantApi {
     throw Exception('Assistant returned an invalid response.');
   }
 
-  Future<void> resetChat() async {
-    await _client.post<Map<String, dynamic>>('/api/dtr-assistant/reset');
+  Future<void> resetChat({String? conversationId}) async {
+    await _client.post<Map<String, dynamic>>(
+      '/api/dtr-assistant/reset',
+      data: {if (conversationId != null) 'conversationId': conversationId},
+    );
   }
 
   Future<({String defaultModelProfile, List<DtrAssistantModelProfile> models})>
@@ -91,25 +99,15 @@ class DtrAssistantApi {
   Future<void> submitFeedback({
     required DtrAssistantMessage message,
     required String rating,
-    required String modelProfile,
-    String? promptPreview,
     String? comment,
   }) async {
-    final id = message.id;
-    if (id == null || id.isEmpty) return;
+    final feedbackToken = message.feedbackToken;
+    if (feedbackToken == null || feedbackToken.isEmpty) return;
     await _client.post<Map<String, dynamic>>(
       '/api/dtr-assistant/feedback',
       data: {
-        'messageId': id,
+        'feedbackToken': feedbackToken,
         'rating': rating,
-        'intent': message.intent,
-        'provider': message.provider,
-        'model': message.model,
-        'modelProfile': message.modelProfile ?? modelProfile,
-        'promptPreview': promptPreview ?? message.promptPreview,
-        'intentConfidence': message.intentConfidence,
-        'intentSource': message.intentSource,
-        'contentPreview': message.content,
         if (comment != null && comment.trim().isNotEmpty)
           'comment': comment.trim(),
       },
