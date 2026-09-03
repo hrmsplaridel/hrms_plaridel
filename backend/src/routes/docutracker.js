@@ -27,6 +27,7 @@ const {
   createSignatureAsset,
   listSavedSignatureAssets,
   signDocumentField,
+  moveSignedDocumentField,
 } = require('../services/docutrackerDocumentBuilderService');
 
 const router = express.Router();
@@ -501,6 +502,25 @@ router.post('/documents/:id/signature-fields/:fieldId/sign', protect, async (req
     );
   } catch (err) {
     console.error('[docutracker POST /documents/:id/signature-fields/:fieldId/sign]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** PATCH /api/docutracker/documents/:id/signature-fields/:fieldId/position. */
+router.patch('/documents/:id/signature-fields/:fieldId/position', protect, async (req, res) => {
+  try {
+    res.json(
+      await moveSignedDocumentField(
+        pool,
+        req.user,
+        req.params.id,
+        req.params.fieldId,
+        req.body || {}
+      )
+    );
+  } catch (err) {
+    console.error('[docutracker PATCH /documents/:id/signature-fields/:fieldId/position]', err);
     const mapped = mapWorkflowServiceError(err);
     res.status(mapped.status).json({ error: mapped.error });
   }

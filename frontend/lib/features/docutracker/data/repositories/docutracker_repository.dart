@@ -444,6 +444,28 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>>
+  moveSignedDocumentField({
+    required String documentId,
+    required String fieldId,
+    required double x,
+    required double y,
+  }) async {
+    try {
+      final response = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '$_base/documents/$documentId/signature-fields/$fieldId/position',
+        data: <String, dynamic>{'position_x': x, 'position_y': y},
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The signature position was not saved');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocumentBuilderData.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
   Future<List<DocumentHistoryEntry>> listDocumentHistory(
     String documentId,
   ) async {

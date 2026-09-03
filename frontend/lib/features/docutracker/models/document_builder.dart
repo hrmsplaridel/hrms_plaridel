@@ -1,6 +1,11 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+Uint8List _decodeBase64Image(String encoded) {
+  final normalized = encoded.replaceAll(RegExp(r'\s'), '');
+  return Uint8List.fromList(base64Decode(normalized));
+}
+
 /// One A4 page stored as Quill Delta operations.
 class DocuTrackerDocumentPage {
   const DocuTrackerDocumentPage({required this.delta});
@@ -58,9 +63,7 @@ class DocuTrackerSignatureAsset {
       mimeType: json['mime_type']?.toString() ?? 'image/png',
       sourceType: json['source_type']?.toString() ?? 'uploaded',
       isSaved: json['is_saved'] == true,
-      imageBytes: encoded.isEmpty
-          ? Uint8List(0)
-          : Uint8List.fromList(base64Decode(encoded)),
+      imageBytes: encoded.isEmpty ? Uint8List(0) : _decodeBase64Image(encoded),
       displayName: json['display_name']?.toString(),
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
     );
@@ -122,7 +125,7 @@ class DocuTrackerSignatureField {
       signatureAssetId: json['signature_asset_id']?.toString(),
       signatureImageBytes: encoded == null || encoded.isEmpty
           ? null
-          : Uint8List.fromList(base64Decode(encoded)),
+          : _decodeBase64Image(encoded),
       signedBy: json['signed_by']?.toString(),
       signerName: json['signer_name_snapshot']?.toString(),
       signedAt: DateTime.tryParse(json['signed_at']?.toString() ?? ''),

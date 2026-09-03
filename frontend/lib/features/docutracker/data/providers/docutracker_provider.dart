@@ -668,6 +668,35 @@ class DocuTrackerProvider extends ChangeNotifier {
     }
   }
 
+  Future<DocuTrackerDocumentBuilderData?> moveSignedDocumentField({
+    required String documentId,
+    required String fieldId,
+    required double x,
+    required double y,
+  }) async {
+    if (_builderLoading) return null;
+    _builderLoading = true;
+    _builderError = null;
+    notifyListeners();
+    final result = await _repo.moveSignedDocumentField(
+      documentId: documentId,
+      fieldId: fieldId,
+      x: x,
+      y: y,
+    );
+    _builderLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
+        _builderData = value;
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
+        _builderError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
   /// Submit document to start workflow (Step 10).
   Future<bool> submitDocument(
     DocuTrackerDocument doc, {

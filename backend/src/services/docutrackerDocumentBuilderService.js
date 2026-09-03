@@ -164,10 +164,7 @@ async function serializeBuilder(client, document, user) {
   const canEditLayout = await canEditBuilder(client, document, user);
   const signatureFields = fieldsResult.rows.map((field) => ({
     ...field,
-    can_sign:
-      !field.signed_at &&
-      !field.locked_at &&
-      String(field.assigned_signer_id) === String(user.id),
+    can_sign: String(field.assigned_signer_id) === String(user.id),
   }));
   return {
     document_id: document.id,
@@ -367,10 +364,12 @@ async function signDocumentField(pool, user, documentId, fieldId, input) {
     );
     const field = fieldResult.rows[0];
     if (!field) throw notFoundError('Signature field not found');
-    if (field.locked_at) throw conflictError('This signature field is already signed and locked');
     if (String(field.assigned_signer_id) !== String(user.id)) {
       throw forbiddenError('Only the assigned signer can sign this field');
     }
+    const isReplacement = Boolean(
+      field.signature_asset_id || field.signed_at || field.locked_at
+    );
 
     let assetId = String(input.signature_asset_id || '').trim();
     if (assetId) {
@@ -400,17 +399,85 @@ async function signDocumentField(pool, user, documentId, fieldId, input) {
          signed_at = now(),
          locked_at = now(),
          updated_at = now()
-       WHERE id = $4 AND locked_at IS NULL
+       WHERE id = $4 AND document_id = $5 AND assigned_signer_id = $2
        RETURNING *`,
-      [assetId, user.id, signerName, fieldId]
+      [assetId, user.id, signerName, fieldId, documentId]
     );
-    if (!signed.rowCount) throw conflictError('This signature field was signed elsewhere');
+    if (!signed.rowCount) throw conflictError('This signature field changed while it was being signed');
 
     await client.query(
       `INSERT INTO docutracker_document_history
          (document_id, action, actor_id, actor_name, remarks)
        VALUES ($1, 'signed', $2, $3, $4)`,
-      [documentId, user.id, signerName, `Signed field: ${field.label}`]
+      [
+        documentId,
+        user.id,
+        signerName,
+        `${isReplacement ? 'Replaced signature' : 'Signed'} field: ${field.label}`,
+      ]
+    );
+    await client.query('COMMIT');
+    return getDocumentBuilder(pool, user, documentId);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function moveSignedDocumentField(pool, user, documentId, fieldId, input) {
+  if (!isUuid(fieldId)) throw notFoundError('Signature field not found');
+  const x = numberInRange(input.position_x, 0, 1, 'Horizontal position');
+  const y = numberInRange(input.position_y, 0, 1, 'Vertical position');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const document = await getDocumentForUpdate(client, documentId, true);
+    if (!(await canReadBuilder(client, document, user))) {
+      throw forbiddenError('You do not have access to this document');
+    }
+    const fieldResult = await client.query(
+      `SELECT * FROM docutracker_signature_fields
+       WHERE id = $1 AND document_id = $2 FOR UPDATE`,
+      [fieldId, documentId]
+    );
+    const field = fieldResult.rows[0];
+    if (!field) throw notFoundError('Signature field not found');
+    if (String(field.assigned_signer_id) !== String(user.id)) {
+      throw forbiddenError('Only the assigned signer can move this signature');
+    }
+    if (!field.signature_asset_id || !field.signed_at || !field.locked_at) {
+      throw conflictError('Only a signed signature field can be moved this way');
+    }
+    if (x + Number(field.width) > 1.000001 || y + Number(field.height) > 1.000001) {
+      throw validationError('The signature field must remain inside its A4 page');
+    }
+
+    const moved = await client.query(
+      `UPDATE docutracker_signature_fields SET
+         position_x = $1,
+         position_y = $2,
+         updated_at = now()
+       WHERE id = $3 AND document_id = $4 AND assigned_signer_id = $5
+       RETURNING *`,
+      [x, y, fieldId, documentId, user.id]
+    );
+    if (!moved.rowCount) {
+      throw conflictError('This signature field changed while it was being moved');
+    }
+
+    const userResult = await client.query(
+      `SELECT full_name FROM users WHERE id = $1 AND is_active = true`,
+      [user.id]
+    );
+    if (!userResult.rowCount) throw forbiddenError('Only an active user can move a signature');
+    const signerName = userResult.rows[0].full_name;
+    await client.query(
+      `INSERT INTO docutracker_document_history
+         (document_id, action, actor_id, actor_name, remarks)
+       VALUES ($1, 'metadata_updated', $2, $3, $4)`,
+      [documentId, user.id, signerName, `Moved signed field: ${field.label}`]
     );
     await client.query('COMMIT');
     return getDocumentBuilder(pool, user, documentId);
@@ -428,4 +495,5 @@ module.exports = {
   createSignatureAsset,
   listSavedSignatureAssets,
   signDocumentField,
+  moveSignedDocumentField,
 };

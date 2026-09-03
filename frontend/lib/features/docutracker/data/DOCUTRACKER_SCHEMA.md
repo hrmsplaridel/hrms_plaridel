@@ -130,7 +130,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | signed_by | UUID | Authenticated signer |
 | signer_name_snapshot | TEXT | Printed signer name retained with the event |
 | signed_at | TIMESTAMPTZ | Backend-authoritative signed time |
-| locked_at | TIMESTAMPTZ | Non-null when placement and signature are locked |
+| locked_at | TIMESTAMPTZ | Non-null when signed; the assigned signer may reposition the field or replace its image, but cannot resize, reassign, or delete it |
 | created_by | UUID | User who prepared the field |
 | created_at | TIMESTAMPTZ | Creation time |
 | updated_at | TIMESTAMPTZ | Last update |

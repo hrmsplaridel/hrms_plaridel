@@ -23,7 +23,8 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | PUT | `/api/docutracker/documents/{id}/builder` | Save page Delta content and the complete unsigned signature-field layout using optimistic revision checking |
 | GET | `/api/docutracker/signature-assets` | List saved signatures owned by the authenticated user |
 | POST | `/api/docutracker/signature-assets` | Save a drawn or uploaded PNG/JPEG signature owned by the authenticated user |
-| POST | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/sign` | Sign and server-lock one field assigned to the authenticated user |
+| POST | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/sign` | Sign or replace the signature image in one field assigned to the authenticated user |
+| PATCH | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/position` | Move an already-signed field assigned to the authenticated user without changing its size, signer, or image |
 
 Builder responses include `current_user_id` and a per-field `can_sign`
 capability calculated from the authenticated backend user. The Flutter client
@@ -52,9 +53,11 @@ The builder PUT body is:
 ```
 
 Only an effective document editor can change page content or unsigned field
-layout. Signed fields cannot be moved, resized, reassigned, or deleted. Only the
-assigned active user can sign a field. Saved signature assets are private to
-their owner.
+layout. Signed fields cannot be resized, reassigned, or deleted. Only the
+assigned active user can reposition a signed field or replace its signature
+image. Repositioning appends a `metadata_updated` history entry, and replacement
+appends another `signed` entry; neither operation overwrites prior history. Saved
+signature assets are private to their owner.
 
 **Query params:**
 - `document_type=eq.memo` - Filter by type

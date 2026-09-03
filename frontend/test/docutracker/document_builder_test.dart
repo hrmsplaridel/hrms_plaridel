@@ -6,6 +6,31 @@ import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart'
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 
 void main() {
+  test('signature images decode PostgreSQL line-wrapped Base64', () {
+    final imageBytes = List<int>.generate(90, (index) => index);
+    final encoded = base64Encode(imageBytes);
+    final wrapped = '${encoded.substring(0, 76)}\n${encoded.substring(76)}';
+
+    final asset = DocuTrackerSignatureAsset.fromJson(<String, dynamic>{
+      'id': 'asset-1',
+      'owner_user_id': 'user-1',
+      'mime_type': 'image/png',
+      'source_type': 'drawn',
+      'is_saved': true,
+      'image_base64': wrapped,
+    });
+    final field = DocuTrackerSignatureField.fromJson(<String, dynamic>{
+      'id': 'field-1',
+      'page_number': 1,
+      'assigned_signer_id': 'user-1',
+      'label': 'Sign Here',
+      'signature_image_base64': wrapped,
+    });
+
+    expect(asset.imageBytes, imageBytes);
+    expect(field.signatureImageBytes, imageBytes);
+  });
+
   test('builder preserves A4 pages and locked signature geometry', () {
     final data = DocuTrackerDocumentBuilderData.fromJson(<String, dynamic>{
       'document_id': 'document-1',

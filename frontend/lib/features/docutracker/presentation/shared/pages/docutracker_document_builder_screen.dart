@@ -5,8 +5,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
@@ -14,9 +12,12 @@ import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_pr
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_field_visual.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_pdf_export.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_geometry.dart';
 
 class DocuTrackerDocumentBuilderScreen extends StatefulWidget {
   const DocuTrackerDocumentBuilderScreen({super.key, required this.document});
@@ -51,6 +52,9 @@ class _DocuTrackerDocumentBuilderScreenState
   bool _exporting = false;
   bool _canEditLayout = false;
   bool _dirty = false;
+  String? _draggingSignedFieldId;
+  double? _signedDragOriginX;
+  double? _signedDragOriginY;
 
   DocuTrackerProvider get _provider => context.read<DocuTrackerProvider>();
 
@@ -295,12 +299,35 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   Future<void> _signField(DocuTrackerSignatureField field) async {
-    if (field.isSigned || !field.canSign) return;
+    if (!field.canSign || _saving) return;
     if (field.id.startsWith('local-')) {
       setState(
         () => _error = 'Save the document before signing this placeholder.',
       );
       return;
+    }
+    if (field.isSigned) {
+      final replace = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Replace signature?'),
+          content: const Text(
+            'Your current signature will be replaced in this field. '
+            'The replacement will be recorded in document history.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Replace'),
+            ),
+          ],
+        ),
+      );
+      if (replace != true || !mounted) return;
     }
     final choice = await showDocuTrackerSignatureDialog(
       context,
@@ -380,7 +407,13 @@ class _DocuTrackerDocumentBuilderScreenState
     }
     _replaceFromServer(signed);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Signature added and locked.')),
+      SnackBar(
+        content: Text(
+          field.isSigned
+              ? 'Signature replaced. The change was recorded in history.'
+              : 'Signature added and locked.',
+        ),
+      ),
     );
   }
 
@@ -391,7 +424,8 @@ class _DocuTrackerDocumentBuilderScreenState
     double? width,
     double? height,
   }) {
-    if (!_canEditLayout || field.isSigned) return;
+    final canMoveSigned = field.isSigned && field.canSign;
+    if (!canMoveSigned && (!_canEditLayout || field.isSigned)) return;
     final index = _signatureFields.indexWhere((item) => item.id == field.id);
     if (index < 0) return;
     final nextWidth = (width ?? field.width).clamp(0.08, 1.0);
@@ -406,7 +440,88 @@ class _DocuTrackerDocumentBuilderScreenState
         height: nextHeight,
       );
       _selectedFieldId = field.id;
-      _dirty = true;
+      if (!canMoveSigned) _dirty = true;
+    });
+  }
+
+  void _moveFieldBy(DocuTrackerSignatureField field, Offset delta) {
+    final index = _signatureFields.indexWhere((item) => item.id == field.id);
+    if (index < 0) return;
+    final current = _signatureFields[index];
+    _updateField(
+      current,
+      x: current.x + delta.dx / _paperWidth,
+      y: current.y + delta.dy / _paperHeight,
+    );
+  }
+
+  void _startSignedFieldDrag(DocuTrackerSignatureField field) {
+    if (!field.isSigned || !field.canSign || _saving) return;
+    final current = _signatureFields.firstWhere((item) => item.id == field.id);
+    setState(() {
+      _draggingSignedFieldId = field.id;
+      _signedDragOriginX = current.x;
+      _signedDragOriginY = current.y;
+      _selectedFieldId = field.id;
+      _error = null;
+    });
+  }
+
+  Future<void> _finishSignedFieldDrag(String fieldId) async {
+    if (_draggingSignedFieldId != fieldId) return;
+    final originX = _signedDragOriginX;
+    final originY = _signedDragOriginY;
+    _draggingSignedFieldId = null;
+    _signedDragOriginX = null;
+    _signedDragOriginY = null;
+    final index = _signatureFields.indexWhere((item) => item.id == fieldId);
+    if (index < 0 || originX == null || originY == null) return;
+    final field = _signatureFields[index];
+    if (field.x == originX && field.y == originY) return;
+
+    setState(() => _saving = true);
+    final moved = await _provider.moveSignedDocumentField(
+      documentId: widget.document.id!,
+      fieldId: fieldId,
+      x: field.x,
+      y: field.y,
+    );
+    if (!mounted) return;
+    if (moved == null) {
+      final restoreIndex = _signatureFields.indexWhere(
+        (item) => item.id == fieldId,
+      );
+      setState(() {
+        if (restoreIndex >= 0) {
+          _signatureFields[restoreIndex] = _signatureFields[restoreIndex]
+              .copyWith(x: originX, y: originY);
+        }
+        _saving = false;
+        _error =
+            _provider.builderError ?? 'Could not save the signature position.';
+      });
+      return;
+    }
+    _replaceFromServer(moved);
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Signature position saved.')));
+  }
+
+  void _cancelSignedFieldDrag(String fieldId) {
+    if (_draggingSignedFieldId != fieldId) return;
+    final originX = _signedDragOriginX;
+    final originY = _signedDragOriginY;
+    _draggingSignedFieldId = null;
+    _signedDragOriginX = null;
+    _signedDragOriginY = null;
+    final index = _signatureFields.indexWhere((item) => item.id == fieldId);
+    if (index < 0 || originX == null || originY == null) return;
+    setState(() {
+      _signatureFields[index] = _signatureFields[index].copyWith(
+        x: originX,
+        y: originY,
+      );
     });
   }
 
@@ -459,7 +574,7 @@ class _DocuTrackerDocumentBuilderScreenState
       _selectedFieldId = null;
     });
     await WidgetsBinding.instance.endOfFrame;
-    final document = pw.Document();
+    final pageImages = <Uint8List>[];
     for (final key in _pageKeys) {
       final boundary =
           key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
@@ -471,21 +586,9 @@ class _DocuTrackerDocumentBuilderScreenState
       if (data == null) {
         throw StateError('A document page could not be rendered.');
       }
-      final bytes = data.buffer.asUint8List();
-      document.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.a4,
-          margin: pw.EdgeInsets.zero,
-          build: (_) => pw.Image(
-            pw.MemoryImage(bytes),
-            width: PdfPageFormat.a4.width,
-            height: PdfPageFormat.a4.height,
-            fit: pw.BoxFit.fill,
-          ),
-        ),
-      );
+      pageImages.add(data.buffer.asUint8List());
     }
-    final bytes = await document.save();
+    final bytes = await buildDocuTrackerA4Pdf(pageImages);
     if (mounted) setState(() => _exporting = false);
     return bytes;
   }
@@ -608,147 +711,215 @@ class _DocuTrackerDocumentBuilderScreenState
   Widget _buildToolbar() {
     final enabled = _canEditLayout && _pages.isNotEmpty;
     final controller = _pages[_activePage].controller;
-    final pendingForCurrentUser = _signatureFields
-        .where((field) => !field.isSigned && field.canSign)
+    final actionableForCurrentUser = _signatureFields
+        .where((field) => field.canSign)
         .toList(growable: false);
-    DocuTrackerSignatureField? pendingOnActivePage;
+    final pendingForCurrentUser = actionableForCurrentUser
+        .where((field) => !field.isSigned)
+        .toList(growable: false);
+    final signedForCurrentUser = actionableForCurrentUser
+        .where((field) => field.isSigned)
+        .toList(growable: false);
+    DocuTrackerSignatureField? toolbarField;
     for (final field in pendingForCurrentUser) {
       if (field.pageNumber == _activePage + 1) {
-        pendingOnActivePage = field;
+        toolbarField = field;
         break;
       }
     }
+    toolbarField ??= pendingForCurrentUser.isEmpty
+        ? null
+        : pendingForCurrentUser.first;
+    if (toolbarField == null) {
+      for (final field in signedForCurrentUser) {
+        if (field.pageNumber == _activePage + 1) {
+          toolbarField = field;
+          break;
+        }
+      }
+    }
+    toolbarField ??= signedForCurrentUser.isEmpty
+        ? null
+        : signedForCurrentUser.first;
+    final selectedField = _signatureFields
+        .cast<DocuTrackerSignatureField?>()
+        .firstWhere(
+          (field) => field?.id == _selectedFieldId,
+          orElse: () => null,
+        );
+    final canDeleteSelected =
+        enabled && selectedField != null && !selectedField.isSigned;
     return Material(
       color: Colors.white,
       elevation: 2,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              _FormatButton(
-                tooltip: 'Bold',
-                icon: Icons.format_bold,
-                enabled: enabled,
-                onPressed: () => _toggle(controller, quill.Attribute.bold),
-              ),
-              _FormatButton(
-                tooltip: 'Italic',
-                icon: Icons.format_italic,
-                enabled: enabled,
-                onPressed: () => _toggle(controller, quill.Attribute.italic),
-              ),
-              _FormatButton(
-                tooltip: 'Underline',
-                icon: Icons.format_underline,
-                enabled: enabled,
-                onPressed: () => _toggle(controller, quill.Attribute.underline),
-              ),
-              const VerticalDivider(),
-              _PopupFormat<int>(
-                tooltip: 'Heading',
-                icon: Icons.title,
-                enabled: enabled,
-                items: const <PopupMenuEntry<int>>[
-                  PopupMenuItem(value: 0, child: Text('Normal text')),
-                  PopupMenuItem(value: 1, child: Text('Heading 1')),
-                  PopupMenuItem(value: 2, child: Text('Heading 2')),
-                  PopupMenuItem(value: 3, child: Text('Heading 3')),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _FormatButton(
+                    tooltip: 'Bold',
+                    icon: Icons.format_bold,
+                    enabled: enabled,
+                    onPressed: () => _toggle(controller, quill.Attribute.bold),
+                  ),
+                  _FormatButton(
+                    tooltip: 'Italic',
+                    icon: Icons.format_italic,
+                    enabled: enabled,
+                    onPressed: () =>
+                        _toggle(controller, quill.Attribute.italic),
+                  ),
+                  _FormatButton(
+                    tooltip: 'Underline',
+                    icon: Icons.format_underline,
+                    enabled: enabled,
+                    onPressed: () =>
+                        _toggle(controller, quill.Attribute.underline),
+                  ),
+                  const VerticalDivider(),
+                  _PopupFormat<int>(
+                    tooltip: 'Heading',
+                    icon: Icons.title,
+                    enabled: enabled,
+                    items: const <PopupMenuEntry<int>>[
+                      PopupMenuItem(value: 0, child: Text('Normal text')),
+                      PopupMenuItem(value: 1, child: Text('Heading 1')),
+                      PopupMenuItem(value: 2, child: Text('Heading 2')),
+                      PopupMenuItem(value: 3, child: Text('Heading 3')),
+                    ],
+                    onSelected: (level) => controller.formatSelection(
+                      quill.HeaderAttribute(level: level == 0 ? null : level),
+                    ),
+                  ),
+                  _PopupFormat<String>(
+                    tooltip: 'Font size',
+                    icon: Icons.format_size,
+                    enabled: enabled,
+                    items: const <PopupMenuEntry<String>>[
+                      PopupMenuItem(value: '12', child: Text('12 pt')),
+                      PopupMenuItem(value: '14', child: Text('14 pt')),
+                      PopupMenuItem(value: '16', child: Text('16 pt')),
+                      PopupMenuItem(value: '18', child: Text('18 pt')),
+                      PopupMenuItem(value: '24', child: Text('24 pt')),
+                    ],
+                    onSelected: (size) =>
+                        controller.formatSelection(quill.SizeAttribute(size)),
+                  ),
+                  const VerticalDivider(),
+                  _FormatButton(
+                    tooltip: 'Align left',
+                    icon: Icons.format_align_left,
+                    enabled: enabled,
+                    onPressed: () => controller.formatSelection(
+                      const quill.AlignAttribute(null),
+                    ),
+                  ),
+                  _FormatButton(
+                    tooltip: 'Align center',
+                    icon: Icons.format_align_center,
+                    enabled: enabled,
+                    onPressed: () => controller.formatSelection(
+                      const quill.AlignAttribute('center'),
+                    ),
+                  ),
+                  _FormatButton(
+                    tooltip: 'Align right',
+                    icon: Icons.format_align_right,
+                    enabled: enabled,
+                    onPressed: () => controller.formatSelection(
+                      const quill.AlignAttribute('right'),
+                    ),
+                  ),
+                  _FormatButton(
+                    tooltip: 'Bulleted list',
+                    icon: Icons.format_list_bulleted,
+                    enabled: enabled,
+                    onPressed: () => _toggle(
+                      controller,
+                      const quill.ListAttribute('bullet'),
+                    ),
+                  ),
+                  _FormatButton(
+                    tooltip: 'Numbered list',
+                    icon: Icons.format_list_numbered,
+                    enabled: enabled,
+                    onPressed: () => _toggle(
+                      controller,
+                      const quill.ListAttribute('ordered'),
+                    ),
+                  ),
                 ],
-                onSelected: (level) => controller.formatSelection(
-                  quill.HeaderAttribute(level: level == 0 ? null : level),
+              ),
+            ),
+            const Divider(height: 16),
+            Text(
+              'Document actions',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: DocuTrackerTokens.textMutedOf(context),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                  ),
+                  onPressed: enabled ? _addPage : null,
+                  icon: const Icon(Icons.note_add_outlined),
+                  label: Text('Add Page (${_pages.length})'),
                 ),
-              ),
-              _PopupFormat<String>(
-                tooltip: 'Font size',
-                icon: Icons.format_size,
-                enabled: enabled,
-                items: const <PopupMenuEntry<String>>[
-                  PopupMenuItem(value: '12', child: Text('12 pt')),
-                  PopupMenuItem(value: '14', child: Text('14 pt')),
-                  PopupMenuItem(value: '16', child: Text('16 pt')),
-                  PopupMenuItem(value: '18', child: Text('18 pt')),
-                  PopupMenuItem(value: '24', child: Text('24 pt')),
-                ],
-                onSelected: (size) =>
-                    controller.formatSelection(quill.SizeAttribute(size)),
-              ),
-              const VerticalDivider(),
-              _FormatButton(
-                tooltip: 'Align left',
-                icon: Icons.format_align_left,
-                enabled: enabled,
-                onPressed: () => controller.formatSelection(
-                  const quill.AlignAttribute(null),
+                FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    backgroundColor: DocuTrackerTokens.brandSoft,
+                    foregroundColor: DocuTrackerTokens.brandDark,
+                  ),
+                  onPressed: enabled ? _addSignatureField : null,
+                  icon: const Icon(Icons.add_box_outlined),
+                  label: const Text('Add Signature Field'),
                 ),
-              ),
-              _FormatButton(
-                tooltip: 'Align center',
-                icon: Icons.format_align_center,
-                enabled: enabled,
-                onPressed: () => controller.formatSelection(
-                  const quill.AlignAttribute('center'),
+                FilledButton.icon(
+                  style: DocuTrackerTokens.brandFilledStyle(),
+                  onPressed: _saving
+                      ? null
+                      : toolbarField != null
+                      ? () => _signField(toolbarField!)
+                      : enabled
+                      ? _insertOwnSignature
+                      : null,
+                  icon: const Icon(Icons.gesture_rounded),
+                  label: Text(
+                    toolbarField?.isSigned == true
+                        ? 'Change E-Signature'
+                        : 'Insert E-Signature',
+                  ),
                 ),
-              ),
-              _FormatButton(
-                tooltip: 'Align right',
-                icon: Icons.format_align_right,
-                enabled: enabled,
-                onPressed: () => controller.formatSelection(
-                  const quill.AlignAttribute('right'),
-                ),
-              ),
-              _FormatButton(
-                tooltip: 'Bulleted list',
-                icon: Icons.format_list_bulleted,
-                enabled: enabled,
-                onPressed: () =>
-                    _toggle(controller, const quill.ListAttribute('bullet')),
-              ),
-              _FormatButton(
-                tooltip: 'Numbered list',
-                icon: Icons.format_list_numbered,
-                enabled: enabled,
-                onPressed: () =>
-                    _toggle(controller, const quill.ListAttribute('ordered')),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: enabled ? _addPage : null,
-                icon: const Icon(Icons.note_add_outlined),
-                label: Text('Add page (${_pages.length})'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton.tonalIcon(
-                onPressed: enabled ? _addSignatureField : null,
-                icon: const Icon(Icons.draw_outlined),
-                label: const Text('Add Sign Here'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton.icon(
-                onPressed: _saving
-                    ? null
-                    : pendingForCurrentUser.isNotEmpty
-                    ? () => _signField(
-                        pendingOnActivePage ?? pendingForCurrentUser.first,
-                      )
-                    : enabled
-                    ? _insertOwnSignature
-                    : null,
-                icon: const Icon(Icons.gesture_rounded),
-                label: const Text('Insert E-Signature'),
-              ),
-              if (_selectedFieldId != null) ...[
-                const SizedBox(width: 8),
-                IconButton(
-                  tooltip: 'Delete selected signature field',
-                  onPressed: _deleteSelectedField,
-                  icon: const Icon(Icons.delete_outline),
-                ),
+                if (canDeleteSelected)
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      foregroundColor: const Color(0xFFB91C1C),
+                    ),
+                    onPressed: _deleteSelectedField,
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Delete Field'),
+                  ),
               ],
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -844,13 +1015,16 @@ class _DocuTrackerDocumentBuilderScreenState
 
   Widget _buildSignatureField(DocuTrackerSignatureField field) {
     final selected = _selectedFieldId == field.id;
-    final editable = _canEditLayout && !field.isSigned;
-    final signable = !field.isSigned && field.canSign;
-    return Positioned(
-      left: field.x * _paperWidth,
-      top: field.y * _paperHeight,
-      width: field.width * _paperWidth,
-      height: field.height * _paperHeight,
+    final editable = !_exporting && _canEditLayout && !field.isSigned;
+    final canMoveSigned = !_exporting && field.isSigned && field.canSign;
+    final movable = !_saving && (editable || canMoveSigned);
+    final signable = !_exporting && !_saving && field.canSign;
+    final rect = docuTrackerSignatureRect(
+      field,
+      const Size(_paperWidth, _paperHeight),
+    );
+    return Positioned.fromRect(
+      rect: rect,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {
@@ -860,12 +1034,15 @@ class _DocuTrackerDocumentBuilderScreenState
             setState(() => _selectedFieldId = field.id);
           }
         },
-        onPanUpdate: editable
-            ? (details) => _updateField(
-                field,
-                x: field.x + details.delta.dx / _paperWidth,
-                y: field.y + details.delta.dy / _paperHeight,
-              )
+        onPanStart: canMoveSigned ? (_) => _startSignedFieldDrag(field) : null,
+        onPanUpdate: movable
+            ? (details) => _moveFieldBy(field, details.delta)
+            : null,
+        onPanEnd: canMoveSigned
+            ? (_) => unawaited(_finishSignedFieldDrag(field.id))
+            : null,
+        onPanCancel: canMoveSigned
+            ? () => _cancelSignedFieldDrag(field.id)
             : null,
         child: Stack(
           clipBehavior: Clip.none,
@@ -877,7 +1054,9 @@ class _DocuTrackerDocumentBuilderScreenState
                       ? Colors.white.withValues(alpha: 0.92)
                       : const Color(0xFFFFF7ED).withValues(alpha: 0.94),
                   border: Border.all(
-                    color: selected
+                    color: _exporting && field.isSigned
+                        ? Colors.transparent
+                        : selected
                         ? DocuTrackerTokens.brand
                         : field.isSigned
                         ? const Color(0xFF15803D)
@@ -886,9 +1065,11 @@ class _DocuTrackerDocumentBuilderScreenState
                   ),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: field.isSigned
-                    ? _buildSignedField(field)
-                    : _buildUnsignedField(field, signable),
+                child: DocuTrackerSignatureFieldVisual(
+                  field: field,
+                  signable: signable,
+                  exportMode: _exporting,
+                ),
               ),
             ),
             if (editable && selected)
@@ -921,78 +1102,6 @@ class _DocuTrackerDocumentBuilderScreenState
         ),
       ),
     );
-  }
-
-  Widget _buildUnsignedField(DocuTrackerSignatureField field, bool signable) {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            signable ? Icons.edit_rounded : Icons.draw_outlined,
-            color: const Color(0xFFB45309),
-            size: 20,
-          ),
-          Text(
-            field.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-          ),
-          Text(
-            field.assignedSignerName ?? field.assignedSignerId,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10, color: Color(0xFF92400E)),
-          ),
-          if (signable)
-            const Text(
-              'Click to sign',
-              maxLines: 1,
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFFB45309),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSignedField(DocuTrackerSignatureField field) {
-    return Padding(
-      padding: const EdgeInsets.all(5),
-      child: Column(
-        children: [
-          Expanded(
-            child: field.signatureImageBytes == null
-                ? const Icon(Icons.verified_rounded, color: Color(0xFF15803D))
-                : Image.memory(field.signatureImageBytes!, fit: BoxFit.contain),
-          ),
-          Text(
-            field.signerName ?? field.assignedSignerName ?? 'Signed',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 9),
-          ),
-          Text(
-            _formatSignedDate(field.signedAt),
-            maxLines: 1,
-            style: const TextStyle(fontSize: 8, color: Color(0xFF4B5563)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatSignedDate(DateTime? value) {
-    if (value == null) return '';
-    final local = value.toLocal();
-    String two(int number) => number.toString().padLeft(2, '0');
-    return '${local.year}-${two(local.month)}-${two(local.day)} '
-        '${two(local.hour)}:${two(local.minute)}';
   }
 }
 
