@@ -55,6 +55,45 @@ function normalizedTime(value) {
   return String(value).trim().slice(0, 8);
 }
 
+function timeMinutes(value) {
+  const normalized = normalizedTime(value);
+  const match = normalized?.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3] || 0);
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  return (hour * 60) + minute + (second / 60);
+}
+
+function ensureSupportedShiftRange(startTime, endTime) {
+  const startMinutes = timeMinutes(startTime);
+  const endMinutes = timeMinutes(endTime);
+  if (startMinutes == null || endMinutes == null) {
+    throw new ShiftLifecycleError(
+      'Start Time and End Time must be valid times.',
+      400,
+      {
+        fields: {
+          start_time: 'Enter a valid Start Time.',
+          end_time: 'Enter a valid End Time.',
+        },
+      }
+    );
+  }
+  if (endMinutes <= startMinutes) {
+    throw new ShiftLifecycleError(
+      'Overnight shifts are not currently supported. End Time must be later than Start Time.',
+      400,
+      {
+        fields: {
+          end_time: 'End Time must be later than Start Time.',
+        },
+      }
+    );
+  }
+}
+
 function normalizedWorkingDays(value) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map((day) => Number(day)).filter(Number.isFinite))]
@@ -263,6 +302,7 @@ module.exports = {
   deleteUnusedShift,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
+  ensureSupportedShiftRange,
   lockShiftForUpdate,
   shiftAssignmentHistoryCount,
   shiftDeactivationBlockers,

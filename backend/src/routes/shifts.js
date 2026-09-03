@@ -11,6 +11,7 @@ const {
   deleteUnusedShift,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
+  ensureSupportedShiftRange,
   lockShiftForUpdate,
   shiftDeactivationBlockers,
   shiftDeactivationCountsFromRow,
@@ -103,6 +104,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     }
     const st = parseTime(start_time) || '09:00:00';
     const et = parseTime(end_time) || '17:00:00';
+    ensureSupportedShiftRange(st, et);
     const be = break_end != null && break_end !== '' ? parseTime(break_end) : null;
     const mode = normalizePunchMode(punch_mode);
     const grace = grace_period_minutes != null ? Math.max(0, parseInt(grace_period_minutes, 10) || 0) : 0;
@@ -130,6 +132,12 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       is_active: r.is_active ?? true,
     });
   } catch (err) {
+    if (err instanceof ShiftLifecycleError) {
+      return res.status(err.statusCode).json({
+        error: err.message,
+        ...(err.details || {}),
+      });
+    }
     console.error('[shifts POST]', err);
     res.status(500).json({ error: 'Failed to create shift' });
   }
@@ -172,6 +180,16 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (!lockedShift) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Shift not found' });
+    }
+    if (start_time !== undefined || end_time !== undefined) {
+      ensureSupportedShiftRange(
+        start_time !== undefined
+          ? parseTime(start_time) || '09:00:00'
+          : lockedShift.start_time,
+        end_time !== undefined
+          ? parseTime(end_time) || '17:00:00'
+          : lockedShift.end_time
+      );
     }
     const scheduleChanges = {};
     if (start_time !== undefined) scheduleChanges.start_time = parseTime(start_time) || '09:00:00';

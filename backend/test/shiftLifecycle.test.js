@@ -9,6 +9,7 @@ const {
   deleteUnusedShift,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
+  ensureSupportedShiftRange,
   shiftDeactivationCountsSql,
   shiftDependencyCountsSql,
 } = require('../src/services/shiftLifecycle');
@@ -52,6 +53,33 @@ test('shift schedule comparison reports only changed schedule fields', () => {
       working_days: [1, 2, 3, 4, 5],
     }),
     ['start_time', 'grace_period_minutes']
+  );
+});
+
+test('same-day shift range accepts an end time later than its start time', () => {
+  assert.doesNotThrow(() => ensureSupportedShiftRange('08:00:00', '17:00:00'));
+});
+
+test('overnight shift range is rejected with a field-specific error', () => {
+  assert.throws(
+    () => ensureSupportedShiftRange('22:00:00', '06:00:00'),
+    (error) => {
+      assert.ok(error instanceof ShiftLifecycleError);
+      assert.equal(error.statusCode, 400);
+      assert.equal(
+        error.details.fields.end_time,
+        'End Time must be later than Start Time.'
+      );
+      assert.match(error.message, /overnight shifts are not currently supported/i);
+      return true;
+    }
+  );
+});
+
+test('equal shift start and end times are rejected', () => {
+  assert.throws(
+    () => ensureSupportedShiftRange('08:00:00', '08:00:00'),
+    (error) => error instanceof ShiftLifecycleError && error.statusCode === 400
   );
 });
 

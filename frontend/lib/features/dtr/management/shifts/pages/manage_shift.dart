@@ -298,6 +298,23 @@ class _ManageShiftState extends State<ManageShift> {
     });
   }
 
+  bool _validateSameDayShiftRange() {
+    final start = _startTime;
+    final end = _endTime;
+    if (start == null || end == null) return false;
+    final startMinutes = (start.hour * 60) + start.minute;
+    final endMinutes = (end.hour * 60) + end.minute;
+    if (endMinutes > startMinutes) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Overnight shifts are not currently supported. End Time must be later than Start Time.',
+        ),
+      ),
+    );
+    return false;
+  }
+
   void _toggleWorkingDay(int day) {
     _updateShiftFormState(() {
       if (_workingDays.contains(day)) {
@@ -322,6 +339,7 @@ class _ManageShiftState extends State<ManageShift> {
       );
       return false;
     }
+    if (!_validateSameDayShiftRange()) return false;
     if (_workingDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select at least one working day.')),
@@ -382,6 +400,7 @@ class _ManageShiftState extends State<ManageShift> {
       );
       return false;
     }
+    if (!_validateSameDayShiftRange()) return false;
     if (_workingDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select at least one working day.')),
