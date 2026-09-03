@@ -280,7 +280,9 @@ class _ManageShiftState extends State<ManageShift> {
       _startTime = s.startTime;
       _endTime = s.endTime;
       _punchMode = s.punchMode;
-      _breakEndTime = _punchMode == 'single_session' ? null : s.breakEndTime;
+      _breakEndTime = _punchMode == 'full_day' || _punchMode == 'auto'
+          ? s.breakEndTime
+          : null;
       _workingDays = s.workingDays.toSet();
     });
   }
@@ -315,6 +317,76 @@ class _ManageShiftState extends State<ManageShift> {
     return false;
   }
 
+  String _resolvedFormPunchMode() {
+    if (_punchMode != 'auto') return _punchMode;
+    final start = _startTime;
+    final end = _endTime;
+    if (start != null && start.hour >= 12) return 'pm_only';
+    final endMinutes = end == null ? null : (end.hour * 60) + end.minute;
+    if (_breakEndTime == null && endMinutes != null && endMinutes <= 13 * 60) {
+      return 'am_only';
+    }
+    return 'full_day';
+  }
+
+  bool get _formUsesPmStart => _resolvedFormPunchMode() == 'full_day';
+
+  bool _validatePunchModeSchedule() {
+    final mode = _resolvedFormPunchMode();
+    final start = _startTime!;
+    final end = _endTime!;
+    final pmStart = _breakEndTime;
+    if (mode == 'full_day') {
+      if (start.hour >= 12) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('A full-day shift must start before 12:00 PM.'),
+          ),
+        );
+        return false;
+      }
+      if (pmStart == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('PM Start is required for a full-day shift.'),
+          ),
+        );
+        return false;
+      }
+      final startMinutes = (start.hour * 60) + start.minute;
+      final endMinutes = (end.hour * 60) + end.minute;
+      final pmStartMinutes = (pmStart.hour * 60) + pmStart.minute;
+      if (pmStartMinutes < 12 * 60 ||
+          pmStartMinutes <= startMinutes ||
+          pmStartMinutes >= endMinutes) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'PM Start must be at or after 12:00 PM and before End Time.',
+            ),
+          ),
+        );
+        return false;
+      }
+    } else if (pmStart != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('PM Start is not used for this punch mode.'),
+        ),
+      );
+      return false;
+    }
+    if (mode == 'pm_only' && start.hour < 12) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('A PM-only shift must start at or after 12:00 PM.'),
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
+
   void _toggleWorkingDay(int day) {
     _updateShiftFormState(() {
       if (_workingDays.contains(day)) {
@@ -340,6 +412,7 @@ class _ManageShiftState extends State<ManageShift> {
       return false;
     }
     if (!_validateSameDayShiftRange()) return false;
+    if (!_validatePunchModeSchedule()) return false;
     if (_workingDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select at least one working day.')),
@@ -352,7 +425,7 @@ class _ManageShiftState extends State<ManageShift> {
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
         'punch_mode': _punchMode,
-        if (_breakEndTime != null && _punchMode != 'single_session')
+        if (_breakEndTime != null && _formUsesPmStart)
           'break_end': _timeStr(_breakEndTime!),
         'is_active': true,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
@@ -401,6 +474,7 @@ class _ManageShiftState extends State<ManageShift> {
       return false;
     }
     if (!_validateSameDayShiftRange()) return false;
+    if (!_validatePunchModeSchedule()) return false;
     if (_workingDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select at least one working day.')),
@@ -413,7 +487,7 @@ class _ManageShiftState extends State<ManageShift> {
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
         'punch_mode': _punchMode,
-        'break_end': _breakEndTime != null && _punchMode != 'single_session'
+        'break_end': _breakEndTime != null && _formUsesPmStart
             ? _timeStr(_breakEndTime!)
             : null,
         'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
@@ -1133,7 +1207,7 @@ class _ManageShiftState extends State<ManageShift> {
               ? (mode) {
                   _updateShiftFormState(() {
                     _punchMode = mode ?? 'auto';
-                    if (_punchMode == 'single_session') {
+                    if (!_formUsesPmStart) {
                       _breakEndTime = null;
                     }
                   });
@@ -1243,7 +1317,10 @@ class _ManageShiftState extends State<ManageShift> {
         const SizedBox(height: 6),
         _buildTimePicker(
           _startTime,
-          (t) => _updateShiftFormState(() => _startTime = t),
+          (t) => _updateShiftFormState(() {
+            _startTime = t;
+            if (!_formUsesPmStart) _breakEndTime = null;
+          }),
           enabled: !scheduleLocked,
         ),
         const SizedBox(height: 20),
@@ -1258,7 +1335,10 @@ class _ManageShiftState extends State<ManageShift> {
         const SizedBox(height: 6),
         _buildTimePicker(
           _endTime,
-          (t) => _updateShiftFormState(() => _endTime = t),
+          (t) => _updateShiftFormState(() {
+            _endTime = t;
+            if (!_formUsesPmStart) _breakEndTime = null;
+          }),
           enabled: !scheduleLocked,
         ),
         const SizedBox(height: 20),
@@ -1291,9 +1371,9 @@ class _ManageShiftState extends State<ManageShift> {
         ),
         const SizedBox(height: 4),
         Text(
-          _punchMode == 'single_session'
-              ? 'Not used for single-session shifts.'
-              : 'When PM shift starts; used for PM late check. Leave empty if not needed.',
+          _formUsesPmStart
+              ? 'Required scheduled return time after lunch.'
+              : 'Not used for the selected punch mode.',
           style: TextStyle(
             fontSize: 11,
             color: _mutedColor(context).withValues(alpha: 0.8),
@@ -1303,8 +1383,8 @@ class _ManageShiftState extends State<ManageShift> {
         _buildTimePicker(
           _breakEndTime,
           (t) => _updateShiftFormState(() => _breakEndTime = t),
-          allowClear: true,
-          enabled: !scheduleLocked && _punchMode != 'single_session',
+          allowClear: !_formUsesPmStart,
+          enabled: !scheduleLocked && _formUsesPmStart,
         ),
         const SizedBox(height: 20),
         Text(

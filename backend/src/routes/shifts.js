@@ -9,6 +9,7 @@ const {
 const {
   ShiftLifecycleError,
   deleteUnusedShift,
+  ensureCompatiblePunchModeSchedule,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   ensureSupportedShiftRange,
@@ -111,6 +112,12 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       required: false,
     });
     const mode = normalizePunchMode(punch_mode);
+    ensureCompatiblePunchModeSchedule({
+      startTime: st,
+      endTime: et,
+      breakEnd: be,
+      punchMode: mode,
+    });
     const grace = grace_period_minutes != null ? Math.max(0, parseInt(grace_period_minutes, 10) || 0) : 0;
     const wd = parseWorkingDays(working_days) || [1, 2, 3, 4, 5];
 
@@ -173,6 +180,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         label: 'PM Start',
         required: false,
       });
+    const parsedPunchMode = punch_mode === undefined
+      ? undefined
+      : normalizePunchMode(punch_mode);
 
     const updates = [];
     const values = [];
@@ -182,7 +192,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (parsedStartTime !== undefined) { updates.push(`start_time = $${i++}::time`); values.push(parsedStartTime); }
     if (parsedEndTime !== undefined) { updates.push(`end_time = $${i++}::time`); values.push(parsedEndTime); }
     if (parsedBreakEnd !== undefined) { updates.push(`break_end = $${i++}::time`); values.push(parsedBreakEnd); }
-    if (punch_mode !== undefined) { updates.push(`punch_mode = $${i++}`); values.push(normalizePunchMode(punch_mode)); }
+    if (parsedPunchMode !== undefined) { updates.push(`punch_mode = $${i++}`); values.push(parsedPunchMode); }
     if (grace_period_minutes !== undefined) { updates.push(`grace_period_minutes = $${i++}`); values.push(Math.max(0, parseInt(grace_period_minutes, 10) || 0)); }
     if (working_days !== undefined) {
       const wd = parseWorkingDays(working_days) || [1, 2, 3, 4, 5];
@@ -214,13 +224,26 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           : lockedShift.end_time
       );
     }
+    if (
+      start_time !== undefined ||
+      end_time !== undefined ||
+      break_end !== undefined ||
+      punch_mode !== undefined
+    ) {
+      ensureCompatiblePunchModeSchedule({
+        startTime: parsedStartTime ?? lockedShift.start_time,
+        endTime: parsedEndTime ?? lockedShift.end_time,
+        breakEnd: break_end !== undefined ? parsedBreakEnd : lockedShift.break_end,
+        punchMode: parsedPunchMode ?? lockedShift.punch_mode,
+      });
+    }
     const scheduleChanges = {};
     if (parsedStartTime !== undefined) scheduleChanges.start_time = parsedStartTime;
     if (parsedEndTime !== undefined) scheduleChanges.end_time = parsedEndTime;
     if (break_end !== undefined) {
       scheduleChanges.break_end = parsedBreakEnd;
     }
-    if (punch_mode !== undefined) scheduleChanges.punch_mode = normalizePunchMode(punch_mode);
+    if (parsedPunchMode !== undefined) scheduleChanges.punch_mode = parsedPunchMode;
     if (grace_period_minutes !== undefined) {
       scheduleChanges.grace_period_minutes = Math.max(0, parseInt(grace_period_minutes, 10) || 0);
     }

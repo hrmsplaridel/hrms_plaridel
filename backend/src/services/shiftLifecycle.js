@@ -125,6 +125,87 @@ function ensureSupportedShiftRange(startTime, endTime) {
   }
 }
 
+function resolvedPunchModeForSchedule({
+  startTime,
+  endTime,
+  breakEnd,
+  punchMode,
+}) {
+  const mode = String(punchMode || 'auto').trim().toLowerCase();
+  if (mode !== 'auto') return mode;
+  const startMinutes = timeMinutes(startTime);
+  const endMinutes = timeMinutes(endTime);
+  const breakEndMinutes = timeMinutes(breakEnd);
+  if (startMinutes != null && startMinutes >= 12 * 60) return 'pm_only';
+  if (breakEndMinutes == null && endMinutes != null && endMinutes <= 13 * 60) {
+    return 'am_only';
+  }
+  return 'full_day';
+}
+
+function ensureCompatiblePunchModeSchedule({
+  startTime,
+  endTime,
+  breakEnd,
+  punchMode,
+}) {
+  const resolvedMode = resolvedPunchModeForSchedule({
+    startTime,
+    endTime,
+    breakEnd,
+    punchMode,
+  });
+  const startMinutes = timeMinutes(startTime);
+  const endMinutes = timeMinutes(endTime);
+  const breakEndMinutes = timeMinutes(breakEnd);
+
+  if (resolvedMode === 'full_day') {
+    if (startMinutes >= 12 * 60) {
+      throw new ShiftLifecycleError(
+        'A full-day shift must start before 12:00 PM.',
+        400,
+        { fields: { start_time: 'Full-day Start Time must be before 12:00 PM.' } }
+      );
+    }
+    if (breakEndMinutes == null) {
+      throw new ShiftLifecycleError(
+        'PM Start is required for a full-day shift.',
+        400,
+        { fields: { break_end: 'Select the scheduled return time after lunch.' } }
+      );
+    }
+    if (
+      breakEndMinutes < 12 * 60 ||
+      breakEndMinutes <= startMinutes ||
+      breakEndMinutes >= endMinutes
+    ) {
+      throw new ShiftLifecycleError(
+        'PM Start must be at or after 12:00 PM and earlier than End Time.',
+        400,
+        { fields: { break_end: 'PM Start must be at or after 12:00 PM and before End Time.' } }
+      );
+    }
+    return resolvedMode;
+  }
+
+  if (breakEndMinutes != null) {
+    const modeLabel = resolvedMode.replace('_', '-');
+    throw new ShiftLifecycleError(
+      `PM Start is not used for ${modeLabel} shifts.`,
+      400,
+      { fields: { break_end: 'Clear PM Start for this punch mode.' } }
+    );
+  }
+  if (resolvedMode === 'pm_only' && startMinutes < 12 * 60) {
+    throw new ShiftLifecycleError(
+      'A PM-only shift must start at or after 12:00 PM.',
+      400,
+      { fields: { start_time: 'PM-only Start Time must be at or after 12:00 PM.' } }
+    );
+  }
+  return resolvedMode;
+}
+
 function normalizedWorkingDays(value) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map((day) => Number(day)).filter(Number.isFinite))]
@@ -333,9 +414,11 @@ module.exports = {
   deleteUnusedShift,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
+  ensureCompatiblePunchModeSchedule,
   ensureSupportedShiftRange,
   lockShiftForUpdate,
   parseShiftTimeInput,
+  resolvedPunchModeForSchedule,
   shiftAssignmentHistoryCount,
   shiftDeactivationBlockers,
   shiftDeactivationCountsFromRow,

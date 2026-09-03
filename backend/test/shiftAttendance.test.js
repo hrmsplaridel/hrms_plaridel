@@ -3,12 +3,40 @@ const assert = require('node:assert/strict');
 
 const {
   getShiftType,
+  getExpectedPmStartMinutes,
   getExpectedWorkMinutesForCoverage,
   getShiftExpectedLogs,
   interpretPunchesForShift,
   computeTotalHoursFromRecord,
   computeClockOutUndertimeMinutes,
 } = require('../src/services/shiftAttendance');
+
+test('PM cutoff uses one consistent rule for current and legacy shifts', () => {
+  assert.equal(getExpectedPmStartMinutes({
+    startMinutes: 8 * 60,
+    endMinutes: 17 * 60,
+    breakEndMinutes: 13 * 60,
+    punchMode: 'full_day',
+  }), 13 * 60);
+  assert.equal(getExpectedPmStartMinutes({
+    startMinutes: 8 * 60,
+    endMinutes: 17 * 60,
+    breakEndMinutes: null,
+    punchMode: 'full_day',
+  }), 13 * 60);
+  assert.equal(getExpectedPmStartMinutes({
+    startMinutes: 14 * 60,
+    endMinutes: 18 * 60,
+    breakEndMinutes: null,
+    punchMode: 'pm_only',
+  }), 14 * 60);
+  assert.equal(getExpectedPmStartMinutes({
+    startMinutes: 8 * 60,
+    endMinutes: 12 * 60,
+    breakEndMinutes: null,
+    punchMode: 'am_only',
+  }), null);
+});
 
 test('partial holiday coverage keeps only the scheduled shift session', () => {
   const fullDay = {

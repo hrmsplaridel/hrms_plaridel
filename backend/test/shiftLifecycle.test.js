@@ -7,10 +7,12 @@ const {
   ShiftLifecycleError,
   changedShiftScheduleFields,
   deleteUnusedShift,
+  ensureCompatiblePunchModeSchedule,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   ensureSupportedShiftRange,
   parseShiftTimeInput,
+  resolvedPunchModeForSchedule,
   shiftDeactivationCountsSql,
   shiftDependencyCountsSql,
 } = require('../src/services/shiftLifecycle');
@@ -139,6 +141,86 @@ test('empty optional PM Start is preserved as null', () => {
       required: false,
     }),
     null
+  );
+});
+
+test('full-day shift requires a PM Start', () => {
+  assert.throws(
+    () => ensureCompatiblePunchModeSchedule({
+      startTime: '08:00:00',
+      endTime: '17:00:00',
+      breakEnd: null,
+      punchMode: 'full_day',
+    }),
+    (error) => {
+      assert.ok(error instanceof ShiftLifecycleError);
+      assert.equal(error.statusCode, 400);
+      assert.match(error.details.fields.break_end, /return time after lunch/i);
+      return true;
+    }
+  );
+});
+
+test('full-day shift accepts a PM Start between noon and End Time', () => {
+  assert.equal(
+    ensureCompatiblePunchModeSchedule({
+      startTime: '08:00:00',
+      endTime: '17:00:00',
+      breakEnd: '13:00:00',
+      punchMode: 'full_day',
+    }),
+    'full_day'
+  );
+});
+
+test('non-full-day punch modes reject PM Start', () => {
+  for (const punchMode of ['am_only', 'pm_only', 'single_session']) {
+    assert.throws(
+      () => ensureCompatiblePunchModeSchedule({
+        startTime: punchMode === 'pm_only' ? '13:00:00' : '08:00:00',
+        endTime: punchMode === 'pm_only' ? '17:00:00' : '12:00:00',
+        breakEnd: '11:00:00',
+        punchMode,
+      }),
+      (error) => error instanceof ShiftLifecycleError && error.statusCode === 400
+    );
+  }
+});
+
+test('PM-only shift requires an afternoon Start Time', () => {
+  assert.throws(
+    () => ensureCompatiblePunchModeSchedule({
+      startTime: '08:00:00',
+      endTime: '12:00:00',
+      breakEnd: null,
+      punchMode: 'pm_only',
+    }),
+    (error) => {
+      assert.ok(error instanceof ShiftLifecycleError);
+      assert.match(error.details.fields.start_time, /12:00 PM/);
+      return true;
+    }
+  );
+});
+
+test('auto mode resolves before PM Start compatibility is validated', () => {
+  assert.equal(
+    resolvedPunchModeForSchedule({
+      startTime: '13:00:00',
+      endTime: '17:00:00',
+      breakEnd: null,
+      punchMode: 'auto',
+    }),
+    'pm_only'
+  );
+  assert.equal(
+    resolvedPunchModeForSchedule({
+      startTime: '08:00:00',
+      endTime: '17:00:00',
+      breakEnd: '13:00:00',
+      punchMode: 'auto',
+    }),
+    'full_day'
   );
 });
 

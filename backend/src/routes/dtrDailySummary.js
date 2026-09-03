@@ -13,6 +13,7 @@ const {
   getExpectedWorkMinutes: resolveExpectedWorkMinutes,
   getExpectedWorkMinutesForCoverage,
   getExpectedAmEndMinutes,
+  getExpectedPmStartMinutes,
   computeClockOutUndertimeMinutes,
   getExpectedLogsForDay: resolveExpectedLogsForDay,
   computeTotalHoursFromRecord,
@@ -344,7 +345,7 @@ function getExpectedLogsForDay(shiftInfo, holidayInfo) {
 /**
  * Get the employee assignment effective on a date, including closed history.
  * Returns { startMinutes, endMinutes, graceMinutes, breakEndMinutes } or null if no assignment/shift.
- * breakEndMinutes: PM shift start (when late is checked for break_in). Null = no PM late check.
+ * breakEndMinutes: configured PM shift start; legacy full-day null values use 1:00 PM.
  * endMinutes: shift end time in minutes from midnight (for validating clock-in outside shift).
  */
 async function getAssignmentShiftForDate(employeeId, dateStr) {
@@ -410,14 +411,15 @@ async function computeStatusFromShift(employeeId, dateStr, timeInIso) {
 
 /**
  * Compute PM status: 'late' if break_in is after break_end + grace, else 'present'.
- * Returns null if no break_in, or if no shift break_end configured (no PM late check).
+ * Returns null if there is no break_in. Full-day legacy rows without break_end use 1:00 PM.
  */
 async function computePmLateStatus(employeeId, dateStr, breakInIso) {
   if (!breakInIso) return null;
   const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
-  if (!shiftInfo || shiftInfo.breakEndMinutes == null) return 'present'; // no PM cutoff = present
-  const { breakEndMinutes, graceMinutes } = shiftInfo;
-  const cutoffMinutes = breakEndMinutes + graceMinutes;
+  if (!shiftInfo) return 'present';
+  const pmStartMinutes = getExpectedPmStartMinutes(shiftInfo);
+  if (pmStartMinutes == null) return 'present';
+  const cutoffMinutes = pmStartMinutes + shiftInfo.graceMinutes;
 
   const localMins = minutesFromMidnightInTimeZone(breakInIso);
   if (localMins == null) return 'present';
@@ -445,7 +447,7 @@ async function computeLateMinutes(
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
   const shiftInfo = prefetchedShiftInfo || await getAssignmentShiftForDate(employeeId, dateStr);
   if (!shiftInfo) return 0;
-  const { startMinutes, graceMinutes, breakEndMinutes } = shiftInfo;
+  const { startMinutes, graceMinutes } = shiftInfo;
   const type = getShiftType(shiftInfo);
   let total = 0;
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
@@ -456,8 +458,8 @@ async function computeLateMinutes(
     const cutoff = startMinutes + graceMinutes;
     if (localMins > cutoff) total += localMins - cutoff;
   }
-  const pmStartMinutes = breakEndMinutes ?? startMinutes;
-  if (evalPm && breakInIso && (type === 'pm_only' || pmStartMinutes != null)) {
+  const pmStartMinutes = getExpectedPmStartMinutes(shiftInfo);
+  if (evalPm && breakInIso && pmStartMinutes != null) {
     const localMins = minutesFromMidnightInTimeZone(breakInIso);
     if (localMins == null) return total;
     const cutoff = pmStartMinutes + graceMinutes;
@@ -517,7 +519,7 @@ async function computeUndertimeMinutes(
       (timeInIso != null || locatorSegSet.has('AM IN')) &&
       (breakOutIso != null || locatorSegSet.has('AM OUT'));
     const amEndMinutes = getExpectedAmEndMinutes(shiftInfo);
-    const pmStartMinutes = shiftInfo.breakEndMinutes ?? NOON_MINUTES;
+    const pmStartMinutes = getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
     const amWindowClosed =
       dateStr < todayStr || (dateStr === todayStr && nowMinutes >= pmStartMinutes);
     if (!hasAmLogs && amWindowClosed) {

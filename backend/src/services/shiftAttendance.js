@@ -45,6 +45,15 @@ function getShiftType(shiftInfo) {
   return 'full_day';
 }
 
+function getExpectedPmStartMinutes(shiftInfo) {
+  const type = getShiftType(shiftInfo);
+  if (type === 'pm_only') return shiftInfo?.startMinutes ?? null;
+  if (type === 'full_day') {
+    return shiftInfo?.breakEndMinutes ?? ONE_PM_MINUTES;
+  }
+  return null;
+}
+
 function getExpectedWorkMinutes(shiftInfo) {
   if (!shiftInfo || shiftInfo.startMinutes == null || shiftInfo.endMinutes == null) {
     return 0;
@@ -71,7 +80,7 @@ function getExpectedWorkMinutesForCoverage(shiftInfo, coverage) {
     if (type === 'am_only') return 0;
     if (type === 'pm_only') return fullMinutes;
     if (type === 'full_day') {
-      const pmStart = shiftInfo.breakEndMinutes ?? ONE_PM_MINUTES;
+      const pmStart = getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
       return Math.max(0, (shiftInfo.endMinutes ?? pmStart) - pmStart);
     }
     if (type === 'single_session') {
@@ -271,9 +280,7 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
   } else {
     const firstPunchMins = minutesFromMidnightInTimeZone(punches[0], timeZone);
     const pmStartThreshold =
-      shiftInfo && Number.isFinite(shiftInfo.breakEndMinutes)
-        ? shiftInfo.breakEndMinutes
-        : NOON_MINUTES;
+      getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
     const isAfternoonFirstPunch =
       firstPunchMins != null && firstPunchMins >= pmStartThreshold;
 
@@ -333,6 +340,7 @@ module.exports = {
   normalizePunchMode,
   ensureShiftPunchModeColumn,
   getShiftType,
+  getExpectedPmStartMinutes,
   getExpectedWorkMinutes,
   getExpectedWorkMinutesForCoverage,
   getExpectedAmEndMinutes,
