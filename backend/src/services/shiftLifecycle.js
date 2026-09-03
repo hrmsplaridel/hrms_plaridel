@@ -55,6 +55,37 @@ function normalizedTime(value) {
   return String(value).trim().slice(0, 8);
 }
 
+function parseShiftTimeInput(
+  value,
+  { field, label, required = true }
+) {
+  const isEmpty = value == null || (typeof value === 'string' && value.trim() === '');
+  if (isEmpty) {
+    if (!required) return null;
+    throw new ShiftLifecycleError(
+      `${label} is required.`,
+      400,
+      { fields: { [field]: `${label} is required.` } }
+    );
+  }
+  if (typeof value !== 'string') {
+    throw new ShiftLifecycleError(
+      `${label} must be a valid time.`,
+      400,
+      { fields: { [field]: `${label} must use HH:mm or HH:mm:ss in 24-hour format.` } }
+    );
+  }
+  const match = value.trim().match(/^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/);
+  if (!match) {
+    throw new ShiftLifecycleError(
+      `${label} must be a valid time.`,
+      400,
+      { fields: { [field]: `${label} must use HH:mm or HH:mm:ss in 24-hour format.` } }
+    );
+  }
+  return `${match[1]}:${match[2]}:${match[3] || '00'}`;
+}
+
 function timeMinutes(value) {
   const normalized = normalizedTime(value);
   const match = normalized?.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
@@ -304,6 +335,7 @@ module.exports = {
   ensureShiftScheduleChangeAllowed,
   ensureSupportedShiftRange,
   lockShiftForUpdate,
+  parseShiftTimeInput,
   shiftAssignmentHistoryCount,
   shiftDeactivationBlockers,
   shiftDeactivationCountsFromRow,

@@ -10,6 +10,7 @@ const {
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   ensureSupportedShiftRange,
+  parseShiftTimeInput,
   shiftDeactivationCountsSql,
   shiftDependencyCountsSql,
 } = require('../src/services/shiftLifecycle');
@@ -80,6 +81,64 @@ test('equal shift start and end times are rejected', () => {
   assert.throws(
     () => ensureSupportedShiftRange('08:00:00', '08:00:00'),
     (error) => error instanceof ShiftLifecycleError && error.statusCode === 400
+  );
+});
+
+test('shift time input normalizes valid 24-hour values', () => {
+  assert.equal(
+    parseShiftTimeInput('08:30', {
+      field: 'start_time',
+      label: 'Start Time',
+    }),
+    '08:30:00'
+  );
+  assert.equal(
+    parseShiftTimeInput('17:15:45', {
+      field: 'end_time',
+      label: 'End Time',
+    }),
+    '17:15:45'
+  );
+});
+
+test('missing required shift time is rejected instead of defaulted', () => {
+  assert.throws(
+    () => parseShiftTimeInput(null, {
+      field: 'start_time',
+      label: 'Start Time',
+    }),
+    (error) => {
+      assert.ok(error instanceof ShiftLifecycleError);
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.details.fields.start_time, 'Start Time is required.');
+      return true;
+    }
+  );
+});
+
+test('malformed shift time is rejected instead of defaulted', () => {
+  assert.throws(
+    () => parseShiftTimeInput('8am', {
+      field: 'start_time',
+      label: 'Start Time',
+    }),
+    (error) => {
+      assert.ok(error instanceof ShiftLifecycleError);
+      assert.equal(error.statusCode, 400);
+      assert.match(error.details.fields.start_time, /24-hour format/);
+      return true;
+    }
+  );
+});
+
+test('empty optional PM Start is preserved as null', () => {
+  assert.equal(
+    parseShiftTimeInput('', {
+      field: 'break_end',
+      label: 'PM Start',
+      required: false,
+    }),
+    null
   );
 });
 

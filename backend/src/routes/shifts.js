@@ -13,6 +13,7 @@ const {
   ensureShiftScheduleChangeAllowed,
   ensureSupportedShiftRange,
   lockShiftForUpdate,
+  parseShiftTimeInput,
   shiftDeactivationBlockers,
   shiftDeactivationCountsFromRow,
   shiftDeactivationCountsSql,
@@ -24,13 +25,6 @@ const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
 const protect = [authMiddleware];
-
-function parseTime(val) {
-  if (!val) return null;
-  const s = String(val);
-  if (s.match(/^\d{1,2}:\d{2}(:\d{2})?$/)) return s.length <= 5 ? s + ':00' : s.substring(0, 8);
-  return null;
-}
 
 /** Parse working_days from body: array of 1-7 (Mon-Sun) or null for default Mon-Fri. */
 function parseWorkingDays(val) {
@@ -102,10 +96,20 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
     }
-    const st = parseTime(start_time) || '09:00:00';
-    const et = parseTime(end_time) || '17:00:00';
+    const st = parseShiftTimeInput(start_time, {
+      field: 'start_time',
+      label: 'Start Time',
+    });
+    const et = parseShiftTimeInput(end_time, {
+      field: 'end_time',
+      label: 'End Time',
+    });
     ensureSupportedShiftRange(st, et);
-    const be = break_end != null && break_end !== '' ? parseTime(break_end) : null;
+    const be = parseShiftTimeInput(break_end, {
+      field: 'break_end',
+      label: 'PM Start',
+      required: false,
+    });
     const mode = normalizePunchMode(punch_mode);
     const grace = grace_period_minutes != null ? Math.max(0, parseInt(grace_period_minutes, 10) || 0) : 0;
     const wd = parseWorkingDays(working_days) || [1, 2, 3, 4, 5];
@@ -150,15 +154,34 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     await ensureShiftPunchModeColumn(pool);
     const { id } = req.params;
     const { name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active } = req.body;
+    const parsedStartTime = start_time === undefined
+      ? undefined
+      : parseShiftTimeInput(start_time, {
+        field: 'start_time',
+        label: 'Start Time',
+      });
+    const parsedEndTime = end_time === undefined
+      ? undefined
+      : parseShiftTimeInput(end_time, {
+        field: 'end_time',
+        label: 'End Time',
+      });
+    const parsedBreakEnd = break_end === undefined
+      ? undefined
+      : parseShiftTimeInput(break_end, {
+        field: 'break_end',
+        label: 'PM Start',
+        required: false,
+      });
 
     const updates = [];
     const values = [];
     let i = 1;
 
     if (name !== undefined) { updates.push(`name = $${i++}`); values.push(name.trim()); }
-    if (start_time !== undefined) { updates.push(`start_time = $${i++}::time`); values.push(parseTime(start_time) || '09:00:00'); }
-    if (end_time !== undefined) { updates.push(`end_time = $${i++}::time`); values.push(parseTime(end_time) || '17:00:00'); }
-    if (break_end !== undefined) { updates.push(`break_end = $${i++}::time`); values.push(break_end != null && break_end !== '' ? parseTime(break_end) : null); }
+    if (parsedStartTime !== undefined) { updates.push(`start_time = $${i++}::time`); values.push(parsedStartTime); }
+    if (parsedEndTime !== undefined) { updates.push(`end_time = $${i++}::time`); values.push(parsedEndTime); }
+    if (parsedBreakEnd !== undefined) { updates.push(`break_end = $${i++}::time`); values.push(parsedBreakEnd); }
     if (punch_mode !== undefined) { updates.push(`punch_mode = $${i++}`); values.push(normalizePunchMode(punch_mode)); }
     if (grace_period_minutes !== undefined) { updates.push(`grace_period_minutes = $${i++}`); values.push(Math.max(0, parseInt(grace_period_minutes, 10) || 0)); }
     if (working_days !== undefined) {
@@ -184,18 +207,18 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (start_time !== undefined || end_time !== undefined) {
       ensureSupportedShiftRange(
         start_time !== undefined
-          ? parseTime(start_time) || '09:00:00'
+          ? parsedStartTime
           : lockedShift.start_time,
         end_time !== undefined
-          ? parseTime(end_time) || '17:00:00'
+          ? parsedEndTime
           : lockedShift.end_time
       );
     }
     const scheduleChanges = {};
-    if (start_time !== undefined) scheduleChanges.start_time = parseTime(start_time) || '09:00:00';
-    if (end_time !== undefined) scheduleChanges.end_time = parseTime(end_time) || '17:00:00';
+    if (parsedStartTime !== undefined) scheduleChanges.start_time = parsedStartTime;
+    if (parsedEndTime !== undefined) scheduleChanges.end_time = parsedEndTime;
     if (break_end !== undefined) {
-      scheduleChanges.break_end = break_end != null && break_end !== '' ? parseTime(break_end) : null;
+      scheduleChanges.break_end = parsedBreakEnd;
     }
     if (punch_mode !== undefined) scheduleChanges.punch_mode = normalizePunchMode(punch_mode);
     if (grace_period_minutes !== undefined) {
