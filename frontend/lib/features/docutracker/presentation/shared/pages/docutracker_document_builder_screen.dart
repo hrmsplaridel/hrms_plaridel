@@ -13,6 +13,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_field_visual.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_fields_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
@@ -35,6 +36,7 @@ class _DocuTrackerDocumentBuilderScreenState
   static const double _paperHeight = 1123;
   static const double _horizontalMargin = 68;
   static const double _verticalMargin = 72;
+  static const double _signaturePanelBreakpoint = 1180;
 
   final EmployeeDirectoryLookup _directory = EmployeeDirectoryLookup();
   final List<_EditorPage> _pages = <_EditorPage>[];
@@ -55,6 +57,7 @@ class _DocuTrackerDocumentBuilderScreenState
   String? _draggingSignedFieldId;
   double? _signedDragOriginX;
   double? _signedDragOriginY;
+  double _zoom = 1;
 
   DocuTrackerProvider get _provider => context.read<DocuTrackerProvider>();
 
@@ -559,12 +562,81 @@ class _DocuTrackerDocumentBuilderScreenState
     final field = _signatureFields
         .cast<DocuTrackerSignatureField?>()
         .firstWhere((item) => item?.id == _selectedFieldId, orElse: () => null);
-    if (field == null || field.isSigned) return;
+    if (field == null) return;
+    _deleteSignatureField(field);
+  }
+
+  void _deleteSignatureField(DocuTrackerSignatureField field) {
+    if (!_canEditLayout || field.isSigned) return;
     setState(() {
       _signatureFields.removeWhere((item) => item.id == field.id);
-      _selectedFieldId = null;
+      if (_selectedFieldId == field.id) _selectedFieldId = null;
       _dirty = true;
     });
+  }
+
+  Future<void> _goToPage(int pageIndex, {String? selectedFieldId}) async {
+    if (pageIndex < 0 || pageIndex >= _pages.length) return;
+    setState(() {
+      _activePage = pageIndex;
+      _selectedFieldId = selectedFieldId;
+    });
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    final pageContext = _pageKeys[pageIndex].currentContext;
+    if (pageContext == null || !pageContext.mounted) return;
+    await Scrollable.ensureVisible(
+      pageContext,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      alignment: 0.05,
+    );
+  }
+
+  Future<void> _focusSignatureField(DocuTrackerSignatureField field) =>
+      _goToPage(field.pageNumber - 1, selectedFieldId: field.id);
+
+  void _changeZoom(double change) {
+    final nextZoom = (_zoom + change).clamp(0.6, 1.0);
+    if (nextZoom == _zoom) return;
+    setState(() => _zoom = nextZoom);
+  }
+
+  Future<void> _showSignatureFieldsSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        void closeThen(VoidCallback action) {
+          Navigator.of(sheetContext).pop();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) action();
+          });
+        }
+
+        return SizedBox(
+          height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: DocuTrackerSignatureFieldsPanel(
+              fields: _signatureFields,
+              activePage: _activePage + 1,
+              selectedFieldId: _selectedFieldId,
+              canEditLayout: _canEditLayout,
+              isBusy: _saving,
+              onClose: () => Navigator.of(sheetContext).pop(),
+              onSelect: (field) =>
+                  closeThen(() => unawaited(_focusSignatureField(field))),
+              onSign: (field) => closeThen(() => unawaited(_signField(field))),
+              onDelete: (field) =>
+                  closeThen(() => _deleteSignatureField(field)),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<Uint8List> _buildPdf() async {
@@ -659,7 +731,7 @@ class _DocuTrackerDocumentBuilderScreenState
               Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: FilledButton.icon(
-                  onPressed: _saving ? null : _save,
+                  onPressed: _saving || !_dirty ? null : _save,
                   icon: _saving
                       ? const SizedBox.square(
                           dimension: 16,
@@ -668,8 +740,18 @@ class _DocuTrackerDocumentBuilderScreenState
                             color: Colors.white,
                           ),
                         )
-                      : const Icon(Icons.save_outlined),
-                  label: Text(_dirty ? 'Save changes' : 'Saved'),
+                      : Icon(
+                          _dirty
+                              ? Icons.save_outlined
+                              : Icons.check_circle_outline,
+                        ),
+                  label: Text(
+                    _saving
+                        ? 'Saving...'
+                        : _dirty
+                        ? 'Unsaved changes'
+                        : 'Saved',
+                  ),
                 ),
               ),
           ],
@@ -682,28 +764,135 @@ class _DocuTrackerDocumentBuilderScreenState
                 child: DocuTrackerErrorBanner(message: _error!),
               ),
             _buildToolbar(),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final scale = ((constraints.maxWidth - 32) / _paperWidth)
-                      .clamp(0.42, 1.0);
-                  return SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 48),
-                    child: Column(
-                      children: [
-                        for (var index = 0; index < _pages.length; index++) ...[
-                          _buildPage(index, scale),
-                          if (index != _pages.length - 1)
-                            const SizedBox(height: 24),
-                        ],
-                      ],
-                    ),
-                  );
-                },
+            Expanded(child: _buildWorkspace()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkspace() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final showSidePanel = constraints.maxWidth >= _signaturePanelBreakpoint;
+        if (!showSidePanel) return _buildDocumentCanvas();
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: _buildDocumentCanvas()),
+            SizedBox(
+              width: 336,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(0, 16, 16, 16),
+                child: DocuTrackerSignatureFieldsPanel(
+                  fields: _signatureFields,
+                  activePage: _activePage + 1,
+                  selectedFieldId: _selectedFieldId,
+                  canEditLayout: _canEditLayout,
+                  isBusy: _saving,
+                  onSelect: (field) => unawaited(_focusSignatureField(field)),
+                  onSign: (field) => unawaited(_signField(field)),
+                  onDelete: _deleteSignatureField,
+                ),
               ),
             ),
           ],
+        );
+      },
+    );
+  }
+
+  Widget _buildDocumentCanvas() {
+    return Column(
+      children: [
+        _buildCanvasControls(),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final fittedScale = ((constraints.maxWidth - 32) / _paperWidth)
+                  .clamp(0.42, 1.0);
+              final scale = (fittedScale * _zoom).clamp(0.30, 1.0);
+              return SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 48),
+                child: Column(
+                  children: [
+                    for (var index = 0; index < _pages.length; index++) ...[
+                      _buildPage(index, scale),
+                      if (index != _pages.length - 1)
+                        const SizedBox(height: 24),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildCanvasControls() {
+    final zoomPercent = (_zoom * 100).round();
+    return Material(
+      color: DocuTrackerTokens.surfaceOf(context),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 600;
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: 'Previous page',
+                  onPressed: _activePage > 0
+                      ? () => unawaited(_goToPage(_activePage - 1))
+                      : null,
+                  icon: const Icon(Icons.chevron_left),
+                ),
+                Text(
+                  compact
+                      ? '${_activePage + 1}/${_pages.length}'
+                      : 'Page ${_activePage + 1} of ${_pages.length}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                IconButton(
+                  tooltip: 'Next page',
+                  onPressed: _activePage < _pages.length - 1
+                      ? () => unawaited(_goToPage(_activePage + 1))
+                      : null,
+                  icon: const Icon(Icons.chevron_right),
+                ),
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Zoom out',
+                  onPressed: _zoom > 0.6 ? () => _changeZoom(-0.1) : null,
+                  icon: const Icon(Icons.zoom_out),
+                ),
+                SizedBox(
+                  width: 42,
+                  child: Text(
+                    '$zoomPercent%',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Zoom in',
+                  onPressed: _zoom < 1 ? () => _changeZoom(0.1) : null,
+                  icon: const Icon(Icons.zoom_in),
+                ),
+                if (!compact)
+                  IconButton(
+                    tooltip: 'Reset zoom',
+                    onPressed: _zoom == 1
+                        ? null
+                        : () => setState(() => _zoom = 1),
+                    icon: const Icon(Icons.fit_screen_outlined),
+                  ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -749,6 +938,8 @@ class _DocuTrackerDocumentBuilderScreenState
         );
     final canDeleteSelected =
         enabled && selectedField != null && !selectedField.isSigned;
+    final showSignatureFieldsButton =
+        MediaQuery.sizeOf(context).width < _signaturePanelBreakpoint;
     return Material(
       color: Colors.white,
       elevation: 2,
@@ -890,6 +1081,18 @@ class _DocuTrackerDocumentBuilderScreenState
                   icon: const Icon(Icons.add_box_outlined),
                   label: const Text('Add Signature Field'),
                 ),
+                if (showSignatureFieldsButton)
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                    ),
+                    onPressed: _showSignatureFieldsSheet,
+                    icon: const Icon(Icons.view_sidebar_outlined),
+                    label: Text(
+                      'Signature Fields (${_signatureFields.length})',
+                    ),
+                  ),
                 FilledButton.icon(
                   style: DocuTrackerTokens.brandFilledStyle(),
                   onPressed: _saving
