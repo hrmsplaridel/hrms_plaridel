@@ -30,8 +30,8 @@ const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const router = express.Router();
 const protect = [authMiddleware];
 
-// GET /api/shifts - list all (?status=Active|Inactive|All)
-router.get('/', protect, async (req, res) => {
+// GET /api/shifts - list all (?status=Active|Inactive|All; admin only)
+router.get('/', protect, requireAdmin, async (req, res) => {
   try {
     await ensureShiftPunchModeColumn(pool);
     const today = todayInHrmsTimezone();
