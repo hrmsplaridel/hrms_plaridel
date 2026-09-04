@@ -41,10 +41,17 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
   @override
   void initState() {
     super.initState();
+    final reservedDays = widget.request.reservedCreditDays;
+    final suggestedWithPay = reservedDays == null
+        ? _totalRequested
+        : reservedDays.clamp(0.0, _totalRequested).toDouble();
+    final suggestedWithoutPay = _totalRequested - suggestedWithPay;
     _withPayController = TextEditingController(
-      text: _formatDays(_totalRequested),
+      text: _formatDays(suggestedWithPay),
     );
-    _withoutPayController = TextEditingController(text: '0');
+    _withoutPayController = TextEditingController(
+      text: _formatDays(suggestedWithoutPay),
+    );
     _remarksController = TextEditingController();
   }
 

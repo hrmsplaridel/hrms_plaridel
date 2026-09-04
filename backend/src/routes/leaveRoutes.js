@@ -51,6 +51,10 @@ const {
   resolveApprovalAllocation,
 } = require('../services/leaveApprovalAllocation');
 const {
+  calculateApprovalCreditHeadroom,
+  calculateCreditReservation,
+} = require('../services/leaveCreditReservation');
+const {
   attachmentReplacementCleanupPath,
   assertRequiredLeaveAttachment,
   canModifyLeaveAttachment,
@@ -1112,6 +1116,10 @@ function mapLeaveRowToApi(row) {
       row.approved_days_without_pay != null
         ? parseFloat(row.approved_days_without_pay)
         : null,
+    reserved_credit_days:
+      row.reserved_credit_days != null
+        ? parseFloat(row.reserved_credit_days)
+        : null,
     approved_other_details: row.approved_other_details || null,
     reviewed_at: row.reviewed_at || row.approved_at || null,
     created_at: row.created_at || null,
@@ -1583,6 +1591,13 @@ function ledgerAvailableFromBalancesRow(row) {
   return ledgerRemainingFromBalancesRow(row) - pending;
 }
 
+function reservedCreditDaysFromRequest(row) {
+  const days = row?.reserved_credit_days != null
+    ? parseFloat(row.reserved_credit_days)
+    : 0;
+  return Number.isFinite(days) && days > 0 ? days : 0;
+}
+
 /** Normalized snapshot for leave_balance_ledger old/new values. */
 function balanceRowToSnapshot(row) {
   if (!row) {
@@ -1594,36 +1609,6 @@ function balanceRowToSnapshot(row) {
     pending_days: parseFloat(row.pending_days ?? 0),
     adjusted_days: parseFloat(row.adjusted_days ?? 0),
   };
-}
-
-/**
- * New pending reservation (submit / resubmit): must not exceed available pool.
- * Same formula as Flutter: available = earned - used + adjusted - pending.
- */
-async function assertEnoughAvailableForPendingReservation(client, userId, leaveTypeName, deltaDays) {
-  const d = deltaDays != null ? parseFloat(deltaDays) : 0;
-  if (!userId || !leaveTypeName || !Number.isFinite(d) || d <= 0) return;
-  const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
-  if (!ledgerType) return;
-  const bal = await client.query(
-    `SELECT earned_days, used_days, pending_days, adjusted_days
-     FROM leave_balances
-     WHERE user_id = $1::uuid AND leave_type = $2::text
-     LIMIT 1
-     FOR UPDATE`,
-    [userId, ledgerType]
-  );
-  const available = ledgerAvailableFromBalancesRow(bal.rows[0]);
-  if (d > available) {
-    const remaining = ledgerRemainingFromBalancesRow(bal.rows[0]);
-    const pending = bal.rows.length > 0 ? parseFloat(bal.rows[0].pending_days ?? 0) : 0;
-    const bucketLabel = creditBalanceLabel(ledgerType, leaveTypeName);
-    const err = new Error(
-      `Insufficient ${bucketLabel} balance. Available ${available.toFixed(2)} (remaining ${remaining.toFixed(2)}, pending ${pending.toFixed(2)}), requested ${d.toFixed(2)}.`
-    );
-    err.statusCode = 400;
-    throw err;
-  }
 }
 
 async function upsertLeaveBalanceDeduction(
@@ -1661,11 +1646,17 @@ async function upsertLeaveBalanceDeduction(
   const available = remaining - pending;
 
   if (decrementPendingDays) {
-    // Final approval: convert pending → used. Pool headroom is "remaining" (earned - used + adj); days were already in pending.
-    if (!allowNegative && days > remaining) {
+    // This request may reserve only part of its requested days. Its own hold is
+    // available for approval; pending credits held by other requests are not.
+    const approvalHeadroom = calculateApprovalCreditHeadroom({
+      remainingDays: remaining,
+      pendingDays: pending,
+      reservedCreditDays: pendingDaysToRelease,
+    });
+    if (!allowNegative && days > approvalHeadroom) {
       const bucketLabel = creditBalanceLabel(ledgerType, leaveTypeName);
       const err = new Error(
-        `Insufficient ${bucketLabel} balance. Remaining ${remaining.toFixed(2)}, requested ${days.toFixed(2)}.`
+        `Insufficient ${bucketLabel} balance for the paid allocation. Available ${approvalHeadroom.toFixed(2)}, requested with pay ${days.toFixed(2)}.`
       );
       err.statusCode = 400;
       throw err;
@@ -1772,15 +1763,48 @@ async function reservePendingLeaveBalance(
   const ledgerType = await resolveBalanceLedgerLeaveType(client, leaveTypeName);
   if (!ledgerType) return null;
 
-  await assertEnoughAvailableForPendingReservation(client, userId, leaveTypeName, d);
-  const beforeSnap = await fetchBalanceSnapshot(client, userId, ledgerType);
   await client.query(
-    `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days, as_of_date, last_accrual_date, created_at, updated_at)
-     VALUES ($1::uuid, $2::text, 0, 0, $3::numeric, 0, now()::date, now()::date, now(), now())
-     ON CONFLICT (user_id, leave_type)
-     DO UPDATE SET pending_days = COALESCE(leave_balances.pending_days, 0) + EXCLUDED.pending_days,
-                   updated_at = now()`,
-    [userId, ledgerType, d]
+    `INSERT INTO leave_balances (
+       user_id, leave_type, earned_days, used_days, pending_days,
+       adjusted_days, as_of_date, last_accrual_date, created_at, updated_at
+     )
+     VALUES ($1::uuid, $2::text, 0, 0, 0, 0, now()::date, now()::date, now(), now())
+     ON CONFLICT (user_id, leave_type) DO NOTHING`,
+    [userId, ledgerType]
+  );
+  const lockedBalance = await client.query(
+    `SELECT earned_days, used_days, pending_days, adjusted_days
+     FROM leave_balances
+     WHERE user_id = $1::uuid AND leave_type = $2::text
+     FOR UPDATE`,
+    [userId, ledgerType]
+  );
+  const beforeSnap = balanceRowToSnapshot(lockedBalance.rows[0]);
+  const reservation = calculateCreditReservation({
+    requestedDays: d,
+    availableDays: ledgerAvailableFromBalancesRow(lockedBalance.rows[0]),
+  });
+
+  if (leaveRequestId) {
+    await client.query(
+      `UPDATE leave_requests
+       SET reserved_credit_days = $2::numeric,
+           updated_at = now()
+       WHERE id = $1`,
+      [leaveRequestId, reservation.reservedDays]
+    );
+  }
+
+  if (reservation.reservedDays <= 0) {
+    return { ledgerType, ...reservation };
+  }
+
+  await client.query(
+    `UPDATE leave_balances
+     SET pending_days = COALESCE(pending_days, 0) + $3::numeric,
+         updated_at = now()
+     WHERE user_id = $1::uuid AND leave_type = $2::text`,
+    [userId, ledgerType, reservation.reservedDays]
   );
   const afterSnap = await fetchBalanceSnapshot(client, userId, ledgerType);
   await insertLeaveBalanceLedger(client, {
@@ -1795,9 +1819,14 @@ async function reservePendingLeaveBalance(
     actorUserId: actorUserId || null,
     actorKind,
     remarks,
-    metadataJson: metadataJson || { number_of_days: d },
+    metadataJson: {
+      ...(metadataJson || {}),
+      requested_days: reservation.requestedDays,
+      reserved_credit_days: reservation.reservedDays,
+      potential_without_pay_days: reservation.potentialWithoutPayDays,
+    },
   });
-  return ledgerType;
+  return { ledgerType, ...reservation };
 }
 
 async function releasePendingLeaveBalance(
@@ -2206,7 +2235,7 @@ router.post('/submit', protect, async (req, res) => {
       if (pendingDeltaSubmit != null && pendingDeltaSubmit > 0) {
         const leaveTypeName = leave_type ? String(leave_type) : null;
         if (leaveTypeName) {
-          await reservePendingLeaveBalance(client, {
+          const reservation = await reservePendingLeaveBalance(client, {
             userId,
             leaveTypeName,
             days: pendingDeltaSubmit,
@@ -2216,6 +2245,7 @@ router.post('/submit', protect, async (req, res) => {
             action: 'leave_submitted',
             metadataJson: { number_of_days: pendingDeltaSubmit },
           });
+          row.reserved_credit_days = reservation?.reservedDays ?? null;
         }
       }
       const typeName = leave_type ? String(leave_type) : null;
@@ -2456,7 +2486,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       if (effectiveDaysSubmit != null && effectiveDaysSubmit > 0) {
         const leaveTypeName = leave_type ? String(leave_type) : null;
         if (leaveTypeName) {
-          await reservePendingLeaveBalance(client, {
+          const reservation = await reservePendingLeaveBalance(client, {
             userId,
             leaveTypeName,
             days: effectiveDaysSubmit,
@@ -2469,6 +2499,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
               attachment_name: storedAttachment.originalName,
             },
           });
+          row.reserved_credit_days = reservation?.reservedDays ?? null;
         }
       }
 
@@ -2737,7 +2768,7 @@ router.put('/:id', protect, async (req, res) => {
           // Moving INTO a pending status: increment pending_days.
           const putAction =
             historyAction === 'resubmitted' ? 'leave_resubmitted' : 'leave_submitted';
-          await reservePendingLeaveBalance(client, {
+          const reservation = await reservePendingLeaveBalance(client, {
             userId,
             leaveTypeName,
             days: effectiveDays,
@@ -2747,6 +2778,7 @@ router.put('/:id', protect, async (req, res) => {
             action: putAction,
             metadataJson: { number_of_days: effectiveDays, history_action: historyAction },
           });
+          row.reserved_credit_days = reservation?.reservedDays ?? null;
         }
       }
       await client.query('COMMIT');
@@ -2803,7 +2835,9 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     await client.query('BEGIN');
 
     const q = await client.query(
-      'SELECT id, status FROM leave_requests WHERE id = $1 AND (user_id = $2 OR employee_id = $2)',
+      `SELECT id, status, reserved_credit_days
+       FROM leave_requests
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
       [id, userId]
     );
     if (q.rows.length === 0) {
@@ -2819,6 +2853,7 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     const cancelledReq = await client.query(
       `UPDATE leave_requests
        SET status = 'cancelled',
+           reserved_credit_days = 0,
            details = COALESCE(details, '{}'::jsonb) || jsonb_build_object('cancel_reason', $3::text),
            updated_at = now()
        WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
@@ -2839,7 +2874,7 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     // FIX #5c: Decrement pending_days on cancel (only if it was in a pending status — not draft).
     if (status === 'pending' || status === 'pending_department_head' || status === 'pending_hr') {
       const cancelRow = cancelledReq.rows[0];
-      const cancelDays = cancelRow?.days != null ? parseFloat(cancelRow.days) : null;
+      const cancelDays = reservedCreditDaysFromRequest(q.rows[0]);
       const cancelUserId = cancelRow?.user_id || cancelRow?.employee_id;
       if (cancelDays && cancelDays > 0 && cancelUserId) {
         const ltRow = await client.query(
@@ -3678,7 +3713,8 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
     const existing = await client.query(
       `SELECT lr.id, lr.status, lr.user_id, lr.employee_id,
               lr.review_department_id,
-              COALESCE(lr.number_of_days, lr.total_days) AS days, lt.name AS leave_type_name
+              COALESCE(lr.number_of_days, lr.total_days) AS days,
+              lr.reserved_credit_days, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        WHERE lr.id = $1
@@ -3704,7 +3740,8 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
     });
     await client.query(
       `UPDATE leave_requests
-       SET status = $2, reviewer_id = $3, reviewer_remarks = $4, reviewed_at = now(), updated_at = now()
+       SET status = $2, reviewer_id = $3, reviewer_remarks = $4,
+           reserved_credit_days = 0, reviewed_at = now(), updated_at = now()
        WHERE id = $1`,
       [id, nextStatus, reviewerId, remarks]
     );
@@ -3718,7 +3755,7 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
       metadataJson: { department_id: r.review_department_id || null },
     });
     // Decrement pending_days on dept head reject
-    const rejectDays = r.days != null ? parseFloat(r.days) : null;
+    const rejectDays = reservedCreditDaysFromRequest(r);
     const rejectUserId = r.user_id || r.employee_id;
     const rejectLtName = r.leave_type_name || null;
     if (rejectDays && rejectDays > 0 && rejectUserId && rejectLtName) {
@@ -3779,7 +3816,8 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
     const existing = await client.query(
       `SELECT lr.id, lr.status, lr.user_id, lr.employee_id,
               lr.review_department_id,
-              COALESCE(lr.number_of_days, lr.total_days) AS days, lt.name AS leave_type_name
+              COALESCE(lr.number_of_days, lr.total_days) AS days,
+              lr.reserved_credit_days, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        WHERE lr.id = $1
@@ -3805,7 +3843,8 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
     });
     await client.query(
       `UPDATE leave_requests
-       SET status = $2, reviewer_id = $3, reviewer_remarks = $4, reviewed_at = now(), updated_at = now()
+       SET status = $2, reviewer_id = $3, reviewer_remarks = $4,
+           reserved_credit_days = 0, reviewed_at = now(), updated_at = now()
        WHERE id = $1`,
       [id, nextStatus, reviewerId, remarks]
     );
@@ -3819,7 +3858,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
       metadataJson: { department_id: r.review_department_id || null },
     });
     // Decrement pending_days on dept head return
-    const returnDays = r.days != null ? parseFloat(r.days) : null;
+    const returnDays = reservedCreditDaysFromRequest(r);
     const returnUserId = r.user_id || r.employee_id;
     const returnLtName = r.leave_type_name || null;
     if (returnDays && returnDays > 0 && returnUserId && returnLtName) {
@@ -3886,6 +3925,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
        `SELECT lr.id, lr.status, lr.user_id, lr.employee_id, lr.start_date, lr.end_date,
                lr.attachment_path,
                COALESCE(lr.number_of_days, lr.total_days) AS days,
+                lr.reserved_credit_days,
                 lt.name AS leave_type_name
          FROM leave_requests lr
          LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -3955,6 +3995,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
              approved_days_with_pay = $5::numeric,
              approved_days_without_pay = $6::numeric,
              approved_other_details = $7::text,
+             reserved_credit_days = 0,
              reviewed_at = now(),
              approved_by = $2::uuid,
              approved_at = now(),
@@ -3999,7 +4040,9 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         });
       }
 
-      // Final approval releases the full pending reservation but charges only
+      const reservedCreditDays = reservedCreditDaysFromRequest(r);
+
+      // Final approval releases this request's exact pending reservation but charges only
       // the days HR classified as paid against the configured balance bucket.
       await upsertLeaveBalanceDeduction(
         client,
@@ -4008,7 +4051,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         allocation.usedDaysToDeduct,
         {
           decrementPendingDays: true,
-          pendingDaysToRelease: allocation.pendingDaysToRelease,
+          pendingDaysToRelease: reservedCreditDays,
           ledgerContext: {
             action: 'leave_approved',
             leaveRequestId: id,
@@ -4018,6 +4061,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
               requested_days: allocation.requestedDays,
               approved_days_with_pay: allocation.approvedDaysWithPay,
               approved_days_without_pay: allocation.approvedDaysWithoutPay,
+              reserved_credit_days: reservedCreditDays,
             },
           },
         }
@@ -4099,6 +4143,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
     await client.query('BEGIN');
     const current = await client.query(
       `SELECT lr.status, COALESCE(lr.number_of_days, lr.total_days) AS days,
+              lr.reserved_credit_days,
               lr.user_id, lr.employee_id, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -4127,6 +4172,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
            reviewer_id = $2::uuid,
            reviewer_remarks = $3::text,
            disapproval_reason = $5::text,
+           reserved_credit_days = 0,
            reviewed_at = now(),
            updated_at = now()
        WHERE id = $1`,
@@ -4144,7 +4190,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
     });
 
     // FIX #5d: Decrement pending_days on reject.
-    const rejectDays = currentRow.days != null ? parseFloat(currentRow.days) : null;
+    const rejectDays = reservedCreditDaysFromRequest(currentRow);
     const rejectUserId = currentRow.user_id || currentRow.employee_id;
     const rejectLtName = currentRow.leave_type_name || null;
     if (rejectDays && rejectDays > 0 && rejectUserId && rejectLtName) {
@@ -4406,6 +4452,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
     await client.query('BEGIN');
     const current = await client.query(
       `SELECT lr.status, COALESCE(lr.number_of_days, lr.total_days) AS days,
+              lr.reserved_credit_days,
               lr.user_id, lr.employee_id, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
@@ -4430,6 +4477,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
        SET status = 'returned',
            reviewer_id = $2::uuid,
            reviewer_remarks = $3::text,
+           reserved_credit_days = 0,
            reviewed_at = now(),
            updated_at = now()
        WHERE id = $1`,
@@ -4447,7 +4495,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
     });
 
     // FIX #5e: Decrement pending_days when a request is returned to employee.
-    const returnDays = currentRow.days != null ? parseFloat(currentRow.days) : null;
+    const returnDays = reservedCreditDaysFromRequest(currentRow);
     const returnUserId = currentRow.user_id || currentRow.employee_id;
     const returnLtName = currentRow.leave_type_name || null;
     if (returnDays && returnDays > 0 && returnUserId && returnLtName) {

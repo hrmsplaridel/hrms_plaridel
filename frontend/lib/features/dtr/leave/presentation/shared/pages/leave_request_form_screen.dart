@@ -1589,15 +1589,34 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     } else if (policy != 'none') {
       final bucket = _selectedCreditBucket;
       final balance = _balanceForBucket(bucket);
+      final requestedDays = _currentWorkingDaysApplied;
+      final availableDays = balance == null || balance.availableDays < 0
+          ? 0.0
+          : balance.availableDays;
+      final reservableDays = requestedDays == null
+          ? null
+          : (availableDays < requestedDays ? availableDays : requestedDays);
+      final potentialWithoutPayDays = requestedDays == null
+          ? null
+          : requestedDays - (reservableDays ?? 0);
       final bucketLabel = switch (bucket) {
         'vacationLeave' => 'Vacation Leave',
         'sickLeave' => 'Sick Leave',
         _ => _selectedLeaveTypeLabel,
       };
       icon = Icons.account_balance_wallet_outlined;
-      message = balance == null
-          ? 'Deducts from $bucketLabel credits. No balance row is available yet.'
-          : 'Deducts from $bucketLabel credits. Available: ${balance.availableDays.toStringAsFixed(1)} day(s), pending: ${balance.pendingDays.toStringAsFixed(1)}.';
+      if (requestedDays != null && potentialWithoutPayDays! > 0) {
+        message =
+            'Available $bucketLabel credits: ${availableDays.toStringAsFixed(1)} day(s). '
+            '${reservableDays!.toStringAsFixed(1)} day(s) can be reserved with pay; '
+            '${potentialWithoutPayDays.toStringAsFixed(1)} day(s) may be processed without pay, subject to HR approval.';
+      } else if (balance == null) {
+        message =
+            'No $bucketLabel credits are available yet. You may still submit; requested days may be processed without pay, subject to HR approval.';
+      } else {
+        message =
+            'Deducts from $bucketLabel credits. Available: ${balance.availableDays.toStringAsFixed(1)} day(s), pending: ${balance.pendingDays.toStringAsFixed(1)}.';
+      }
     } else if (entitlementBasis == LeaveEntitlementBasis.perEvent) {
       final maximum = _selectedMaxDays;
       icon = Icons.event_note_outlined;

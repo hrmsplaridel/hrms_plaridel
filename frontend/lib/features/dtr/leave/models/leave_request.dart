@@ -143,6 +143,7 @@ class LeaveRequest {
     this.disapprovalReason,
     this.approvedDaysWithPay,
     this.approvedDaysWithoutPay,
+    this.reservedCreditDays,
     this.approvedOtherDetails,
     this.reviewerId,
     this.reviewerName,
@@ -213,6 +214,7 @@ class LeaveRequest {
   final String? disapprovalReason;
   final double? approvedDaysWithPay;
   final double? approvedDaysWithoutPay;
+  final double? reservedCreditDays;
   final String? approvedOtherDetails;
   final String? reviewerId;
   final String? reviewerName;
@@ -339,6 +341,7 @@ class LeaveRequest {
       disapprovalReason: json['disapproval_reason']?.toString(),
       approvedDaysWithPay: _parseDouble(json['approved_days_with_pay']),
       approvedDaysWithoutPay: _parseDouble(json['approved_days_without_pay']),
+      reservedCreditDays: _parseDouble(json['reserved_credit_days']),
       approvedOtherDetails: json['approved_other_details']?.toString(),
       reviewerId: json['reviewer_id']?.toString(),
       reviewerName: json['reviewer_name']?.toString(),
@@ -404,6 +407,7 @@ class LeaveRequest {
       'disapproval_reason': _trimOrNull(disapprovalReason),
       'approved_days_with_pay': approvedDaysWithPay,
       'approved_days_without_pay': approvedDaysWithoutPay,
+      'reserved_credit_days': reservedCreditDays,
       'approved_other_details': _trimOrNull(approvedOtherDetails),
       'reviewer_id': reviewerId,
       'reviewer_name': _trimOrNull(reviewerName),
@@ -467,6 +471,7 @@ class LeaveRequest {
     String? disapprovalReason,
     double? approvedDaysWithPay,
     double? approvedDaysWithoutPay,
+    double? reservedCreditDays,
     String? approvedOtherDetails,
     String? reviewerId,
     String? reviewerName,
@@ -535,6 +540,7 @@ class LeaveRequest {
       approvedDaysWithPay: approvedDaysWithPay ?? this.approvedDaysWithPay,
       approvedDaysWithoutPay:
           approvedDaysWithoutPay ?? this.approvedDaysWithoutPay,
+      reservedCreditDays: reservedCreditDays ?? this.reservedCreditDays,
       approvedOtherDetails: approvedOtherDetails ?? this.approvedOtherDetails,
       reviewerId: reviewerId ?? this.reviewerId,
       reviewerName: reviewerName ?? this.reviewerName,

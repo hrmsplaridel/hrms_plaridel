@@ -706,6 +706,9 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   approved_days_with_pay NUMERIC(5,2),
   approved_days_without_pay NUMERIC(5,2),
   approved_other_details TEXT,
+  -- Exact amount held in leave_balances.pending_days while this request is pending.
+  -- NULL means the leave type does not use a credit balance.
+  reserved_credit_days NUMERIC(10,3),
 
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
@@ -727,6 +730,9 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   CONSTRAINT chk_leave_approved_days_nonnegative CHECK (
     (approved_days_with_pay IS NULL OR approved_days_with_pay >= 0)
     AND (approved_days_without_pay IS NULL OR approved_days_without_pay >= 0)
+  ),
+  CONSTRAINT chk_leave_reserved_credit_days_nonnegative CHECK (
+    reserved_credit_days IS NULL OR reserved_credit_days >= 0
   )
 );
 CREATE INDEX IF NOT EXISTS idx_leave_requests_review_department
