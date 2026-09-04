@@ -14,7 +14,10 @@ const {
   ensureShiftScheduleChangeAllowed,
   ensureSupportedShiftRange,
   lockShiftForUpdate,
+  parseShiftActiveInput,
+  parseShiftGracePeriodInput,
   parseShiftTimeInput,
+  parseShiftWorkingDaysInput,
   shiftDeactivationBlockers,
   shiftDeactivationCountsFromRow,
   shiftDeactivationCountsSql,
@@ -26,16 +29,6 @@ const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
 const protect = [authMiddleware];
-
-/** Parse working_days from body: array of 1-7 (Mon-Sun) or null for default Mon-Fri. */
-function parseWorkingDays(val) {
-  if (val == null || !Array.isArray(val)) return null;
-  const arr = val
-    .map((v) => parseInt(v, 10))
-    .filter((n) => n >= 1 && n <= 7);
-  const uniq = [...new Set(arr)].sort((a, b) => a - b);
-  return uniq.length > 0 ? uniq : null;
-}
 
 // GET /api/shifts - list all (?status=Active|Inactive|All)
 router.get('/', protect, async (req, res) => {
@@ -118,14 +111,19 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       breakEnd: be,
       punchMode: mode,
     });
-    const grace = grace_period_minutes != null ? Math.max(0, parseInt(grace_period_minutes, 10) || 0) : 0;
-    const wd = parseWorkingDays(working_days) || [1, 2, 3, 4, 5];
+    const grace = grace_period_minutes === undefined
+      ? 0
+      : parseShiftGracePeriodInput(grace_period_minutes);
+    const wd = working_days === undefined
+      ? [1, 2, 3, 4, 5]
+      : parseShiftWorkingDaysInput(working_days);
+    const active = parseShiftActiveInput(is_active);
 
     const result = await pool.query(
       `INSERT INTO shifts (name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active)
        VALUES ($1, $2::time, $3::time, $4::time, $5, $6, $7::int[], $8)
        RETURNING id, shift_number, name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active`,
-      [name.trim(), st, et, be, mode, grace, wd, !!is_active]
+      [name.trim(), st, et, be, mode, grace, wd, active]
     );
     const r = result.rows[0];
     res.status(201).json({
@@ -183,6 +181,15 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const parsedPunchMode = punch_mode === undefined
       ? undefined
       : normalizePunchMode(punch_mode);
+    const parsedGrace = grace_period_minutes === undefined
+      ? undefined
+      : parseShiftGracePeriodInput(grace_period_minutes);
+    const parsedWorkingDays = working_days === undefined
+      ? undefined
+      : parseShiftWorkingDaysInput(working_days);
+    const parsedIsActive = is_active === undefined
+      ? undefined
+      : parseShiftActiveInput(is_active);
 
     const updates = [];
     const values = [];
@@ -193,13 +200,12 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (parsedEndTime !== undefined) { updates.push(`end_time = $${i++}::time`); values.push(parsedEndTime); }
     if (parsedBreakEnd !== undefined) { updates.push(`break_end = $${i++}::time`); values.push(parsedBreakEnd); }
     if (parsedPunchMode !== undefined) { updates.push(`punch_mode = $${i++}`); values.push(parsedPunchMode); }
-    if (grace_period_minutes !== undefined) { updates.push(`grace_period_minutes = $${i++}`); values.push(Math.max(0, parseInt(grace_period_minutes, 10) || 0)); }
-    if (working_days !== undefined) {
-      const wd = parseWorkingDays(working_days) || [1, 2, 3, 4, 5];
+    if (parsedGrace !== undefined) { updates.push(`grace_period_minutes = $${i++}`); values.push(parsedGrace); }
+    if (parsedWorkingDays !== undefined) {
       updates.push(`working_days = $${i++}::int[]`);
-      values.push(wd);
+      values.push(parsedWorkingDays);
     }
-    if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(!!is_active); }
+    if (parsedIsActive !== undefined) { updates.push(`is_active = $${i++}`); values.push(parsedIsActive); }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
@@ -245,10 +251,10 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     }
     if (parsedPunchMode !== undefined) scheduleChanges.punch_mode = parsedPunchMode;
     if (grace_period_minutes !== undefined) {
-      scheduleChanges.grace_period_minutes = Math.max(0, parseInt(grace_period_minutes, 10) || 0);
+      scheduleChanges.grace_period_minutes = parsedGrace;
     }
     if (working_days !== undefined) {
-      scheduleChanges.working_days = parseWorkingDays(working_days) || [1, 2, 3, 4, 5];
+      scheduleChanges.working_days = parsedWorkingDays;
     }
     await ensureShiftScheduleChangeAllowed(client, {
       shiftId: id,
@@ -257,7 +263,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     });
     const nextIsActive = is_active === undefined
       ? lockedShift.is_active !== false
-      : !!is_active;
+      : parsedIsActive;
     if (lockedShift.is_active !== false && nextIsActive === false) {
       await ensureShiftDeactivationAllowed(client, {
         shiftId: id,

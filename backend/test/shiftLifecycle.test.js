@@ -5,13 +5,17 @@ const assert = require('node:assert/strict');
 
 const {
   ShiftLifecycleError,
+  MAX_SHIFT_GRACE_PERIOD_MINUTES,
   changedShiftScheduleFields,
   deleteUnusedShift,
   ensureCompatiblePunchModeSchedule,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   ensureSupportedShiftRange,
+  parseShiftActiveInput,
+  parseShiftGracePeriodInput,
   parseShiftTimeInput,
+  parseShiftWorkingDaysInput,
   resolvedPunchModeForSchedule,
   shiftDeactivationCountsSql,
   shiftDependencyCountsSql,
@@ -142,6 +146,52 @@ test('empty optional PM Start is preserved as null', () => {
     }),
     null
   );
+});
+
+test('working days require unique JSON integers from 1 through 7', () => {
+  assert.deepEqual(parseShiftWorkingDaysInput([5, 1, 3]), [1, 3, 5]);
+  for (const invalid of [[], [1, 1], [0, 1], [1, 8], ['1', 2], 'weekdays']) {
+    assert.throws(
+      () => parseShiftWorkingDaysInput(invalid),
+      (error) => {
+        assert.ok(error instanceof ShiftLifecycleError);
+        assert.equal(error.statusCode, 400);
+        assert.ok(error.details.fields.working_days);
+        return true;
+      }
+    );
+  }
+});
+
+test('grace period requires a bounded whole JSON number', () => {
+  assert.equal(parseShiftGracePeriodInput(15), 15);
+  for (const invalid of [-1, 2.5, '15', 'abc', MAX_SHIFT_GRACE_PERIOD_MINUTES + 1]) {
+    assert.throws(
+      () => parseShiftGracePeriodInput(invalid),
+      (error) => {
+        assert.ok(error instanceof ShiftLifecycleError);
+        assert.equal(error.statusCode, 400);
+        assert.ok(error.details.fields.grace_period_minutes);
+        return true;
+      }
+    );
+  }
+});
+
+test('active status accepts only JSON booleans', () => {
+  assert.equal(parseShiftActiveInput(true), true);
+  assert.equal(parseShiftActiveInput(false), false);
+  for (const invalid of ['false', 0, 1, null]) {
+    assert.throws(
+      () => parseShiftActiveInput(invalid),
+      (error) => {
+        assert.ok(error instanceof ShiftLifecycleError);
+        assert.equal(error.statusCode, 400);
+        assert.ok(error.details.fields.is_active);
+        return true;
+      }
+    );
+  }
 });
 
 test('full-day shift requires a PM Start', () => {

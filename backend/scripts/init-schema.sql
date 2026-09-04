@@ -215,6 +215,20 @@ CREATE INDEX IF NOT EXISTS idx_position_department_head_periods_effective
 -- =========================================
 -- SHIFTS / SCHEDULES
 -- =========================================
+CREATE OR REPLACE FUNCTION public.is_valid_shift_working_days(days INTEGER[])
+RETURNS BOOLEAN
+LANGUAGE SQL
+IMMUTABLE
+STRICT
+AS $$
+  SELECT cardinality(days) BETWEEN 1 AND 7
+     AND days <@ ARRAY[1,2,3,4,5,6,7]::INTEGER[]
+     AND cardinality(days) = (
+       SELECT COUNT(DISTINCT day)::INTEGER
+       FROM unnest(days) AS day
+     );
+$$;
+
 CREATE TABLE IF NOT EXISTS shifts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   shift_number INT UNIQUE DEFAULT nextval('shifts_shift_number_seq'),
@@ -227,9 +241,13 @@ CREATE TABLE IF NOT EXISTS shifts (
     CONSTRAINT shifts_punch_mode_check
     CHECK (punch_mode IN ('auto', 'full_day', 'am_only', 'pm_only', 'single_session')),
 
-  grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
+  grace_period_minutes INT NOT NULL DEFAULT 0
+    CONSTRAINT shifts_grace_period_range_check
+    CHECK (grace_period_minutes BETWEEN 0 AND 240),
 
-  working_days INT[] NOT NULL DEFAULT ARRAY[1,2,3,4,5],
+  working_days INT[] NOT NULL DEFAULT ARRAY[1,2,3,4,5]
+    CONSTRAINT shifts_working_days_check
+    CHECK (public.is_valid_shift_working_days(working_days)),
   is_active BOOLEAN NOT NULL DEFAULT true,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
