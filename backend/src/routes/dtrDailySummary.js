@@ -8,7 +8,6 @@ const {
 } = require('../services/holidayOverlay');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
-  ensureShiftPunchModeColumn,
   getShiftType: resolveShiftType,
   getExpectedWorkMinutes: resolveExpectedWorkMinutes,
   getExpectedWorkMinutesForCoverage,
@@ -349,7 +348,6 @@ function getExpectedLogsForDay(shiftInfo, holidayInfo) {
  * endMinutes: shift end time in minutes from midnight (for validating clock-in outside shift).
  */
 async function getAssignmentShiftForDate(employeeId, dateStr) {
-  await ensureShiftPunchModeColumn(pool);
   const result = await pool.query(
     `SELECT a.override_start_time::text AS override_start_time,
             a.override_end_time::text AS override_end_time,
@@ -811,7 +809,6 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
   const map = new Map();
   if (!employeeIds || employeeIds.length === 0) return map;
   if (!startStr || !endStr) return map;
-  await ensureShiftPunchModeColumn(pool);
   const res = await pool.query(
     `SELECT a.id,
             a.employee_id,

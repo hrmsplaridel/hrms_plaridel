@@ -17,6 +17,8 @@ const {
   parseShiftTimeInput,
   parseShiftWorkingDaysInput,
   resolvedPunchModeForSchedule,
+  shiftAuditAction,
+  shiftAuditSnapshot,
   shiftDeactivationCountsSql,
   shiftDependencyCountsSql,
 } = require('../src/services/shiftLifecycle');
@@ -37,6 +39,43 @@ function shiftRow() {
     is_active: true,
   };
 }
+
+test('shift audit snapshots normalize lifecycle fields', () => {
+  assert.deepEqual(shiftAuditSnapshot({
+    ...shiftRow(),
+    start_time: '08:00:00.000000',
+    working_days: [5, 1, 3, 2, 4],
+  }), {
+    id: SHIFT_ID,
+    shift_number: 1,
+    name: 'Morning Shift',
+    start_time: '08:00:00',
+    end_time: '17:00:00',
+    break_end: '13:00:00',
+    punch_mode: 'full_day',
+    grace_period_minutes: 10,
+    working_days: [1, 2, 3, 4, 5],
+    is_active: true,
+  });
+});
+
+test('shift audit actions distinguish updates and lifecycle transitions', () => {
+  assert.equal(
+    shiftAuditAction(shiftRow(), { ...shiftRow(), name: 'Renamed Shift' }),
+    'shift_updated',
+  );
+  assert.equal(
+    shiftAuditAction(shiftRow(), { ...shiftRow(), is_active: false }),
+    'shift_deactivated',
+  );
+  assert.equal(
+    shiftAuditAction(
+      { ...shiftRow(), is_active: false },
+      { ...shiftRow(), is_active: true },
+    ),
+    'shift_reactivated',
+  );
+});
 
 test('shift schedule comparison ignores equivalent time and weekday formats', () => {
   assert.deepEqual(

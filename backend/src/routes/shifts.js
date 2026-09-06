@@ -2,10 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
-const {
-  ensureShiftPunchModeColumn,
-  normalizePunchMode,
-} = require('../services/shiftAttendance');
+const { normalizePunchMode } = require('../services/shiftAttendance');
 const {
   ShiftLifecycleError,
   deleteUnusedShift,
@@ -18,12 +15,15 @@ const {
   parseShiftGracePeriodInput,
   parseShiftTimeInput,
   parseShiftWorkingDaysInput,
+  shiftAuditAction,
+  shiftAuditSnapshot,
   shiftDeactivationBlockers,
   shiftDeactivationCountsFromRow,
   shiftDeactivationCountsSql,
   shiftDependencyBlockers,
   shiftDependencyCountsFromRow,
   shiftDependencyCountsSql,
+  writeShiftAudit,
 } = require('../services/shiftLifecycle');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
@@ -33,7 +33,6 @@ const protect = [authMiddleware];
 // GET /api/shifts - list all (?status=Active|Inactive|All; admin only)
 router.get('/', protect, requireAdmin, async (req, res) => {
   try {
-    await ensureShiftPunchModeColumn(pool);
     const today = todayInHrmsTimezone();
     const status = req.query.status || 'Active';
     let where = '';
@@ -84,8 +83,8 @@ router.get('/', protect, requireAdmin, async (req, res) => {
 
 // POST /api/shifts - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
-    await ensureShiftPunchModeColumn(pool);
     const { name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active = true } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
@@ -119,13 +118,22 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       : parseShiftWorkingDaysInput(working_days);
     const active = parseShiftActiveInput(is_active);
 
-    const result = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const result = await client.query(
       `INSERT INTO shifts (name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active)
        VALUES ($1, $2::time, $3::time, $4::time, $5, $6, $7::int[], $8)
        RETURNING id, shift_number, name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active`,
       [name.trim(), st, et, be, mode, grace, wd, active]
     );
     const r = result.rows[0];
+    await writeShiftAudit(client, {
+      actorId: req.user?.id,
+      action: 'shift_created',
+      shiftId: r.id,
+      after: shiftAuditSnapshot(r),
+    });
+    await client.query('COMMIT');
     res.status(201).json({
       id: r.id,
       shift_number: r.shift_number,
@@ -141,6 +149,13 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       is_active: r.is_active ?? true,
     });
   } catch (err) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[shifts POST rollback]', rollbackError);
+      }
+    }
     if (err instanceof ShiftLifecycleError) {
       return res.status(err.statusCode).json({
         error: err.message,
@@ -149,6 +164,8 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     }
     console.error('[shifts POST]', err);
     res.status(500).json({ error: 'Failed to create shift' });
+  } finally {
+    client?.release();
   }
 });
 
@@ -156,7 +173,6 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   let client;
   try {
-    await ensureShiftPunchModeColumn(pool);
     const { id } = req.params;
     const { name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active } = req.body;
     const parsedStartTime = start_time === undefined
@@ -220,6 +236,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Shift not found' });
     }
+    const before = shiftAuditSnapshot(lockedShift);
     if (start_time !== undefined || end_time !== undefined) {
       ensureSupportedShiftRange(
         start_time !== undefined
@@ -277,8 +294,16 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
        RETURNING id, shift_number, name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active`,
       values
     );
-    await client.query('COMMIT');
     const r = result.rows[0];
+    const after = shiftAuditSnapshot(r);
+    await writeShiftAudit(client, {
+      actorId: req.user?.id,
+      action: shiftAuditAction(before, after),
+      shiftId: id,
+      before,
+      after,
+    });
+    await client.query('COMMIT');
     res.json({
       id: r.id,
       shift_number: r.shift_number,
@@ -322,6 +347,12 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
     await client.query('BEGIN');
     const deletedShift = await deleteUnusedShift(client, {
       shiftId: req.params.id,
+    });
+    await writeShiftAudit(client, {
+      actorId: req.user?.id,
+      action: 'shift_deleted',
+      shiftId: deletedShift.id,
+      before: shiftAuditSnapshot(deletedShift),
     });
     await client.query('COMMIT');
     res.json({

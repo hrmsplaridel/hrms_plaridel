@@ -148,6 +148,51 @@ function parseShiftActiveInput(value) {
   return value;
 }
 
+function shiftAuditSnapshot(shift) {
+  if (!shift) return null;
+  return {
+    id: shift.id,
+    shift_number: shift.shift_number ?? null,
+    name: shift.name,
+    start_time: normalizedTime(shift.start_time),
+    end_time: normalizedTime(shift.end_time),
+    break_end: normalizedTime(shift.break_end),
+    punch_mode: shift.punch_mode ?? 'auto',
+    grace_period_minutes: Number(shift.grace_period_minutes ?? 0),
+    working_days: Array.isArray(shift.working_days)
+      ? shift.working_days.map(Number).sort((a, b) => a - b)
+      : [],
+    is_active: shift.is_active !== false,
+  };
+}
+
+function shiftAuditAction(before, after) {
+  if (before?.is_active !== false && after?.is_active === false) {
+    return 'shift_deactivated';
+  }
+  if (before?.is_active === false && after?.is_active !== false) {
+    return 'shift_reactivated';
+  }
+  return 'shift_updated';
+}
+
+async function writeShiftAudit(
+  db,
+  { actorId, action, shiftId, before = null, after = null }
+) {
+  await db.query(
+    `INSERT INTO audit_logs (
+       user_id, action, entity_type, entity_id, details
+     ) VALUES ($1::uuid, $2, 'shift', $3::uuid, $4)`,
+    [
+      actorId || null,
+      action,
+      shiftId,
+      JSON.stringify({ before, after }),
+    ]
+  );
+}
+
 function timeMinutes(value) {
   const normalized = normalizedTime(value);
   const match = normalized?.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
@@ -485,6 +530,8 @@ module.exports = {
   parseShiftTimeInput,
   parseShiftWorkingDaysInput,
   resolvedPunchModeForSchedule,
+  shiftAuditAction,
+  shiftAuditSnapshot,
   shiftAssignmentHistoryCount,
   shiftDeactivationBlockers,
   shiftDeactivationCountsFromRow,
@@ -493,4 +540,5 @@ module.exports = {
   shiftDependencyCounts,
   shiftDependencyCountsFromRow,
   shiftDependencyCountsSql,
+  writeShiftAudit,
 };

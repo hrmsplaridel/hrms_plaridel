@@ -7,28 +7,10 @@ const VALID_PUNCH_MODES = new Set([
   'pm_only',
   'single_session',
 ]);
-const ensuredPunchModePools = new WeakMap();
 
 function normalizePunchMode(value) {
   const raw = value == null ? 'auto' : String(value).trim().toLowerCase();
   return VALID_PUNCH_MODES.has(raw) ? raw : 'auto';
-}
-
-async function ensureShiftPunchModeColumn(pool) {
-  let promise = ensuredPunchModePools.get(pool);
-  if (!promise) {
-    promise = pool.query(
-      `ALTER TABLE shifts
-       ADD COLUMN IF NOT EXISTS punch_mode TEXT NOT NULL DEFAULT 'auto'`
-    );
-    ensuredPunchModePools.set(pool, promise);
-  }
-  try {
-    await promise;
-  } catch (err) {
-    ensuredPunchModePools.delete(pool);
-    throw err;
-  }
 }
 
 function getShiftType(shiftInfo) {
@@ -338,7 +320,6 @@ module.exports = {
   ONE_PM_MINUTES,
   VALID_PUNCH_MODES,
   normalizePunchMode,
-  ensureShiftPunchModeColumn,
   getShiftType,
   getExpectedPmStartMinutes,
   getExpectedWorkMinutes,

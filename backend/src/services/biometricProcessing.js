@@ -2,7 +2,6 @@ const { pool } = require('../config/db');
 const { loadHolidayOverlayMap } = require('./holidayOverlay');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
-  ensureShiftPunchModeColumn,
   getShiftType: resolveShiftType,
   getExpectedAmEndMinutes,
   getExpectedPmStartMinutes,
@@ -136,7 +135,6 @@ function timeToMinutes(timeStr) {
 }
 
 async function getAssignmentShiftForDate(employeeId, dateStr) {
-  await ensureShiftPunchModeColumn(pool);
   const result = await pool.query(
     `SELECT a.override_start_time::text AS override_start_time,
             a.override_end_time::text AS override_end_time,
