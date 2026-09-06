@@ -50,73 +50,18 @@ const _rspHubFeatures = <RspHubFeature>[
     sectionIndex: 19,
   ),
   RspHubFeature(
-    title: 'BEI / Exam Questions',
+    title: 'Exams',
     subtitle:
-        'View and edit the 8 Behavioral Event Interview questions applicants answer.',
+        'View and edit BEI, General Exam, Mathematics Exam, and General Information Exam questions.',
     icon: Icons.quiz_rounded,
-    sectionIndex: 3,
+    sectionIndex: 20,
   ),
   RspHubFeature(
-    title: 'General Exam (LGU-Plaridel)',
+    title: 'Forms',
     subtitle:
-        'View and edit the General Exam multiple-choice questions for applicants.',
-    icon: Icons.assignment_turned_in_rounded,
-    sectionIndex: 4,
-  ),
-  RspHubFeature(
-    title: 'Mathematics Exam',
-    subtitle: 'View and edit the Mathematics exam questions for applicants.',
-    icon: Icons.calculate_rounded,
-    sectionIndex: 5,
-  ),
-  RspHubFeature(
-    title: 'General Information Exam',
-    subtitle:
-        'View and edit the General Information exam questions for applicants.',
-    icon: Icons.info_outline_rounded,
-    sectionIndex: 6,
-  ),
-  RspHubFeature(
-    title: 'Background Investigation (BI Form)',
-    subtitle:
-        'Record BI form entries: applicant, respondent, and competency ratings.',
-    icon: Icons.verified_user_rounded,
-    sectionIndex: 7,
-  ),
-  RspHubFeature(
-    title: 'Applicants Profile',
-    subtitle:
-        'Job vacancy details and list of applicants (name, course, address, sex, age, civil status, remark).',
-    icon: Icons.people_alt_rounded,
-    sectionIndex: 10,
-  ),
-  RspHubFeature(
-    title: 'Selection Line-Up',
-    subtitle:
-        'Date, agency/office, vacant position, item no., and applicants table.',
-    icon: Icons.format_list_numbered_rounded,
-    sectionIndex: 13,
-  ),
-  RspHubFeature(
-    title: 'Computation of Points',
-    subtitle:
-        'Personnel Selection Board scoring: education, eligibility, experience, training, and ranking.',
-    icon: Icons.calculate_rounded,
-    sectionIndex: 17,
-  ),
-  RspHubFeature(
-    title: 'Work Experience Sheet',
-    subtitle:
-        'Position, department, minimum standards, job description of last work, and applicant signature.',
-    icon: Icons.work_history_rounded,
-    sectionIndex: 18,
-  ),
-  RspHubFeature(
-    title: 'Turn Around Time',
-    subtitle:
-        'Position, office, dates, and applicant tracking through hiring milestones.',
-    icon: Icons.schedule_rounded,
-    sectionIndex: 14,
+        'View and edit BI Form, Applicants Profile, Selection Line-Up, Computation of Points, Work Experience Sheet, and Turn Around Time.',
+    icon: Icons.description_rounded,
+    sectionIndex: 21,
   ),
 ];
 

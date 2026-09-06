@@ -9,7 +9,7 @@ import 'package:shimmer/shimmer.dart';
 
 const _kClock12hrKey = 'dtr_clock_12hr';
 
-/// Compact admin welcome header: live clock, date, and local weather.
+/// Compact welcome header: live clock, date, and local weather (shared across portal roles).
 class AdminWelcomeStatusCard extends StatefulWidget {
   const AdminWelcomeStatusCard({super.key});
 

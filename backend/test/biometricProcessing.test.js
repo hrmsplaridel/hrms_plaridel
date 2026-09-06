@@ -188,7 +188,7 @@ test('processing rebuilds a completed system row from a later biometric punch', 
   ];
   const { service, restore } = loadBiometricProcessing(async (sql, params) => {
     const text = String(sql);
-    if (/ALTER TABLE shifts/i.test(text)) return { rows: [], rowCount: 0 };
+    assert.doesNotMatch(text, /ALTER TABLE shifts/i);
     if (/FROM biometric_attendance_logs/i.test(text)) {
       return {
         rows: [{

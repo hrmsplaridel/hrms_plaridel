@@ -583,6 +583,64 @@ class _ManageShiftState extends State<ManageShift> {
     }
   }
 
+  Future<bool> _reactivateShift() async {
+    final s = _selectedShift;
+    if (s == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a shift to reactivate.')),
+      );
+      return false;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reactivate shift?'),
+        content: Text(
+          'Reactivate "${s.name}"? It will become available in active shift lists again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+            label: const Text('Reactivate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+
+    try {
+      await ApiClient.instance.put(
+        '/api/shifts/${s.id}',
+        data: {'is_active': true},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${s.name} has been reactivated.')),
+        );
+        _clearForm();
+        _loadShifts();
+      }
+      return true;
+    } on DioException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to reactivate: ${e.response?.data ?? e.message}',
+            ),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
   Future<bool> _deleteUnusedShift() async {
     final s = _selectedShift;
     if (s == null || !s.canPermanentlyDelete) {
@@ -765,7 +823,7 @@ class _ManageShiftState extends State<ManageShift> {
             onPressed: () => Navigator.of(drawerContext).pop(),
             child: const Text('Cancel'),
           ),
-          if (isEditing)
+          if (isEditing && _selectedShift!.isActive)
             OutlinedButton.icon(
               onPressed: () async {
                 final ok = await _deactivateShift();
@@ -779,6 +837,17 @@ class _ManageShiftState extends State<ManageShift> {
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
               ),
+            ),
+          if (isEditing && !_selectedShift!.isActive)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _reactivateShift();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.play_arrow_rounded, size: 18),
+              label: const Text('Reactivate'),
             ),
           if (isEditing && _selectedShift!.canPermanentlyDelete)
             OutlinedButton.icon(
@@ -1481,25 +1550,42 @@ class _ManageShiftState extends State<ManageShift> {
                   elevation: 0,
                 ),
               ),
-              FilledButton.icon(
-                onPressed: _selectedShift != null
-                    ? () => _deactivateShift()
-                    : null,
-                icon: const Icon(Icons.person_off_rounded, size: 18),
-                label: const Text('Deactivate'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFE53935),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
+              if (_selectedShift?.isActive == true)
+                FilledButton.icon(
+                  onPressed: _deactivateShift,
+                  icon: const Icon(Icons.person_off_rounded, size: 18),
+                  label: const Text('Deactivate'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE53935),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 0,
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  elevation: 0,
                 ),
-              ),
+              if (_selectedShift?.isActive == false)
+                FilledButton.icon(
+                  onPressed: _reactivateShift,
+                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                  label: const Text('Reactivate'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
               if (_selectedShift?.canPermanentlyDelete == true)
                 OutlinedButton.icon(
                   onPressed: _deleteUnusedShift,

@@ -9,7 +9,6 @@ import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'package:hrms_plaridel/features/auth/presentation/pages/login_page.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_form_header_footer.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_application_status_timeline.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_applicant_exam_ui.dart';
@@ -83,6 +82,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   int _step = 1;
   String? _applicationId;
 
+  /// Human-readable randomized applicant ID (e.g. PLR-AB12CD34).
+  String? _applicantNumber;
+
   /// Set when applicant uses "Continue" so the app bar shows DB position for later steps.
   String? _applicationPositionAppliedFor;
 
@@ -123,6 +125,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   String? _docDrugTestName;
   String? _docNbiClearancePath;
   String? _docNbiClearanceName;
+  String? _docMedicalCertificateRejectReason;
+  String? _docDrugTestRejectReason;
+  String? _docNbiClearanceRejectReason;
   bool _finalRequirementsApproved = false;
   DateTime? _orientationAt;
   bool? _orientationAttended;
@@ -190,7 +195,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     return h != null && h.isNotEmpty;
   }
 
-  /// Per-exam countdown limits from API (keys: general, math, general_info).
+  /// Per-exam countdown limits from API (keys: bei, general, math, general_info, custom_*).
   Map<String, int> _examTimeLimitSeconds = {};
 
   Timer? _examCountdownTimer;
@@ -827,6 +832,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         _beiQuestionsLoaded = questions;
         _beiLoading = false;
         setState(() {});
+        if (questions.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || _step != 3) return;
+            unawaited(_ensureExamTimeLimits().then((_) {
+              if (!mounted || _step != 3) return;
+              _startExamCountdown('bei');
+            }));
+          });
+        }
       }
     } catch (_) {
       if (mounted) {
@@ -839,6 +853,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         _beiQuestionsLoaded = _defaultBeiQuestions;
         _beiLoading = false;
         setState(() {});
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _step != 3) return;
+          unawaited(_ensureExamTimeLimits().then((_) {
+            if (!mounted || _step != 3) return;
+            _startExamCountdown('bei');
+          }));
+        });
       }
     }
   }
@@ -889,6 +910,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   void _syncPipelineFromApp(RecruitmentApplication app) {
+    _applicantNumber = app.applicantNumber;
     _finalInterviewAt = app.finalInterviewAt;
     _finalInterviewPassed = app.finalInterviewPassed;
     _applicationStatus = app.status;
@@ -900,6 +922,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _docDrugTestName = app.docDrugTestName;
     _docNbiClearancePath = app.docNbiClearancePath;
     _docNbiClearanceName = app.docNbiClearanceName;
+    _docMedicalCertificateRejectReason =
+        app.docMedicalCertificateRejectReason;
+    _docDrugTestRejectReason = app.docDrugTestRejectReason;
+    _docNbiClearanceRejectReason = app.docNbiClearanceRejectReason;
     _finalRequirementsApproved = app.finalRequirementsApproved;
     _orientationAt = app.orientationAt;
     _orientationAttended = app.orientationAttended;
@@ -925,6 +951,25 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       case RspFinalRequirementDocKind.nbiClearance:
         return _docNbiClearanceName;
     }
+  }
+
+  String? _finalReqRejectReason(RspFinalRequirementDocKind kind) {
+    switch (kind) {
+      case RspFinalRequirementDocKind.medicalCertificate:
+        return _docMedicalCertificateRejectReason;
+      case RspFinalRequirementDocKind.drugTestResult:
+        return _docDrugTestRejectReason;
+      case RspFinalRequirementDocKind.nbiClearance:
+        return _docNbiClearanceRejectReason;
+    }
+  }
+
+  bool get _hasAnyFinalReqRejection {
+    for (final kind in RspFinalRequirementDocKind.values) {
+      final r = _finalReqRejectReason(kind)?.trim();
+      if (r != null && r.isNotEmpty) return true;
+    }
+    return false;
   }
 
   bool get _allFinalRequirementsUploaded {
@@ -1268,7 +1313,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
     setState(() => _submitting = true);
     try {
-      final id = await RecruitmentRepo.instance.insertApplication(
+      final created = await RecruitmentRepo.instance.insertApplication(
         RecruitmentApplication(
           id: '',
           fullName:
@@ -1294,6 +1339,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             ? _emailVerificationToken
             : null,
       );
+      final id = created.id;
       if (mounted) {
         try {
           for (final kind in RspApplicationDocKind.values) {
@@ -1321,6 +1367,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         );
         setState(() {
           _applicationId = id;
+          _applicantNumber = created.applicantNumber;
           _applicationStatus = 'submitted';
           _step = 2;
           _submitting = false;
@@ -1353,6 +1400,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   String _examLabelForType(String examType) {
     switch (examType) {
+      case 'bei':
+        return 'BEI / Exam Questions';
       case 'general':
         return 'General Exam';
       case 'math':
@@ -1361,6 +1410,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         return 'General Information Exam';
       default:
         return 'Exam';
+    }
+  }
+
+  Future<void> _ensureExamTimeLimits() async {
+    if (_examTimeLimitSeconds.isNotEmpty) return;
+    try {
+      _examTimeLimitSeconds = await RecruitmentRepo.instance.getExamTimeLimits();
+    } catch (_) {
+      _examTimeLimitSeconds = Map<String, int>.from(
+        RecruitmentRepo.kDefaultRspExamTimeLimitSeconds,
+      );
     }
   }
 
@@ -1401,6 +1461,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       context,
     ).showSnackBar(SnackBar(content: Text('Time limit reached for $label.')));
     switch (examType) {
+      case 'bei':
+        unawaited(_submitBeiExam(dueToTimeLimit: true));
+        return;
       case 'general':
         setState(() => _step = 5);
         WidgetsBinding.instance.addPostFrameCallback(
@@ -1476,11 +1539,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     );
   }
 
-  Future<void> _submitBeiExam() async {
+  Future<void> _submitBeiExam({bool dueToTimeLimit = false}) async {
     if (_beiQuestionsLoaded == null || _beiControllers.isEmpty) return;
     final answers = _beiControllers.map((c) => c.text.trim()).toList();
     final allFilled = answers.every((a) => a.isNotEmpty);
-    if (!allFilled) {
+    if (!dueToTimeLimit && !allFilled) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please provide an answer for each question.'),
@@ -1488,15 +1551,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
       return;
     }
+    _cancelExamCountdown();
     _beiAnswersForSubmit = answers;
-    try {
-      _examTimeLimitSeconds = await RecruitmentRepo.instance
-          .getExamTimeLimits();
-    } catch (_) {
-      _examTimeLimitSeconds = Map<String, int>.from(
-        RecruitmentRepo.kDefaultRspExamTimeLimitSeconds,
-      );
-    }
+    await _ensureExamTimeLimits();
     if (!mounted) return;
     setState(() => _step = 4);
     WidgetsBinding.instance.addPostFrameCallback(
@@ -3351,6 +3408,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   Widget _buildStep2PendingReview() {
     final isDeclined = _applicationStatus == 'document_declined';
+    final applicantId = (_applicantNumber ?? '').trim();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3362,7 +3420,66 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             fontWeight: FontWeight.w700,
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
+        if (applicantId.isNotEmpty) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF7F0),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: const Color(0xFFE85D04).withValues(alpha: 0.28),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.badge_outlined,
+                  color: Color(0xFFE85D04),
+                  size: 22,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your Applicant ID',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textSecondary,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      SelectableText(
+                        applicantId,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                          color: Color(0xFFE85D04),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Keep this ID. HR can use it to search and verify your application details.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          height: 1.35,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         if (!isDeclined) ...[
           Container(
             padding: const EdgeInsets.all(16),
@@ -3468,8 +3585,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   Widget _buildStep3BeiExam() {
     const stepTitle = '8 Behavioral Event Interview (BEI)';
-    const stepSubtitle =
-        'For new applicants and promotions. Answer each question in the space provided.';
+    final timeNote = _mcqInstructionTimeNote('bei');
+    final stepSubtitle =
+        'For new applicants and promotions. Answer each question in the space provided.$timeNote';
 
     if (_beiQuestionsLoaded == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadBeiQuestions());
@@ -3504,6 +3622,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           totalCount: questions.length,
           label: 'Questions answered',
         ),
+        _buildExamTimerBanner(),
         const SizedBox(height: 20),
         ...List.generate(questions.length, (i) {
           return RspApplicantBeiQuestionCard(
@@ -4105,13 +4224,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ],
         OutlinedButton.icon(
           onPressed: _refreshHiringStatus,
-          icon: const Icon(Icons.refresh_rounded, size: 20),
-          label: const Text('Refresh status'),
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text(
+            'Refresh status',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
           style: OutlinedButton.styleFrom(
             foregroundColor: AppTheme.primaryNavy,
-            padding: const EdgeInsets.symmetric(vertical: 12),
+            padding: const EdgeInsets.symmetric(vertical: 11),
             side: BorderSide(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+              color: AppTheme.primaryNavy.withValues(alpha: 0.22),
             ),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -4136,55 +4258,111 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     late final IconData icon;
 
     if (linked) {
-      title = 'Hired — your account is ready';
+      title = 'Hired — account ready';
       body =
-          'Your application is linked to an employee account. Sign in below with the same email you used for this application. If login fails, check your inbox (including spam) or contact HR.';
+          'Your application is linked to an employee account. Sign in with the same email used for this application. Check spam or contact HR if login fails.';
       accent = const Color(0xFF2E7D32);
       icon = Icons.verified_rounded;
     } else if (failedFinal) {
       title = 'Final interview recorded';
       body =
-          'HR has recorded your final interview result. For questions, contact the HR office.';
+          'HR has recorded your final interview result. Contact the HR office for questions.';
       accent = Colors.red.shade800;
       icon = Icons.info_outline_rounded;
     } else if (passedFinal && finalReqApproved && hrSetupDone) {
       title = 'Account setup complete';
       body =
-          'HR marked your employee account as ready. Check your email, then use Go to login form with this application email.';
+          'HR marked your employee account as ready. Check your email (and spam folder) for sign-in details.';
       accent = const Color(0xFF1565C0);
       icon = Icons.task_alt_rounded;
     } else if (passedFinal && finalReqApproved) {
       title = 'Waiting for HR account setup';
       body =
-          'Your final requirements are approved. HR will create your account and email you when you can sign in—applicants cannot self-register. Check your inbox and spam folder, then tap Refresh status for updates.';
+          'Final requirements are approved. HR will create your account and email you when you can sign in. Tap Refresh status for updates.';
       accent = const Color(0xFFE85D04);
       icon = Icons.hourglass_top_rounded;
     } else if (passedFinal && allFinalReqUploaded) {
       title = 'Final requirements submitted';
       body =
-          'HR is reviewing your medical certificate, drug test result, and NBI clearance. You will proceed to account setup after approval.';
+          'HR is reviewing your medical certificate, drug test, and NBI clearance.';
       accent = const Color(0xFF1565C0);
       icon = Icons.fact_check_rounded;
+    } else if (passedFinal && _hasAnyFinalReqRejection) {
+      title = 'Resubmit final requirements';
+      body =
+          'HR rejected one or more documents. Review the notes below, upload corrected PDFs, then tap Upload documents.';
+      accent = const Color(0xFFC62828);
+      icon = Icons.replay_circle_filled_rounded;
     } else if (passedFinal) {
       title = 'Submit final requirements';
       body =
-          'You passed deliberation. Upload your medical certificate, drug test result, and NBI clearance below before HR can set up your employee account.';
+          'Upload your medical certificate, drug test result, and NBI clearance below.';
       accent = const Color(0xFFE85D04);
       icon = Icons.health_and_safety_rounded;
     } else {
       title = 'Waiting for interview result';
       body =
-          'HR has not recorded a final interview outcome yet. After your in-person interview, tap Refresh status here or continue on Step 2 with your email.';
+          'HR has not recorded a final interview outcome yet. Refresh here after your interview.';
       accent = AppTheme.primaryNavy;
       icon = Icons.pending_outlined;
     }
 
-    return RspApplicantStatusCard(
-      icon: icon,
-      title: title,
-      body: body,
-      accentColor: accent,
-      child: _buildStep8StatusFooter(),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: accent, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        height: 1.25,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      body,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        height: 1.45,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _buildStep8StatusFooter(),
+        ],
+      ),
     );
   }
 
@@ -4195,14 +4373,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       decoration: BoxDecoration(
         color: AppTheme.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: AppTheme.primaryNavy.withValues(alpha: 0.18),
+          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
         ),
-        boxShadow: AppTheme.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4210,32 +4387,57 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           Row(
             children: [
               Icon(
-                Icons.health_and_safety_rounded,
+                Icons.description_outlined,
+                size: 20,
                 color: AppTheme.primaryNavy.withValues(alpha: 0.85),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               const Expanded(
                 child: Text(
                   'Final requirements',
                   style: TextStyle(
                     fontWeight: FontWeight.w800,
-                    fontSize: 16,
+                    fontSize: 15,
+                    letterSpacing: -0.15,
                   ),
                 ),
               ),
               if (approved)
                 Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5E9),
+                    color: const Color(0xFFF3FAF4),
                     borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFF2E7D32).withValues(alpha: 0.25),
+                    ),
                   ),
                   child: Text(
-                    'Approved by HR',
+                    'Approved',
                     style: TextStyle(
                       color: Colors.green.shade800,
-                      fontSize: 12,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                )
+              else if (_hasAnyFinalReqRejection)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF6F6),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFFC62828).withValues(alpha: 0.25),
+                    ),
+                  ),
+                  child: Text(
+                    'Resubmit',
+                    style: TextStyle(
+                      color: Colors.red.shade800,
+                      fontSize: 11.5,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -4243,16 +4445,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               else if (allUploaded)
                 Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE3F2FD),
+                    color: const Color(0xFFF5F9FF),
                     borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFF1565C0).withValues(alpha: 0.25),
+                    ),
                   ),
                   child: const Text(
-                    'Submitted — awaiting HR review',
+                    'Under review',
                     style: TextStyle(
                       color: Color(0xFF1565C0),
-                      fontSize: 12,
+                      fontSize: 11.5,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -4261,15 +4466,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Upload PDF copies of your medical certificate, drug test result, '
-            'and NBI clearance. HR will review them before account setup.',
+            'Upload PDF copies of your medical certificate, drug test result, and NBI clearance.',
             style: TextStyle(
-              fontSize: 14,
+              fontSize: 13,
               color: AppTheme.textSecondary.withValues(alpha: 0.95),
-              height: 1.45,
+              height: 1.4,
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           LayoutBuilder(
             builder: (context, constraints) {
               final sideBySide = constraints.maxWidth >= 480;
@@ -4305,7 +4509,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               );
             },
           ),
-          if (!approved && pendingUpload)
+          if (!approved && pendingUpload) ...[
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -4316,16 +4521,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.cloud_upload_rounded),
+                    : const Icon(Icons.cloud_upload_rounded, size: 20),
                 label: Text(
                   _finalReqUploading ? 'Uploading…' : 'Upload documents',
                 ),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.primaryNavy,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ),
+          ],
         ],
       ),
     );
@@ -4338,6 +4547,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final storedPath = _finalReqStoredPath(kind);
     final storedName = _finalReqStoredName(kind);
     final hasStored = storedPath != null && storedPath.trim().isNotEmpty;
+    final rejectReason = _finalReqRejectReason(kind)?.trim();
+    final wasRejected = rejectReason != null && rejectReason.isNotEmpty;
     final picked = _pickedFinalReqDocs[kind];
 
     return DecoratedBox(
@@ -4345,7 +4556,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: AppTheme.lightGray.withValues(alpha: 0.9),
+          color: wasRejected && !hasStored
+              ? const Color(0xFFC62828).withValues(alpha: 0.45)
+              : AppTheme.lightGray.withValues(alpha: 0.9),
         ),
       ),
       child: Padding(
@@ -4360,6 +4573,26 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                 fontSize: 14,
               ),
             ),
+            if (wasRejected && !hasStored) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Rejected by HR — please upload again',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.red.shade800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                rejectReason,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
             if (hasStored)
               Row(
@@ -4408,7 +4641,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                 onPressed:
                     _finalReqUploading || approved ? null : () => _pickFinalReqDoc(kind),
                 icon: const Icon(Icons.upload_file_rounded, size: 20),
-                label: const Text('Choose PDF'),
+                label: Text(wasRejected ? 'Re-upload PDF' : 'Choose PDF'),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
@@ -4422,158 +4655,77 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   Widget _buildOrientationScheduleCard() {
     final at = _orientationAt!.toLocal();
     final attended = _orientationAttended;
+    final dateLine =
+        '${MaterialLocalizations.of(context).formatFullDate(at)} · ${TimeOfDay.fromDateTime(at).format(context)}';
+
+    late final Color accent;
+    late final Color surface;
+    late final IconData icon;
+    late final String title;
+    late final String body;
 
     if (attended == true) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE8F5E9),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: const Color(0xFF2E7D32).withValues(alpha: 0.4),
-          ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.check_circle_rounded, color: Colors.green.shade800, size: 30),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Orientation attended',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                      color: Colors.green.shade900,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${MaterialLocalizations.of(context).formatFullDate(at)} · ${TimeOfDay.fromDateTime(at).format(context)}',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.green.shade900,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'HR confirmed your attendance. Your employee account will be set up next.',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.green.shade900.withValues(alpha: 0.9),
-                      height: 1.45,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (attended == false) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFEBEE),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: const Color(0xFFC62828).withValues(alpha: 0.4),
-          ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.cancel_rounded, color: Colors.red.shade800, size: 30),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Orientation not attended',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                      color: Colors.red.shade900,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${MaterialLocalizations.of(context).formatFullDate(at)} · ${TimeOfDay.fromDateTime(at).format(context)}',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.red.shade900,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'HR recorded that you did not attend orientation. Contact the HR office for next steps.',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.red.shade900.withValues(alpha: 0.9),
-                      height: 1.45,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
+      accent = const Color(0xFF2E7D32);
+      surface = const Color(0xFFF3FAF4);
+      icon = Icons.check_circle_outline_rounded;
+      title = 'Orientation attended';
+      body = 'HR confirmed attendance. Account setup is next.';
+    } else if (attended == false) {
+      accent = const Color(0xFFC62828);
+      surface = const Color(0xFFFFF6F6);
+      icon = Icons.cancel_outlined;
+      title = 'Orientation not attended';
+      body = 'Contact HR for next steps.';
+    } else {
+      accent = const Color(0xFF1565C0);
+      surface = const Color(0xFFF5F9FF);
+      icon = Icons.event_available_outlined;
+      title = 'Orientation scheduled';
+      body = 'Attend as instructed by HR. Account setup follows this step.';
     }
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
-        color: const Color(0xFFE3F2FD),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: const Color(0xFF1565C0).withValues(alpha: 0.4),
-        ),
+        color: surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.22)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.school_rounded, color: Colors.blue.shade800, size: 30),
-          const SizedBox(width: 14),
+          Icon(icon, color: accent, size: 22),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Orientation scheduled',
+                  title,
                   style: TextStyle(
                     fontWeight: FontWeight.w800,
-                    fontSize: 16,
-                    color: Colors.blue.shade900,
+                    fontSize: 14.5,
+                    letterSpacing: -0.15,
+                    color: AppTheme.dashTextPrimaryOf(context),
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 Text(
-                  '${MaterialLocalizations.of(context).formatFullDate(at)} · ${TimeOfDay.fromDateTime(at).format(context)}',
+                  dateLine,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: Colors.blue.shade900,
+                    color: accent,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Text(
-                  'Attend orientation as instructed by HR. Your employee account will be set up after this step.',
+                  body,
                   style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.blue.shade900.withValues(alpha: 0.9),
-                    height: 1.45,
+                    fontSize: 13,
+                    height: 1.4,
+                    color: AppTheme.dashTextSecondaryOf(context),
                   ),
                 ),
               ],
@@ -4581,6 +4733,111 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildStep8MilestoneRow({
+    required bool passedFinal,
+    required bool finalReqApproved,
+    required bool linked,
+  }) {
+    final orientationDone = _orientationAttended == true;
+    final accountReady = linked || _hrAccountSetupDone;
+
+    Widget chip({
+      required String label,
+      required bool done,
+      required bool active,
+    }) {
+      final color = done
+          ? const Color(0xFF2E7D32)
+          : (active ? const Color(0xFFE85D04) : AppTheme.textSecondary);
+      return Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(
+            color: done
+                ? const Color(0xFFF3FAF4)
+                : (active ? const Color(0xFFFFF7F0) : const Color(0xFFF8FAFC)),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withValues(alpha: 0.28)),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                done
+                    ? Icons.check_circle_rounded
+                    : (active
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.circle_outlined),
+                size: 16,
+                color: color,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final reqDone = passedFinal && (finalReqApproved || _allFinalRequirementsUploaded);
+    final reqActive = passedFinal && !finalReqApproved;
+    final orientActive =
+        passedFinal && finalReqApproved && !orientationDone && !accountReady;
+    final accountActive =
+        passedFinal && finalReqApproved && (orientationDone || _orientationAt == null) && !accountReady;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stacked = constraints.maxWidth < 520;
+        final items = [
+          chip(
+            label: 'Requirements',
+            done: finalReqApproved,
+            active: reqActive || (passedFinal && !reqDone),
+          ),
+          chip(
+            label: 'Orientation',
+            done: orientationDone,
+            active: orientActive,
+          ),
+          chip(
+            label: 'Account',
+            done: accountReady,
+            active: accountActive,
+          ),
+        ];
+        if (stacked) {
+          return Column(
+            children: [
+              for (int i = 0; i < items.length; i++) ...[
+                if (i > 0) const SizedBox(height: 8),
+                items[i],
+              ],
+            ],
+          );
+        }
+        return Row(
+          children: [
+            for (int i = 0; i < items.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              items[i],
+            ],
+          ],
+        );
+      },
     );
   }
 
@@ -4593,42 +4850,103 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
     String headerSubtitle;
     if (failedFinal) {
-      headerSubtitle = 'Your current hiring status from HR.';
+      headerSubtitle = 'Current hiring status from HR.';
     } else if (linked) {
-      headerSubtitle = 'You can sign in with your employee account.';
+      headerSubtitle = 'Your employee account is ready.';
     } else if (passedFinal && finalReqApproved && _orientationAttended == true) {
-      headerSubtitle =
-          'Orientation attended. HR is setting up your employee account.';
+      headerSubtitle = 'Orientation done. Account setup in progress.';
     } else if (passedFinal && finalReqApproved && _orientationAttended == false) {
-      headerSubtitle =
-          'HR recorded that you did not attend orientation. Contact HR for next steps.';
+      headerSubtitle = 'Orientation missed. Contact HR for next steps.';
     } else if (passedFinal && finalReqApproved && _orientationAt != null) {
-      headerSubtitle =
-          'Final requirements approved. Attend your orientation, then HR will set up your employee account.';
+      headerSubtitle = 'Attend orientation, then wait for account setup.';
     } else if (passedFinal && finalReqApproved) {
-      headerSubtitle =
-          'Final requirements approved. HR will schedule orientation, then set up your employee account.';
+      headerSubtitle = 'Waiting for orientation schedule and account setup.';
     } else if (passedFinal) {
-      headerSubtitle =
-          'Upload final requirements, then wait for HR approval, orientation, and account setup.';
+      headerSubtitle = 'Upload final documents, then wait for HR review.';
     } else {
-      headerSubtitle =
-          'Track your deliberation result and hiring progress in one place.';
+      headerSubtitle = 'Track your hiring progress here.';
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        RspApplicantStepHeader(
-          stepNumber: 8,
-          title: 'Final requirements, orientation & account',
-          subtitle: headerSubtitle,
-          icon: Icons.health_and_safety_rounded,
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF4EC),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.health_and_safety_outlined,
+                  color: Color(0xFFE85D04),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'STEP 8',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
+                        color: const Color(0xFFE85D04).withValues(alpha: 0.95),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Final hiring',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                        color: AppTheme.dashTextPrimaryOf(context),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      headerSubtitle,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        height: 1.4,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 20),
+        if (passedFinal) ...[
+          const SizedBox(height: 14),
+          _buildStep8MilestoneRow(
+            passedFinal: passedFinal,
+            finalReqApproved: finalReqApproved,
+            linked: linked,
+          ),
+        ],
+        const SizedBox(height: 16),
         if (passedFinal && !finalReqApproved) ...[
           _buildFinalRequirementsSection(),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
         ],
         _buildHiringStatusCard(
           linked: linked,
@@ -4639,37 +4957,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           allFinalReqUploaded: allFinalReqUploaded,
         ),
         if (passedFinal && finalReqApproved) ...[
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
           _buildFinalRequirementsSection(),
         ],
         if (passedFinal && _orientationAt != null) ...[
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           _buildOrientationScheduleCard(),
         ],
-        const SizedBox(height: 24),
-        if (linked ||
-            (passedFinal && finalReqApproved && _hrAccountSetupDone))
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (context) => const LoginPage()),
-                );
-              },
-              icon: const Icon(Icons.login_rounded, size: 22),
-              label: const Text('Go to login form'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         SizedBox(
           width: double.infinity,
           child: OutlinedButton(
@@ -4677,11 +4972,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.primaryNavy,
               padding: const EdgeInsets.symmetric(vertical: 14),
+              side: BorderSide(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.28),
+              ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            child: const Text('Done'),
+            child: const Text(
+              'Done',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
         ),
       ],

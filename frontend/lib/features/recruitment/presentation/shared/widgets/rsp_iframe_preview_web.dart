@@ -21,13 +21,18 @@ class _RspIframePreviewState extends State<RspIframePreview> {
   void initState() {
     super.initState();
     _viewType = 'rsp-attachment-iframe-${_counter++}';
+    final src = widget.url;
 
     ui_web.platformViewRegistry.registerViewFactory(_viewType, (int viewId) {
       final iframe = web.HTMLIFrameElement()
-        ..src = widget.url
+        ..src = src
         ..style.border = '0'
         ..style.width = '100%'
-        ..style.height = '100%';
+        ..style.height = '100%'
+        ..style.backgroundColor = '#ffffff'
+        ..setAttribute('allowfullscreen', 'true')
+        ..setAttribute('loading', 'eager')
+        ..title = 'Attachment preview';
       return iframe;
     });
   }

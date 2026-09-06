@@ -42,6 +42,7 @@ class RecruitmentHubAnalyticsPanel extends StatelessWidget {
 
     final counts = {for (final d in months) d: 0};
     for (final app in applications) {
+      if (app.isFromMayorModule) continue;
       final dt = app.createdAt?.toLocal();
       if (dt == null) continue;
       final key = DateTime(dt.year, dt.month, 1);
@@ -75,6 +76,7 @@ class RecruitmentHubAnalyticsPanel extends StatelessWidget {
   Map<String, int> get _statusBreakdown {
     final map = <String, int>{};
     for (final app in applications) {
+      if (app.isFromMayorModule) continue;
       final label = _statusLabel(app.status);
       map[label] = (map[label] ?? 0) + 1;
     }
