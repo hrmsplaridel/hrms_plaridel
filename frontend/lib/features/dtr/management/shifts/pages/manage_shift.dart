@@ -98,6 +98,8 @@ class _ManageShiftState extends State<ManageShift> {
   int _page = 0;
   List<_ShiftRecord> _shifts = [];
   bool _loading = false;
+  int _loadGeneration = 0;
+  String? _loadError;
   _ShiftRecord? _selectedShift;
   StateSetter? _drawerSetState;
   TimeOfDay? _startTime;
@@ -179,8 +181,11 @@ class _ManageShiftState extends State<ManageShift> {
   }
 
   Future<void> _loadShifts() async {
+    if (!mounted) return;
+    final generation = ++_loadGeneration;
     setState(() {
       _loading = true;
+      _loadError = null;
       _page = 0;
     });
     try {
@@ -188,6 +193,7 @@ class _ManageShiftState extends State<ManageShift> {
         '/api/shifts',
         queryParameters: {'status': _statusFilter},
       );
+      if (!mounted || generation != _loadGeneration) return;
       final data = res.data ?? [];
       _shifts = (data).map((e) {
         final m = e as Map<String, dynamic>;
@@ -264,10 +270,20 @@ class _ManageShiftState extends State<ManageShift> {
         );
       }).toList();
     } on DioException catch (e) {
-      debugPrint('Load shifts failed: ${e.response?.data ?? e.message}');
-      _shifts = [];
+      if (!mounted || generation != _loadGeneration) return;
+      final data = e.response?.data;
+      final message = data is Map ? data['error'] : null;
+      _loadError = message is String && message.trim().isNotEmpty
+          ? message.trim()
+          : 'Unable to load shifts. Please try again.';
+    } catch (_) {
+      if (!mounted || generation != _loadGeneration) return;
+      _loadError = 'Unable to load shifts. Please try again.';
+    } finally {
+      if (mounted && generation == _loadGeneration) {
+        setState(() => _loading = false);
+      }
     }
-    if (mounted) setState(() => _loading = false);
   }
 
   void _selectShift(_ShiftRecord s) {
@@ -1033,6 +1049,26 @@ class _ManageShiftState extends State<ManageShift> {
             const Padding(
               padding: EdgeInsets.all(32),
               child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_loadError != null)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(_loadError!, textAlign: TextAlign.center),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _loadShifts,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              ),
             )
           else if (filtered.isEmpty)
             Container(
