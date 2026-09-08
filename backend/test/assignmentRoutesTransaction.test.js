@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// Keep September transfers future-dated regardless of when this suite runs.
+test.beforeEach((t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-28T04:00:00Z') });
+});
+
 function withMockedModule(modulePath, exportsValue) {
   const resolved = require.resolve(modulePath);
   const previous = require.cache[resolved];
@@ -40,6 +45,9 @@ test('failed assignment insert rolls back on the same checked-out client', async
       const normalized = String(sql).trim();
       clientCalls.push(normalized);
       if (normalized === 'BEGIN' || normalized === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.includes('FROM position_department_head_periods')) {
         return { rowCount: 0, rows: [] };
       }
       if (normalized.includes('AS employee_exists')) {
@@ -113,6 +121,8 @@ test('failed assignment insert rolls back on the same checked-out client', async
     assert.equal(poolQueryCount, 0);
     assert.equal(clientCalls[0], 'BEGIN');
     assert.equal(clientCalls.at(-1), 'ROLLBACK');
+    assert.ok(clientCalls.some((sql) => sql.startsWith('INSERT INTO assignments')));
+    assert.equal(clientCalls.includes('COMMIT'), false);
     assert.equal(released, true);
   } finally {
     console.error = originalConsoleError;
@@ -130,6 +140,9 @@ test('failed policy insert rolls back the primary assignment on the same client'
       const normalized = String(sql).trim();
       clientCalls.push(normalized);
       if (['BEGIN', 'ROLLBACK'].includes(normalized)) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.includes('FROM position_department_head_periods')) {
         return { rowCount: 0, rows: [] };
       }
       if (normalized.includes('AS employee_exists')) {
@@ -345,7 +358,10 @@ test('moving a future transfer later restores its predecessor in the update tran
     async query(sql, params = []) {
       const normalized = String(sql).trim();
       calls.push({ normalized, params });
-      if (['BEGIN', 'COMMIT'].includes(normalized)) {
+      if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(normalized)) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.includes('FROM position_department_head_periods')) {
         return { rowCount: 0, rows: [] };
       }
       if (normalized.startsWith('SELECT id, employee_id')) {

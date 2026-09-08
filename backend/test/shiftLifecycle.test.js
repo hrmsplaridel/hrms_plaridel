@@ -318,7 +318,7 @@ test('used shift rejects a schedule change with actionable details', async () =>
     async query(sql, params) {
       assert.match(String(sql), /FROM assignments/);
       assert.deepEqual(params, [SHIFT_ID]);
-      return { rows: [{ assignment_history_count: 3 }], rowCount: 1 };
+      return { rows: [{ dependency_assignments: 3 }], rowCount: 1 };
     },
   };
 
@@ -361,7 +361,7 @@ test('used shift permits updates that do not change its schedule', async () => {
 test('unused shift permits schedule changes', async () => {
   const db = {
     async query() {
-      return { rows: [{ assignment_history_count: 0 }], rowCount: 1 };
+      return { rows: [{ dependency_assignments: 0, dependency_dtr_records: 0, dependency_policy_periods: 0 }], rowCount: 1 };
     },
   };
 

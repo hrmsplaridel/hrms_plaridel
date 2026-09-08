@@ -17,7 +17,8 @@ function responseRecorder() {
   };
 }
 
-test('shift catalog rejects employees and allows administrators', () => {
+for (const [method, path] of [['get', '/'], ['post', '/'], ['put', '/:id'], ['delete', '/:id']]) {
+test(`shift ${method.toUpperCase()} rejects employees and allows administrators`, () => {
   const restoreDb = withMockedModule('../src/config/db', {
     pool: {
       query: async () => {
@@ -31,14 +32,16 @@ test('shift catalog rejects employees and allows administrators', () => {
   try {
     const router = require(routePath);
     const layer = router.stack.find(
-      (entry) => entry.route?.path === '/' && entry.route.methods.get,
+      (entry) => entry.route?.path === path && entry.route.methods[method],
     );
-    assert.ok(layer, 'GET / shift catalog route not found');
+    assert.ok(layer, `${method.toUpperCase()} ${path} route not found`);
+    assert.ok(layer.route.stack.some((entry) => entry.handle.name === 'authMiddleware'),
+      'shift route must authenticate before authorizing');
 
     const guard = layer.route.stack
       .map((entry) => entry.handle)
       .find((handler) => handler.name === 'requireAdmin');
-    assert.ok(guard, 'GET / shift catalog is missing the administrator guard');
+    assert.ok(guard, `${method.toUpperCase()} ${path} is missing the administrator guard`);
 
     const employeeResponse = responseRecorder();
     let employeeAdvanced = false;
@@ -68,3 +71,4 @@ test('shift catalog rejects employees and allows administrators', () => {
     restoreDb();
   }
 });
+}

@@ -498,13 +498,16 @@ async function ensureShiftScheduleChangeAllowed(
   const changedFields = changedShiftScheduleFields(shift, changes);
   if (changedFields.length === 0) return shift;
 
-  const assignmentHistoryCount = await shiftAssignmentHistoryCount(db, shiftId);
-  if (assignmentHistoryCount > 0) {
+  const dependencies = await shiftDependencyCounts(db, shiftId);
+  const blockers = shiftDependencyBlockers(dependencies);
+  if (blockers.length > 0) {
     throw new ShiftLifecycleError(
-      'This shift has assignment history, so its schedule cannot be changed. Create a new shift and use Assignment Management to start it on the required effective date.',
+      'This shift has assignment, attendance, or policy history, so its schedule cannot be changed. Create a new shift and use Assignment Management to start it on the required effective date.',
       409,
       {
-        assignment_history_count: assignmentHistoryCount,
+        assignment_history_count: dependencies.assignments,
+        dependencies,
+        blockers,
         changed_fields: changedFields,
       }
     );
