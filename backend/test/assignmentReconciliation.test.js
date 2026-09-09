@@ -32,12 +32,14 @@ test('future-only assignment changes do not rebuild DTR or queue month-end work'
 async function withRebuildService({ fail = false } = {}, callback) {
   const calls = [];
   const restore = withMockedModule('../src/services/biometricProcessing', {
-    clearBiometricAttendancePolicyCache: (options) => calls.push(['clear', options]),
     processBiometricLogsToSummary: async (...args) => {
       calls.push(['rebuild', ...args]);
       if (fail) throw new Error('Simulated rebuild failure');
       return { inserted: 1, updated: 2 };
     },
+  });
+  const restoreCache = withMockedModule('../src/services/attendancePolicyCache', {
+    invalidateAttendancePolicyCache: (options) => calls.push(['clear', options]),
   });
   const path = '../src/services/assignmentReconciliation';
   clearModule(path);
@@ -45,6 +47,7 @@ async function withRebuildService({ fail = false } = {}, callback) {
     await callback(require(path), calls);
   } finally {
     clearModule(path);
+    restoreCache();
     restore();
   }
 }

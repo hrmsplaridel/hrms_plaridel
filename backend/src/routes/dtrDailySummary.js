@@ -184,20 +184,18 @@ function nowMinutesInHrmsTimezone() {
   return minutesFromMidnightInTimeZone(new Date(), HRMS_TIMEZONE) ?? 0;
 }
 
-const ATTENDANCE_POLICY_CACHE_TTL_MS = 60 * 1000;
-let _cachedAttendancePolicy = null;
-let _cachedAttendancePolicyAt = 0;
-const _policyByEmployeeDateCache = new Map();
+const {
+  getAttendancePolicyCache,
+  setAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
 
 function _normalizePolicy(row) {
   return normalizeAttendancePolicy(row);
 }
 
 async function getActiveDefaultAttendancePolicy() {
-  const now = Date.now();
-  if (_cachedAttendancePolicy && now - _cachedAttendancePolicyAt < ATTENDANCE_POLICY_CACHE_TTL_MS) {
-    return _cachedAttendancePolicy;
-  }
+  const cached = getAttendancePolicyCache('dtr', 'default');
+  if (cached.found) return cached.value;
   const result = await pool.query(
     `SELECT id, work_hours_per_day, deduct_late,
             convert_late_to_equivalent_day, deduct_undertime, convert_undertime_to_equivalent_day,
@@ -207,17 +205,19 @@ async function getActiveDefaultAttendancePolicy() {
      ORDER BY is_default DESC, updated_at DESC, created_at DESC
      LIMIT 1`
   );
-  _cachedAttendancePolicy = _normalizePolicy(result.rows[0]);
-  _cachedAttendancePolicyAt = now;
-  return _cachedAttendancePolicy;
+  return setAttendancePolicyCache(
+    'dtr',
+    'default',
+    _normalizePolicy(result.rows[0]),
+    { isDefault: true }
+  );
 }
 
 async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
   if (!employeeId || !dateStr) return getActiveDefaultAttendancePolicy();
   const cacheKey = `${employeeId}|${dateStr}`;
-  const now = Date.now();
-  const cached = _policyByEmployeeDateCache.get(cacheKey);
-  if (cached && now - cached.at < ATTENDANCE_POLICY_CACHE_TTL_MS) return cached.value;
+  const cached = getAttendancePolicyCache('dtr', cacheKey);
+  if (cached.found) return cached.value;
 
   const result = await pool.query(
     `WITH eff AS (
@@ -255,8 +255,10 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
     [employeeId, dateStr]
   );
   const resolved = result.rows[0] ? _normalizePolicy(result.rows[0]) : await getActiveDefaultAttendancePolicy();
-  _policyByEmployeeDateCache.set(cacheKey, { at: now, value: resolved });
-  return resolved;
+  return setAttendancePolicyCache('dtr', cacheKey, resolved, {
+    employeeId,
+    date: dateStr,
+  });
 }
 
 async function applyAttendancePolicyPenalties(employeeId, dateStr, rawLateMinutes, rawUndertimeMinutes) {

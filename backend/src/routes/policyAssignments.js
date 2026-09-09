@@ -22,6 +22,9 @@ const {
   assignmentStatusWhereSql,
   computedAssignmentStatusSql,
 } = require('../services/assignmentStatus');
+const {
+  invalidateAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -147,6 +150,11 @@ router.post('/employee-upsert', protect, requireAdmin, async (req, res) => {
         metadata: { policy_assignment_id: policyAssignment?.id || null },
       });
       await client.query('COMMIT');
+      invalidateAttendancePolicyCache({
+        employeeId: employee_id,
+        dateFrom: ef,
+        dateTo: et,
+      });
       const reconciliation = await rebuildAfterAssignmentCommit(employee_id, queued);
       res.status(policyAssignment ? 201 : 200).json({
         policy_assignment: policyAssignment,

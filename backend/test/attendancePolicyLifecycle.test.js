@@ -30,6 +30,7 @@ function policyRow({ isUsed = true, overrides = {} } = {}) {
 
 async function updatePolicy({ body, isUsed = true }) {
   const queries = [];
+  const invalidations = [];
   const current = policyRow({ isUsed });
   const pool = {
     async query(sql, params = []) {
@@ -49,6 +50,9 @@ async function updatePolicy({ body, isUsed = true }) {
     },
   };
   const restore = withMockedModule('../src/config/db', { pool });
+  const restoreCache = withMockedModule('../src/services/attendancePolicyCache', {
+    invalidateAttendancePolicyCache: (options) => invalidations.push(options),
+  });
   const routePath = '../src/routes/attendancePolicies';
   clearModule(routePath);
   const res = {
@@ -65,9 +69,10 @@ async function updatePolicy({ body, isUsed = true }) {
       { params: { id: policyId }, body },
       res
     );
-    return { res, queries };
+    return { res, queries, invalidations };
   } finally {
     clearModule(routePath);
+    restoreCache();
     restore();
   }
 }
@@ -84,7 +89,7 @@ test('used policy rejects changes to computation settings', async () => {
 });
 
 test('used policy permits metadata edits with unchanged submitted settings', async () => {
-  const { res, queries } = await updatePolicy({
+  const { res, queries, invalidations } = await updatePolicy({
     body: {
       policy_name: 'Renamed standard policy',
       description: 'Corrected description',
@@ -104,6 +109,7 @@ test('used policy permits metadata edits with unchanged submitted settings', asy
   assert.equal(res.body.policy_name, 'Renamed standard policy');
   assert.equal(res.body.is_used, true);
   assert.equal(queries.some(({ text }) => text.startsWith('UPDATE ')), true);
+  assert.deepEqual(invalidations, [undefined]);
 });
 
 test('unused policy permits computation changes', async () => {

@@ -11,28 +11,14 @@ const {
 } = require('./shiftAttendance');
 const { dtrDeletionKey, getDeletedDtrDateKeys } = require('./dtrDeletionAudit');
 const { calculateAttendancePolicyPenalties } = require('./attendancePolicyResolver');
+const {
+  getAttendancePolicyCache,
+  setAttendancePolicyCache,
+} = require('./attendancePolicyCache');
 
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
 const ONE_PM_MINUTES = 13 * 60;
-const ATTENDANCE_POLICY_CACHE_TTL_MS = 60 * 1000;
-let _cachedAttendancePolicy = null;
-let _cachedAttendancePolicyAt = 0;
-const _policyByEmployeeDateCache = new Map();
-
-function clearBiometricAttendancePolicyCache({ employeeId = null, dateFrom = null, dateTo = null } = {}) {
-  const employee = employeeId == null ? null : String(employeeId);
-  for (const key of _policyByEmployeeDateCache.keys()) {
-    const separator = key.indexOf('|');
-    const cachedEmployee = separator < 0 ? key : key.slice(0, separator);
-    const cachedDate = separator < 0 ? '' : key.slice(separator + 1);
-    if (employee && cachedEmployee !== employee) continue;
-    if (dateFrom && cachedDate < dateFrom) continue;
-    if (dateTo && cachedDate > dateTo) continue;
-    _policyByEmployeeDateCache.delete(key);
-  }
-}
-
 function _normalizePolicy(row) {
   return {
     id: row?.id || null,
@@ -48,10 +34,8 @@ function _normalizePolicy(row) {
 }
 
 async function getActiveDefaultAttendancePolicy() {
-  const now = Date.now();
-  if (_cachedAttendancePolicy && now - _cachedAttendancePolicyAt < ATTENDANCE_POLICY_CACHE_TTL_MS) {
-    return _cachedAttendancePolicy;
-  }
+  const cached = getAttendancePolicyCache('biometric', 'default');
+  if (cached.found) return cached.value;
   const result = await pool.query(
     `SELECT id, work_hours_per_day, deduct_late,
             convert_late_to_equivalent_day, deduct_undertime, convert_undertime_to_equivalent_day,
@@ -61,17 +45,19 @@ async function getActiveDefaultAttendancePolicy() {
      ORDER BY is_default DESC, updated_at DESC, created_at DESC
      LIMIT 1`
   );
-  _cachedAttendancePolicy = _normalizePolicy(result.rows[0]);
-  _cachedAttendancePolicyAt = now;
-  return _cachedAttendancePolicy;
+  return setAttendancePolicyCache(
+    'biometric',
+    'default',
+    _normalizePolicy(result.rows[0]),
+    { isDefault: true }
+  );
 }
 
 async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
   if (!employeeId || !dateStr) return getActiveDefaultAttendancePolicy();
   const cacheKey = `${employeeId}|${dateStr}`;
-  const now = Date.now();
-  const cached = _policyByEmployeeDateCache.get(cacheKey);
-  if (cached && now - cached.at < ATTENDANCE_POLICY_CACHE_TTL_MS) return cached.value;
+  const cached = getAttendancePolicyCache('biometric', cacheKey);
+  if (cached.found) return cached.value;
 
   const result = await pool.query(
     `WITH eff AS (
@@ -110,8 +96,10 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
     [employeeId, dateStr]
   );
   const resolved = result.rows[0] ? _normalizePolicy(result.rows[0]) : await getActiveDefaultAttendancePolicy();
-  _policyByEmployeeDateCache.set(cacheKey, { at: now, value: resolved });
-  return resolved;
+  return setAttendancePolicyCache('biometric', cacheKey, resolved, {
+    employeeId,
+    date: dateStr,
+  });
 }
 
 async function applyAttendancePolicyPenalties(employeeId, dateStr, rawLateMinutes, rawUndertimeMinutes) {
@@ -895,7 +883,6 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
 }
 
 module.exports = {
-  clearBiometricAttendancePolicyCache,
   processBiometricLogsToSummary,
   interpretPunchesForDay,
   hasBiometricSummaryChanged,

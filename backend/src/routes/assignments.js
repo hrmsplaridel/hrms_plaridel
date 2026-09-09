@@ -35,6 +35,9 @@ const {
   assignmentStatusWhereSql,
   computedAssignmentStatusSql,
 } = require('../services/assignmentStatus');
+const {
+  invalidateAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -361,6 +364,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         metadata: { assignment_id: assignment.id },
       });
       await client.query('COMMIT');
+      invalidateAttendancePolicyCache({ employeeId: assignment.employee_id });
       const reconciliation = await rebuildAfterAssignmentCommit(
         assignment.employee_id,
         queued
@@ -571,6 +575,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           })
         : { range: null, count: 0, months: [] };
       await client.query('COMMIT');
+      invalidateAttendancePolicyCache({ employeeId: assignment.employee_id });
       const reconciliation = await rebuildAfterAssignmentCommit(
         assignment.employee_id,
         queued
@@ -629,6 +634,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
           })
         : { range: null, count: 0, months: [] };
       await client.query('COMMIT');
+      invalidateAttendancePolicyCache({ employeeId: result.record.employee_id });
       const reconciliation = await rebuildAfterAssignmentCommit(
         result.record.employee_id,
         queued
@@ -688,6 +694,7 @@ router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
         });
       }
       await client.query('COMMIT');
+      invalidateAttendancePolicyCache({ employeeId: result.deleted.employee_id });
       res.json({
         message: 'Mistaken unused assignment permanently deleted',
         restored_previous_assignment: result.restoredPredecessor?.after || null,

@@ -2,6 +2,9 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  invalidateAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -193,6 +196,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       ]
     );
     const r = result.rows[0];
+    invalidateAttendancePolicyCache();
     res.status(201).json({
       id: r.id,
       policy_name: r.name,
@@ -300,6 +304,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Attendance policy not found' });
     const r = result.rows[0];
+    invalidateAttendancePolicyCache();
     res.json({
       id: r.id,
       policy_name: r.name,
@@ -330,6 +335,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM attendance_policies WHERE id = $1 RETURNING id', [req.params.id]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'Attendance policy not found' });
+    invalidateAttendancePolicyCache();
     res.status(204).send();
   } catch (err) {
     console.error('[attendance-policies DELETE]', err);
