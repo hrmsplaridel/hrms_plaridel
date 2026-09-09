@@ -168,3 +168,47 @@ test('template rows reject invalid booleans, enums, and calendar dates', () => {
     /date_from must be a real date/i
   );
 });
+
+test('non-recurring template rows must use the labeled template year', () => {
+  assert.throws(
+    () => normalizeTemplatePayload({
+      year: 2027,
+      holidays: [{
+        ...initial,
+        date_from: '2026-09-09',
+        date_to: '2026-09-09',
+        recurring: false,
+      }],
+    }),
+    /Holiday row 1 must use template year 2027 for both dates because it is non-recurring/i
+  );
+});
+
+test('non-recurring template ranges cannot silently cross into another year', () => {
+  assert.throws(
+    () => normalizeTemplatePayload({
+      year: 2027,
+      holidays: [{
+        ...initial,
+        date_from: '2027-12-31',
+        date_to: '2028-01-01',
+        recurring: false,
+      }],
+    }),
+    /Holiday row 1 must use template year 2027 for both dates/i
+  );
+});
+
+test('recurring template rows retain their original month-day anchors', () => {
+  const template = normalizeTemplatePayload({
+    year: 2027,
+    holidays: [{
+      ...initial,
+      date_from: '2024-12-31',
+      date_to: '2025-01-01',
+      recurring: true,
+    }],
+  });
+  assert.equal(template.holidays[0].date_from, '2024-12-31');
+  assert.equal(template.holidays[0].date_to, '2025-01-01');
+});

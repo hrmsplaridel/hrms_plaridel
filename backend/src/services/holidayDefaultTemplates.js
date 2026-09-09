@@ -45,6 +45,19 @@ function normalizeDate(value, field) {
   return normalizeIsoDate(text, field);
 }
 
+function validateTemplateYearMembership(year, holidays) {
+  for (const [index, holiday] of holidays.entries()) {
+    if (holiday.recurring) continue;
+    const dateFromYear = Number(String(holiday.date_from).slice(0, 4));
+    const dateToYear = Number(String(holiday.date_to).slice(0, 4));
+    if (dateFromYear !== year || dateToYear !== year) {
+      throw badRequest(
+        `Holiday row ${index + 1} must use template year ${year} for both dates because it is non-recurring.`
+      );
+    }
+  }
+}
+
 function normalizeTemplatePayload(payload = {}) {
   const year = normalizeYear(payload.year);
   const rawItems = Array.isArray(payload.holidays) ? payload.holidays : [];
@@ -77,6 +90,7 @@ function normalizeTemplatePayload(payload = {}) {
       sort_order: Number.isInteger(Number(raw.sort_order)) ? Number(raw.sort_order) : index,
     };
   });
+  validateTemplateYearMembership(year, holidays);
 
   return {
     country: 'PH',
@@ -204,11 +218,13 @@ async function getHolidayDefaultTemplate(year) {
   const dbTemplate = await readDbTemplate(numericYear);
   const supportedYears = await getHolidayDefaultTemplateYears();
   if (dbTemplate) {
+    validateTemplateYearMembership(numericYear, dbTemplate.holidays);
     return { ...dbTemplate, supported_years: supportedYears };
   }
 
   const builtIn = getPhilippineHolidayDefaults(numericYear);
   if (!builtIn) return null;
+  validateTemplateYearMembership(numericYear, builtIn.holidays);
   return {
     ...builtIn,
     source_mode: 'built_in',
@@ -332,5 +348,6 @@ module.exports = {
   getHolidayDefaultTemplateYears,
   listHolidayDefaultTemplates,
   normalizeTemplatePayload,
+  validateTemplateYearMembership,
   upsertHolidayDefaultTemplate,
 };

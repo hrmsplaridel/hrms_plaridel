@@ -8,6 +8,7 @@ const {
   getHolidayDefaultTemplateYears,
   listHolidayDefaultTemplates,
   upsertHolidayDefaultTemplate,
+  validateTemplateYearMembership,
 } = require('../services/holidayDefaultTemplates');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
@@ -131,6 +132,7 @@ async function templateOr404(req, res) {
     });
     return null;
   }
+  validateTemplateYearMembership(template.year, template.holidays);
   return template;
 }
 
@@ -243,8 +245,9 @@ router.get('/ph-defaults', protect, requireAdmin, async (req, res) => {
       }),
     });
   } catch (err) {
-    console.error('[holidays PH defaults GET]', err);
-    res.status(500).json({ error: 'Failed to load Philippine holiday defaults' });
+    const status = err.statusCode || 500;
+    if (status >= 500) console.error('[holidays PH defaults GET]', err);
+    res.status(status).json({ error: err.message || 'Failed to load Philippine holiday defaults' });
   }
 });
 
@@ -313,8 +316,9 @@ router.post('/ph-defaults/import', protect, requireAdmin, async (req, res) => {
     });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    console.error('[holidays PH defaults import POST]', err);
-    res.status(500).json({ error: 'Failed to import Philippine holiday defaults' });
+    const status = err.statusCode || 500;
+    if (status >= 500) console.error('[holidays PH defaults import POST]', err);
+    res.status(status).json({ error: err.message || 'Failed to import Philippine holiday defaults' });
   } finally {
     client.release();
   }
