@@ -327,7 +327,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     const type = ['regular', 'special', 'local', 'work_suspension'].includes(holiday_type) ? holiday_type : 'regular';
     const coverageAllowed = ['whole_day', 'am_only', 'pm_only'];
     let coverage = coverageAllowed.includes(bodyCoverage) ? bodyCoverage : 'whole_day';
-    if (type !== 'work_suspension') coverage = 'whole_day';
+    if (!['work_suspension', 'special'].includes(type)) coverage = 'whole_day';
 
     await client.query('BEGIN');
     const result = await client.query(

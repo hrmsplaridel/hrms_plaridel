@@ -283,7 +283,8 @@ class _ManageHolidayState extends State<ManageHoliday> {
               : _descriptionController.text.trim(),
           'is_active': _isActive,
           'recurring': _isRecurring,
-          if (_holidayType == 'work_suspension') 'coverage': _coverage,
+          if (_holidayType == 'work_suspension' || _holidayType == 'special')
+            'coverage': _coverage,
         },
       );
       if (mounted) {
@@ -345,7 +346,8 @@ class _ManageHolidayState extends State<ManageHoliday> {
           'date_to': _dateToYyyyMmDd(_dateTo!),
           'name': name,
           'holiday_type': _holidayType,
-          'coverage': _holidayType == 'work_suspension'
+          'coverage':
+              _holidayType == 'work_suspension' || _holidayType == 'special'
               ? _coverage
               : 'whole_day',
           'description': _descriptionController.text.trim().isEmpty
@@ -1088,7 +1090,8 @@ class _ManageHolidayState extends State<ManageHoliday> {
                             Icons.repeat_rounded,
                             const Color(0xFF2563EB),
                           ),
-                        if (holiday.holidayType == 'work_suspension')
+                        if (holiday.holidayType == 'work_suspension' ||
+                            holiday.holidayType == 'special')
                           _buildMetaPill(
                             _coverageLabel(holiday.coverage),
                             Icons.schedule_rounded,
@@ -1478,11 +1481,14 @@ class _ManageHolidayState extends State<ManageHoliday> {
           onChanged: (v) {
             _updateHolidayFormState(() {
               _holidayType = v ?? 'regular';
-              if (_holidayType != 'work_suspension') _coverage = 'whole_day';
+              if (_holidayType != 'work_suspension' &&
+                  _holidayType != 'special') {
+                _coverage = 'whole_day';
+              }
             });
           },
         ),
-        if (_holidayType == 'work_suspension') ...[
+        if (_holidayType == 'work_suspension' || _holidayType == 'special') ...[
           const SizedBox(height: 16),
           Text(
             'Coverage',

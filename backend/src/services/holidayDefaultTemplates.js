@@ -71,7 +71,7 @@ function normalizeTemplatePayload(payload = {}) {
       : VALID_HOLIDAY_TYPES.has(raw.holidayType)
         ? raw.holidayType
         : 'regular';
-    const coverage = holidayType === 'work_suspension' && VALID_COVERAGE.has(raw.coverage)
+    const coverage = ['work_suspension', 'special'].includes(holidayType) && VALID_COVERAGE.has(raw.coverage)
       ? raw.coverage
       : 'whole_day';
 
