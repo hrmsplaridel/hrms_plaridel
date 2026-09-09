@@ -2760,22 +2760,25 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
                   onMarkMetMayor: _awaitingMeeting
                       ? () async {
                           final ok = await widget.onMarkMetMayor();
-                          if (ok && context.mounted)
+                          if (ok && context.mounted) {
                             Navigator.of(context).pop();
+                          }
                         }
                       : null,
                   onScheduleMeeting: _awaitingMeeting
                       ? () async {
                           final ok = await widget.onScheduleMeeting();
-                          if (ok && context.mounted)
+                          if (ok && context.mounted) {
                             Navigator.of(context).pop();
+                          }
                         }
                       : null,
                   onMarkNoShow: _awaitingMeeting
                       ? () async {
                           final ok = await widget.onMarkNoShow();
-                          if (ok && context.mounted)
+                          if (ok && context.mounted) {
                             Navigator.of(context).pop();
+                          }
                         }
                       : null,
                 ),

@@ -617,7 +617,6 @@ class _DocuTrackerWorkflowEditorScreenState
     if (newIndex < 0 || newIndex > _steps.length) return;
 
     setState(() {
-      if (newIndex > oldIndex) newIndex -= 1;
       if (newIndex == oldIndex) return;
 
       final movedStep = _steps.removeAt(oldIndex);
@@ -994,7 +993,7 @@ class _DocuTrackerWorkflowEditorScreenState
                         padding: const EdgeInsets.only(bottom: 8),
                         sliver: SliverReorderableList(
                           itemCount: _steps.length,
-                          onReorder: _onReorderSteps,
+                          onReorderItem: _onReorderSteps,
                           proxyDecorator: (child, index, animation) {
                             return AnimatedBuilder(
                               animation: animation,

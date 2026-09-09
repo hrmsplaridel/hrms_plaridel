@@ -65,7 +65,7 @@ void main() {
   ) async {
     await pumpEditor(tester);
 
-    expect(find.text('Visual workflow builder'), findsOneWidget);
+    expect(find.text('Workflow Builder'), findsOneWidget);
     expect(find.text('Route preview'), findsOneWidget);
     expect(find.text('Step 1 highlighted'), findsOneWidget);
     expect(tester.takeException(), isNull);

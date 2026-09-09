@@ -106,9 +106,9 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
         provider.loading &&
         provider.balances.isEmpty &&
         provider.requests.isEmpty;
-    const _creditTypes = {'vacationLeave', 'sickLeave'};
+    const creditTypes = {'vacationLeave', 'sickLeave'};
     final totalAvailable = provider.balances
-        .where((b) => _creditTypes.contains(b.effectiveLeaveTypeName))
+        .where((b) => creditTypes.contains(b.effectiveLeaveTypeName))
         .fold<double>(0, (sum, item) => sum + item.availableDays);
     final totalPendingDays = provider.pendingRequests.fold<double>(
       0,

@@ -1818,38 +1818,40 @@ Widget _rspMcqQuestionsPanel({
                                       width: 520,
                                       child: StatefulBuilder(
                                         builder: (context, setDialogState) {
-                                          return SingleChildScrollView(
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: List.generate(
-                                                optCount,
-                                                (idx) {
-                                                  final txt = item
-                                                      .optionControllers[idx]
-                                                      .text
-                                                      .trim();
-                                                  return RadioListTile<int>(
-                                                    value: idx,
-                                                    groupValue: selected,
-                                                    onChanged: (v) {
-                                                      if (v == null) return;
-                                                      setDialogState(
-                                                        () => selected = v,
-                                                      );
-                                                    },
-                                                    title: Text(
-                                                      txt.isEmpty
-                                                          ? 'Option ${idx + 1}'
-                                                          : txt,
-                                                      maxLines: 2,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                    ),
-                                                    dense: true,
-                                                    contentPadding:
-                                                        EdgeInsets.zero,
-                                                  );
-                                                },
+                                          return RadioGroup<int>(
+                                            groupValue: selected,
+                                            onChanged: (value) {
+                                              if (value == null) return;
+                                              setDialogState(
+                                                () => selected = value,
+                                              );
+                                            },
+                                            child: SingleChildScrollView(
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: List.generate(
+                                                  optCount,
+                                                  (idx) {
+                                                    final txt = item
+                                                        .optionControllers[idx]
+                                                        .text
+                                                        .trim();
+                                                    return RadioListTile<int>(
+                                                      value: idx,
+                                                      title: Text(
+                                                        txt.isEmpty
+                                                            ? 'Option ${idx + 1}'
+                                                            : txt,
+                                                        maxLines: 2,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                      ),
+                                                      dense: true,
+                                                      contentPadding:
+                                                          EdgeInsets.zero,
+                                                    );
+                                                  },
+                                                ),
                                               ),
                                             ),
                                           );
@@ -3605,8 +3607,9 @@ class _RspApplicantsProfileSectionState
     List<String> positions,
     List<RecruitmentApplication> applications,
   ) async {
-    if (positions.length <= 1)
+    if (positions.length <= 1) {
       return positions.isEmpty ? null : positions.first;
+    }
     final pipelineApps = applications
         .where((a) => a.isActiveInPipeline)
         .toList();
@@ -5252,8 +5255,7 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     final encoded =
-        _addressFormKey.currentState?.composeEncoded() ??
-        _street.text.trim();
+        _addressFormKey.currentState?.composeEncoded() ?? _street.text.trim();
     Navigator.of(context).pop(
       _ApplicantDialogResult(
         name: _name.text.trim(),
@@ -5367,8 +5369,7 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
                                 context,
                                 labelText: 'Full Name',
                               ),
-                              validator: (v) =>
-                                  (v == null || v.trim().isEmpty)
+                              validator: (v) => (v == null || v.trim().isEmpty)
                                   ? 'Required'
                                   : null,
                             );
@@ -5429,24 +5430,23 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
                                 labelText: 'Age',
                               ),
                             );
-                            final civilField =
-                                DropdownButtonFormField<String>(
-                                  initialValue: _civilStatus,
-                                  decoration: AppTheme.dashInputDecoration(
-                                    context,
-                                    labelText: 'Civil Status',
-                                  ),
-                                  items: _civilStatusOptions
-                                      .map(
-                                        (s) => DropdownMenuItem(
-                                          value: s,
-                                          child: Text(s),
-                                        ),
-                                      )
-                                      .toList(),
-                                  onChanged: (v) =>
-                                      setState(() => _civilStatus = v),
-                                );
+                            final civilField = DropdownButtonFormField<String>(
+                              initialValue: _civilStatus,
+                              decoration: AppTheme.dashInputDecoration(
+                                context,
+                                labelText: 'Civil Status',
+                              ),
+                              items: _civilStatusOptions
+                                  .map(
+                                    (s) => DropdownMenuItem(
+                                      value: s,
+                                      child: Text(s),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) =>
+                                  setState(() => _civilStatus = v),
+                            );
                             if (!wide) {
                               return Column(
                                 children: [
@@ -6485,9 +6485,7 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                     ],
                   );
                 }
-                return Column(
-                  children: [a, const SizedBox(height: 14), b],
-                );
+                return Column(children: [a, const SizedBox(height: 14), b]);
               }
 
               return Column(
@@ -6524,10 +6522,7 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
             ),
             const SizedBox(width: 10),
             Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 9,
-                vertical: 3,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
               decoration: BoxDecoration(
                 color: AppTheme.primaryNavy.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(999),
@@ -6670,10 +6665,7 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                                 tooltip: 'Edit',
                                 style: rspLdRecordIconButtonStyle(),
                                 onPressed: () => _openEditApplicantDialog(i),
-                                icon: const Icon(
-                                  Icons.edit_rounded,
-                                  size: 18,
-                                ),
+                                icon: const Icon(Icons.edit_rounded, size: 18),
                               ),
                               const SizedBox(width: 6),
                               IconButton(
@@ -6928,9 +6920,7 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
                     children: [
                       Expanded(
                         child: Text(
-                          widget.isEditing
-                              ? 'Edit Applicant'
-                              : 'Add Applicant',
+                          widget.isEditing ? 'Edit Applicant' : 'Add Applicant',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
@@ -11654,105 +11644,107 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: hairline),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // ignore: deprecated_member_use
-                    RadioListTile<_AdminPassScoreMode>(
-                      value: _AdminPassScoreMode.perfect,
-                      groupValue: _mode,
-                      onChanged: (v) => setState(() => _mode = v!),
-                      title: const Text('Perfect score (100% on all sections)'),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    // ignore: deprecated_member_use
-                    RadioListTile<_AdminPassScoreMode>(
-                      value: _AdminPassScoreMode.custom,
-                      groupValue: _mode,
-                      onChanged: (v) => setState(() => _mode = v!),
-                      title: const Text(
-                        'Custom scores (admin manually encodes section scores)',
-                      ),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    if (_mode == _AdminPassScoreMode.custom) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Allowed range: 60 to 100 (Mark passed mode).',
-                        style: TextStyle(
-                          color: secondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                child: RadioGroup<_AdminPassScoreMode>(
+                  groupValue: _mode,
+                  onChanged: (value) {
+                    if (value != null) setState(() => _mode = value);
+                  },
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      RadioListTile<_AdminPassScoreMode>(
+                        value: _AdminPassScoreMode.perfect,
+                        title: const Text(
+                          'Perfect score (100% on all sections)',
                         ),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
                       ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _generalController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: const InputDecoration(
-                                labelText: 'General',
-                                isDense: true,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextField(
-                              controller: _mathController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: const InputDecoration(
-                                labelText: 'Math',
-                                isDense: true,
-                              ),
-                            ),
-                          ),
-                        ],
+                      RadioListTile<_AdminPassScoreMode>(
+                        value: _AdminPassScoreMode.custom,
+                        title: const Text(
+                          'Custom scores (admin manually encodes section scores)',
+                        ),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _infoController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: const InputDecoration(
-                                labelText: 'Gen. info',
-                                isDense: true,
+                      if (_mode == _AdminPassScoreMode.custom) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Allowed range: 60 to 100 (Mark passed mode).',
+                          style: TextStyle(
+                            color: secondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _generalController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: const InputDecoration(
+                                  labelText: 'General',
+                                  isDense: true,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextField(
-                              controller: _beiController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: const InputDecoration(
-                                labelText: 'BEI',
-                                isDense: true,
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: _mathController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Math',
+                                  isDense: true,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _infoController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Gen. info',
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: _beiController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: const InputDecoration(
+                                  labelText: 'BEI',
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),

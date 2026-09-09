@@ -143,7 +143,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final isScreenActive = TickerMode.of(context);
+    final isScreenActive = TickerMode.valuesOf(context).enabled;
     if (_initialized) {
       if (_isScreenActive == isScreenActive) return;
       _isScreenActive = isScreenActive;
