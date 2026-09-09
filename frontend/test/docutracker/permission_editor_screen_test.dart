@@ -1,29 +1,24 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/pages/docutracker_permission_editor_screen.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 void main() {
-  const secureStorageChannel = MethodChannel(
-    'plugins.it_nomads.com/flutter_secure_storage',
-  );
   var apiInitialized = false;
 
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, (call) async {
-          if (call.method == 'read') return null;
-          if (call.method == 'containsKey') return false;
-          if (call.method == 'write' ||
-              call.method == 'delete' ||
-              call.method == 'deleteAll') {
-            return null;
-          }
-          return null;
-        });
+    FlutterSecureStorage.setMockInitialValues({});
+    PackageInfo.setMockInitialValues(
+      appName: 'HRMS Plaridel',
+      packageName: 'hrms_plaridel',
+      version: '1.0.0',
+      buildNumber: '1',
+      buildSignature: '',
+    );
 
     if (!apiInitialized) {
       ApiClient.instance.init();
@@ -129,11 +124,6 @@ void main() {
     }
   });
 
-  tearDownAll(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, null);
-  });
-
   Future<void> pumpEditor(WidgetTester tester, {bool userTab = false}) async {
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = const Size(1440, 2200);
@@ -157,15 +147,18 @@ void main() {
   ) async {
     await pumpEditor(tester);
 
-    expect(find.text('Role baseline'), findsOneWidget);
-    expect(find.text('User override'), findsOneWidget);
-    expect(find.text('Effective preview'), findsOneWidget);
+    expect(find.text('Role Governance'), findsOneWidget);
+    expect(find.text('User Override'), findsOneWidget);
+    expect(find.text('Effective Preview'), findsOneWidget);
 
-    await tester.tap(find.text('Effective preview'));
+    await tester.tap(find.text('Effective Preview'));
     await tester.pumpAndSettle();
 
     expect(find.text('Rules reference'), findsOneWidget);
-    expect(find.text('Draft behavior'), findsOneWidget);
+    expect(
+      find.textContaining('Workflow actions are enforced'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -191,7 +184,7 @@ void main() {
     await tester.tap(find.textContaining('Beatriz Reviewer').last);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Effective preview'));
+    await tester.tap(find.text('Effective Preview'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Beatriz Reviewer'), findsOneWidget);

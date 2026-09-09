@@ -6,6 +6,7 @@
 // tree, read text, and verify that the values of widget properties are correct.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hrms_plaridel/main.dart';
@@ -24,6 +25,8 @@ class FakeAuthProvider extends AuthProvider {
 
 void main() {
   testWidgets('App smoke test', (WidgetTester tester) async {
+    FlutterSecureStorage.setMockInitialValues({});
+
     // Provide a non-null user so `_initialHome` renders the dashboard
     // instead of `LoginPage` (which can overflow at test viewport widths).
     final auth = FakeAuthProvider(

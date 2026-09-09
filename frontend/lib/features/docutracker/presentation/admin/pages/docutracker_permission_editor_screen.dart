@@ -1353,7 +1353,8 @@ class _DocuTrackerPermissionEditorScreenState
                     ),
                   ),
                   _buildGovernanceBodyWithSidebar(
-                    main: ListView(
+                    main: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         _buildEffectivePreview(),
                         const SizedBox(height: 12),
