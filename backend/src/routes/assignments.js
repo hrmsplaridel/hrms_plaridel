@@ -38,6 +38,7 @@ const {
 
 const router = express.Router();
 const protect = [authMiddleware];
+const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 
 // GET /api/assignments/context?employee_id=uuid
 router.get('/context', protect, async (req, res) => {
@@ -149,10 +150,20 @@ router.get('/', protect, async (req, res) => {
               a.is_active, a.remarks,
               ${computedAssignmentStatusSql('a', '$2')} AS computed_status,
               (
-                a.effective_from > $2::date
+                (
+                  a.effective_from >= $2::date
+                  OR (a.created_at AT TIME ZONE $3)::date = $2::date
+                )
                 AND NOT EXISTS (
                   SELECT 1 FROM dtr_daily_summary dtr
                    WHERE dtr.assignment_id = a.id
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM biometric_attendance_logs bal
+                   WHERE bal.user_id = a.employee_id
+                     AND (bal.logged_at AT TIME ZONE $3)::date >= a.effective_from
+                     AND (bal.logged_at AT TIME ZONE $3)::date <=
+                       COALESCE(a.effective_to, 'infinity'::date)
                 )
                 AND NOT EXISTS (
                   SELECT 1 FROM leave_requests lr
@@ -168,6 +179,8 @@ router.get('/', protect, async (req, res) => {
                 )
               ) AS can_permanently_delete,
               d.name AS department_name, p.name AS position_name, s.name AS shift_name,
+              employee_policy.attendance_policy_id,
+              employee_policy.attendance_policy_name,
               s.start_time AS shift_start_time, s.end_time AS shift_end_time,
               s.break_end AS shift_break_end, s.punch_mode,
               s.working_days AS shift_working_days
@@ -175,9 +188,34 @@ router.get('/', protect, async (req, res) => {
        LEFT JOIN departments d ON a.department_id = d.id
        LEFT JOIN positions p ON a.position_id = p.id
        LEFT JOIN shifts s ON a.shift_id = s.id
+       LEFT JOIN LATERAL (
+         SELECT pa.attendance_policy_id, ap.name AS attendance_policy_name
+           FROM policy_assignments pa
+           JOIN attendance_policies ap ON ap.id = pa.attendance_policy_id
+          WHERE pa.employee_id = a.employee_id
+            AND pa.department_id IS NULL
+            AND pa.shift_id IS NULL
+            AND pa.is_active = true
+            AND pa.effective_from <= CASE
+              WHEN a.effective_from <= $2::date
+               AND COALESCE(a.effective_to, 'infinity'::date) >= $2::date
+                THEN $2::date
+              WHEN a.effective_from > $2::date THEN a.effective_from
+              ELSE COALESCE(a.effective_to, a.effective_from)
+            END
+            AND COALESCE(pa.effective_to, 'infinity'::date) >= CASE
+              WHEN a.effective_from <= $2::date
+               AND COALESCE(a.effective_to, 'infinity'::date) >= $2::date
+                THEN $2::date
+              WHEN a.effective_from > $2::date THEN a.effective_from
+              ELSE COALESCE(a.effective_to, a.effective_from)
+            END
+          ORDER BY pa.effective_from DESC, pa.created_at DESC, pa.id DESC
+          LIMIT 1
+       ) employee_policy ON true
        WHERE a.employee_id = $1 ${statusWhere}
        ORDER BY a.effective_from DESC`,
-      [employeeId, statusContext.today]
+      [employeeId, statusContext.today, HRMS_TIMEZONE]
     );
 
     const visibleRows = await filterAssignmentRowsForAccess(pool, access, result.rows);
@@ -198,6 +236,8 @@ router.get('/', protect, async (req, res) => {
         department_id: r.department_id,
         position_id: r.position_id,
         shift_id: r.shift_id,
+        attendance_policy_id: r.attendance_policy_id,
+        attendance_policy_name: r.attendance_policy_name,
         effective_from: r.effective_from,
         effective_to: r.effective_to,
         is_active: r.is_active ?? true,
@@ -383,6 +423,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       effective_to === undefined &&
       is_active === undefined &&
       remarks === undefined
+      && !hasPolicyChange
     ) {
       return res.status(400).json({ error: 'No fields to update' });
     }
@@ -615,7 +656,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /api/assignments/:id/permanent - remove an unused future mistake only
+// DELETE /api/assignments/:id/permanent - remove an unused current/future mistake only
 router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
   let client;
   try {
@@ -628,10 +669,29 @@ router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
         recordId: req.params.id,
         reason: req.body?.reason,
       });
+      const policyTransition = await upsertEmployeePolicyAssignment(client, {
+        employeeId: result.deleted.employee_id,
+        attendancePolicyId: null,
+        effectiveFrom: result.deleted.effective_from,
+        effectiveTo: result.deleted.effective_to,
+        includeTransition: true,
+      });
+      if (policyTransition.before.length > 0) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'policy',
+          recordId: policyTransition.before[0]?.id || null,
+          action: 'employee_policy_assignment_removed_with_assignment',
+          reason: req.body?.reason,
+          before: policyTransition.before,
+          after: policyTransition.after,
+        });
+      }
       await client.query('COMMIT');
       res.json({
-        message: 'Mistaken future assignment permanently deleted',
+        message: 'Mistaken unused assignment permanently deleted',
         restored_previous_assignment: result.restoredPredecessor?.after || null,
+        policy_assignment_removed: policyTransition.before.length > 0,
       });
     } catch (error) {
       await client.query('ROLLBACK');
