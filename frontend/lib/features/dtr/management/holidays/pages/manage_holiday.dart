@@ -11,6 +11,19 @@ part '../models/holiday_models.dart';
 part '../widgets/philippine_holiday_defaults_dialog.dart';
 part '../widgets/holiday_template_upload_dialog.dart';
 
+String holidayApiErrorMessage(DioException exception, String fallback) {
+  final data = exception.response?.data;
+  if (data is Map) {
+    final value = data['error'] ?? data['message'];
+    if (value != null && value.toString().trim().isNotEmpty) {
+      return value.toString();
+    }
+  }
+
+  final dioMessage = exception.message?.trim();
+  return dioMessage == null || dioMessage.isEmpty ? fallback : dioMessage;
+}
+
 class ManageHoliday extends StatefulWidget {
   const ManageHoliday({super.key});
 
@@ -311,10 +324,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to add';
+        final msg = holidayApiErrorMessage(e, 'Unable to add holiday.');
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
@@ -381,10 +391,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to update';
+        final msg = holidayApiErrorMessage(e, 'Unable to update holiday.');
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
@@ -427,10 +434,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to delete';
+        final msg = holidayApiErrorMessage(e, 'Unable to delete holiday.');
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $msg')));
