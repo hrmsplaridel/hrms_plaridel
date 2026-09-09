@@ -13,6 +13,14 @@ const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
   enqueueHolidayReconciliation,
 } = require('../services/dtrMonthEndReconciliation');
+const {
+  normalizeBoolean,
+  normalizeHolidayCoverage,
+  normalizeHolidayType,
+  normalizeIsoDate,
+  normalizeRequiredName,
+  validateCoverageForType,
+} = require('../services/holidayValidation');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -318,23 +326,27 @@ router.post('/', protect, requireAdmin, async (req, res) => {
   try {
     const { name, holiday_type = 'regular', description, is_active = true, recurring = false, coverage: bodyCoverage } = req.body;
     const { dateFrom, dateTo } = normalizeRange(req.body);
-    if (!dateFrom || !dateTo || !name || !name.trim()) {
+    if (!dateFrom || !dateTo || name === undefined) {
       return res.status(400).json({ error: 'date_from, date_to, and name are required' });
     }
-    if (dateTo < dateFrom) {
+    const validDateFrom = normalizeIsoDate(dateFrom, 'date_from');
+    const validDateTo = normalizeIsoDate(dateTo, 'date_to');
+    const validName = normalizeRequiredName(name);
+    if (validDateTo < validDateFrom) {
       return res.status(400).json({ error: 'date_to must be on or after date_from' });
     }
-    const type = ['regular', 'special', 'local', 'work_suspension'].includes(holiday_type) ? holiday_type : 'regular';
-    const coverageAllowed = ['whole_day', 'am_only', 'pm_only'];
-    let coverage = coverageAllowed.includes(bodyCoverage) ? bodyCoverage : 'whole_day';
-    if (!['work_suspension', 'special'].includes(type)) coverage = 'whole_day';
+    const type = normalizeHolidayType(holiday_type);
+    const coverage = normalizeHolidayCoverage(bodyCoverage);
+    const active = normalizeBoolean(is_active, 'is_active', true);
+    const repeats = normalizeBoolean(recurring, 'recurring', false);
+    validateCoverageForType(type, coverage);
 
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO holidays (date_from, date_to, name, holiday_type, description, is_active, recurring, coverage)
        VALUES ($1::date, $2::date, $3, $4, $5, $6, $7, $8)
        RETURNING id, date_from, date_to, name, holiday_type, description, is_active, recurring, coverage, created_at`,
-      [dateFrom, dateTo, name.trim(), type, description?.trim() || null, !!is_active, !!recurring, coverage]
+      [validDateFrom, validDateTo, validName, type, description?.trim() || null, active, repeats, coverage]
     );
     const row = result.rows[0];
     await enqueueHolidayReconciliation(client, {
@@ -349,6 +361,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     res.status(201).json(rowToJson(row));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    if (err.statusCode === 400) return res.status(400).json({ error: err.message });
     if (err.code === '23505') return res.status(409).json({ error: 'A holiday with this name and date range already exists.' });
     console.error('[holidays POST]', err);
     res.status(500).json({ error: 'Failed to create holiday' });
@@ -364,7 +377,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const { id } = req.params;
     await client.query('BEGIN');
     const previousResult = await client.query(
-      `SELECT id, date_from, date_to, recurring
+      `SELECT id, date_from, date_to, name, holiday_type, description, is_active, recurring, coverage
          FROM holidays
         WHERE id = $1`,
       [id]
@@ -383,31 +396,40 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const updates = [];
     const values = [];
     let i = 1;
+    let validType;
+    let validCoverage;
     if (hasRangeKey) {
       if (!range.dateFrom || !range.dateTo) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Provide both date_from and date_to (or holiday_date for a single day).' });
       }
-      if (range.dateTo < range.dateFrom) {
+      const validDateFrom = normalizeIsoDate(range.dateFrom, 'date_from');
+      const validDateTo = normalizeIsoDate(range.dateTo, 'date_to');
+      if (validDateTo < validDateFrom) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'date_to must be on or after date_from' });
       }
-      updates.push(`date_from = $${i++}::date`); values.push(range.dateFrom);
-      updates.push(`date_to = $${i++}::date`); values.push(range.dateTo);
+      updates.push(`date_from = $${i++}::date`); values.push(validDateFrom);
+      updates.push(`date_to = $${i++}::date`); values.push(validDateTo);
     }
-    if (name !== undefined) { updates.push(`name = $${i++}`); values.push(name.trim()); }
+    if (name !== undefined) { updates.push(`name = $${i++}`); values.push(normalizeRequiredName(name)); }
     if (holiday_type !== undefined) {
-      const type = ['regular', 'special', 'local', 'work_suspension'].includes(holiday_type) ? holiday_type : 'regular';
+      validType = normalizeHolidayType(holiday_type);
       updates.push(`holiday_type = $${i++}`);
-      values.push(type);
+      values.push(validType);
     }
     if (description !== undefined) { updates.push(`description = $${i++}`); values.push(description?.trim() || null); }
-    if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(!!is_active); }
-    if (recurring !== undefined) { updates.push(`recurring = $${i++}`); values.push(!!recurring); }
+    if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(normalizeBoolean(is_active, 'is_active')); }
+    if (recurring !== undefined) { updates.push(`recurring = $${i++}`); values.push(normalizeBoolean(recurring, 'recurring')); }
     if (bodyCoverage !== undefined) {
-      const coverageAllowed = ['whole_day', 'am_only', 'pm_only'];
-      const coverage = coverageAllowed.includes(bodyCoverage) ? bodyCoverage : 'whole_day';
-      updates.push(`coverage = $${i++}`); values.push(coverage);
+      validCoverage = normalizeHolidayCoverage(bodyCoverage);
+      updates.push(`coverage = $${i++}`); values.push(validCoverage);
+    }
+    if (holiday_type !== undefined || bodyCoverage !== undefined) {
+      validateCoverageForType(
+        validType ?? previous.holiday_type,
+        validCoverage ?? previous.coverage ?? 'whole_day'
+      );
     }
     if (updates.length === 0) {
       await client.query('ROLLBACK');
@@ -440,6 +462,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     res.json(rowToJson(row));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    if (err.statusCode === 400) return res.status(400).json({ error: err.message });
     if (err.code === '23505') return res.status(409).json({ error: 'A holiday with this name and date range already exists.' });
     console.error('[holidays PUT]', err);
     res.status(500).json({ error: 'Failed to update holiday' });

@@ -57,8 +57,14 @@ async function request(method, body) {
     const route = router.stack.find((entry) => entry.route?.path === (method === 'post' ? '/' : '/:id') && entry.route.methods[method]);
     await route.route.stack.at(-1).handle({ body, params: { id: initial.id } }, res);
     assert.equal(released, true);
-    assert.ok(events.indexOf('QUEUE') < events.indexOf('COMMIT'));
-    assert.ok(events.indexOf('COMMIT') < events.indexOf('BROADCAST'));
+    if (res.statusCode < 400) {
+      assert.ok(events.indexOf('QUEUE') < events.indexOf('COMMIT'));
+      assert.ok(events.indexOf('COMMIT') < events.indexOf('BROADCAST'));
+    } else {
+      assert.equal(events.includes('WRITE'), false);
+      assert.equal(events.includes('QUEUE'), false);
+      assert.equal(events.includes('BROADCAST'), false);
+    }
     return res;
   } finally {
     clearModule(path);
@@ -97,7 +103,68 @@ test('description-only API edit keeps existing AM-only special holiday', async (
 
 test('regular/local creation rules remain unchanged', async () => {
   for (const type of ['regular', 'local']) {
-    const res = await request('post', { ...initial, holiday_type: type });
+    const { coverage, ...body } = initial;
+    const res = await request('post', { ...body, holiday_type: type });
     assert.equal(res.body.coverage, 'whole_day');
   }
+});
+
+test('API rejects string booleans instead of treating them as true', async () => {
+  const res = await request('post', { ...initial, is_active: 'false' });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /is_active must be true or false/i);
+});
+
+test('API rejects blank names on partial updates', async () => {
+  const res = await request('put', { name: '   ' });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /name must be a nonempty string/i);
+});
+
+test('API rejects unsupported holiday types and coverage values', async () => {
+  const invalidType = await request('post', { ...initial, holiday_type: 'national' });
+  assert.equal(invalidType.statusCode, 400);
+  assert.match(invalidType.body.error, /holiday_type must be one of/i);
+
+  const invalidCoverage = await request('put', { coverage: 'morning' });
+  assert.equal(invalidCoverage.statusCode, 400);
+  assert.match(invalidCoverage.body.error, /coverage must be one of/i);
+});
+
+test('API rejects partial coverage for regular and local holidays', async () => {
+  const res = await request('post', { ...initial, holiday_type: 'regular', coverage: 'am_only' });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /coverage must be whole_day/i);
+});
+
+test('API rejects nonexistent calendar dates', async () => {
+  const res = await request('post', {
+    ...initial,
+    date_from: '2026-02-30',
+    date_to: '2026-02-30',
+  });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /date_from must be a real date/i);
+});
+
+test('template rows reject invalid booleans, enums, and calendar dates', () => {
+  assert.throws(
+    () => normalizeTemplatePayload({ year: 2026, holidays: [{ ...initial, name: 123 }] }),
+    /Holiday row 1 name must be a nonempty string/i
+  );
+  assert.throws(
+    () => normalizeTemplatePayload({ year: 2026, holidays: [{ ...initial, recurring: 'false' }] }),
+    /recurring must be true or false/i
+  );
+  assert.throws(
+    () => normalizeTemplatePayload({ year: 2026, holidays: [{ ...initial, holiday_type: 'national' }] }),
+    /holiday_type must be one of/i
+  );
+  assert.throws(
+    () => normalizeTemplatePayload({
+      year: 2026,
+      holidays: [{ ...initial, date_from: '2026-02-30', date_to: '2026-02-30' }],
+    }),
+    /date_from must be a real date/i
+  );
 });

@@ -3,15 +3,14 @@ const {
   getPhilippineHolidayDefaults,
   supportedYears: supportedBuiltInYears,
 } = require('./philippineHolidayDefaults');
-
-const VALID_HOLIDAY_TYPES = new Set([
-  'regular',
-  'special',
-  'local',
-  'work_suspension',
-]);
-
-const VALID_COVERAGE = new Set(['whole_day', 'am_only', 'pm_only']);
+const {
+  normalizeBoolean,
+  normalizeHolidayCoverage,
+  normalizeHolidayType,
+  normalizeIsoDate,
+  normalizeRequiredName,
+  validateCoverageForType,
+} = require('./holidayValidation');
 
 function toDateString(value) {
   if (value == null) return null;
@@ -43,10 +42,7 @@ function normalizeYear(value) {
 
 function normalizeDate(value, field) {
   const text = toDateString(value);
-  if (!text || !/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-    throw badRequest(`${field} must be a YYYY-MM-DD date.`);
-  }
-  return text;
+  return normalizeIsoDate(text, field);
 }
 
 function normalizeTemplatePayload(payload = {}) {
@@ -57,8 +53,7 @@ function normalizeTemplatePayload(payload = {}) {
   }
 
   const holidays = rawItems.map((raw, index) => {
-    const name = String(raw.name || '').trim();
-    if (!name) throw badRequest(`Holiday row ${index + 1} needs a name.`);
+    const name = normalizeRequiredName(raw.name, `Holiday row ${index + 1} name`);
 
     const dateFrom = normalizeDate(raw.date_from ?? raw.dateFrom, `Holiday row ${index + 1} date_from`);
     const dateTo = normalizeDate(raw.date_to ?? raw.dateTo ?? dateFrom, `Holiday row ${index + 1} date_to`);
@@ -66,14 +61,9 @@ function normalizeTemplatePayload(payload = {}) {
       throw badRequest(`Holiday row ${index + 1} date_to must be on or after date_from.`);
     }
 
-    const holidayType = VALID_HOLIDAY_TYPES.has(raw.holiday_type)
-      ? raw.holiday_type
-      : VALID_HOLIDAY_TYPES.has(raw.holidayType)
-        ? raw.holidayType
-        : 'regular';
-    const coverage = ['work_suspension', 'special'].includes(holidayType) && VALID_COVERAGE.has(raw.coverage)
-      ? raw.coverage
-      : 'whole_day';
+    const holidayType = normalizeHolidayType(raw.holiday_type ?? raw.holidayType);
+    const coverage = normalizeHolidayCoverage(raw.coverage);
+    validateCoverageForType(holidayType, coverage);
 
     return {
       date_from: dateFrom,
@@ -81,8 +71,8 @@ function normalizeTemplatePayload(payload = {}) {
       name,
       holiday_type: holidayType,
       description: String(raw.description || '').trim() || null,
-      is_active: raw.is_active === undefined ? true : !!raw.is_active,
-      recurring: raw.recurring === undefined ? false : !!raw.recurring,
+      is_active: normalizeBoolean(raw.is_active, `Holiday row ${index + 1} is_active`, true),
+      recurring: normalizeBoolean(raw.recurring, `Holiday row ${index + 1} recurring`, false),
       coverage,
       sort_order: Number.isInteger(Number(raw.sort_order)) ? Number(raw.sort_order) : index,
     };
