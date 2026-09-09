@@ -144,12 +144,13 @@ async function validateSetupReferences(db, setup) {
       `SELECT 1
        FROM attendance_policies
        WHERE id = $1::uuid
+         AND is_active = true
        LIMIT 1`,
       [setup.policyAssignment.attendancePolicyId]
     );
     if (result.rowCount === 0) {
       throw new EmployeeSetupValidationError(
-        'Selected attendance policy was not found'
+        'Selected attendance policy is inactive or was not found'
       );
     }
   }

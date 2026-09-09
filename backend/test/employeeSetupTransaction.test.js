@@ -5,6 +5,7 @@ const {
   EmployeeSetupValidationError,
   normalizeEmployeeSetup,
   applyEmployeeSetup,
+  validateSetupReferences,
 } = require('../src/services/employeeSetupTransaction');
 
 const IDS = {
@@ -67,6 +68,22 @@ test('normalizes complete assignment and policy setup', () => {
   });
 });
 
+test('employee quick setup rejects an inactive attendance policy', async () => {
+  const db = {
+    async query(sql) {
+      assert.match(String(sql), /is_active = true/);
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  await assert.rejects(
+    validateSetupReferences(db, normalizeEmployeeSetup(completePayload())),
+    (error) =>
+      error instanceof EmployeeSetupValidationError &&
+      error.message === 'Selected attendance policy is inactive or was not found'
+  );
+});
+
 test('null setup parts explicitly close the current assignment and policy', () => {
   const setup = normalizeEmployeeSetup({
     effective_from: '2026-08-25',
@@ -103,6 +120,9 @@ test('applies selected assignment and policy through the provided transaction cl
       }
       if (sql.includes('FROM attendance_policies')) {
         return { rowCount: 1, rows: [{ id: IDS.policy }] };
+      }
+      if (sql.includes('FROM position_department_head_periods')) {
+        return { rowCount: 0, rows: [] };
       }
       if (sql.includes('FROM assignments')) {
         return { rowCount: 0, rows: [] };

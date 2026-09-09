@@ -91,7 +91,6 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
      JOIN attendance_policies p ON p.id = pa.attendance_policy_id
      LEFT JOIN eff e ON true
      WHERE (pa.is_active IS NULL OR pa.is_active = true)
-       AND (p.is_active IS NULL OR p.is_active = true)
        AND pa.effective_from <= $2::date
        AND (pa.effective_to IS NULL OR pa.effective_to >= $2::date)
        AND (

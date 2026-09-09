@@ -288,10 +288,17 @@ test('batch policy context preserves employee, department, shift, and default pr
 
 test('batch policy query receives all range targets in one call', async () => {
   let assignedParams;
+  let assignedSql;
+  let defaultSql;
   const secondEmployeeId = '44444444-4444-4444-8444-444444444444';
   const db = {
     async query(sql, params) {
-      if (String(sql).includes('FROM policy_assignments')) assignedParams = params;
+      if (String(sql).includes('FROM policy_assignments')) {
+        assignedParams = params;
+        assignedSql = String(sql);
+      } else {
+        defaultSql = String(sql);
+      }
       return { rows: [] };
     },
   };
@@ -315,4 +322,6 @@ test('batch policy query receives all range targets in one call', async () => {
     '2026-08-01',
     '2026-08-31',
   ]);
+  assert.doesNotMatch(assignedSql, /p\.is_active/);
+  assert.match(defaultSql, /p\.is_active/);
 });

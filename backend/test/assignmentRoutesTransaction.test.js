@@ -184,6 +184,15 @@ test('failed policy insert rolls back the primary assignment on the same client'
       if (normalized.startsWith('SELECT pg_advisory_xact_lock')) {
         return { rowCount: 1, rows: [{}] };
       }
+      if (
+        normalized.startsWith('SELECT id') &&
+        normalized.includes('FROM attendance_policies')
+      ) {
+        return {
+          rowCount: 1,
+          rows: [{ id: '66666666-6666-4666-8666-666666666666' }],
+        };
+      }
       if (normalized.startsWith('SELECT id, attendance_policy_id')) {
         return { rowCount: 0, rows: [] };
       }
@@ -264,6 +273,15 @@ test('standalone policy upsert rolls back through one checked-out client', async
       }
       if (normalized.startsWith('SELECT pg_advisory_xact_lock')) {
         return { rowCount: 1, rows: [{}] };
+      }
+      if (
+        normalized.startsWith('SELECT id') &&
+        normalized.includes('FROM attendance_policies')
+      ) {
+        return {
+          rowCount: 1,
+          rows: [{ id: '66666666-6666-4666-8666-666666666666' }],
+        };
       }
       if (normalized.startsWith('SELECT id, attendance_policy_id')) {
         return { rowCount: 0, rows: [] };

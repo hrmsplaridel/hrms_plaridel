@@ -328,7 +328,6 @@ async function loadPolicies(client, assignmentsByEmployee, employeeIds, startStr
      FROM policy_assignments pa
      JOIN attendance_policies p ON p.id = pa.attendance_policy_id
      WHERE (pa.is_active IS NULL OR pa.is_active = true)
-       AND (p.is_active IS NULL OR p.is_active = true)
        AND pa.effective_from <= $5::date
        AND (pa.effective_to IS NULL OR pa.effective_to >= $4::date)
        AND (
