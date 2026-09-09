@@ -253,11 +253,14 @@ router.get('/ph-defaults', protect, requireAdmin, async (req, res) => {
 
 // POST /api/holidays/ph-defaults/import - insert missing Philippine defaults for a supported year.
 router.post('/ph-defaults/import', protect, requireAdmin, async (req, res) => {
-  const client = await pool.connect();
+  let client;
+  let transactionStarted = false;
   try {
+    client = await pool.connect();
     const template = await templateOr404(req, res);
     if (!template) return;
     await client.query('BEGIN');
+    transactionStarted = true;
     const existing = await existingHolidayKeyMap(template.holidays, client);
     const created = [];
     const skipped = [];
@@ -303,6 +306,7 @@ router.post('/ph-defaults/import', protect, requireAdmin, async (req, res) => {
     }
 
     await client.query('COMMIT');
+    transactionStarted = false;
     if (created.length > 0) {
       broadcastHolidayRefresh('holidays_imported', created);
     }
@@ -315,18 +319,23 @@ router.post('/ph-defaults/import', protect, requireAdmin, async (req, res) => {
       skipped,
     });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client && transactionStarted) await client.query('ROLLBACK').catch(() => {});
+    if (!client) {
+      console.error('[holidays PH defaults import POST] Database connection failed', err);
+      return res.status(503).json({ error: 'Database is temporarily unavailable.' });
+    }
     const status = err.statusCode || 500;
     if (status >= 500) console.error('[holidays PH defaults import POST]', err);
     res.status(status).json({ error: err.message || 'Failed to import Philippine holiday defaults' });
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
 // POST /api/holidays - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
-  const client = await pool.connect();
+  let client;
+  let transactionStarted = false;
   try {
     const { name, holiday_type = 'regular', description, is_active = true, recurring = false, coverage: bodyCoverage } = req.body;
     const { dateFrom, dateTo } = normalizeRange(req.body);
@@ -345,7 +354,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     const repeats = normalizeBoolean(recurring, 'recurring', false);
     validateCoverageForType(type, coverage);
 
+    client = await pool.connect();
     await client.query('BEGIN');
+    transactionStarted = true;
     const result = await client.query(
       `INSERT INTO holidays (date_from, date_to, name, holiday_type, description, is_active, recurring, coverage)
        VALUES ($1::date, $2::date, $3, $4, $5, $6, $7, $8)
@@ -361,25 +372,33 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       metadata: { holiday_id: row.id, action: 'created' },
     });
     await client.query('COMMIT');
+    transactionStarted = false;
     broadcastHolidayRefresh('holiday_created', row);
     res.status(201).json(rowToJson(row));
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client && transactionStarted) await client.query('ROLLBACK').catch(() => {});
     if (err.statusCode === 400) return res.status(400).json({ error: err.message });
+    if (!client) {
+      console.error('[holidays POST] Database connection failed', err);
+      return res.status(503).json({ error: 'Database is temporarily unavailable.' });
+    }
     if (err.code === '23505') return res.status(409).json({ error: 'A holiday with this name and date range already exists.' });
     console.error('[holidays POST]', err);
     res.status(500).json({ error: 'Failed to create holiday' });
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
 // PUT /api/holidays/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
-  const client = await pool.connect();
+  let client;
+  let transactionStarted = false;
   try {
     const { id } = req.params;
+    client = await pool.connect();
     await client.query('BEGIN');
+    transactionStarted = true;
     const previousResult = await client.query(
       `SELECT id, date_from, date_to, name, holiday_type, description, is_active, recurring, coverage
          FROM holidays
@@ -388,6 +407,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     );
     if (previousResult.rowCount === 0) {
       await client.query('ROLLBACK');
+      transactionStarted = false;
       return res.status(404).json({ error: 'Holiday not found' });
     }
     const previous = previousResult.rows[0];
@@ -405,12 +425,14 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (hasRangeKey) {
       if (!range.dateFrom || !range.dateTo) {
         await client.query('ROLLBACK');
+        transactionStarted = false;
         return res.status(400).json({ error: 'Provide both date_from and date_to (or holiday_date for a single day).' });
       }
       const validDateFrom = normalizeIsoDate(range.dateFrom, 'date_from');
       const validDateTo = normalizeIsoDate(range.dateTo, 'date_to');
       if (validDateTo < validDateFrom) {
         await client.query('ROLLBACK');
+        transactionStarted = false;
         return res.status(400).json({ error: 'date_to must be on or after date_from' });
       }
       updates.push(`date_from = $${i++}::date`); values.push(validDateFrom);
@@ -437,6 +459,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     }
     if (updates.length === 0) {
       await client.query('ROLLBACK');
+      transactionStarted = false;
       return res.status(400).json({ error: 'No fields to update' });
     }
     values.push(id);
@@ -462,24 +485,32 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       metadata: { holiday_id: id, action: 'updated' },
     });
     await client.query('COMMIT');
+    transactionStarted = false;
     broadcastHolidayRefresh('holiday_updated', [previous, row]);
     res.json(rowToJson(row));
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client && transactionStarted) await client.query('ROLLBACK').catch(() => {});
     if (err.statusCode === 400) return res.status(400).json({ error: err.message });
+    if (!client) {
+      console.error('[holidays PUT] Database connection failed', err);
+      return res.status(503).json({ error: 'Database is temporarily unavailable.' });
+    }
     if (err.code === '23505') return res.status(409).json({ error: 'A holiday with this name and date range already exists.' });
     console.error('[holidays PUT]', err);
     res.status(500).json({ error: 'Failed to update holiday' });
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
 // DELETE /api/holidays/:id (admin only)
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
-  const client = await pool.connect();
+  let client;
+  let transactionStarted = false;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
+    transactionStarted = true;
     const result = await client.query(
       `DELETE FROM holidays
         WHERE id = $1
@@ -488,6 +519,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
     );
     if (result.rowCount === 0) {
       await client.query('ROLLBACK');
+      transactionStarted = false;
       return res.status(404).json({ error: 'Holiday not found' });
     }
     const row = result.rows[0];
@@ -499,14 +531,19 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
       metadata: { holiday_id: row.id, action: 'deleted' },
     });
     await client.query('COMMIT');
+    transactionStarted = false;
     broadcastHolidayRefresh('holiday_deleted', row);
     res.status(204).send();
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client && transactionStarted) await client.query('ROLLBACK').catch(() => {});
+    if (!client) {
+      console.error('[holidays DELETE] Database connection failed', err);
+      return res.status(503).json({ error: 'Database is temporarily unavailable.' });
+    }
     console.error('[holidays DELETE]', err);
     res.status(500).json({ error: 'Failed to delete holiday' });
   } finally {
-    client.release();
+    client?.release();
   }
 });
 

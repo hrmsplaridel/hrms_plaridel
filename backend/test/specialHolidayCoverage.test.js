@@ -14,6 +14,7 @@ const initial = {
 async function request(method, body) {
   let stored = { ...initial };
   const events = [];
+  let connected = false;
   let released = false;
   const client = {
     async query(sql, params = []) {
@@ -37,7 +38,7 @@ async function request(method, body) {
     release() { released = true; },
   };
   const restores = [
-    withMockedModule('../src/config/db', { pool: { connect: async () => client } }),
+    withMockedModule('../src/config/db', { pool: { connect: async () => { connected = true; return client; } } }),
     withMockedModule('../src/services/dtrMonthEndReconciliation', {
       enqueueHolidayReconciliation: async (db) => { assert.equal(db, client); events.push('QUEUE'); },
     }),
@@ -56,7 +57,7 @@ async function request(method, body) {
     const router = require(path);
     const route = router.stack.find((entry) => entry.route?.path === (method === 'post' ? '/' : '/:id') && entry.route.methods[method]);
     await route.route.stack.at(-1).handle({ body, params: { id: initial.id } }, res);
-    assert.equal(released, true);
+    assert.equal(released, connected);
     if (res.statusCode < 400) {
       assert.ok(events.indexOf('QUEUE') < events.indexOf('COMMIT'));
       assert.ok(events.indexOf('COMMIT') < events.indexOf('BROADCAST'));
