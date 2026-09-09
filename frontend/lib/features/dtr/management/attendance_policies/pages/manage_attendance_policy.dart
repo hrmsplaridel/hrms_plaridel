@@ -23,6 +23,7 @@ class _PolicyRecord {
     required this.deductionMultiplier,
     required this.isDefault,
     required this.isActive,
+    required this.isUsed,
   });
   final String id;
   final String policyName;
@@ -44,6 +45,7 @@ class _PolicyRecord {
 
   final bool isDefault;
   final bool isActive;
+  final bool isUsed;
 }
 
 class _ShiftWorkHoursOption {
@@ -304,6 +306,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               (m['deduction_multiplier'] as num?)?.toDouble() ?? 1.0,
           isDefault: m['is_default'] as bool? ?? false,
           isActive: m['is_active'] as bool? ?? true,
+          isUsed: m['is_used'] as bool? ?? false,
         );
       }).toList();
     } on DioException catch (e) {
@@ -858,56 +861,59 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                   itemBuilder: (_, i) {
                     final p = paged[i];
                     final isSelected = _selectedPolicy?.id == p.id;
-                    return ListTile(
-                      selected: isSelected,
-                      selectedTileColor: dark
-                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                          : AppTheme.primaryNavy.withValues(alpha: 0.08),
-                      title: Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              p.policyName,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: _headingColor(context),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (p.isDefault) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryNavy.withValues(
-                                  alpha: 0.15,
-                                ),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
+                    return Material(
+                      color: Colors.transparent,
+                      child: ListTile(
+                        selected: isSelected,
+                        selectedTileColor: dark
+                            ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                            : AppTheme.primaryNavy.withValues(alpha: 0.08),
+                        title: Row(
+                          children: [
+                            Flexible(
                               child: Text(
-                                'Default',
+                                p.policyName,
                                 style: TextStyle(
-                                  fontSize: 10,
-                                  color: AppTheme.primaryNavy,
                                   fontWeight: FontWeight.w600,
+                                  color: _headingColor(context),
                                 ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            if (p.isDefault) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.15,
+                                  ),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'Default',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: AppTheme.primaryNavy,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
-                        ],
-                      ),
-                      subtitle: Text(
-                        'Work hours/day: ${p.workHoursPerDay % 1 == 0 ? p.workHoursPerDay.toStringAsFixed(0) : p.workHoursPerDay.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _mutedColor(context),
                         ),
+                        subtitle: Text(
+                          'Work hours/day: ${p.workHoursPerDay % 1 == 0 ? p.workHoursPerDay.toStringAsFixed(0) : p.workHoursPerDay.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _mutedColor(context),
+                          ),
+                        ),
+                        onTap: () => _openPolicyDrawer(policy: p),
                       ),
-                      onTap: () => _openPolicyDrawer(policy: p),
                     );
                   },
                 ),
@@ -971,6 +977,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   }
 
   Widget _buildFormPanel({bool framed = true, bool showActions = true}) {
+    final computationLocked = _selectedPolicy?.isUsed ?? false;
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1021,15 +1028,43 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
         const SizedBox(height: 24),
         _sectionTitle('Computation Settings'),
+        if (computationLocked) ...[
+          const SizedBox(height: 10),
+          Container(
+            key: const Key('attendance-policy-computation-lock'),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE85D04).withValues(alpha: 0.10),
+              border: Border.all(
+                color: const Color(0xFFE85D04).withValues(alpha: 0.45),
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.lock_outline_rounded, size: 18),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'This policy has already been used. Create a new policy to change computation settings.',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         _label('Calculate From Shift'),
         const SizedBox(height: 6),
-        _buildShiftTemplateDropdown(),
+        _buildShiftTemplateDropdown(enabled: !computationLocked),
         const SizedBox(height: 12),
         _label('Work Hours Per Day'),
         const SizedBox(height: 6),
         TextFormField(
+          key: const Key('attendance-policy-work-hours'),
           controller: _workHoursPerDayController,
+          enabled: !computationLocked,
           style: AppTheme.dashFieldTextStyle(context),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: _decoration('8'),
@@ -1038,6 +1073,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _switchTile(
           title: 'Use Equivalent Day Conversion',
           value: _useEquivalentDayConversion,
+          enabled: !computationLocked,
           onChanged: (v) =>
               _updatePolicyFormState(() => _useEquivalentDayConversion = v),
         ),
@@ -1048,12 +1084,14 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _switchTile(
           title: 'Deduct Late',
           value: _deductLate,
+          enabled: !computationLocked,
           onChanged: (v) => _updatePolicyFormState(() => _deductLate = v),
         ),
         const SizedBox(height: 12),
         _switchTile(
           title: 'Convert Late to Equivalent Day',
           value: _convertLateToEquivalentDay,
+          enabled: !computationLocked,
           onChanged: (v) =>
               _updatePolicyFormState(() => _convertLateToEquivalentDay = v),
         ),
@@ -1064,12 +1102,14 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _switchTile(
           title: 'Deduct Undertime',
           value: _deductUndertime,
+          enabled: !computationLocked,
           onChanged: (v) => _updatePolicyFormState(() => _deductUndertime = v),
         ),
         const SizedBox(height: 12),
         _switchTile(
           title: 'Convert Undertime to Equivalent Day',
           value: _convertUndertimeToEquivalentDay,
+          enabled: !computationLocked,
           onChanged: (v) => _updatePolicyFormState(
             () => _convertUndertimeToEquivalentDay = v,
           ),
@@ -1081,6 +1121,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _switchTile(
           title: 'Absent Equals Full Day Deduction',
           value: _absentEqualsFullDayDeduction,
+          enabled: !computationLocked,
           onChanged: (v) =>
               _updatePolicyFormState(() => _absentEqualsFullDayDeduction = v),
         ),
@@ -1091,6 +1132,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _switchTile(
           title: 'Combine Late and Undertime',
           value: _combineLateAndUndertime,
+          enabled: !computationLocked,
           onChanged: (v) =>
               _updatePolicyFormState(() => _combineLateAndUndertime = v),
         ),
@@ -1098,7 +1140,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _label('Deduction Multiplier'),
         const SizedBox(height: 6),
         TextFormField(
+          key: const Key('attendance-policy-deduction-multiplier'),
           controller: _deductionMultiplierController,
+          enabled: !computationLocked,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: _decoration('1.0'),
         ),
@@ -1170,21 +1214,30 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     required String title,
     required bool value,
     required ValueChanged<bool> onChanged,
+    bool enabled = true,
   }) {
     return Row(
       children: [
         Switch(
+          key: ValueKey('attendance-policy-switch-$title'),
           value: value,
-          onChanged: onChanged,
+          onChanged: enabled ? onChanged : null,
           activeThumbColor: AppTheme.primaryNavy,
         ),
         const SizedBox(width: 8),
-        Expanded(child: Text(title)),
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              color: enabled ? _headingColor(context) : _mutedColor(context),
+            ),
+          ),
+        ),
       ],
     );
   }
 
-  Widget _buildShiftTemplateDropdown() {
+  Widget _buildShiftTemplateDropdown({bool enabled = true}) {
     return DropdownButtonFormField<String>(
       key: ValueKey(_selectedShiftTemplateId),
       initialValue: _selectedShiftTemplateId,
@@ -1212,7 +1265,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           ),
         ),
       ],
-      onChanged: _shiftTemplates.isEmpty ? null : _applyShiftTemplate,
+      onChanged: !enabled || _shiftTemplates.isEmpty
+          ? null
+          : _applyShiftTemplate,
     );
   }
 

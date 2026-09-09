@@ -6,6 +6,28 @@ const { requireAdmin } = require('../middleware/rbac');
 const router = express.Router();
 const protect = [authMiddleware];
 
+const COMPUTATION_FIELDS = [
+  'work_hours_per_day',
+  'use_equivalent_day_conversion',
+  'deduct_late',
+  'convert_late_to_equivalent_day',
+  'deduct_undertime',
+  'convert_undertime_to_equivalent_day',
+  'absent_equals_full_day_deduction',
+  'combine_late_and_undertime',
+  'deduction_multiplier',
+];
+
+const BOOLEAN_COMPUTATION_FIELDS = new Set([
+  'use_equivalent_day_conversion',
+  'deduct_late',
+  'convert_late_to_equivalent_day',
+  'deduct_undertime',
+  'convert_undertime_to_equivalent_day',
+  'absent_equals_full_day_deduction',
+  'combine_late_and_undertime',
+]);
+
 function toBool(v, fallback = false) {
   if (v === undefined) return fallback;
   if (v === null) return false;
@@ -40,6 +62,32 @@ function validatePolicyPayload(p) {
   return null;
 }
 
+function normalizedComputationValue(field, value) {
+  if (BOOLEAN_COMPUTATION_FIELDS.has(field)) return toBool(value, false);
+  return toNumberOrDefault(value, field === 'work_hours_per_day' ? 8 : 1);
+}
+
+function changedLockedComputationFields(body, current) {
+  return COMPUTATION_FIELDS.filter((field) => {
+    if (body[field] === undefined) return false;
+    const requested = normalizedComputationValue(field, body[field]);
+    const stored = BOOLEAN_COMPUTATION_FIELDS.has(field)
+      ? current[field] === true
+      : Number(current[field]);
+    return requested !== stored;
+  });
+}
+
+const policyUsageSql = `(
+  EXISTS (
+    SELECT 1 FROM policy_assignments pa
+    WHERE pa.attendance_policy_id = attendance_policies.id
+  ) OR EXISTS (
+    SELECT 1 FROM dtr_daily_summary dtr
+    WHERE dtr.attendance_policy_id = attendance_policies.id
+  )
+)`;
+
 // GET /api/attendance-policies - list (?status=Active|Inactive|All)
 router.get('/', protect, async (req, res) => {
   try {
@@ -55,7 +103,8 @@ router.get('/', protect, async (req, res) => {
               deduct_undertime, convert_undertime_to_equivalent_day,
               absent_equals_full_day_deduction,
               combine_late_and_undertime, deduction_multiplier,
-              is_default, is_active, created_at
+              is_default, is_active, created_at,
+              ${policyUsageSql} AS is_used
        FROM attendance_policies ${where}
        ORDER BY is_default DESC, name`
     );
@@ -77,6 +126,7 @@ router.get('/', protect, async (req, res) => {
       deduction_multiplier: r.deduction_multiplier != null ? parseFloat(r.deduction_multiplier) : 1.0,
       is_default: r.is_default ?? false,
       is_active: r.is_active ?? true,
+      is_used: r.is_used === true,
       created_at: r.created_at,
     })));
   } catch (err) {
@@ -159,6 +209,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       deduction_multiplier: r.deduction_multiplier != null ? parseFloat(r.deduction_multiplier) : 1.0,
       is_default: r.is_default ?? false,
       is_active: r.is_active ?? true,
+      is_used: false,
       created_at: r.created_at,
     });
   } catch (err) {
@@ -172,6 +223,32 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const body = req.body || {};
+
+    const currentResult = await pool.query(
+      `SELECT work_hours_per_day, use_equivalent_day_conversion,
+              deduct_late, convert_late_to_equivalent_day,
+              deduct_undertime, convert_undertime_to_equivalent_day,
+              absent_equals_full_day_deduction,
+              combine_late_and_undertime, deduction_multiplier,
+              ${policyUsageSql} AS is_used
+       FROM attendance_policies
+       WHERE id = $1`,
+      [id]
+    );
+    if (currentResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Attendance policy not found' });
+    }
+    const current = currentResult.rows[0];
+    const changedComputationFields = current.is_used === true
+      ? changedLockedComputationFields(body, current)
+      : [];
+    if (changedComputationFields.length > 0) {
+      return res.status(409).json({
+        error:
+          'This policy has already been used. Create a new policy to change computation settings.',
+        locked_fields: changedComputationFields,
+      });
+    }
 
     const updates = [];
     const values = [];
@@ -239,6 +316,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       deduction_multiplier: r.deduction_multiplier != null ? parseFloat(r.deduction_multiplier) : 1.0,
       is_default: r.is_default ?? false,
       is_active: r.is_active ?? true,
+      is_used: current.is_used === true,
       created_at: r.created_at,
     });
   } catch (err) {
