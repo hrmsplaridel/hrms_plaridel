@@ -106,49 +106,6 @@ function normalizeTemplatePayload(payload = {}) {
   };
 }
 
-async function ensureHolidayTemplateTables(client = pool) {
-  await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS holiday_default_templates (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      country_code TEXT NOT NULL DEFAULT 'PH',
-      year INTEGER NOT NULL,
-      label TEXT NOT NULL,
-      source TEXT,
-      note TEXT,
-      is_active BOOLEAN NOT NULL DEFAULT true,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      CONSTRAINT uq_holiday_default_templates_country_year UNIQUE (country_code, year)
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS holiday_default_template_items (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      template_id UUID NOT NULL REFERENCES holiday_default_templates(id) ON DELETE CASCADE,
-      date_from DATE NOT NULL,
-      date_to DATE NOT NULL,
-      name TEXT NOT NULL,
-      holiday_type TEXT NOT NULL DEFAULT 'regular'
-        CHECK (holiday_type IN ('regular', 'special', 'local', 'work_suspension')),
-      description TEXT,
-      is_active BOOLEAN NOT NULL DEFAULT true,
-      recurring BOOLEAN NOT NULL DEFAULT false,
-      coverage TEXT NOT NULL DEFAULT 'whole_day'
-        CHECK (coverage IN ('whole_day', 'am_only', 'pm_only')),
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      CONSTRAINT chk_holiday_default_template_items_date_range CHECK (date_to >= date_from),
-      CONSTRAINT uq_holiday_default_template_items_row UNIQUE (template_id, name, date_from, date_to)
-    )
-  `);
-  await client.query(`
-    CREATE INDEX IF NOT EXISTS idx_holiday_default_template_items_template
-      ON holiday_default_template_items(template_id, sort_order, date_from)
-  `);
-}
-
 function rowToHolidayItem(row) {
   return {
     date_from: toDateString(row.date_from),
@@ -163,7 +120,6 @@ function rowToHolidayItem(row) {
 }
 
 async function readDbTemplate(year, client = pool) {
-  await ensureHolidayTemplateTables(client);
   const template = await client.query(
     `SELECT id, country_code, year, label, source, note, is_active, created_at, updated_at
        FROM holiday_default_templates
@@ -195,7 +151,6 @@ async function readDbTemplate(year, client = pool) {
 }
 
 async function getHolidayDefaultTemplateYears() {
-  await ensureHolidayTemplateTables();
   const result = await pool.query(
     `SELECT year
        FROM holiday_default_templates
@@ -233,7 +188,6 @@ async function getHolidayDefaultTemplate(year) {
 }
 
 async function listHolidayDefaultTemplates() {
-  await ensureHolidayTemplateTables();
   const result = await pool.query(
     `SELECT t.year, t.label, t.source, t.note, t.is_active, COUNT(i.id)::int AS item_count
        FROM holiday_default_templates t
@@ -278,7 +232,6 @@ async function upsertHolidayDefaultTemplate(payload) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await ensureHolidayTemplateTables(client);
     const upsert = await client.query(
       `INSERT INTO holiday_default_templates (country_code, year, label, source, note, is_active, updated_at)
        VALUES ('PH', $1, $2, $3, $4, true, NOW())
@@ -330,7 +283,6 @@ async function upsertHolidayDefaultTemplate(payload) {
 
 async function deleteHolidayDefaultTemplate(year) {
   const numericYear = normalizeYear(year);
-  await ensureHolidayTemplateTables();
   const result = await pool.query(
     `DELETE FROM holiday_default_templates
       WHERE country_code = 'PH'
@@ -343,7 +295,6 @@ async function deleteHolidayDefaultTemplate(year) {
 
 module.exports = {
   deleteHolidayDefaultTemplate,
-  ensureHolidayTemplateTables,
   getHolidayDefaultTemplate,
   getHolidayDefaultTemplateYears,
   listHolidayDefaultTemplates,
