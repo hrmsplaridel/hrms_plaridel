@@ -26,9 +26,11 @@ class _AssignmentRecord {
     required this.departmentId,
     required this.positionId,
     required this.shiftId,
+    required this.attendancePolicyId,
     required this.departmentName,
     required this.positionName,
     required this.shiftName,
+    required this.attendancePolicyName,
     required this.startTime,
     required this.endTime,
     required this.effectiveFrom,
@@ -42,9 +44,11 @@ class _AssignmentRecord {
   final String? departmentId;
   final String? positionId;
   final String? shiftId;
+  final String? attendancePolicyId;
   final String departmentName;
   final String positionName;
   final String shiftName;
+  final String attendancePolicyName;
   final TimeOfDay startTime;
   final TimeOfDay endTime;
   final DateTime effectiveFrom;
@@ -53,27 +57,6 @@ class _AssignmentRecord {
   final String computedStatus;
   final bool canPermanentlyDelete;
   final String? remarks;
-}
-
-/// One non-overlapping employee-level attendance-policy period.
-class _PolicyAssignmentRecord {
-  const _PolicyAssignmentRecord({
-    required this.id,
-    required this.policyId,
-    required this.policyName,
-    required this.effectiveFrom,
-    this.effectiveTo,
-    required this.isActive,
-    required this.computedStatus,
-  });
-
-  final String id;
-  final String policyId;
-  final String policyName;
-  final DateTime effectiveFrom;
-  final DateTime? effectiveTo;
-  final bool isActive;
-  final String computedStatus;
 }
 
 /// Extra role/designation record that can coexist with the primary assignment.
