@@ -324,4 +324,32 @@ test('batch policy query receives all range targets in one call', async () => {
   ]);
   assert.doesNotMatch(assignedSql, /p\.is_active/);
   assert.match(defaultSql, /p\.is_active/);
+  assert.match(defaultSql, /p\.is_default\s*=\s*true/);
+  assert.doesNotMatch(defaultSql, /ORDER BY p\.is_default/);
+});
+
+test('missing explicit default uses the documented internal fallback', async () => {
+  const db = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  const context = await loadAttendancePolicyContext(
+    db,
+    [],
+    '2026-09-01',
+    '2026-09-30',
+    new Map()
+  );
+  const policy = resolveAttendancePolicy(
+    context,
+    employeeId,
+    '2026-09-10',
+    null
+  );
+
+  assert.equal(policy.id, null);
+  assert.equal(policy.workHoursPerDay, 8);
+  assert.equal(policy.deductionMultiplier, 1);
 });

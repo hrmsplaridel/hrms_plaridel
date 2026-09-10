@@ -197,8 +197,8 @@ async function loadAttendancePolicyContext(
     db.query(
       `SELECT ${policyColumns}
        FROM attendance_policies p
-       WHERE (p.is_active IS NULL OR p.is_active = true)
-       ORDER BY p.is_default DESC, p.updated_at DESC, p.created_at DESC
+       WHERE p.is_default = true
+         AND (p.is_active IS NULL OR p.is_active = true)
        LIMIT 1`
     ),
     ids.length === 0

@@ -302,8 +302,8 @@ async function loadPolicies(client, assignmentsByEmployee, employeeIds, startStr
             deduct_late, deduct_undertime, absent_equals_full_day_deduction,
             deduction_multiplier
      FROM attendance_policies
-     WHERE (is_active IS NULL OR is_active = true)
-     ORDER BY is_default DESC, updated_at DESC, created_at DESC
+     WHERE is_default = true
+       AND (is_active IS NULL OR is_active = true)
      LIMIT 1`
   );
   const defaultPolicy = normalizePolicy(defaultResult.rows[0]);
