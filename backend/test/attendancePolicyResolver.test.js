@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   calculateAttendanceReportDeduction,
   calculateAttendancePolicyPenalties,
+  DEFAULT_ATTENDANCE_POLICY,
   loadAttendancePolicyContext,
   resolveAttendancePolicy,
 } = require('../src/services/attendancePolicyResolver');
@@ -328,6 +329,21 @@ test('batch policy query receives all range targets in one call', async () => {
   assert.doesNotMatch(defaultSql, /ORDER BY p\.is_default/);
 });
 
+test('canonical fallback matches attendance policy schema and API defaults', () => {
+  assert.deepEqual(DEFAULT_ATTENDANCE_POLICY, {
+    id: null,
+    workHoursPerDay: 8,
+    useEquivalentDayConversion: true,
+    deductLate: false,
+    convertLateToEquivalentDay: true,
+    deductUndertime: true,
+    convertUndertimeToEquivalentDay: true,
+    absentEqualsFullDayDeduction: true,
+    combineLateAndUndertime: false,
+    deductionMultiplier: 1,
+  });
+});
+
 test('missing explicit default uses the documented internal fallback', async () => {
   const db = {
     async query() {
@@ -351,5 +367,40 @@ test('missing explicit default uses the documented internal fallback', async () 
 
   assert.equal(policy.id, null);
   assert.equal(policy.workHoursPerDay, 8);
+  assert.equal(policy.useEquivalentDayConversion, true);
+  assert.equal(policy.deductLate, false);
+  assert.equal(policy.convertLateToEquivalentDay, true);
+  assert.equal(policy.deductUndertime, true);
+  assert.equal(policy.convertUndertimeToEquivalentDay, true);
   assert.equal(policy.deductionMultiplier, 1);
+});
+
+test('global conversion switch preserves DTR facts but disables official deduction', () => {
+  const policy = {
+    ...DEFAULT_ATTENDANCE_POLICY,
+    useEquivalentDayConversion: false,
+    deductLate: true,
+    deductUndertime: true,
+  };
+
+  assert.deepEqual(calculateAttendancePolicyPenalties(policy, 30, 15), {
+    lateMinutes: 30,
+    undertimeMinutes: 15,
+  });
+  assert.deepEqual(
+    calculateAttendanceReportDeduction({
+      policy,
+      lateMinutes: 30,
+      undertimeMinutes: 15,
+      status: 'late',
+      expectedWorkMinutes: 480,
+    }),
+    {
+      late_minutes: 0,
+      undertime_minutes: 0,
+      absence_minutes: 0,
+      total_minutes: 0,
+      equivalent_day: 0,
+    }
+  );
 });

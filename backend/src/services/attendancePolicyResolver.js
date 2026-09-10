@@ -1,15 +1,37 @@
+const DEFAULT_ATTENDANCE_POLICY = Object.freeze({
+  id: null,
+  workHoursPerDay: 8,
+  useEquivalentDayConversion: true,
+  deductLate: false,
+  convertLateToEquivalentDay: true,
+  deductUndertime: true,
+  convertUndertimeToEquivalentDay: true,
+  absentEqualsFullDayDeduction: true,
+  combineLateAndUndertime: false,
+  deductionMultiplier: 1,
+});
+
 function normalizeAttendancePolicy(row) {
   return {
-    id: row?.id || null,
-    workHoursPerDay: row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
-    useEquivalentDayConversion: row?.use_equivalent_day_conversion ?? true,
-    deductLate: row?.deduct_late ?? true,
-    convertLateToEquivalentDay: row?.convert_late_to_equivalent_day ?? false,
-    deductUndertime: row?.deduct_undertime ?? true,
-    convertUndertimeToEquivalentDay: row?.convert_undertime_to_equivalent_day ?? false,
-    absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ?? true,
-    combineLateAndUndertime: row?.combine_late_and_undertime ?? false,
-    deductionMultiplier: row?.deduction_multiplier != null ? parseFloat(row.deduction_multiplier) : 1,
+    id: row?.id || DEFAULT_ATTENDANCE_POLICY.id,
+    workHoursPerDay: row?.work_hours_per_day != null
+      ? parseFloat(row.work_hours_per_day)
+      : DEFAULT_ATTENDANCE_POLICY.workHoursPerDay,
+    useEquivalentDayConversion: row?.use_equivalent_day_conversion ??
+      DEFAULT_ATTENDANCE_POLICY.useEquivalentDayConversion,
+    deductLate: row?.deduct_late ?? DEFAULT_ATTENDANCE_POLICY.deductLate,
+    convertLateToEquivalentDay: row?.convert_late_to_equivalent_day ??
+      DEFAULT_ATTENDANCE_POLICY.convertLateToEquivalentDay,
+    deductUndertime: row?.deduct_undertime ?? DEFAULT_ATTENDANCE_POLICY.deductUndertime,
+    convertUndertimeToEquivalentDay: row?.convert_undertime_to_equivalent_day ??
+      DEFAULT_ATTENDANCE_POLICY.convertUndertimeToEquivalentDay,
+    absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ??
+      DEFAULT_ATTENDANCE_POLICY.absentEqualsFullDayDeduction,
+    combineLateAndUndertime: row?.combine_late_and_undertime ??
+      DEFAULT_ATTENDANCE_POLICY.combineLateAndUndertime,
+    deductionMultiplier: row?.deduction_multiplier != null
+      ? parseFloat(row.deduction_multiplier)
+      : DEFAULT_ATTENDANCE_POLICY.deductionMultiplier,
   };
 }
 
@@ -118,6 +140,8 @@ function applyPolicyConversion(minutes, convertToEquivalentDay, workHoursPerDay,
 }
 
 function calculateAttendancePolicyPenalties(policy, rawLateMinutes, rawUndertimeMinutes) {
+  // These remain observable DTR minute buckets. Equivalent-day eligibility is
+  // applied later by report/month-end consumers through the global switch.
   const late = policy?.deductLate ? Math.max(0, Number(rawLateMinutes) || 0) : 0;
   const undertime = policy?.deductUndertime
     ? Math.max(0, Number(rawUndertimeMinutes) || 0)
@@ -271,6 +295,7 @@ function resolveAttendancePolicy(context, employeeId, dateStr, assignment) {
 }
 
 module.exports = {
+  DEFAULT_ATTENDANCE_POLICY,
   attendancePolicyPayload,
   calculateAttendanceReportDeduction,
   calculateAttendancePolicyPenalties,

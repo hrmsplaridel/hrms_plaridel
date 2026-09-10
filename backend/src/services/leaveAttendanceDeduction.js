@@ -31,6 +31,7 @@ const {
   ensureDtrMonthEndReconciliationTable,
   resolveReconciliationMonth,
 } = require('./dtrMonthEndReconciliation');
+const { normalizeAttendancePolicy } = require('./attendancePolicyResolver');
 
 const VACATION_LEAVE = 'vacationLeave';
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
@@ -87,20 +88,6 @@ function timeToMinutes(value) {
   const minutes = parseInt(match[2], 10);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
   return hours * 60 + minutes;
-}
-
-function normalizePolicy(row) {
-  return {
-    id: row?.id || row?.attendance_policy_id || null,
-    workHoursPerDay:
-      row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
-    useEquivalentDayConversion: row?.use_equivalent_day_conversion ?? true,
-    deductLate: row?.deduct_late ?? false,
-    deductUndertime: row?.deduct_undertime ?? true,
-    absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ?? true,
-    deductionMultiplier:
-      row?.deduction_multiplier != null ? parseFloat(row.deduction_multiplier) : 1,
-  };
 }
 
 function policyWorkMinutes(policy) {
@@ -306,7 +293,7 @@ async function loadPolicies(client, assignmentsByEmployee, employeeIds, startStr
        AND (is_active IS NULL OR is_active = true)
      LIMIT 1`
   );
-  const defaultPolicy = normalizePolicy(defaultResult.rows[0]);
+  const defaultPolicy = normalizeAttendancePolicy(defaultResult.rows[0]);
 
   const departmentIds = new Set();
   const shiftIds = new Set();
@@ -356,7 +343,7 @@ async function loadPolicies(client, assignmentsByEmployee, employeeIds, startStr
         row.created_at instanceof Date
           ? row.created_at.toISOString()
           : String(row.created_at || ''),
-      policy: normalizePolicy(row),
+      policy: normalizeAttendancePolicy(row),
     })),
   };
 }

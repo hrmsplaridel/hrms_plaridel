@@ -197,7 +197,7 @@ async function getActiveDefaultAttendancePolicy() {
   const cached = getAttendancePolicyCache('dtr', 'default');
   if (cached.found) return cached.value;
   const result = await pool.query(
-    `SELECT id, work_hours_per_day, deduct_late,
+    `SELECT id, work_hours_per_day, use_equivalent_day_conversion, deduct_late,
             convert_late_to_equivalent_day, deduct_undertime, convert_undertime_to_equivalent_day,
             absent_equals_full_day_deduction, combine_late_and_undertime, deduction_multiplier
      FROM attendance_policies
@@ -229,7 +229,7 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
        LIMIT 1
      )
-     SELECT p.id, p.work_hours_per_day, p.deduct_late,
+     SELECT p.id, p.work_hours_per_day, p.use_equivalent_day_conversion, p.deduct_late,
             p.convert_late_to_equivalent_day, p.deduct_undertime, p.convert_undertime_to_equivalent_day,
             p.absent_equals_full_day_deduction, p.combine_late_and_undertime, p.deduction_multiplier
      FROM policy_assignments pa

@@ -37,3 +37,28 @@ test('all attendance calculation paths select only the explicit active default',
     );
   }
 });
+
+test('DTR and biometric policy queries load the global conversion switch', () => {
+  for (const relativePath of [
+    'src/routes/dtrDailySummary.js',
+    'src/services/biometricProcessing.js',
+  ]) {
+    const source = fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
+    const policyLoaders = [
+      source.match(
+        /async function getActiveDefaultAttendancePolicy\(\)[\s\S]*?\r?\n}\r?\n/
+      )?.[0],
+      source.match(
+        /async function getAttendancePolicyForEmployeeDate\([\s\S]*?\r?\n}\r?\n/
+      )?.[0],
+    ];
+    for (const loader of policyLoaders) {
+      assert.ok(loader, `${relativePath} must contain both policy loaders`);
+      assert.match(
+        loader,
+        /use_equivalent_day_conversion/,
+        `${relativePath} must load the global conversion switch`
+      );
+    }
+  }
+});

@@ -10,7 +10,10 @@ const {
   computeTotalHours: computeShiftTotalHours,
 } = require('./shiftAttendance');
 const { dtrDeletionKey, getDeletedDtrDateKeys } = require('./dtrDeletionAudit');
-const { calculateAttendancePolicyPenalties } = require('./attendancePolicyResolver');
+const {
+  calculateAttendancePolicyPenalties,
+  normalizeAttendancePolicy,
+} = require('./attendancePolicyResolver');
 const {
   getAttendancePolicyCache,
   setAttendancePolicyCache,
@@ -19,25 +22,11 @@ const {
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
 const ONE_PM_MINUTES = 13 * 60;
-function _normalizePolicy(row) {
-  return {
-    id: row?.id || null,
-    workHoursPerDay: row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
-    deductLate: row?.deduct_late ?? true,
-    convertLateToEquivalentDay: row?.convert_late_to_equivalent_day ?? false,
-    deductUndertime: row?.deduct_undertime ?? true,
-    convertUndertimeToEquivalentDay: row?.convert_undertime_to_equivalent_day ?? false,
-    absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ?? true,
-    combineLateAndUndertime: row?.combine_late_and_undertime ?? false,
-    deductionMultiplier: row?.deduction_multiplier != null ? parseFloat(row.deduction_multiplier) : 1,
-  };
-}
-
 async function getActiveDefaultAttendancePolicy() {
   const cached = getAttendancePolicyCache('biometric', 'default');
   if (cached.found) return cached.value;
   const result = await pool.query(
-    `SELECT id, work_hours_per_day, deduct_late,
+    `SELECT id, work_hours_per_day, use_equivalent_day_conversion, deduct_late,
             convert_late_to_equivalent_day, deduct_undertime, convert_undertime_to_equivalent_day,
             absent_equals_full_day_deduction, combine_late_and_undertime, deduction_multiplier
      FROM attendance_policies
@@ -48,7 +37,7 @@ async function getActiveDefaultAttendancePolicy() {
   return setAttendancePolicyCache(
     'biometric',
     'default',
-    _normalizePolicy(result.rows[0]),
+    normalizeAttendancePolicy(result.rows[0]),
     { isDefault: true }
   );
 }
@@ -70,7 +59,7 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
        LIMIT 1
      )
-     SELECT p.id, p.work_hours_per_day, p.deduct_late,
+     SELECT p.id, p.work_hours_per_day, p.use_equivalent_day_conversion, p.deduct_late,
             p.convert_late_to_equivalent_day, p.deduct_undertime, p.convert_undertime_to_equivalent_day,
             p.absent_equals_full_day_deduction, p.combine_late_and_undertime, p.deduction_multiplier
      FROM policy_assignments pa
@@ -95,7 +84,9 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
      LIMIT 1`,
     [employeeId, dateStr]
   );
-  const resolved = result.rows[0] ? _normalizePolicy(result.rows[0]) : await getActiveDefaultAttendancePolicy();
+  const resolved = result.rows[0]
+    ? normalizeAttendancePolicy(result.rows[0])
+    : await getActiveDefaultAttendancePolicy();
   return setAttendancePolicyCache('biometric', cacheKey, resolved, {
     employeeId,
     date: dateStr,
