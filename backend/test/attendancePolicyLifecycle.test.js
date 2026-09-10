@@ -92,6 +92,74 @@ async function updatePolicy({ body, isUsed = true, currentOverrides = {} }) {
   }
 }
 
+async function createPolicy(body) {
+  const queries = [];
+  let connectCount = 0;
+  const client = {
+    async query(sql, params = []) {
+      const text = String(sql);
+      queries.push({ text, params });
+      if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(text)) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (text.startsWith('INSERT INTO attendance_policies')) {
+        return {
+          rowCount: 1,
+          rows: [policyRow({
+            isUsed: false,
+            overrides: {
+              name: params[0],
+              description: params[1],
+              work_hours_per_day: params[2],
+              use_equivalent_day_conversion: params[3],
+              deduct_late: params[4],
+              convert_late_to_equivalent_day: params[5],
+              deduct_undertime: params[6],
+              convert_undertime_to_equivalent_day: params[7],
+              absent_equals_full_day_deduction: params[8],
+              combine_late_and_undertime: params[9],
+              deduction_multiplier: params[10],
+              is_default: params[11],
+              is_active: params[12],
+            },
+          })],
+        };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+    release() {},
+  };
+  const pool = {
+    async connect() {
+      connectCount += 1;
+      return client;
+    },
+  };
+  const restore = withMockedModule('../src/config/db', { pool });
+  const restoreCache = withMockedModule('../src/services/attendancePolicyCache', {
+    invalidateAttendancePolicyCache: () => {},
+  });
+  const routePath = '../src/routes/attendancePolicies';
+  clearModule(routePath);
+  const res = {
+    statusCode: 200,
+    status(code) { this.statusCode = code; return this; },
+    json(payload) { this.body = payload; return this; },
+  };
+  try {
+    const router = require(routePath);
+    const route = router.stack.find(
+      (entry) => entry.route?.path === '/' && entry.route.methods.post
+    );
+    await route.route.stack.at(-1).handle({ body }, res);
+    return { res, queries, connectCount };
+  } finally {
+    clearModule(routePath);
+    restoreCache();
+    restore();
+  }
+}
+
 test('used policy rejects changes to computation settings', async () => {
   const { res, queries } = await updatePolicy({
     body: { work_hours_per_day: 1 },
@@ -188,4 +256,52 @@ test('an inactive policy cannot be promoted as default', async () => {
     false
   );
   assert.equal(queries.at(-1).text, 'ROLLBACK');
+});
+
+test('policy update rejects malformed boolean and numeric values', async () => {
+  const malformedBoolean = await updatePolicy({
+    isUsed: false,
+    body: { deduct_late: 'disabled' },
+  });
+  assert.equal(malformedBoolean.res.statusCode, 400);
+  assert.equal(malformedBoolean.res.body.error, 'deduct_late must be a boolean.');
+  assert.equal(malformedBoolean.queries.length, 0);
+
+  const malformedNumber = await updatePolicy({
+    isUsed: false,
+    body: { work_hours_per_day: '8hours' },
+  });
+  assert.equal(malformedNumber.res.statusCode, 400);
+  assert.equal(
+    malformedNumber.res.body.error,
+    'work_hours_per_day must be a finite number.'
+  );
+  assert.equal(malformedNumber.queries.length, 0);
+});
+
+test('policy creation applies defaults only when optional fields are omitted', async () => {
+  const { res, queries, connectCount } = await createPolicy({
+    policy_name: 'Minimal policy',
+  });
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(connectCount, 1);
+  const insert = queries.find(({ text }) => text.startsWith('INSERT INTO attendance_policies'));
+  assert.equal(insert.params[2], 8);
+  assert.equal(insert.params[4], false);
+  assert.equal(insert.params[10], 1);
+  assert.equal(insert.params[11], false);
+  assert.equal(insert.params[12], true);
+});
+
+test('policy creation rejects supplied invalid values instead of defaulting them', async () => {
+  const { res, queries, connectCount } = await createPolicy({
+    policy_name: 'Malformed policy',
+    deduction_multiplier: 'incorrect',
+  });
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error, 'deduction_multiplier must be a finite number.');
+  assert.equal(connectCount, 0);
+  assert.equal(queries.length, 0);
 });

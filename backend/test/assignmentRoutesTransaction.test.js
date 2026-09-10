@@ -349,6 +349,43 @@ test('standalone policy upsert rolls back through one checked-out client', async
   }
 });
 
+test('standalone policy upsert rejects string boolean values before opening a transaction', async () => {
+  let connectCount = 0;
+  const pool = {
+    async connect() {
+      connectCount += 1;
+      throw new Error('must not connect for an invalid request');
+    },
+  };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/policyAssignments');
+  delete require.cache[routePath];
+  try {
+    const router = require('../src/routes/policyAssignments');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/employee-upsert' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const res = responseRecorder();
+
+    await handler({
+      body: {
+        employee_id: '11111111-1111-4111-8111-111111111111',
+        attendance_policy_id: '66666666-6666-4666-8666-666666666666',
+        effective_from: '2026-09-01',
+        is_active: 'false',
+      },
+    }, res);
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.error, 'is_active must be a boolean.');
+    assert.equal(connectCount, 0);
+  } finally {
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
 test('moving a future transfer later restores its predecessor in the update transaction', async () => {
   const previous = {
     id: '55555555-5555-4555-8555-555555555555',

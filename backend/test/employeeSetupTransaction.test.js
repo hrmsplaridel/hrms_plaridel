@@ -68,6 +68,15 @@ test('normalizes complete assignment and policy setup', () => {
   });
 });
 
+test('employee quick setup rejects string boolean values', () => {
+  assert.throws(
+    () => normalizeEmployeeSetup(completePayload({ is_active: 'false' })),
+    (error) =>
+      error instanceof EmployeeSetupValidationError &&
+      error.message === 'is_active must be a boolean.'
+  );
+});
+
 test('employee quick setup rejects an inactive attendance policy', async () => {
   const db = {
     async query(sql) {

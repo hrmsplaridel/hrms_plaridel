@@ -31,43 +31,47 @@ const BOOLEAN_COMPUTATION_FIELDS = new Set([
   'combine_late_and_undertime',
 ]);
 
-function toBool(v, fallback = false) {
-  if (v === undefined) return fallback;
-  if (v === null) return false;
-  if (typeof v === 'boolean') return v;
-  const s = String(v).trim().toLowerCase();
-  if (s === 'true' || s === '1' || s === 'yes') return true;
-  if (s === 'false' || s === '0' || s === 'no') return false;
-  return fallback;
-}
+const BOOLEAN_POLICY_FIELDS = [
+  ...BOOLEAN_COMPUTATION_FIELDS,
+  'is_default',
+  'is_active',
+];
 
-function toIntOrDefault(v, def) {
-  if (v === undefined) return undefined;
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : def;
-}
-
-function toNumberOrDefault(v, def) {
-  if (v === undefined) return undefined;
-  const n = parseFloat(v);
-  return Number.isFinite(n) ? n : def;
-}
-
-function validatePolicyPayload(p) {
-  const workHoursPerDay = p.work_hours_per_day;
-  if (workHoursPerDay != null && !(parseFloat(workHoursPerDay) > 0)) {
-    return 'Work hours per day must be greater than 0.';
+function validatePolicyPayload(body) {
+  for (const field of BOOLEAN_POLICY_FIELDS) {
+    if (body[field] !== undefined && typeof body[field] !== 'boolean') {
+      return `${field} must be a boolean.`;
+    }
   }
-  const mult = p.deduction_multiplier;
-  if (mult != null && !(parseFloat(mult) > 0)) {
-    return 'Deduction multiplier must be greater than 0.';
+
+  if (body.work_hours_per_day !== undefined) {
+    if (
+      typeof body.work_hours_per_day !== 'number' ||
+      !Number.isFinite(body.work_hours_per_day)
+    ) {
+      return 'work_hours_per_day must be a finite number.';
+    }
+    if (body.work_hours_per_day <= 0 || body.work_hours_per_day > 24) {
+      return 'work_hours_per_day must be greater than 0 and at most 24.';
+    }
+  }
+
+  if (body.deduction_multiplier !== undefined) {
+    if (
+      typeof body.deduction_multiplier !== 'number' ||
+      !Number.isFinite(body.deduction_multiplier)
+    ) {
+      return 'deduction_multiplier must be a finite number.';
+    }
+    if (body.deduction_multiplier <= 0 || body.deduction_multiplier > 999.999) {
+      return 'deduction_multiplier must be greater than 0 and at most 999.999.';
+    }
   }
   return null;
 }
 
 function normalizedComputationValue(field, value) {
-  if (BOOLEAN_COMPUTATION_FIELDS.has(field)) return toBool(value, false);
-  return toNumberOrDefault(value, field === 'work_hours_per_day' ? 8 : 1);
+  return BOOLEAN_COMPUTATION_FIELDS.has(field) ? value : Number(value);
 }
 
 function changedLockedComputationFields(body, current) {
@@ -145,24 +149,26 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     const body = req.body || {};
     const policyName = (body.policy_name ?? body.name ?? '').toString().trim();
     if (!policyName) return res.status(400).json({ error: 'Policy name is required' });
+    const errMsg = validatePolicyPayload(body);
+    if (errMsg) return res.status(400).json({ error: errMsg });
 
     const payload = {
       policy_name: policyName,
       description: body.description?.toString().trim() || null,
-      is_default: toBool(body.is_default, false),
-      is_active: toBool(body.is_active, true),
-      work_hours_per_day: toNumberOrDefault(body.work_hours_per_day, 8),
-      use_equivalent_day_conversion: toBool(body.use_equivalent_day_conversion, true),
-      deduct_late: toBool(body.deduct_late, false),
-      convert_late_to_equivalent_day: toBool(body.convert_late_to_equivalent_day, true),
-      deduct_undertime: toBool(body.deduct_undertime, true),
-      convert_undertime_to_equivalent_day: toBool(body.convert_undertime_to_equivalent_day, true),
-      absent_equals_full_day_deduction: toBool(body.absent_equals_full_day_deduction, true),
-      combine_late_and_undertime: toBool(body.combine_late_and_undertime, false),
-      deduction_multiplier: toNumberOrDefault(body.deduction_multiplier, 1.0),
+      is_default: body.is_default ?? false,
+      is_active: body.is_active ?? true,
+      work_hours_per_day: body.work_hours_per_day ?? 8,
+      use_equivalent_day_conversion: body.use_equivalent_day_conversion ?? true,
+      deduct_late: body.deduct_late ?? false,
+      convert_late_to_equivalent_day: body.convert_late_to_equivalent_day ?? true,
+      deduct_undertime: body.deduct_undertime ?? true,
+      convert_undertime_to_equivalent_day:
+        body.convert_undertime_to_equivalent_day ?? true,
+      absent_equals_full_day_deduction:
+        body.absent_equals_full_day_deduction ?? true,
+      combine_late_and_undertime: body.combine_late_and_undertime ?? false,
+      deduction_multiplier: body.deduction_multiplier ?? 1.0,
     };
-    const errMsg = validatePolicyPayload(payload);
-    if (errMsg) return res.status(400).json({ error: errMsg });
     if (payload.is_default && !payload.is_active) {
       return res.status(400).json({ error: 'Only an active policy can be the default policy.' });
     }
@@ -254,6 +260,10 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const body = req.body || {};
+    const validationError = validatePolicyPayload(body);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
 
     client = await pool.connect();
     await client.query('BEGIN');
@@ -293,10 +303,10 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const nextIsActive = body.is_active === undefined
       ? current.is_active !== false
-      : toBool(body.is_active, true);
+      : body.is_active;
     let nextIsDefault = body.is_default === undefined
       ? current.is_default === true
-      : toBool(body.is_default, false);
+      : body.is_default;
     if (nextIsDefault && !nextIsActive) {
       if (current.is_default === true) {
         nextIsDefault = false;
@@ -311,41 +321,35 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     let i = 1;
     if (body.policy_name !== undefined || body.name !== undefined) {
       const policyName = (body.policy_name ?? body.name ?? '').toString().trim();
-      if (!policyName) return res.status(400).json({ error: 'Policy name is required' });
+      if (!policyName) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Policy name is required' });
+      }
       updates.push(`name = $${i++}`); values.push(policyName);
     }
     if (body.description !== undefined) { updates.push(`description = $${i++}`); values.push(body.description?.toString().trim() || null); }
 
-    if (body.work_hours_per_day !== undefined) { updates.push(`work_hours_per_day = $${i++}`); values.push(toNumberOrDefault(body.work_hours_per_day, 8)); }
-    if (body.use_equivalent_day_conversion !== undefined) { updates.push(`use_equivalent_day_conversion = $${i++}`); values.push(toBool(body.use_equivalent_day_conversion, true)); }
+    if (body.work_hours_per_day !== undefined) { updates.push(`work_hours_per_day = $${i++}`); values.push(body.work_hours_per_day); }
+    if (body.use_equivalent_day_conversion !== undefined) { updates.push(`use_equivalent_day_conversion = $${i++}`); values.push(body.use_equivalent_day_conversion); }
 
-    if (body.deduct_late !== undefined) { updates.push(`deduct_late = $${i++}`); values.push(toBool(body.deduct_late, false)); }
-    if (body.convert_late_to_equivalent_day !== undefined) { updates.push(`convert_late_to_equivalent_day = $${i++}`); values.push(toBool(body.convert_late_to_equivalent_day, true)); }
+    if (body.deduct_late !== undefined) { updates.push(`deduct_late = $${i++}`); values.push(body.deduct_late); }
+    if (body.convert_late_to_equivalent_day !== undefined) { updates.push(`convert_late_to_equivalent_day = $${i++}`); values.push(body.convert_late_to_equivalent_day); }
 
-    if (body.deduct_undertime !== undefined) { updates.push(`deduct_undertime = $${i++}`); values.push(toBool(body.deduct_undertime, true)); }
-    if (body.convert_undertime_to_equivalent_day !== undefined) { updates.push(`convert_undertime_to_equivalent_day = $${i++}`); values.push(toBool(body.convert_undertime_to_equivalent_day, true)); }
+    if (body.deduct_undertime !== undefined) { updates.push(`deduct_undertime = $${i++}`); values.push(body.deduct_undertime); }
+    if (body.convert_undertime_to_equivalent_day !== undefined) { updates.push(`convert_undertime_to_equivalent_day = $${i++}`); values.push(body.convert_undertime_to_equivalent_day); }
 
-    if (body.absent_equals_full_day_deduction !== undefined) { updates.push(`absent_equals_full_day_deduction = $${i++}`); values.push(toBool(body.absent_equals_full_day_deduction, true)); }
-    if (body.combine_late_and_undertime !== undefined) { updates.push(`combine_late_and_undertime = $${i++}`); values.push(toBool(body.combine_late_and_undertime, false)); }
-    if (body.deduction_multiplier !== undefined) { updates.push(`deduction_multiplier = $${i++}`); values.push(toNumberOrDefault(body.deduction_multiplier, 1.0)); }
+    if (body.absent_equals_full_day_deduction !== undefined) { updates.push(`absent_equals_full_day_deduction = $${i++}`); values.push(body.absent_equals_full_day_deduction); }
+    if (body.combine_late_and_undertime !== undefined) { updates.push(`combine_late_and_undertime = $${i++}`); values.push(body.combine_late_and_undertime); }
+    if (body.deduction_multiplier !== undefined) { updates.push(`deduction_multiplier = $${i++}`); values.push(body.deduction_multiplier); }
 
     if (body.is_default !== undefined || (current.is_default === true && !nextIsActive)) {
       updates.push(`is_default = $${i++}`); values.push(nextIsDefault);
     }
-    if (body.is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(toBool(body.is_active, true)); }
+    if (body.is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(body.is_active); }
 
     if (updates.length === 0) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'No fields to update' });
-    }
-
-    const validateErr = validatePolicyPayload({
-      work_hours_per_day: body.work_hours_per_day,
-      deduction_multiplier: body.deduction_multiplier,
-    });
-    if (validateErr) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: validateErr });
     }
 
     if (nextIsDefault) {

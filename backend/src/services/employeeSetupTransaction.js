@@ -64,6 +64,9 @@ function normalizeEmployeeSetup(setup, defaults = {}) {
   const hasAssignmentChange = hasOwn(setup, 'assignment');
   const hasPolicyChange = hasOwn(setup, 'policy_assignment');
   if (!hasAssignmentChange && !hasPolicyChange) return null;
+  if (hasOwn(setup, 'is_active') && typeof setup.is_active !== 'boolean') {
+    throw new EmployeeSetupValidationError('is_active must be a boolean.');
+  }
 
   let assignment;
   if (hasAssignmentChange) {
