@@ -441,7 +441,7 @@ CREATE INDEX IF NOT EXISTS idx_employee_other_positions_duplicate_lookup
 -- =========================================
 CREATE TABLE IF NOT EXISTS policy_assignments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  attendance_policy_id UUID NOT NULL REFERENCES attendance_policies(id) ON DELETE CASCADE,
+  attendance_policy_id UUID NOT NULL REFERENCES attendance_policies(id) ON DELETE RESTRICT,
 
   employee_id UUID REFERENCES users(id) ON DELETE CASCADE,
   department_id UUID REFERENCES departments(id) ON DELETE CASCADE,
@@ -1316,7 +1316,7 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
 
   assignment_id UUID REFERENCES assignments(id) ON DELETE SET NULL,
   shift_id UUID REFERENCES shifts(id) ON DELETE SET NULL,
-  attendance_policy_id UUID REFERENCES attendance_policies(id) ON DELETE SET NULL,
+  attendance_policy_id UUID REFERENCES attendance_policies(id) ON DELETE RESTRICT,
   holiday_id UUID REFERENCES holidays(id) ON DELETE SET NULL,
   leave_request_id UUID REFERENCES leave_requests(id) ON DELETE SET NULL,
 

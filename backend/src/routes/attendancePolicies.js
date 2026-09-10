@@ -414,12 +414,45 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 // DELETE /api/attendance-policies/:id (admin only)
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM attendance_policies WHERE id = $1 RETURNING id', [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Attendance policy not found' });
+    const result = await pool.query(
+      `DELETE FROM attendance_policies p
+       WHERE p.id = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM policy_assignments pa
+           WHERE pa.attendance_policy_id = p.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM dtr_daily_summary dtr
+           WHERE dtr.attendance_policy_id = p.id
+         )
+       RETURNING p.id`,
+      [req.params.id]
+    );
+    if (result.rowCount === 0) {
+      const policy = await pool.query(
+        `SELECT id, ${policyUsageSql} AS is_used
+         FROM attendance_policies
+         WHERE id = $1`,
+        [req.params.id]
+      );
+      if (policy.rowCount === 0) {
+        return res.status(404).json({ error: 'Attendance policy not found' });
+      }
+      return res.status(409).json({
+        error:
+          'This policy has assignment or attendance history. Deactivate it instead of deleting it.',
+      });
+    }
     invalidateAttendancePolicyCache();
     res.status(204).send();
   } catch (err) {
     console.error('[attendance-policies DELETE]', err);
+    if (err?.code === '23503') {
+      return res.status(409).json({
+        error:
+          'This policy has assignment or attendance history. Deactivate it instead of deleting it.',
+      });
+    }
     res.status(500).json({ error: 'Failed to delete attendance policy' });
   }
 });

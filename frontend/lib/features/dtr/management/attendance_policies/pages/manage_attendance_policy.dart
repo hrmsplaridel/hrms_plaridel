@@ -552,6 +552,55 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     }
   }
 
+  Future<bool> _deleteUnusedPolicy() async {
+    final p = _selectedPolicy;
+    if (p == null || p.isUsed) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete unused policy?'),
+        content: Text(
+          '"${p.policyName}" will be permanently deleted. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Delete'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+    try {
+      await ApiClient.instance.delete('/api/attendance-policies/${p.id}');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Unused policy deleted.')));
+        _clearForm();
+        _loadPolicies();
+      }
+      return true;
+    } on DioException catch (e) {
+      if (mounted) {
+        final msg =
+            (e.response?.data as Map?)?['error'] ??
+            e.message ??
+            'Failed to delete policy';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $msg')));
+      }
+      return false;
+    }
+  }
+
   Future<void> _openPolicyDrawer({_PolicyRecord? policy}) async {
     _drawerSetState = null;
     if (policy == null) {
@@ -684,6 +733,21 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               },
               icon: const Icon(Icons.person_off_rounded, size: 18),
               label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          if (isEditing && !(_selectedPolicy?.isUsed ?? true))
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deleteUnusedPolicy();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.delete_outline_rounded, size: 18),
+              label: const Text('Delete Unused'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
@@ -1186,6 +1250,18 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               foregroundColor: Colors.white,
             ),
           ),
+          if (_selectedPolicy != null && !_selectedPolicy!.isUsed) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => _deleteUnusedPolicy(),
+              icon: const Icon(Icons.delete_outline_rounded, size: 18),
+              label: const Text('Delete Unused Policy'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          ],
         ],
       ],
     );
