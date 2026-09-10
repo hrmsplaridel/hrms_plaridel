@@ -140,6 +140,7 @@ router.get('/', protect, async (req, res) => {
 
 // POST /api/attendance-policies - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     const body = req.body || {};
     const policyName = (body.policy_name ?? body.name ?? '').toString().trim();
@@ -162,8 +163,24 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     };
     const errMsg = validatePolicyPayload(payload);
     if (errMsg) return res.status(400).json({ error: errMsg });
+    if (payload.is_default && !payload.is_active) {
+      return res.status(400).json({ error: 'Only an active policy can be the default policy.' });
+    }
 
-    const result = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    if (payload.is_default) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext('attendance_policy_default'))`
+      );
+      await client.query(
+        `UPDATE attendance_policies
+         SET is_default = false, updated_at = now()
+         WHERE is_default = true`
+      );
+    }
+
+    const result = await client.query(
       `INSERT INTO attendance_policies (name, description,
         work_hours_per_day, use_equivalent_day_conversion,
         deduct_late, convert_late_to_equivalent_day,
@@ -195,6 +212,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         payload.is_active,
       ]
     );
+    await client.query('COMMIT');
     const r = result.rows[0];
     invalidateAttendancePolicyCache();
     res.status(201).json({
@@ -217,29 +235,47 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       created_at: r.created_at,
     });
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[attendance-policies POST]', err);
-    res.status(500).json({ error: 'Failed to create attendance policy' });
+    const status = err?.code === '23505' ? 409 : 500;
+    res.status(status).json({
+      error: status === 409
+        ? 'Another default-policy change was completed first. Reload and try again.'
+        : 'Failed to create attendance policy',
+    });
+  } finally {
+    client?.release();
   }
 });
 
 // PUT /api/attendance-policies/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     const { id } = req.params;
     const body = req.body || {};
 
-    const currentResult = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext('attendance_policy_default'))`
+    );
+
+    const currentResult = await client.query(
       `SELECT work_hours_per_day, use_equivalent_day_conversion,
               deduct_late, convert_late_to_equivalent_day,
               deduct_undertime, convert_undertime_to_equivalent_day,
               absent_equals_full_day_deduction,
               combine_late_and_undertime, deduction_multiplier,
+              is_default, is_active,
               ${policyUsageSql} AS is_used
        FROM attendance_policies
-       WHERE id = $1`,
+       WHERE id = $1
+       FOR UPDATE`,
       [id]
     );
     if (currentResult.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Attendance policy not found' });
     }
     const current = currentResult.rows[0];
@@ -247,11 +283,27 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       ? changedLockedComputationFields(body, current)
       : [];
     if (changedComputationFields.length > 0) {
+      await client.query('ROLLBACK');
       return res.status(409).json({
         error:
           'This policy has already been used. Create a new policy to change computation settings.',
         locked_fields: changedComputationFields,
       });
+    }
+
+    const nextIsActive = body.is_active === undefined
+      ? current.is_active !== false
+      : toBool(body.is_active, true);
+    let nextIsDefault = body.is_default === undefined
+      ? current.is_default === true
+      : toBool(body.is_default, false);
+    if (nextIsDefault && !nextIsActive) {
+      if (current.is_default === true) {
+        nextIsDefault = false;
+      } else {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Only an active policy can be the default policy.' });
+      }
     }
 
     const updates = [];
@@ -277,21 +329,38 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (body.combine_late_and_undertime !== undefined) { updates.push(`combine_late_and_undertime = $${i++}`); values.push(toBool(body.combine_late_and_undertime, false)); }
     if (body.deduction_multiplier !== undefined) { updates.push(`deduction_multiplier = $${i++}`); values.push(toNumberOrDefault(body.deduction_multiplier, 1.0)); }
 
-    if (body.is_default !== undefined) { updates.push(`is_default = $${i++}`); values.push(toBool(body.is_default, false)); }
+    if (body.is_default !== undefined || (current.is_default === true && !nextIsActive)) {
+      updates.push(`is_default = $${i++}`); values.push(nextIsDefault);
+    }
     if (body.is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(toBool(body.is_active, true)); }
 
-    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    if (updates.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No fields to update' });
+    }
 
     const validateErr = validatePolicyPayload({
       work_hours_per_day: body.work_hours_per_day,
       deduction_multiplier: body.deduction_multiplier,
     });
-    if (validateErr) return res.status(400).json({ error: validateErr });
+    if (validateErr) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: validateErr });
+    }
+
+    if (nextIsDefault) {
+      await client.query(
+        `UPDATE attendance_policies
+         SET is_default = false, updated_at = now()
+         WHERE is_default = true AND id <> $1`,
+        [id]
+      );
+    }
 
     updates.push('updated_at = now()');
     values.push(id);
 
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE attendance_policies SET ${updates.join(', ')} WHERE id = $${i}
        RETURNING id, name, description,
         work_hours_per_day, use_equivalent_day_conversion,
@@ -302,7 +371,11 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         is_default, is_active, created_at`,
       values
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Attendance policy not found' });
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Attendance policy not found' });
+    }
+    await client.query('COMMIT');
     const r = result.rows[0];
     invalidateAttendancePolicyCache();
     res.json({
@@ -325,8 +398,16 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       created_at: r.created_at,
     });
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[attendance-policies PUT]', err);
-    res.status(500).json({ error: 'Failed to update attendance policy' });
+    const status = err?.code === '23505' ? 409 : 500;
+    res.status(status).json({
+      error: status === 409
+        ? 'Another default-policy change was completed first. Reload and try again.'
+        : 'Failed to update attendance policy',
+    });
+  } finally {
+    client?.release();
   }
 });
 
