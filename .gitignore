@@ -57,6 +57,7 @@ docs/private/
 docs/weekly_progress/
 /bugs/
 /Capstone_research/
+/tmp_figure_review/
 
 # IntelliJ related
 *.iml
