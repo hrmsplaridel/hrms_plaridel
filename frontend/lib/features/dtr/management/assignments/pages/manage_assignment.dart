@@ -927,10 +927,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     if (_selectedEmployeeId == null) return false;
     if (_selectedDeptId == null ||
         _selectedPositionId == null ||
-        _selectedShiftId == null) {
+        _selectedShiftId == null ||
+        _selectedPolicyId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select Department, Position, and Shift.'),
+          content: Text(
+            'Please select Department, Position, Shift, and Attendance Policy.',
+          ),
         ),
       );
       return false;
@@ -1003,10 +1006,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
     if (_selectedDeptId == null ||
         _selectedPositionId == null ||
-        _selectedShiftId == null) {
+        _selectedShiftId == null ||
+        _selectedPolicyId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select Department, Position, and Shift.'),
+          content: Text(
+            'Please select Department, Position, Shift, and Attendance Policy.',
+          ),
         ),
       );
       return false;
@@ -1034,11 +1040,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         'effective_to': _effectiveTo != null
             ? _effectiveTo!.toIso8601String().split('T')[0]
             : null,
-        if (_selectedPolicyId != a.attendancePolicyId ||
-            _attendancePolicies.any(
-              (policy) => policy['id']?.toString() == _selectedPolicyId,
-            ))
-          'attendance_policy_id': _selectedPolicyId,
+        'attendance_policy_id': _selectedPolicyId,
         'remarks': _remarksController.text.trim().isEmpty
             ? null
             : _remarksController.text.trim(),

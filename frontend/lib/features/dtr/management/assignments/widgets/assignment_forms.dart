@@ -88,13 +88,13 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
                   Expanded(
                     flex: 1,
                     child: _buildFormDropdown(
-                      'Attendance Policy (optional)',
+                      'Attendance Policy',
                       selectedPolicyValue,
                       policyItems,
                       (v) => _updateAssignmentFormState(
                         () => _selectedPolicyId = v,
                       ),
-                      selectLabel: 'Use fallback policy',
+                      selectLabel: 'Select policy',
                     ),
                   ),
                 ],
@@ -126,12 +126,12 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
                   (v) => _updateAssignmentFormState(() => _selectedShiftId = v),
                 ),
                 _buildFormDropdown(
-                  'Attendance Policy (optional)',
+                  'Attendance Policy',
                   selectedPolicyValue,
                   policyItems,
                   (v) =>
                       _updateAssignmentFormState(() => _selectedPolicyId = v),
-                  selectLabel: 'Use fallback policy',
+                  selectLabel: 'Select policy',
                 ),
               ],
             );
