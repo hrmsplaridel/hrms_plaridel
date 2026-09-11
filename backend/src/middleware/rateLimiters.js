@@ -17,6 +17,7 @@ function createJsonLimiter({
   limit,
   message,
   skipSuccessfulRequests = false,
+  skip,
 }) {
   return rateLimit({
     windowMs,
@@ -24,8 +25,13 @@ function createJsonLimiter({
     standardHeaders: 'draft-8',
     legacyHeaders: false,
     skipSuccessfulRequests,
+    skip,
     message: { error: message },
   });
+}
+
+function isReadRequest(req) {
+  return req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
 }
 
 function authenticatedEmployeeKey(req) {
@@ -81,10 +87,18 @@ function createEmployeeAssistantLimiter({
   });
 }
 
+const generalApiReadLimiter = createJsonLimiter({
+  windowMs: parsePositiveInt(process.env.RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
+  limit: parsePositiveInt(process.env.RATE_LIMIT_READ_MAX, 3000),
+  message: 'Too many API read requests. Please wait and try again.',
+  skip: (req) => !isReadRequest(req),
+});
+
 const generalApiLimiter = createJsonLimiter({
   windowMs: parsePositiveInt(process.env.RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
   limit: parsePositiveInt(process.env.RATE_LIMIT_MAX, 300),
   message: 'Too many API requests. Please wait and try again.',
+  skip: isReadRequest,
 });
 
 const authLoginLimiter = createJsonLimiter({
@@ -192,6 +206,7 @@ const dtrAssistantExportLimiter = createEmployeeAssistantLimiter({
 
 module.exports = {
   createEmployeeAssistantLimiter,
+  generalApiReadLimiter,
   generalApiLimiter,
   authLoginLimiter,
   authRegisterLimiter,

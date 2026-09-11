@@ -16,6 +16,7 @@ const {
   computeClockOutUndertimeMinutes,
   getExpectedLogsForDay: resolveExpectedLogsForDay,
   computeTotalHoursFromRecord,
+  resolveSingleSessionPunches,
 } = require('../services/shiftAttendance');
 const {
   evaluateLocatorCoverage,
@@ -451,6 +452,18 @@ async function computeLateMinutes(
   let total = 0;
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
   const evalPm = !isHolidayOrSuspension || coverage !== 'pm_only';
+  if (type === 'single_session') {
+    const sessionIn = timeInIso || breakInIso;
+    const evaluateSession = shiftInfo.startMinutes >= NOON_MINUTES ? evalPm : evalAm;
+    if (evaluateSession && sessionIn) {
+      const localMins = minutesFromMidnightInTimeZone(sessionIn);
+      if (localMins != null) {
+        const cutoff = startMinutes + graceMinutes;
+        if (localMins > cutoff) total += localMins - cutoff;
+      }
+    }
+    return total;
+  }
   if (evalAm && timeInIso && type !== 'pm_only') {
     const localMins = minutesFromMidnightInTimeZone(timeInIso);
     if (localMins == null) return total;
@@ -528,8 +541,11 @@ async function computeUndertimeMinutes(
   const breakOutMins = breakOutIso
     ? minutesFromMidnightInTimeZone(breakOutIso)
     : null;
-  const timeOutMins = timeOutIso
-    ? minutesFromMidnightInTimeZone(timeOutIso)
+  const effectiveTimeOut = type === 'single_session'
+    ? (timeOutIso || breakOutIso)
+    : timeOutIso;
+  const timeOutMins = effectiveTimeOut
+    ? minutesFromMidnightInTimeZone(effectiveTimeOut)
     : null;
   const completedSegmentUndertime = computeClockOutUndertimeMinutes({
     shiftInfo,
@@ -640,9 +656,16 @@ async function computeAttendanceRemark(
   const hasPm =
     (record.break_in != null || locatorSegSet.has('PM IN')) &&
     (record.time_out != null || locatorSegSet.has('PM OUT'));
-  const hasInOut =
-    (record.time_in != null || locatorSegSet.has('AM IN')) &&
-    (record.time_out != null || locatorSegSet.has('PM OUT'));
+  const sessionPunches = resolveSingleSessionPunches(record);
+  const hasInOut = resolveShiftType(shiftInfo) === 'single_session'
+    ? (
+        (sessionPunches.timeIn != null || locatorSegSet.has('AM IN') || locatorSegSet.has('PM IN')) &&
+        (sessionPunches.timeOut != null || locatorSegSet.has('AM OUT') || locatorSegSet.has('PM OUT'))
+      )
+    : (
+        (record.time_in != null || locatorSegSet.has('AM IN')) &&
+        (record.time_out != null || locatorSegSet.has('PM OUT'))
+      );
   const missingRequired =
     (expected.needsAm && !hasAm) ||
     (expected.needsPm && !hasPm) ||
@@ -2712,12 +2735,16 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
     const coverage = holidayInfo?.coverage || null;
     const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
 
+    const shiftType = resolveShiftType(shiftInfo);
+    const statusTimeIn = shiftType === 'single_session'
+      ? (existing.time_in || existing.break_in)
+      : existing.time_in;
     let status = existing.status;
     if (holidayId != null && coverage === 'whole_day') {
       status = 'holiday';
     } else if (status !== 'on_leave') {
-      status = existing.time_in
-        ? await computeStatusFromShift(employeeId, dateStr, existing.time_in)
+      status = statusTimeIn
+        ? await computeStatusFromShift(employeeId, dateStr, statusTimeIn)
         : (existing.status === 'holiday' ? 'absent' : existing.status);
     }
 

@@ -217,3 +217,58 @@ test('historical employee list includes separated, deactivated, and rehired empl
   restoreDb();
   clearModule('../src/routes/employees');
 });
+
+test('historical report employee list includes assigned administrators', async () => {
+  const queries = [];
+  const adminEmployee = {
+    id: '00000000-0000-4000-8000-000000000001',
+    employee_number: 1,
+    full_name: 'Admin User',
+    role: 'admin',
+    email: 'admin@example.test',
+    is_active: true,
+    employment_status: 'active',
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      async query(sql, params = []) {
+        const text = String(sql);
+        queries.push({ sql: text, params });
+        if (/SELECT u\.id, u\.employee_number/i.test(text)) {
+          return { rowCount: 1, rows: [adminEmployee] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    },
+  });
+  clearModule('../src/routes/employees');
+  const router = require('../src/routes/employees');
+  const handlers = route(router, 'get', '/');
+  const res = response();
+
+  await handlers[handlers.length - 1](
+    {
+      user: adminEmployee,
+      query: {
+        status: 'Active',
+        role: 'All',
+        start_date: '2026-08-01',
+        end_date: '2026-08-31',
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.length, 1);
+  assert.equal(res.payload[0].role, 'admin');
+  const listQuery = queries.find(
+    ({ sql }) => /SELECT u\.id, u\.employee_number/i.test(sql)
+  );
+  assert.ok(listQuery, 'employee list query was not issued');
+  assert.doesNotMatch(listQuery.sql, /u\.role\s*=/i);
+  assert.match(listQuery.sql, /historical_presence_assignment/i);
+
+  restoreDb();
+  clearModule('../src/routes/employees');
+});

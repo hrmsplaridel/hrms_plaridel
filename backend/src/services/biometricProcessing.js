@@ -279,6 +279,18 @@ async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, st
   let total = 0;
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
   const evalPm = !isHolidayOrSuspension || coverage !== 'pm_only';
+  if (type === 'single_session') {
+    const sessionIn = timeInIso || breakInIso;
+    const evaluateSession = shiftInfo.startMinutes >= NOON_MINUTES ? evalPm : evalAm;
+    if (evaluateSession && sessionIn) {
+      const localMins = minutesFromMidnightInTimeZone(sessionIn);
+      if (localMins != null) {
+        const cutoff = startMinutes + graceMinutes;
+        if (localMins > cutoff) total += localMins - cutoff;
+      }
+    }
+    return total;
+  }
   if (evalAm && timeInIso && type !== 'pm_only') {
     const localMins = minutesFromMidnightInTimeZone(timeInIso);
     if (localMins != null) {
@@ -323,8 +335,11 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
   const breakOutMins = breakOutIso
     ? minutesFromMidnightInTimeZone(breakOutIso)
     : null;
-  const timeOutMins = timeOutIso
-    ? minutesFromMidnightInTimeZone(timeOutIso)
+  const effectiveTimeOut = type === 'single_session'
+    ? (timeOutIso || breakOutIso)
+    : timeOutIso;
+  const timeOutMins = effectiveTimeOut
+    ? minutesFromMidnightInTimeZone(effectiveTimeOut)
     : null;
   const completedSegmentUndertime = computeClockOutUndertimeMinutes({
     shiftInfo,

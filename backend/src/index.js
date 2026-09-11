@@ -13,7 +13,10 @@ const { scheduleYearEndForcedLeaveCron } = require('./jobs/leaveYearEndForcedLea
 const {
   scheduleAuthRefreshTokenCleanupCron,
 } = require('./jobs/authRefreshTokenCleanupScheduler');
-const { generalApiLimiter } = require('./middleware/rateLimiters');
+const {
+  generalApiReadLimiter,
+  generalApiLimiter,
+} = require('./middleware/rateLimiters');
 
 const authRoutes = require('./routes/auth');
 const departmentsRoutes = require('./routes/departments');
@@ -136,7 +139,7 @@ app.get('/health/db', async (_req, res) => {
 });
 
 // API routes
-app.use('/api', generalApiLimiter);
+app.use('/api', generalApiReadLimiter, generalApiLimiter);
 app.use('/auth', authRoutes);
 app.use('/api/departments', departmentsRoutes);
 app.use('/api/offices', officesRoutes);

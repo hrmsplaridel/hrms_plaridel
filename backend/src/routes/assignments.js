@@ -288,8 +288,10 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       req.body || {},
       'attendance_policy_id'
     );
-    if (!employee_id || !effective_from) {
-      return res.status(400).json({ error: 'employee_id and effective_from are required' });
+    if (!employee_id || !effective_from || !String(attendance_policy_id || '').trim()) {
+      return res.status(400).json({
+        error: 'employee_id, effective_from, and attendance_policy_id are required',
+      });
     }
     const ef = parseDate(effective_from);
     if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
@@ -419,6 +421,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       req.body || {},
       'attendance_policy_id'
     );
+    if (hasPolicyChange && !String(attendance_policy_id || '').trim()) {
+      return res.status(400).json({ error: 'attendance_policy_id is required' });
+    }
     if (
       department_id === undefined &&
       position_id === undefined &&

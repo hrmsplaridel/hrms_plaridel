@@ -142,6 +142,44 @@ test('single-session total hours use direct Time In to Time Out span', () => {
   );
 });
 
+test('single-session total hours accept a historical PM slot pair', () => {
+  const shift = {
+    startMinutes: 18 * 60,
+    endMinutes: 19 * 60,
+    punchMode: 'single_session',
+  };
+
+  assert.equal(
+    computeTotalHoursFromRecord(
+      {
+        break_in: '2026-06-01T10:00:00.000Z',
+        time_out: '2026-06-01T11:00:00.000Z',
+      },
+      shift
+    ),
+    1
+  );
+});
+
+test('single-session total hours accept a historical AM slot pair', () => {
+  const shift = {
+    startMinutes: 8 * 60,
+    endMinutes: 12 * 60,
+    punchMode: 'single_session',
+  };
+
+  assert.equal(
+    computeTotalHoursFromRecord(
+      {
+        time_in: '2026-06-01T00:00:00.000Z',
+        break_out: '2026-06-01T04:00:00.000Z',
+      },
+      shift
+    ),
+    4
+  );
+});
+
 test('full-day shift counts early AM Out as undertime', () => {
   const shift = {
     startMinutes: 8 * 60,

@@ -210,12 +210,38 @@ function computeTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType) {
   return Math.max(0, Math.round(hours * 100) / 100);
 }
 
+/**
+ * A historical assignment correction can change a row from AM/PM slot semantics
+ * to a single session. Preserve the punches and treat either complete slot pair
+ * as the session boundaries instead of rewriting manual attendance evidence.
+ */
+function resolveSingleSessionPunches(record) {
+  return {
+    timeIn:
+      record?.time_in ??
+      record?.timeIn ??
+      record?.break_in ??
+      record?.breakIn ??
+      null,
+    timeOut:
+      record?.time_out ??
+      record?.timeOut ??
+      record?.break_out ??
+      record?.breakOut ??
+      null,
+  };
+}
+
 function computeTotalHoursFromRecord(record, shiftInfo = null) {
   const timeIn = record.time_in ?? record.timeIn ?? null;
   const breakOut = record.break_out ?? record.breakOut ?? null;
   const breakIn = record.break_in ?? record.breakIn ?? null;
   const timeOut = record.time_out ?? record.timeOut ?? null;
   const shiftType = getShiftType(shiftInfo);
+  if (shiftType === 'single_session') {
+    const session = resolveSingleSessionPunches(record);
+    return computeTotalHours(session.timeIn, session.timeOut, null, null, shiftType);
+  }
   if (shiftType) return computeTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType);
 
   if (timeIn && breakOut && breakIn && timeOut) {
@@ -331,5 +357,6 @@ module.exports = {
   minutesFromMidnightInTimeZone,
   computeTotalHours,
   computeTotalHoursFromRecord,
+  resolveSingleSessionPunches,
   interpretPunchesForShift,
 };
