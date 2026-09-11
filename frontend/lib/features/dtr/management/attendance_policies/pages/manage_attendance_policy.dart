@@ -503,7 +503,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   Future<bool> _deactivatePolicy() async {
     final p = _selectedPolicy;
-    if (p == null) return false;
+    if (p == null || !p.isActive) return false;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -547,6 +547,56 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed: $msg')));
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _reactivatePolicy() async {
+    final policy = _selectedPolicy;
+    if (policy == null || policy.isActive) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reactivate policy?'),
+        content: Text(
+          'This will restore "${policy.policyName}" to active policy lists.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.restore_rounded, size: 18),
+            label: const Text('Reactivate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+    try {
+      await ApiClient.instance.put(
+        '/api/attendance-policies/${policy.id}',
+        data: {'is_active': true},
+      );
+      if (!mounted) return false;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Policy reactivated.')));
+      _clearForm();
+      _loadPolicies();
+      return true;
+    } on DioException catch (error) {
+      if (mounted) {
+        final message =
+            (error.response?.data as Map?)?['error'] ??
+            error.message ??
+            'Failed to reactivate';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $message')));
       }
       return false;
     }
@@ -723,7 +773,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
             onPressed: () => Navigator.of(drawerContext).pop(),
             child: const Text('Cancel'),
           ),
-          if (isEditing)
+          if (isEditing && (_selectedPolicy?.isActive ?? false))
             OutlinedButton.icon(
               onPressed: () async {
                 final ok = await _deactivatePolicy();
@@ -737,6 +787,18 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
               ),
+            ),
+          if (isEditing && !(_selectedPolicy?.isActive ?? true))
+            OutlinedButton.icon(
+              key: const Key('reactivate-attendance-policy'),
+              onPressed: () async {
+                final ok = await _reactivatePolicy();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.restore_rounded, size: 18),
+              label: const Text('Reactivate'),
             ),
           if (isEditing && !(_selectedPolicy?.isUsed ?? true))
             OutlinedButton.icon(

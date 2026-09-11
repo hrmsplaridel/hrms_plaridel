@@ -34,6 +34,23 @@ void main() {
                     'is_active': true,
                     'is_used': true,
                   },
+                  {
+                    'id': 'policy-inactive',
+                    'policy_name': 'Inactive policy',
+                    'description': 'Inactive historical policy',
+                    'work_hours_per_day': 8,
+                    'use_equivalent_day_conversion': true,
+                    'deduct_late': false,
+                    'convert_late_to_equivalent_day': true,
+                    'deduct_undertime': true,
+                    'convert_undertime_to_equivalent_day': true,
+                    'absent_equals_full_day_deduction': true,
+                    'combine_late_and_undertime': false,
+                    'deduction_multiplier': 1,
+                    'is_default': false,
+                    'is_active': false,
+                    'is_used': true,
+                  },
                 ],
               ),
             );
@@ -114,4 +131,29 @@ void main() {
       expect(metadataFields.where((field) => field.enabled != false).length, 2);
     },
   );
+
+  testWidgets('inactive policy shows Reactivate instead of Deactivate', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1600, 1000);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: ManageAttendancePolicy())),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Inactive policy'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('reactivate-attendance-policy')),
+      findsOneWidget,
+    );
+    expect(find.text('Reactivate'), findsOneWidget);
+    expect(find.text('Deactivate'), findsNothing);
+  });
 }
