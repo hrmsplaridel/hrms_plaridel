@@ -12,10 +12,8 @@ class _PolicyRecord {
     required this.useEquivalentDayConversion,
 
     required this.deductLate,
-    required this.convertLateToEquivalentDay,
 
     required this.deductUndertime,
-    required this.convertUndertimeToEquivalentDay,
 
     required this.absentEqualsFullDayDeduction,
 
@@ -33,10 +31,8 @@ class _PolicyRecord {
   final bool useEquivalentDayConversion;
 
   final bool deductLate;
-  final bool convertLateToEquivalentDay;
 
   final bool deductUndertime;
-  final bool convertUndertimeToEquivalentDay;
 
   final bool absentEqualsFullDayDeduction;
 
@@ -85,11 +81,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   // Late settings
   bool _deductLate = false;
-  bool _convertLateToEquivalentDay = true;
 
   // Undertime settings
   bool _deductUndertime = true;
-  bool _convertUndertimeToEquivalentDay = true;
 
   // Absence settings
   bool _absentEqualsFullDayDeduction = true;
@@ -293,11 +287,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           useEquivalentDayConversion:
               m['use_equivalent_day_conversion'] as bool? ?? true,
           deductLate: m['deduct_late'] as bool? ?? false,
-          convertLateToEquivalentDay:
-              m['convert_late_to_equivalent_day'] as bool? ?? true,
           deductUndertime: m['deduct_undertime'] as bool? ?? true,
-          convertUndertimeToEquivalentDay:
-              m['convert_undertime_to_equivalent_day'] as bool? ?? true,
           absentEqualsFullDayDeduction:
               m['absent_equals_full_day_deduction'] as bool? ?? true,
           combineLateAndUndertime:
@@ -329,10 +319,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       _useEquivalentDayConversion = p.useEquivalentDayConversion;
 
       _deductLate = p.deductLate;
-      _convertLateToEquivalentDay = p.convertLateToEquivalentDay;
 
       _deductUndertime = p.deductUndertime;
-      _convertUndertimeToEquivalentDay = p.convertUndertimeToEquivalentDay;
 
       _absentEqualsFullDayDeduction = p.absentEqualsFullDayDeduction;
 
@@ -355,10 +343,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       _useEquivalentDayConversion = true;
 
       _deductLate = false;
-      _convertLateToEquivalentDay = true;
 
       _deductUndertime = true;
-      _convertUndertimeToEquivalentDay = true;
 
       _absentEqualsFullDayDeduction = true;
 
@@ -397,10 +383,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               double.tryParse(_workHoursPerDayController.text.trim()) ?? 8,
           'use_equivalent_day_conversion': _useEquivalentDayConversion,
           'deduct_late': _deductLate,
-          'convert_late_to_equivalent_day': _convertLateToEquivalentDay,
           'deduct_undertime': _deductUndertime,
-          'convert_undertime_to_equivalent_day':
-              _convertUndertimeToEquivalentDay,
           'absent_equals_full_day_deduction': _absentEqualsFullDayDeduction,
           'combine_late_and_undertime': _combineLateAndUndertime,
           'deduction_multiplier':
@@ -466,10 +449,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               double.tryParse(_workHoursPerDayController.text.trim()) ?? 8,
           'use_equivalent_day_conversion': _useEquivalentDayConversion,
           'deduct_late': _deductLate,
-          'convert_late_to_equivalent_day': _convertLateToEquivalentDay,
           'deduct_undertime': _deductUndertime,
-          'convert_undertime_to_equivalent_day':
-              _convertUndertimeToEquivalentDay,
           'absent_equals_full_day_deduction': _absentEqualsFullDayDeduction,
           'combine_late_and_undertime': _combineLateAndUndertime,
           'deduction_multiplier':
@@ -1213,14 +1193,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           enabled: !computationLocked,
           onChanged: (v) => _updatePolicyFormState(() => _deductLate = v),
         ),
-        const SizedBox(height: 12),
-        _switchTile(
-          title: 'Convert Late to Equivalent Day',
-          value: _convertLateToEquivalentDay,
-          enabled: !computationLocked,
-          onChanged: (v) =>
-              _updatePolicyFormState(() => _convertLateToEquivalentDay = v),
-        ),
 
         const SizedBox(height: 24),
         _sectionTitle('Undertime Settings'),
@@ -1230,15 +1202,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           value: _deductUndertime,
           enabled: !computationLocked,
           onChanged: (v) => _updatePolicyFormState(() => _deductUndertime = v),
-        ),
-        const SizedBox(height: 12),
-        _switchTile(
-          title: 'Convert Undertime to Equivalent Day',
-          value: _convertUndertimeToEquivalentDay,
-          enabled: !computationLocked,
-          onChanged: (v) => _updatePolicyFormState(
-            () => _convertUndertimeToEquivalentDay = v,
-          ),
         ),
 
         const SizedBox(height: 24),

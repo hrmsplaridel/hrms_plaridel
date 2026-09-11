@@ -176,21 +176,19 @@ test('report deduction exempts whole-day holidays but keeps partial-day penaltie
   assert.equal(pmOnly.total_minutes, 135);
 });
 
-test('attendance penalties preserve late and undertime as separate source buckets', () => {
+test('attendance penalties use deduction switches and multiplier only', () => {
   const policy = {
     deductLate: true,
     maxLateMinutesPerMonth: 60,
     deductUndertime: true,
     combineLateAndUndertime: true,
-    convertLateToEquivalentDay: false,
-    convertUndertimeToEquivalentDay: false,
     workHoursPerDay: 8,
-    deductionMultiplier: 1,
+    deductionMultiplier: 1.5,
   };
 
   assert.deepEqual(calculateAttendancePolicyPenalties(policy, 90, 15), {
-    lateMinutes: 90,
-    undertimeMinutes: 15,
+    lateMinutes: 135,
+    undertimeMinutes: 23,
   });
 });
 

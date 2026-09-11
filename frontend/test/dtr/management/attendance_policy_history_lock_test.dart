@@ -124,6 +124,8 @@ void main() {
             .onChanged,
         isNull,
       );
+      expect(find.text('Convert Late to Equivalent Day'), findsNothing);
+      expect(find.text('Convert Undertime to Equivalent Day'), findsNothing);
 
       final metadataFields = tester.widgetList<TextFormField>(
         find.byType(TextFormField),

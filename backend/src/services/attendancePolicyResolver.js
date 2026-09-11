@@ -128,17 +128,6 @@ function calculateAttendanceReportDeduction({
   };
 }
 
-function applyPolicyConversion(minutes, convertToEquivalentDay, workHoursPerDay, multiplier) {
-  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
-  const appliedMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
-  if (!convertToEquivalentDay) return Math.round(minutes * appliedMultiplier);
-  const workMinutes = Math.max(
-    1,
-    Math.round((Number.isFinite(workHoursPerDay) ? workHoursPerDay : 8) * 60)
-  );
-  return Math.round((minutes / workMinutes) * appliedMultiplier * workMinutes);
-}
-
 function calculateAttendancePolicyPenalties(policy, rawLateMinutes, rawUndertimeMinutes) {
   // These remain observable DTR minute buckets. Equivalent-day eligibility is
   // applied later by report/month-end consumers through the global switch.
@@ -146,20 +135,14 @@ function calculateAttendancePolicyPenalties(policy, rawLateMinutes, rawUndertime
   const undertime = policy?.deductUndertime
     ? Math.max(0, Number(rawUndertimeMinutes) || 0)
     : 0;
+  const multiplier = Number.isFinite(policy?.deductionMultiplier) &&
+      policy.deductionMultiplier > 0
+    ? policy.deductionMultiplier
+    : 1;
 
   return {
-    lateMinutes: applyPolicyConversion(
-      late,
-      policy?.convertLateToEquivalentDay,
-      policy?.workHoursPerDay,
-      policy?.deductionMultiplier
-    ),
-    undertimeMinutes: applyPolicyConversion(
-      undertime,
-      policy?.convertUndertimeToEquivalentDay,
-      policy?.workHoursPerDay,
-      policy?.deductionMultiplier
-    ),
+    lateMinutes: Math.round(late * multiplier),
+    undertimeMinutes: Math.round(undertime * multiplier),
   };
 }
 
