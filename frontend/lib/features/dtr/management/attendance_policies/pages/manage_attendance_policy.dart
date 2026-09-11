@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/attendance_policies/data/attendance_policy_request_guard.dart';
 
 class _PolicyRecord {
   const _PolicyRecord({
@@ -96,6 +97,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   int _page = 0;
   List<_PolicyRecord> _policies = [];
   bool _loading = false;
+  String? _loadError;
+  String? _loadedStatusFilter;
   _PolicyRecord? _selectedPolicy;
   bool _isDefault = false;
   bool _isActive = true;
@@ -132,6 +135,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   @override
   void dispose() {
+    _policyRequestGuard.invalidate();
     _searchController.dispose();
     _nameController.dispose();
     _descriptionController.dispose();
@@ -139,6 +143,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     _deductionMultiplierController.dispose();
     super.dispose();
   }
+
+  final _policyRequestGuard = AttendancePolicyRequestGuard();
 
   String? _validateForm() {
     final workHours = double.tryParse(_workHoursPerDayController.text.trim());
@@ -266,17 +272,21 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   }
 
   Future<void> _loadPolicies() async {
+    if (!mounted) return;
+    final requestedStatus = _statusFilter;
+    final request = _policyRequestGuard.begin(requestedStatus);
     setState(() {
       _loading = true;
+      _loadError = null;
       _page = 0;
     });
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/attendance-policies',
-        queryParameters: {'status': _statusFilter},
+        queryParameters: {'status': requestedStatus},
       );
       final data = res.data ?? [];
-      _policies = (data).map((e) {
+      final policies = (data).map((e) {
         final m = e as Map<String, dynamic>;
         return _PolicyRecord(
           id: m['id'] as String,
@@ -299,11 +309,35 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           isUsed: m['is_used'] as bool? ?? false,
         );
       }).toList();
+      if (!mounted || !_policyRequestGuard.accepts(request, _statusFilter)) {
+        return;
+      }
+      setState(() {
+        _policies = policies;
+        _loadedStatusFilter = requestedStatus;
+        _loadError = null;
+      });
     } on DioException catch (e) {
+      if (!mounted || !_policyRequestGuard.accepts(request, _statusFilter)) {
+        return;
+      }
       debugPrint('Load policies failed: ${e.response?.data ?? e.message}');
-      _policies = [];
+      setState(() {
+        _loadError = 'Unable to load attendance policies. Please try again.';
+      });
+    } catch (e) {
+      if (!mounted || !_policyRequestGuard.accepts(request, _statusFilter)) {
+        return;
+      }
+      debugPrint('Load policies failed: $e');
+      setState(() {
+        _loadError = 'Unable to load attendance policies. Please try again.';
+      });
+    } finally {
+      if (mounted && _policyRequestGuard.accepts(request, _statusFilter)) {
+        setState(() => _loading = false);
+      }
     }
-    if (mounted) setState(() => _loading = false);
   }
 
   void _selectPolicy(_PolicyRecord p) {
@@ -820,7 +854,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   @override
   Widget build(BuildContext context) {
     final search = _searchController.text.toLowerCase();
-    final filtered = _policies
+    final hasCurrentFilterData = _loadedStatusFilter == _statusFilter;
+    final filtered = (hasCurrentFilterData ? _policies : <_PolicyRecord>[])
         .where(
           (p) =>
               p.policyName.toLowerCase().contains(search) ||
@@ -866,6 +901,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   Widget _buildListPanel(List<_PolicyRecord> filtered) {
     final dark = _isDark(context);
+    final hasCurrentFilterData = _loadedStatusFilter == _statusFilter;
     final total = filtered.length;
     final pageCount = total == 0
         ? 1
@@ -940,14 +976,45 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
             ],
           ),
           const SizedBox(height: 16),
-          if (_loading)
+          if (_loadError != null) ...[
+            Container(
+              key: const Key('attendance-policy-load-error'),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.12),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.65)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, color: Colors.red),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _loadError!,
+                      style: TextStyle(color: _headingColor(context)),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _loading ? null : _loadPolicies,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (_loading && !hasCurrentFilterData)
             const Center(
               child: Padding(
                 padding: EdgeInsets.all(32),
                 child: CircularProgressIndicator(),
               ),
             )
-          else if (filtered.isEmpty)
+          else if (!hasCurrentFilterData && _loadError != null)
+            const SizedBox(height: 120)
+          else if (filtered.isEmpty && _loadError == null)
             Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),
@@ -960,6 +1027,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           else
             Column(
               children: [
+                if (_loading) const LinearProgressIndicator(minHeight: 2),
                 ListView.separated(
                   shrinkWrap: true,
                   itemCount: paged.length,
