@@ -639,9 +639,9 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   Future<String?> _requestMistakenDeleteReason(
     _DepartmentRecord department,
   ) async {
-    final controller = TextEditingController();
     final formKey = GlobalKey<FormState>();
-    final reason = await showDialog<String>(
+    var reason = '';
+    return showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete mistaken department?'),
@@ -656,7 +656,6 @@ class _ManageDepartmentState extends State<ManageDepartment> {
               ),
               const SizedBox(height: 16),
               TextFormField(
-                controller: controller,
                 autofocus: true,
                 maxLength: 1000,
                 maxLines: 3,
@@ -667,6 +666,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
                 validator: (value) => value == null || value.trim().isEmpty
                     ? 'A reason is required.'
                     : null,
+                onSaved: (value) => reason = value?.trim() ?? '',
               ),
             ],
           ),
@@ -679,7 +679,8 @@ class _ManageDepartmentState extends State<ManageDepartment> {
           FilledButton.icon(
             onPressed: () {
               if (formKey.currentState?.validate() != true) return;
-              Navigator.of(dialogContext).pop(controller.text.trim());
+              formKey.currentState?.save();
+              Navigator.of(dialogContext).pop(reason);
             },
             icon: const Icon(Icons.delete_forever_rounded, size: 18),
             label: const Text('Delete permanently'),
@@ -688,8 +689,6 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         ],
       ),
     );
-    controller.dispose();
-    return reason;
   }
 
   Future<bool> _deleteMistakenDepartment() async {
