@@ -373,12 +373,14 @@ router.post('/push', pushAuth, async (req, res) => {
 
       if (result.rowCount > 0) {
         inserted++;
-        userIds.add(userId);
         markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
       } else {
         duplicatesSkipped++;
         markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
       }
+      // A duplicate can be a retry after raw storage succeeded but summary
+      // processing failed. Keep it in scope so the retry repairs the DTR row.
+      userIds.add(userId);
 
       const gateKey = `${userId}|${manilaDate}`;
       let gate = biometricGateCache.get(gateKey);
