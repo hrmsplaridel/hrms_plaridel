@@ -28,7 +28,12 @@ function policyRow({ isUsed = true, overrides = {} } = {}) {
   };
 }
 
-async function updatePolicy({ body, isUsed = true, currentOverrides = {} }) {
+async function updatePolicy({
+  body,
+  isUsed = true,
+  currentOverrides = {},
+  activeAssignmentCount = 0,
+}) {
   const queries = [];
   const invalidations = [];
   const current = policyRow({ isUsed, overrides: currentOverrides });
@@ -44,6 +49,12 @@ async function updatePolicy({ body, isUsed = true, currentOverrides = {} }) {
       }
       if (text.includes('SET is_default = false') && text.includes('id <> $1')) {
         return { rows: [], rowCount: 0 };
+      }
+      if (text.includes('FROM policy_assignments') && text.includes('assignment_count')) {
+        return {
+          rows: [{ assignment_count: activeAssignmentCount }],
+          rowCount: 1,
+        };
       }
       if (text.includes('FROM attendance_policies') && text.includes('WHERE id = $1')) {
         return { rows: [current], rowCount: 1 };
@@ -241,6 +252,40 @@ test('deactivating the default policy also clears its default flag', async () =>
   assert.equal(res.body.is_default, false);
   const update = queries.find(({ text }) => text.startsWith('UPDATE attendance_policies SET'));
   assert.match(update.text, /is_default = \$\d+/);
+});
+
+test('policy deactivation is blocked by current or upcoming assignment periods', async () => {
+  const { res, queries, invalidations } = await updatePolicy({
+    body: { is_active: false },
+    activeAssignmentCount: 2,
+  });
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.code, 'POLICY_DEACTIVATION_BLOCKED');
+  assert.equal(res.body.assignment_count, 2);
+  assert.match(res.body.error, /2 current or upcoming assignment periods/i);
+  assert.match(res.body.official_date, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(
+    queries.some(({ text }) => text.startsWith('UPDATE attendance_policies SET')),
+    false
+  );
+  assert.equal(queries.at(-1).text, 'ROLLBACK');
+  assert.deepEqual(invalidations, []);
+});
+
+test('expired historical assignment periods do not block policy deactivation', async () => {
+  const { res, queries } = await updatePolicy({
+    body: { is_active: false },
+    activeAssignmentCount: 0,
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.is_active, false);
+  const dependencyQuery = queries.find(({ text }) =>
+    text.includes('FROM policy_assignments') && text.includes('assignment_count')
+  );
+  assert.ok(dependencyQuery);
+  assert.match(dependencyQuery.text, /effective_to IS NULL OR effective_to >= \$2::date/);
 });
 
 test('an inactive policy cannot be promoted as default', async () => {

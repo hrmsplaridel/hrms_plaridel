@@ -5,6 +5,7 @@ const { requireAdmin } = require('../middleware/rbac');
 const {
   invalidateAttendancePolicyCache,
 } = require('../services/attendancePolicyCache');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -304,6 +305,32 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     const nextIsActive = body.is_active === undefined
       ? current.is_active !== false
       : body.is_active;
+    if (current.is_active !== false && !nextIsActive) {
+      const officialDate = todayInHrmsTimezone();
+      const assignmentResult = await client.query(
+        `SELECT COUNT(*)::int AS assignment_count
+         FROM policy_assignments
+         WHERE attendance_policy_id = $1
+           AND (is_active IS NULL OR is_active = true)
+           AND (effective_to IS NULL OR effective_to >= $2::date)`,
+        [id, officialDate]
+      );
+      const assignmentCount = Number(
+        assignmentResult.rows[0]?.assignment_count || 0
+      );
+      if (assignmentCount > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error:
+            `This policy cannot be deactivated because it has ${assignmentCount} ` +
+            `current or upcoming assignment ${assignmentCount === 1 ? 'period' : 'periods'}. ` +
+            'End or replace those assignments first.',
+          code: 'POLICY_DEACTIVATION_BLOCKED',
+          assignment_count: assignmentCount,
+          official_date: officialDate,
+        });
+      }
+    }
     let nextIsDefault = body.is_default === undefined
       ? current.is_default === true
       : body.is_default;
