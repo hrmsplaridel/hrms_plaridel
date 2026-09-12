@@ -286,7 +286,7 @@ router.get('/devices', pushAuth, async (req, res) => {
  * Body: { punches: [{ biometric_user_id, logged_at }], device_id?, source_name? }
  * - Looks up user_id from users WHERE biometric_user_id = ?
  * - Skips punches for unmatched biometric_user_id (logged)
- * - Skips punches when not allowed for that Manila calendar day: no shift, whole-day holiday, or blocking approved leave
+ * - Preserves valid matched raw punches even when attendance processing is blocked
  * - Uses ON CONFLICT to skip duplicates
  * - Processes to dtr_daily_summary after insert
  */
@@ -354,35 +354,11 @@ router.post('/push', pushAuth, async (req, res) => {
         skippedInvalidTimestamp++;
         continue;
       }
-      const gateKey = `${userId}|${manilaDate}`;
-      let gate = biometricGateCache.get(gateKey);
-      if (gate === undefined) {
-        gate = await evaluateBiometricDayGate(userId, manilaDate);
-        biometricGateCache.set(gateKey, gate);
-      }
-      if (!gate.allowed) {
-        if (gate.reason === 'no_schedule') skippedNoSchedule++;
-        else if (gate.reason === 'holiday') skippedHoliday++;
-        else if (gate.reason === 'leave') skippedLeave++;
-        continue;
-      }
-
-      const hasExistingPunchForDay = await hasStoredBiometricPunchForDay(
+      const hadStoredPunchForDay = await hasStoredBiometricPunchForDay(
         userId,
         manilaDate,
         existingDayPunchCache
       );
-      if (!hasExistingPunchForDay && isPunchAfterShiftEnd(loggedAt, gate.shiftInfo)) {
-        skippedAfterShiftFirstPunch++;
-        console.warn('[biometric-attendance-logs push] Skipped first punch after shift end', {
-          biometric_user_id: biometricUserId,
-          user_id: userId,
-          logged_at: loggedAt,
-          attendance_date: manilaDate,
-          shift_end_minutes: gate.shiftInfo?.endMinutes,
-        });
-        continue;
-      }
 
       const rawLine = `${biometricUserId}\t${loggedAt}`;
 
@@ -402,6 +378,29 @@ router.post('/push', pushAuth, async (req, res) => {
       } else {
         duplicatesSkipped++;
         markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
+      }
+
+      const gateKey = `${userId}|${manilaDate}`;
+      let gate = biometricGateCache.get(gateKey);
+      if (gate === undefined) {
+        gate = await evaluateBiometricDayGate(userId, manilaDate);
+        biometricGateCache.set(gateKey, gate);
+      }
+      if (!gate.allowed) {
+        if (gate.reason === 'no_schedule') skippedNoSchedule++;
+        else if (gate.reason === 'holiday') skippedHoliday++;
+        else if (gate.reason === 'leave') skippedLeave++;
+        continue;
+      }
+      if (!hadStoredPunchForDay && isPunchAfterShiftEnd(loggedAt, gate.shiftInfo)) {
+        skippedAfterShiftFirstPunch++;
+        console.warn('[biometric-attendance-logs push] Preserved first punch after shift end', {
+          biometric_user_id: biometricUserId,
+          user_id: userId,
+          logged_at: loggedAt,
+          attendance_date: manilaDate,
+          shift_end_minutes: gate.shiftInfo?.endMinutes,
+        });
       }
     }
 
@@ -451,7 +450,7 @@ router.post('/push', pushAuth, async (req, res) => {
  * Import matched biometric logs into biometric_attendance_logs, then process into dtr_daily_summary.
  * Body: { rows: [{ user_id, biometric_user_id, logged_at, raw_line, verify_code?, punch_code?, work_code? }], source_file_name }
  * Uses ON CONFLICT (biometric_user_id, logged_at) DO NOTHING to skip duplicates.
- * Skips rows when not allowed for that Manila calendar day: no shift, whole-day holiday, or blocking approved leave.
+ * Preserves valid raw rows even when attendance processing is blocked for the day.
  * Admin only.
  */
 router.post('/import', protect, requireAdmin, async (req, res) => {
@@ -500,35 +499,11 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         skippedInvalidTimestamp++;
         continue;
       }
-      const gateKey = `${userId}|${manilaDate}`;
-      let gate = biometricGateCache.get(gateKey);
-      if (gate === undefined) {
-        gate = await evaluateBiometricDayGate(userId, manilaDate);
-        biometricGateCache.set(gateKey, gate);
-      }
-      if (!gate.allowed) {
-        if (gate.reason === 'no_schedule') skippedNoSchedule++;
-        else if (gate.reason === 'holiday') skippedHoliday++;
-        else if (gate.reason === 'leave') skippedLeave++;
-        continue;
-      }
-
-      const hasExistingPunchForDay = await hasStoredBiometricPunchForDay(
+      const hadStoredPunchForDay = await hasStoredBiometricPunchForDay(
         userId,
         manilaDate,
         existingDayPunchCache
       );
-      if (!hasExistingPunchForDay && isPunchAfterShiftEnd(loggedAt, gate.shiftInfo)) {
-        skippedAfterShiftFirstPunch++;
-        console.warn('[biometric-attendance-logs import] Skipped first punch after shift end', {
-          biometric_user_id: biometricUserId,
-          user_id: userId,
-          logged_at: loggedAt,
-          attendance_date: manilaDate,
-          shift_end_minutes: gate.shiftInfo?.endMinutes,
-        });
-        continue;
-      }
 
       const verifyCode = row.verify_code?.trim() || null;
       const punchCode = row.punch_code?.trim() || null;
@@ -556,6 +531,29 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
       if (d) {
         if (!dateMin || d < dateMin) dateMin = d;
         if (!dateMax || d > dateMax) dateMax = d;
+      }
+
+      const gateKey = `${userId}|${manilaDate}`;
+      let gate = biometricGateCache.get(gateKey);
+      if (gate === undefined) {
+        gate = await evaluateBiometricDayGate(userId, manilaDate);
+        biometricGateCache.set(gateKey, gate);
+      }
+      if (!gate.allowed) {
+        if (gate.reason === 'no_schedule') skippedNoSchedule++;
+        else if (gate.reason === 'holiday') skippedHoliday++;
+        else if (gate.reason === 'leave') skippedLeave++;
+        continue;
+      }
+      if (!hadStoredPunchForDay && isPunchAfterShiftEnd(loggedAt, gate.shiftInfo)) {
+        skippedAfterShiftFirstPunch++;
+        console.warn('[biometric-attendance-logs import] Preserved first punch after shift end', {
+          biometric_user_id: biometricUserId,
+          user_id: userId,
+          logged_at: loggedAt,
+          attendance_date: manilaDate,
+          shift_end_minutes: gate.shiftInfo?.endMinutes,
+        });
       }
     }
 
