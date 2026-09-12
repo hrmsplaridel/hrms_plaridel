@@ -48,7 +48,7 @@ async function invokeIngestionRoute({
 
   const restoreDb = withMockedModule('../src/config/db', { pool });
   const restoreProcessing = withMockedModule('../src/services/biometricProcessing', {
-    getManilaDateStr: () => '2026-09-12',
+    getManilaDateStr: (value) => String(value).slice(0, 10),
     evaluateBiometricDayGate: async () => {
       events.push('gate');
       return {
@@ -149,4 +149,25 @@ test('device push reprocesses duplicate punches after a prior processing failure
   assert.equal(res.body.duplicates_skipped, 1);
   assert.ok(events.includes('process'));
   assert.deepEqual(processCalls, [[[userId], '2026-09-12', '2026-09-12']]);
+});
+
+test('device push processes only dates represented in the incoming batch', async () => {
+  const { res, processCalls } = await invokeIngestionRoute({
+    path: '/push',
+    gateReason: null,
+    body: {
+      punches: [
+        { biometric_user_id: '1001', logged_at: '2026-09-10T08:00:00+08:00' },
+        { biometric_user_id: '1001', logged_at: '2026-09-12T08:00:00+08:00' },
+      ],
+      source_name: 'test-clock',
+    },
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.inserted, 2);
+  assert.deepEqual(processCalls, [
+    [[userId], '2026-09-10', '2026-09-10'],
+    [[userId], '2026-09-12', '2026-09-12'],
+  ]);
 });

@@ -25,13 +25,6 @@ function pushAuth(req, res, next) {
   });
 }
 
-function toIsoDate(val) {
-  if (!val) return null;
-  const d = val instanceof Date ? val : new Date(val);
-  if (isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
-}
-
 async function hasStoredBiometricPunchForDay(userId, dateStr, cache) {
   const key = `${userId}|${dateStr}`;
   if (cache.has(key)) return cache.get(key);
@@ -51,6 +44,33 @@ async function hasStoredBiometricPunchForDay(userId, dateStr, cache) {
 
 function markStoredBiometricPunchForDay(userId, dateStr, cache) {
   cache.set(`${userId}|${dateStr}`, true);
+}
+
+function addBiometricProcessingScope(scopes, userId, attendanceDate) {
+  let userIds = scopes.get(attendanceDate);
+  if (!userIds) {
+    userIds = new Set();
+    scopes.set(attendanceDate, userIds);
+  }
+  userIds.add(userId);
+}
+
+async function processBiometricScopes(scopes) {
+  let inserted = 0;
+  let updated = 0;
+  const sortedScopes = [...scopes.entries()].sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  for (const [attendanceDate, userIds] of sortedScopes) {
+    const result = await processBiometricLogsToSummary(
+      [...userIds],
+      attendanceDate,
+      attendanceDate
+    );
+    inserted += Number(result?.inserted || 0);
+    updated += Number(result?.updated || 0);
+  }
+  return { inserted, updated };
 }
 
 function sortByLoggedAtAsc(items, getLoggedAt) {
@@ -328,7 +348,7 @@ router.post('/push', pushAuth, async (req, res) => {
     let skippedLeave = 0;
     let skippedAfterShiftFirstPunch = 0;
     let skippedInvalidTimestamp = 0;
-    const userIds = new Set();
+    const processingScopes = new Map();
     const biometricGateCache = new Map();
     const existingDayPunchCache = new Map();
 
@@ -380,7 +400,7 @@ router.post('/push', pushAuth, async (req, res) => {
       }
       // A duplicate can be a retry after raw storage succeeded but summary
       // processing failed. Keep it in scope so the retry repairs the DTR row.
-      userIds.add(userId);
+      addBiometricProcessingScope(processingScopes, userId, manilaDate);
 
       const gateKey = `${userId}|${manilaDate}`;
       let gate = biometricGateCache.get(gateKey);
@@ -406,26 +426,9 @@ router.post('/push', pushAuth, async (req, res) => {
       }
     }
 
-    let summariesInserted = 0;
-    let summariesUpdated = 0;
-    if (userIds.size > 0) {
-      const tz = process.env.HRMS_TIMEZONE || 'Asia/Manila';
-      const scopeRes = await pool.query(
-        `SELECT
-           MIN((logged_at AT TIME ZONE $2)::date)::text AS min_date,
-           MAX((logged_at AT TIME ZONE $2)::date)::text AS max_date
-         FROM biometric_attendance_logs
-         WHERE user_id = ANY($1::uuid[])`,
-        [[...userIds], tz]
-      );
-      const dateFrom = scopeRes.rows[0]?.min_date?.slice(0, 10);
-      const dateTo = scopeRes.rows[0]?.max_date?.slice(0, 10);
-      if (dateFrom && dateTo) {
-        const proc = await processBiometricLogsToSummary([...userIds], dateFrom, dateTo);
-        summariesInserted = proc.inserted;
-        summariesUpdated = proc.updated;
-      }
-    }
+    const processed = await processBiometricScopes(processingScopes);
+    const summariesInserted = processed.inserted;
+    const summariesUpdated = processed.updated;
 
     res.json({
       inserted,
@@ -480,9 +483,7 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
     let skippedLeave = 0;
     let skippedAfterShiftFirstPunch = 0;
     let skippedInvalidTimestamp = 0;
-    const userIds = new Set();
-    let dateMin = null;
-    let dateMax = null;
+    const processingScopes = new Map();
     const biometricGateCache = new Map();
     const existingDayPunchCache = new Map();
 
@@ -528,12 +529,7 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
       }
 
-      userIds.add(userId);
-      const d = toIsoDate(loggedAt);
-      if (d) {
-        if (!dateMin || d < dateMin) dateMin = d;
-        if (!dateMax || d > dateMax) dateMax = d;
-      }
+      addBiometricProcessingScope(processingScopes, userId, manilaDate);
 
       const gateKey = `${userId}|${manilaDate}`;
       let gate = biometricGateCache.get(gateKey);
@@ -559,33 +555,9 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
       }
     }
 
-    let summariesInserted = 0;
-    let summariesUpdated = 0;
-    if (userIds.size > 0) {
-      const tz = process.env.HRMS_TIMEZONE || 'Asia/Manila';
-      const scopeRes = await pool.query(
-        `SELECT
-           MIN((logged_at AT TIME ZONE $2)::date)::text AS min_date,
-           MAX((logged_at AT TIME ZONE $2)::date)::text AS max_date
-         FROM biometric_attendance_logs
-         WHERE user_id = ANY($1::uuid[])`,
-        [[...userIds], tz]
-      );
-      const dateFrom = scopeRes.rows[0]?.min_date?.slice(0, 10);
-      const dateTo = scopeRes.rows[0]?.max_date?.slice(0, 10);
-      if (dateFrom && dateTo) {
-        console.log('[biometric-attendance-logs import] Calling processBiometricLogsToSummary', {
-          userIdCount: userIds.size,
-          dateFrom,
-          dateTo,
-        });
-        const proc = await processBiometricLogsToSummary([...userIds], dateFrom, dateTo);
-        summariesInserted = proc.inserted;
-        summariesUpdated = proc.updated;
-      } else {
-        console.log('[biometric-attendance-logs import] Skipping processing: no date range from DB');
-      }
-    }
+    const processed = await processBiometricScopes(processingScopes);
+    const summariesInserted = processed.inserted;
+    const summariesUpdated = processed.updated;
 
     res.json({
       inserted,
