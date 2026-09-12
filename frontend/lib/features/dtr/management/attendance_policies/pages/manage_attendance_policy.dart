@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/attendance_policies/data/attendance_policy_request_guard.dart';
 
@@ -437,13 +438,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to add';
+        final message = userFacingApiError(e);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
+        ).showSnackBar(SnackBar(content: Text('Failed to add: $message')));
       }
       return false;
     }
@@ -503,13 +501,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to update';
+        final message = userFacingApiError(e);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
+        ).showSnackBar(SnackBar(content: Text('Failed to update: $message')));
       }
       return false;
     }
@@ -554,13 +549,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to deactivate';
+        final message = userFacingApiError(e);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed: $msg')));
+        ).showSnackBar(SnackBar(content: Text('Failed: $message')));
       }
       return false;
     }
@@ -604,10 +596,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       return true;
     } on DioException catch (error) {
       if (mounted) {
-        final message =
-            (error.response?.data as Map?)?['error'] ??
-            error.message ??
-            'Failed to reactivate';
+        final message = userFacingApiError(error);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed: $message')));
@@ -653,13 +642,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to delete policy';
+        final message = userFacingApiError(e);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed: $msg')));
+        ).showSnackBar(SnackBar(content: Text('Failed: $message')));
       }
       return false;
     }
