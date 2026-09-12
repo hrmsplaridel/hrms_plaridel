@@ -121,6 +121,7 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
   console.error = () => {};
   process.env.JWT_SECRET = 'dtr-assistant-test-secret';
   const captured = [];
+  const capturedFeedback = [];
   const employeeId = '11111111-1111-4111-8111-111111111111';
   const otherEmployeeId = '22222222-2222-4222-8222-222222222222';
   const token = jwt.sign(
@@ -192,12 +193,14 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
           throw error;
         }
         return {
-          messageId: 'message-1',
-          content: 'Your own HRMS answer.',
-          intent: 'leave_balance',
-          provider: 'hrms',
-          model: 'hrms-intent-rules',
-          modelProfile: input.modelProfile || 'tools_ollama',
+          message: {
+            id: '33333333-3333-4333-8333-333333333333',
+            content: 'Your own HRMS answer.',
+            intent: 'leave_balance',
+            provider: 'hrms',
+            model: 'hrms-intent-rules',
+            modelProfile: input.modelProfile || 'tools_ollama',
+          },
           mode: 'employee_self',
           sources: {},
           actions: [],
@@ -222,10 +225,15 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
   const restoreFeedback = withMockedModule(
     '../src/services/dtrAssistant/dtrAssistantFeedbackService',
     {
-      submitDtrAssistantFeedback: async (_pool, payload) => ({
-        id: 'feedback-1',
-        ...payload,
-      }),
+      issueDtrAssistantFeedbackToken: () => 'server-signed-feedback-token',
+      submitDtrAssistantFeedback: async (_pool, payload) => {
+        capturedFeedback.push(payload);
+        return {
+          id: 'feedback-1',
+          rating: payload.rating,
+          comment: payload.comment,
+        };
+      },
     }
   );
 
@@ -280,6 +288,11 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
   assert.equal(captured[0].user.id, employeeId);
   assert.equal(captured[0].targetUserId, undefined);
   assert.equal(captured[0].conversationId, 'chat-api-contract');
+  assert.ok(captured[0].signal instanceof AbortSignal);
+  assert.equal(
+    chat.json.message.feedbackToken,
+    'server-signed-feedback-token'
+  );
 
   const timeout = await requestJson(server, {
     method: 'POST',
@@ -320,13 +333,16 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
     token: otherToken,
   });
   assert.equal(foreignExport.status, 404);
+  assert.equal(foreignExport.json.code, 'DTR_ASSISTANT_EXPORT_UNAVAILABLE');
+  assert.equal(foreignExport.json.action.type, 'send_prompt');
+  assert.equal(foreignExport.json.action.intent, 'dtr_export_guidance');
 
   const feedback = await requestJson(server, {
     method: 'POST',
     path: '/api/dtr-assistant/feedback',
     token,
     body: {
-      messageId: 'message-1',
+      feedbackToken: 'server-signed-feedback-token',
       rating: 'down',
       intent: 'leave_balance',
       promptPreview: 'pila akong leave balance',
@@ -334,6 +350,11 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
     },
   });
   assert.equal(feedback.status, 200);
-  assert.equal(feedback.json.feedback.userId, employeeId);
   assert.equal(feedback.json.feedback.comment, 'Wrong leave type.');
+  assert.deepEqual(capturedFeedback[0], {
+    userId: employeeId,
+    feedbackToken: 'server-signed-feedback-token',
+    rating: 'down',
+    comment: 'Wrong leave type.',
+  });
 });

@@ -20,6 +20,11 @@ function assistantContext(dateRange, userId) {
   return {
     scope: 'employee_self',
     date_range: dateRange,
+    data_completeness: {
+      dtr_records: { complete: true, capped: false, returned_count: 2 },
+      dtr_calendar_days: { complete: true, capped: false, returned_count: 4 },
+      dtr_export: { complete: true },
+    },
     employee: {
       id: userId,
       full_name: 'Test Employee',
@@ -227,14 +232,28 @@ function assistantContext(dateRange, userId) {
 test('DTR assistant service uses employee-self data for real HRMS scenarios', async (t) => {
   const loaded = [];
   let llmMode = 'throw';
+  let delayNextContext = false;
+  let signalDelayedContextStarted;
+  let releaseDelayedContext;
+  const delayedContextStarted = new Promise((resolve) => {
+    signalDelayedContextStarted = resolve;
+  });
+  const delayedContextRelease = new Promise((resolve) => {
+    releaseDelayedContext = resolve;
+  });
   const restoreData = withMockedModule(
     '../src/services/dtrAssistant/dtrAssistantDataService',
     {
       loadEmployeeAssistantContext: async (
         _pool,
-        { userId, message, dateRange }
+        { userId, message, dateRange, intents }
       ) => {
-        loaded.push({ userId, message, dateRange });
+        loaded.push({ userId, message, dateRange, intents });
+        if (delayNextContext) {
+          delayNextContext = false;
+          signalDelayedContextStarted();
+          await delayedContextRelease;
+        }
         return assistantContext(dateRange, userId);
       },
     }
@@ -279,11 +298,22 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
   });
   assert.equal(malicious.mode, 'employee_self');
   assert.equal(loaded.at(-1).userId, user.id);
+  assert.deepEqual(loaded.at(-1).intents, ['leave_balance']);
   assert.match(malicious.message.content, /0\.75/);
   assert.deepEqual(malicious.sources.leaveRequestIds, [
     'leave-rejected',
     'leave-pending',
   ]);
+
+  const combined = await chatWithDtrAssistant(pool, {
+    user: { ...user, id: `${user.id}-context-union` },
+    message: 'what is my leave balance and show my missing DTR logs?',
+  });
+  assert.equal(combined.intent, 'leave_balance');
+  assert.deepEqual(
+    new Set(loaded.at(-1).intents),
+    new Set(['leave_balance', 'dtr_missing_logs'])
+  );
 
   const absence = await chatWithDtrAssistant(pool, {
     user: { ...user, id: `${user.id}-absence` },
@@ -389,6 +419,30 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
   });
   assert.equal(malformedFallback.provider, 'hrms');
   assert.match(malformedFallback.message.content, /not sure|help/i);
+
+  const {
+    getAssistantMemory,
+  } = require('../src/services/dtrAssistant/dtrAssistantMemoryService');
+  const turnUser = { ...user, id: `${user.id}-turn-order` };
+  const turnConversation = 'integration-turn-order';
+  delayNextContext = true;
+  const delayedFirst = chatWithDtrAssistant(pool, {
+    user: turnUser,
+    conversationId: turnConversation,
+    message: 'what is my sick leave balance?',
+  });
+  await delayedContextStarted;
+  const newerSecond = await chatWithDtrAssistant(pool, {
+    user: turnUser,
+    conversationId: turnConversation,
+    message: 'show my DTR today',
+  });
+  releaseDelayedContext();
+  const olderFirst = await delayedFirst;
+
+  const orderedMemory = getAssistantMemory(turnUser.id, turnConversation);
+  assert.equal(orderedMemory.intent, newerSecond.intent);
+  assert.notEqual(orderedMemory.intent, olderFirst.intent);
 });
 
 test('DTR assistant full chat pipeline preserves a long mixed-topic conversation', async (t) => {
@@ -646,4 +700,5 @@ test('DTR assistant locator prompts yield to new locator and DTR questions', asy
     )
   );
   assert.doesNotMatch(statusQuestion.message.content, /destination\/office/i);
+
 });

@@ -34,6 +34,7 @@ function createLocatorSubmissionService({
   notifyAfterSubmit,
   broadcastSubmitted,
   recordHistory,
+  snapshotReviewers,
   nowProvider = () => new Date(),
   logger = console,
 }) {
@@ -49,6 +50,7 @@ function createLocatorSubmissionService({
   assertDependency('notifyAfterSubmit', notifyAfterSubmit);
   assertDependency('broadcastSubmitted', broadcastSubmitted);
   assertDependency('recordHistory', recordHistory);
+  assertDependency('snapshotReviewers', snapshotReviewers);
   assertDependency('nowProvider', nowProvider);
 
   async function submit({
@@ -91,6 +93,7 @@ function createLocatorSubmissionService({
     let insertedRow = null;
     let submitStatus = null;
     let departmentHeadUserId = null;
+    let departmentReviewerUserIds = [];
 
     try {
       await client.query('BEGIN');
@@ -102,6 +105,7 @@ function createLocatorSubmissionService({
       );
       departmentHeadUserId =
         reviewSnapshot?.departmentHeadUserId || null;
+      departmentReviewerUserIds = reviewSnapshot?.reviewerUserIds || [];
       submitStatus = departmentHeadUserId
         ? 'pending_department_head'
         : 'pending_hr';
@@ -238,6 +242,12 @@ function createLocatorSubmissionService({
       if (!insertedRow?.id) {
         throw new Error('Locator request insert did not return a saved record.');
       }
+      await snapshotReviewers(client, {
+        requestType: 'locator',
+        requestId: insertedRow.id,
+        departmentId,
+        reviewers: reviewSnapshot?.reviewers || [],
+      });
       await recordHistory(client, {
         locatorSlipId: insertedRow.id,
         action: 'submitted',
@@ -282,6 +292,7 @@ function createLocatorSubmissionService({
         pmOut,
         requestType,
         departmentHeadUserId,
+        departmentReviewerUserIds,
       });
     } catch (error) {
       logger.error('[locator notification]', error);

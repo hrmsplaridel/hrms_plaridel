@@ -60,23 +60,6 @@ function buildDtrAssistantToolAnswerMessages({ message, intent, toolAnswer, tool
 }
 
 function buildDtrAssistantDirectMessages({ message, context }) {
-  const compactContext = {
-    dateRange: context.date_range,
-    employee: context.employee,
-    dtrRecords: context.dtr_records,
-    dtrCalendarDays: context.dtr_calendar_days,
-    dtrPolicies: context.dtr_policies,
-    leaveBalances: context.leave_balances,
-    leaveRequests: context.recent_leave_requests,
-    leaveAnnualUsage: context.leave_annual_usage,
-    leaveTypes: context.leave_types,
-    leaveGuidelines: context.leave_guidelines,
-    assistantExtraction: context.assistant_extraction,
-    locatorSlips: context.recent_locator_slips,
-    locatorTypes: context.locator_types,
-    locatorPolicies: context.locator_policies,
-  };
-
   return [
     {
       role: 'system',
@@ -87,7 +70,7 @@ function buildDtrAssistantDirectMessages({ message, context }) {
       role: 'user',
       content: `${JSON.stringify({
         question: message,
-        HRMS_CONTEXT: compactContext,
+        HRMS_CONTEXT: context,
       })}\n/no_think`,
     },
   ];

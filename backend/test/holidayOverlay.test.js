@@ -8,6 +8,74 @@ const {
   resolveAttendanceHolidayOverlay,
 } = require('../src/services/holidayOverlay');
 
+function suspension(coverage, overrides = {}) {
+  return {
+    id: coverage,
+    name: `${coverage} suspension`,
+    date_from: '2026-09-09',
+    date_to: '2026-09-09',
+    holiday_type: 'work_suspension',
+    recurring: false,
+    coverage,
+    ...overrides,
+  };
+}
+
+for (const first of ['am_only', 'pm_only', 'whole_day']) {
+  for (const second of ['am_only', 'pm_only', 'whole_day']) {
+    test(`overlapping ${first} and ${second} coverage is combined without double counting`, async () => {
+      const rows = [suspension(first), suspension(second, { id: 'second' })];
+      const original = JSON.stringify(rows);
+      const overlays = await loadHolidayOverlayMap(
+        { query: async () => ({ rows }) }, '2026-09-09', '2026-09-09',
+      );
+      assert.equal(overlays.size, 1);
+      const holiday = overlays.get('2026-09-09');
+      assert.equal(holiday.coverage, first === second ? first : 'whole_day');
+      assert.equal(holiday.id, rows[0].id);
+      assert.equal(holiday.name, rows[0].name);
+      assert.equal(JSON.stringify(rows), original);
+    });
+  }
+}
+
+test('coverage combines only on dates where the ranges overlap', async () => {
+  const rows = [
+    suspension('am_only', { date_from: '2026-09-08' }),
+    suspension('pm_only', { date_to: '2026-09-10' }),
+  ];
+  const overlays = await loadHolidayOverlayMap(
+    { query: async () => ({ rows }) }, '2026-09-08', '2026-09-10',
+  );
+  assert.deepEqual([...overlays.values()].map((row) => row.coverage),
+    ['am_only', 'whole_day', 'pm_only']);
+});
+
+test('recurring whole-day coverage is retained under a dated partial suspension label', async () => {
+  const rows = [
+    suspension('am_only', { id: 'dated' }),
+    suspension('whole_day', {
+      id: 'recurring', recurring: true, holiday_type: 'regular',
+      date_from: '2020-09-09', date_to: '2020-09-09',
+    }),
+  ];
+  const overlays = await loadHolidayOverlayMap(
+    { query: async () => ({ rows }) }, '2026-09-09', '2026-09-09',
+  );
+  assert.equal(overlays.get('2026-09-09').id, 'dated');
+  assert.equal(overlays.get('2026-09-09').coverage, 'whole_day');
+});
+
+test('removing one overlapping suspension restores only the remaining exemption', async () => {
+  let rows = [suspension('am_only'), suspension('pm_only')];
+  const client = { query: async () => ({ rows }) };
+  const before = await loadHolidayOverlayMap(client, '2026-09-09', '2026-09-09');
+  rows = [suspension('pm_only')];
+  const after = await loadHolidayOverlayMap(client, '2026-09-09', '2026-09-09');
+  assert.equal(before.get('2026-09-09').coverage, 'whole_day');
+  assert.equal(after.get('2026-09-09').coverage, 'pm_only');
+});
+
 test('holiday overlay expands ranges and gives dated holidays priority over recurring templates', async () => {
   const client = {
     async query(sql, params) {

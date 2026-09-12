@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { excludeMayorIntakeStubSql } = require('./mayorIntakeStub');
 
 /** Lowercase, trimmed, without common HR prefixes — used to match applications to vacancies. */
 function normalizePositionKey(raw) {
@@ -94,6 +95,7 @@ async function countApplicationsForPositionKey(positionKeyLower) {
       AND btrim(position_applied_for::text) <> ''
       AND lower(regexp_replace(regexp_replace(trim(position_applied_for::text), '^now hiring:\\s*', '', 'i'), '\\s+', ' ', 'g')) = $1
       AND (${ACTIVE_APPLICANT_SLOT_SQL})
+      AND ${excludeMayorIntakeStubSql()}
     `,
     [key]
   );
@@ -110,6 +112,7 @@ async function countTotalApplicationsForPositionKey(positionKeyLower) {
     WHERE position_applied_for IS NOT NULL
       AND btrim(position_applied_for::text) <> ''
       AND lower(regexp_replace(regexp_replace(trim(position_applied_for::text), '^now hiring:\\s*', '', 'i'), '\\s+', ' ', 'g')) = $1
+      AND ${excludeMayorIntakeStubSql()}
     `,
     [key]
   );
@@ -143,6 +146,7 @@ async function enrichVacanciesWithApplicationCounts(vacancies) {
       WHERE position_applied_for IS NOT NULL
         AND btrim(position_applied_for::text) <> ''
         AND (${ACTIVE_APPLICANT_SLOT_SQL})
+        AND ${excludeMayorIntakeStubSql()}
       GROUP BY ${POSITION_KEY_SQL}
       `
     );
@@ -153,6 +157,7 @@ async function enrichVacanciesWithApplicationCounts(vacancies) {
       FROM public.recruitment_applications
       WHERE position_applied_for IS NOT NULL
         AND btrim(position_applied_for::text) <> ''
+        AND ${excludeMayorIntakeStubSql()}
       GROUP BY ${POSITION_KEY_SQL}
       `
     );

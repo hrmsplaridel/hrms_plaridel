@@ -66,6 +66,8 @@ async function validateAssignmentSelection(
        (u.id IS NOT NULL) AS employee_exists,
        COALESCE(u.is_active, false) AS employee_is_active,
        COALESCE(u.employment_status, 'active') AS employee_status,
+       u.date_hired::text AS employee_date_hired,
+       u.separation_date::text AS employee_separation_date,
        (d.id IS NOT NULL) AS department_exists,
        COALESCE(d.is_active, false) AS department_is_active,
        (p.id IS NOT NULL) AS position_exists,
@@ -127,7 +129,42 @@ async function validateAssignmentSelection(
     departmentId: department,
     positionId: position,
     shiftId: shift,
+    employeeIsActive: row.employee_is_active === true,
+    employeeStatus: String(row.employee_status || 'active').toLowerCase(),
+    employeeDateHired: row.employee_date_hired || null,
+    employeeSeparationDate: row.employee_separation_date || null,
   };
+}
+
+function validateEmployeeServiceCoverage(
+  selection,
+  { effectiveFrom, effectiveTo }
+) {
+  const hiredOn = selection.employeeDateHired;
+  const separatedOn = selection.employeeSeparationDate;
+
+  if (hiredOn && effectiveFrom < hiredOn) {
+    throw new AssignmentTransitionError(
+      `Assignment coverage cannot begin before the employee's hire date (${hiredOn})`,
+      409
+    );
+  }
+
+  if (separatedOn && (!effectiveTo || effectiveTo > separatedOn)) {
+    throw new AssignmentTransitionError(
+      `Assignment coverage cannot extend beyond the employee's separation date (${separatedOn})`,
+      409
+    );
+  }
+
+  const employeeIsActive =
+    selection.employeeIsActive && selection.employeeStatus === 'active';
+  if (!employeeIsActive && !separatedOn) {
+    throw new AssignmentTransitionError(
+      'Assignment coverage cannot be changed for an inactive employee without a separation date',
+      409
+    );
+  }
 }
 
 async function closeOverlappingPredecessor(
@@ -160,7 +197,9 @@ async function closeOverlappingPredecessor(
                effective_to::text AS effective_to, is_active`,
     [predecessor.rows[0].id, previousDay]
   );
-  return updated.rows[0] || null;
+  return updated.rows[0]
+    ? { before: predecessor.rows[0], after: updated.rows[0] }
+    : null;
 }
 
 async function findOverlappingAssignment(
@@ -184,6 +223,73 @@ async function findOverlappingAssignment(
   return result.rows[0] || null;
 }
 
+async function assertNoOverlappingDepartmentHeadAssignment(
+  db,
+  {
+    departmentId,
+    positionId,
+    effectiveFrom,
+    effectiveTo,
+    excludeAssignmentId = null,
+  }
+) {
+  const selectedPeriod = await db.query(
+    `SELECT id
+       FROM position_department_head_periods
+      WHERE position_id = $1::uuid
+        AND department_id = $2::uuid
+        AND is_active = true
+        AND effective_from <= COALESCE($4::date, 'infinity'::date)
+        AND COALESCE(effective_to, 'infinity'::date) >= $3::date
+      LIMIT 1`,
+    [positionId, departmentId, effectiveFrom, effectiveTo]
+  );
+  if (selectedPeriod.rowCount === 0) return;
+
+  // Serialize Head changes by department before checking effective periods.
+  await db.query(
+    `SELECT id FROM departments WHERE id = $1::uuid FOR UPDATE`,
+    [departmentId]
+  );
+  const conflict = await db.query(
+    `SELECT a.id, a.employee_id,
+            a.effective_from::text AS effective_from,
+            a.effective_to::text AS effective_to
+     FROM position_department_head_periods selected_period
+     JOIN assignments a
+       ON a.department_id = selected_period.department_id
+     JOIN position_department_head_periods head_period
+       ON head_period.position_id = a.position_id
+      AND head_period.department_id = a.department_id
+      AND head_period.is_active = true
+     WHERE selected_period.position_id = $5::uuid
+       AND selected_period.department_id = $1::uuid
+       AND selected_period.is_active = true
+       AND a.is_active = true
+       AND selected_period.effective_from <= COALESCE($3::date, 'infinity'::date)
+       AND COALESCE(selected_period.effective_to, 'infinity'::date) >= $2::date
+       AND a.effective_from <= COALESCE($3::date, 'infinity'::date)
+       AND COALESCE(a.effective_to, 'infinity'::date) >= $2::date
+       AND head_period.effective_from <= COALESCE($3::date, 'infinity'::date)
+       AND COALESCE(head_period.effective_to, 'infinity'::date) >= $2::date
+       AND head_period.effective_from <= COALESCE(a.effective_to, 'infinity'::date)
+       AND COALESCE(head_period.effective_to, 'infinity'::date) >= a.effective_from
+       AND head_period.effective_from <= COALESCE(selected_period.effective_to, 'infinity'::date)
+       AND COALESCE(head_period.effective_to, 'infinity'::date) >= selected_period.effective_from
+       AND ($4::uuid IS NULL OR a.id <> $4::uuid)
+     ORDER BY a.effective_from, a.created_at, a.id
+     LIMIT 1
+     FOR UPDATE OF a`,
+    [departmentId, effectiveFrom, effectiveTo, excludeAssignmentId, positionId]
+  );
+  if (conflict.rowCount > 0) {
+    throw new AssignmentTransitionError(
+      'This department already has a Department Head assignment during the selected effective period',
+      409
+    );
+  }
+}
+
 function overlapMessage(row) {
   const range = row?.effective_to
     ? `${row.effective_from} to ${row.effective_to}`
@@ -202,6 +308,7 @@ async function createAssignmentTransition(
     effectiveTo = null,
     isActive = true,
     remarks = null,
+    includeTransition = false,
   }
 ) {
   const from = cleanDate(effectiveFrom, 'effective_from', { required: true });
@@ -214,9 +321,16 @@ async function createAssignmentTransition(
     shiftId,
     requireActiveReferences: isActive === true,
   });
-
   if (isActive) {
-    await closeOverlappingPredecessor(db, {
+    validateEmployeeServiceCoverage(selection, {
+      effectiveFrom: from,
+      effectiveTo: to,
+    });
+  }
+
+  let closedPredecessor = null;
+  if (isActive) {
+    closedPredecessor = await closeOverlappingPredecessor(db, {
       employeeId: selection.employeeId,
       effectiveFrom: from,
     });
@@ -228,6 +342,12 @@ async function createAssignmentTransition(
     if (conflict) {
       throw new AssignmentTransitionError(overlapMessage(conflict), 409);
     }
+    await assertNoOverlappingDepartmentHeadAssignment(db, {
+      departmentId: selection.departmentId,
+      positionId: selection.positionId,
+      effectiveFrom: from,
+      effectiveTo: to,
+    });
   }
 
   const result = await db.query(
@@ -251,10 +371,14 @@ async function createAssignmentTransition(
       String(remarks || '').trim() || null,
     ]
   );
-  return result.rows[0];
+  const assignment = result.rows[0];
+  return includeTransition ? { assignment, closedPredecessor } : assignment;
 }
 
-async function updateAssignmentTransition(db, { assignmentId, changes = {} }) {
+async function updateAssignmentTransition(
+  db,
+  { assignmentId, changes = {}, includeTransition = false }
+) {
   const existingResult = await db.query(
     `SELECT id, employee_id, department_id, position_id, shift_id,
             effective_from::text AS effective_from,
@@ -299,19 +423,34 @@ async function updateAssignmentTransition(db, { assignmentId, changes = {} }) {
     changes.positionId !== undefined ||
     changes.shiftId !== undefined;
   const reactivating = existing.is_active === false && isActive;
+  const coverageChanged =
+    from !== existing.effective_from || to !== existing.effective_to;
+  let validatedSelection = null;
   if (selectionChanged || reactivating) {
-    await validateAssignmentSelection(db, {
+    validatedSelection = await validateAssignmentSelection(db, {
       ...selection,
       requireActiveReferences: isActive,
+    });
+  } else if (isActive && coverageChanged) {
+    validatedSelection = await validateAssignmentSelection(db, {
+      ...selection,
+      requireActiveReferences: false,
     });
   } else if (isActive) {
     cleanRequiredSelectionId(selection.departmentId, 'Department');
     cleanRequiredSelectionId(selection.positionId, 'Position');
     cleanRequiredSelectionId(selection.shiftId, 'Shift');
   }
+  if (isActive && validatedSelection) {
+    validateEmployeeServiceCoverage(validatedSelection, {
+      effectiveFrom: from,
+      effectiveTo: to,
+    });
+  }
 
+  let closedPredecessor = null;
   if (isActive) {
-    await closeOverlappingPredecessor(db, {
+    closedPredecessor = await closeOverlappingPredecessor(db, {
       employeeId: existing.employee_id,
       effectiveFrom: from,
       excludeAssignmentId: assignmentId,
@@ -325,6 +464,13 @@ async function updateAssignmentTransition(db, { assignmentId, changes = {} }) {
     if (conflict) {
       throw new AssignmentTransitionError(overlapMessage(conflict), 409);
     }
+    await assertNoOverlappingDepartmentHeadAssignment(db, {
+      departmentId: selection.departmentId,
+      positionId: selection.positionId,
+      effectiveFrom: from,
+      effectiveTo: to,
+      excludeAssignmentId: assignmentId,
+    });
   }
 
   const result = await db.query(
@@ -354,7 +500,8 @@ async function updateAssignmentTransition(db, { assignmentId, changes = {} }) {
         : String(changes.remarks || '').trim() || null,
     ]
   );
-  return result.rows[0];
+  const assignment = result.rows[0];
+  return includeTransition ? { assignment, closedPredecessor } : assignment;
 }
 
 async function endEmployeeAssignmentsFromDate(db, { employeeId, effectiveFrom }) {
@@ -392,6 +539,7 @@ async function endEmployeeAssignmentsFromDate(db, { employeeId, effectiveFrom })
 module.exports = {
   AssignmentTransitionError,
   validateAssignmentSelection,
+  assertNoOverlappingDepartmentHeadAssignment,
   createAssignmentTransition,
   updateAssignmentTransition,
   endEmployeeAssignmentsFromDate,

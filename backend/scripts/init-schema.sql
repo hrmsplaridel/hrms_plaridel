@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'employee'
-    CHECK (role IN ('admin', 'hr', 'employee', 'supervisor')),
+    CHECK (role IN ('admin', 'hr', 'employee', 'supervisor', 'mayor')),
 
   first_name TEXT,
   full_name TEXT NOT NULL,
@@ -127,12 +127,16 @@ CREATE TABLE IF NOT EXISTS auth_password_reset_otps (
 CREATE TABLE IF NOT EXISTS departments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   department_number INT UNIQUE DEFAULT nextval('departments_department_number_seq'),
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   description TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_departments_name_not_blank CHECK (BTRIM(name) <> '')
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_departments_name_ci
+  ON departments (LOWER(BTRIM(name)));
 
 -- =========================================
 -- OFFICES (branch / site; DocuTracker office routing + users.office_id)
@@ -161,16 +165,70 @@ CREATE TABLE IF NOT EXISTS positions (
   name TEXT NOT NULL,
   description TEXT,
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  is_department_head BOOLEAN NOT NULL DEFAULT false,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  CONSTRAINT uq_positions_name_department UNIQUE (name, department_id)
+  CONSTRAINT chk_positions_name_not_blank CHECK (BTRIM(name) <> ''),
+  CONSTRAINT chk_position_department_head_department
+    CHECK (is_department_head = false OR department_id IS NOT NULL)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_positions_name_department_ci
+  ON positions (
+    LOWER(BTRIM(name)),
+    (COALESCE(department_id, '00000000-0000-0000-0000-000000000000'::uuid))
+  );
+
+-- Effective-dated official Department Head designations. Position rows retain
+-- is_department_head as a compatibility indicator; authority is resolved here.
+CREATE TABLE IF NOT EXISTS position_department_head_periods (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  position_id UUID NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
+  department_id UUID NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_position_department_head_period_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+
+ALTER TABLE position_department_head_periods
+  DROP CONSTRAINT IF EXISTS position_department_head_period_no_overlap;
+ALTER TABLE position_department_head_periods
+  ADD CONSTRAINT position_department_head_period_no_overlap
+  EXCLUDE USING gist (
+    department_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (is_active = true);
+
+CREATE INDEX IF NOT EXISTS idx_position_department_head_periods_effective
+  ON position_department_head_periods
+    (position_id, department_id, effective_from, effective_to)
+  WHERE is_active = true;
 
 -- =========================================
 -- SHIFTS / SCHEDULES
 -- =========================================
+CREATE OR REPLACE FUNCTION public.is_valid_shift_working_days(days INTEGER[])
+RETURNS BOOLEAN
+LANGUAGE SQL
+IMMUTABLE
+STRICT
+AS $$
+  SELECT cardinality(days) BETWEEN 1 AND 7
+     AND days <@ ARRAY[1,2,3,4,5,6,7]::INTEGER[]
+     AND cardinality(days) = (
+       SELECT COUNT(DISTINCT day)::INTEGER
+       FROM unnest(days) AS day
+     );
+$$;
+
 CREATE TABLE IF NOT EXISTS shifts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   shift_number INT UNIQUE DEFAULT nextval('shifts_shift_number_seq'),
@@ -183,9 +241,13 @@ CREATE TABLE IF NOT EXISTS shifts (
     CONSTRAINT shifts_punch_mode_check
     CHECK (punch_mode IN ('auto', 'full_day', 'am_only', 'pm_only', 'single_session')),
 
-  grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
+  grace_period_minutes INT NOT NULL DEFAULT 0
+    CONSTRAINT shifts_grace_period_range_check
+    CHECK (grace_period_minutes BETWEEN 0 AND 240),
 
-  working_days INT[] NOT NULL DEFAULT ARRAY[1,2,3,4,5],
+  working_days INT[] NOT NULL DEFAULT ARRAY[1,2,3,4,5]
+    CONSTRAINT shifts_working_days_check
+    CHECK (public.is_valid_shift_working_days(working_days)),
   is_active BOOLEAN NOT NULL DEFAULT true,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -293,12 +355,93 @@ CREATE INDEX IF NOT EXISTS idx_assignments_employee_effective_range
   ON assignments (employee_id, effective_from, effective_to)
   WHERE is_active = true;
 
+-- Effective-dated delegates who may review alongside the official Department
+-- Head. The primary reviewer is always resolved from the assignment history.
+CREATE TABLE IF NOT EXISTS department_reviewer_backups (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  department_id UUID NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  backup_rank INT NOT NULL CHECK (backup_rank > 0),
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  remarks TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_department_reviewer_backup_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+
+ALTER TABLE department_reviewer_backups
+  DROP CONSTRAINT IF EXISTS department_reviewer_backup_rank_no_overlap;
+ALTER TABLE department_reviewer_backups
+  ADD CONSTRAINT department_reviewer_backup_rank_no_overlap
+  EXCLUDE USING gist (
+    department_id WITH =,
+    backup_rank WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (is_active = true);
+
+ALTER TABLE department_reviewer_backups
+  DROP CONSTRAINT IF EXISTS department_reviewer_employee_no_overlap;
+ALTER TABLE department_reviewer_backups
+  ADD CONSTRAINT department_reviewer_employee_no_overlap
+  EXCLUDE USING gist (
+    department_id WITH =,
+    employee_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  )
+  WHERE (is_active = true);
+
+CREATE INDEX IF NOT EXISTS idx_department_reviewer_backups_effective
+  ON department_reviewer_backups
+    (department_id, effective_from, effective_to, backup_rank)
+  WHERE is_active = true;
+
+-- =========================================
+-- EMPLOYEE OTHER POSITIONS / DESIGNATIONS
+-- =========================================
+CREATE TABLE IF NOT EXISTS employee_other_positions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  department_id UUID NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+  position_id UUID NOT NULL REFERENCES positions(id) ON DELETE RESTRICT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  remarks TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_employee_other_position_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_employee_other_positions_employee
+  ON employee_other_positions (employee_id, effective_from DESC);
+
+CREATE INDEX IF NOT EXISTS idx_employee_other_positions_position
+  ON employee_other_positions (position_id);
+
+CREATE INDEX IF NOT EXISTS idx_employee_other_positions_duplicate_lookup
+  ON employee_other_positions (
+    employee_id,
+    department_id,
+    position_id,
+    effective_from,
+    effective_to
+  )
+  WHERE is_active = true;
+
 -- =========================================
 -- POLICY ASSIGNMENTS
 -- =========================================
 CREATE TABLE IF NOT EXISTS policy_assignments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  attendance_policy_id UUID NOT NULL REFERENCES attendance_policies(id) ON DELETE CASCADE,
+  attendance_policy_id UUID NOT NULL REFERENCES attendance_policies(id) ON DELETE RESTRICT,
 
   employee_id UUID REFERENCES users(id) ON DELETE CASCADE,
   department_id UUID REFERENCES departments(id) ON DELETE CASCADE,
@@ -581,6 +724,9 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   approved_days_with_pay NUMERIC(5,2),
   approved_days_without_pay NUMERIC(5,2),
   approved_other_details TEXT,
+  -- Exact amount held in leave_balances.pending_days while this request is pending.
+  -- NULL means the leave type does not use a credit balance.
+  reserved_credit_days NUMERIC(10,3),
 
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
@@ -602,12 +748,34 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   CONSTRAINT chk_leave_approved_days_nonnegative CHECK (
     (approved_days_with_pay IS NULL OR approved_days_with_pay >= 0)
     AND (approved_days_without_pay IS NULL OR approved_days_without_pay >= 0)
+  ),
+  CONSTRAINT chk_leave_reserved_credit_days_nonnegative CHECK (
+    reserved_credit_days IS NULL OR reserved_credit_days >= 0
   )
 );
 CREATE INDEX IF NOT EXISTS idx_leave_requests_review_department
   ON leave_requests(review_department_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_assigned_department_head
   ON leave_requests(assigned_department_head_id, status);
+
+CREATE TABLE IF NOT EXISTS leave_request_department_reviewers (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leave_request_id UUID NOT NULL REFERENCES leave_requests(id) ON DELETE CASCADE,
+  department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  reviewer_name_snapshot TEXT NOT NULL,
+  reviewer_role TEXT NOT NULL CHECK (reviewer_role IN ('primary', 'backup')),
+  backup_rank INT CHECK (backup_rank IS NULL OR backup_rank > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_leave_reviewer_rank CHECK (
+    (reviewer_role = 'primary' AND backup_rank IS NULL)
+    OR (reviewer_role = 'backup' AND backup_rank IS NOT NULL)
+  ),
+  UNIQUE (leave_request_id, reviewer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_leave_request_department_reviewers_user
+  ON leave_request_department_reviewers(reviewer_id, leave_request_id);
 
 -- =========================================
 -- LEAVE BALANCES
@@ -980,6 +1148,25 @@ CREATE INDEX IF NOT EXISTS idx_locator_slips_request_type
 CREATE INDEX IF NOT EXISTS idx_locator_request_types_active
   ON locator_request_types(is_active, sort_order, label);
 
+CREATE TABLE IF NOT EXISTS locator_slip_department_reviewers (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  locator_slip_id UUID NOT NULL REFERENCES locator_slips(id) ON DELETE CASCADE,
+  department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  reviewer_name_snapshot TEXT NOT NULL,
+  reviewer_role TEXT NOT NULL CHECK (reviewer_role IN ('primary', 'backup')),
+  backup_rank INT CHECK (backup_rank IS NULL OR backup_rank > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_locator_reviewer_rank CHECK (
+    (reviewer_role = 'primary' AND backup_rank IS NULL)
+    OR (reviewer_role = 'backup' AND backup_rank IS NOT NULL)
+  ),
+  UNIQUE (locator_slip_id, reviewer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_locator_slip_department_reviewers_user
+  ON locator_slip_department_reviewers(reviewer_id, locator_slip_id);
+
 -- =========================================
 -- LOCATOR WORKFLOW HISTORY (APPEND-ONLY)
 -- =========================================
@@ -1049,6 +1236,7 @@ CREATE TABLE IF NOT EXISTS dtr_assistant_feedback (
   model_profile TEXT,
   prompt_preview TEXT,
   prompt_hash TEXT,
+  response_hash TEXT,
   intent_confidence NUMERIC(5,4),
   intent_source TEXT,
   content_preview TEXT,
@@ -1063,6 +1251,9 @@ CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_user_created
 
 CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_rating_created
   ON dtr_assistant_feedback(rating, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_created
+  ON dtr_assistant_feedback(created_at);
 
 CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_prompt_hash
   ON dtr_assistant_feedback(prompt_hash)
@@ -1125,7 +1316,7 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
 
   assignment_id UUID REFERENCES assignments(id) ON DELETE SET NULL,
   shift_id UUID REFERENCES shifts(id) ON DELETE SET NULL,
-  attendance_policy_id UUID REFERENCES attendance_policies(id) ON DELETE SET NULL,
+  attendance_policy_id UUID REFERENCES attendance_policies(id) ON DELETE RESTRICT,
   holiday_id UUID REFERENCES holidays(id) ON DELETE SET NULL,
   leave_request_id UUID REFERENCES leave_requests(id) ON DELETE SET NULL,
 
@@ -1520,6 +1711,7 @@ CREATE TABLE IF NOT EXISTS ld_training_requirement_records (
 -- =========================================
 CREATE TABLE IF NOT EXISTS recruitment_applications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  applicant_number TEXT,
   first_name TEXT,
   middle_name TEXT,
   last_name TEXT,
@@ -1550,6 +1742,9 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   doc_drug_test_name TEXT,
   doc_nbi_clearance_path TEXT,
   doc_nbi_clearance_name TEXT,
+  doc_medical_certificate_reject_reason TEXT,
+  doc_drug_test_reject_reason TEXT,
+  doc_nbi_clearance_reject_reason TEXT,
   final_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
   orientation_at TIMESTAMPTZ,
   orientation_attended BOOLEAN,
@@ -1562,7 +1757,9 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
         'exam_taken',
         'passed',
         'failed',
-        'registered'
+        'registered',
+        'endorsed',
+        'rejected'
       )
     ),
   final_interview_at TIMESTAMPTZ,
@@ -1594,6 +1791,20 @@ CREATE TABLE IF NOT EXISTS recruitment_exam_questions (
   correct_index INT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_custom_exams (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  exam_type TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  format TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_hidden_exams (
+  exam_type TEXT PRIMARY KEY,
+  hidden_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS job_vacancy_announcement (
@@ -1698,8 +1909,54 @@ CREATE TABLE IF NOT EXISTS recruitment_exam_time_limits (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS mayor_endorsement_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  application_id UUID NOT NULL REFERENCES recruitment_applications(id) ON DELETE CASCADE,
+  requested_office_id UUID REFERENCES offices(id) ON DELETE SET NULL,
+  requested_office_name TEXT,
+  destination_office_id UUID REFERENCES offices(id) ON DELETE SET NULL,
+  destination_office_name TEXT,
+  priority TEXT NOT NULL DEFAULT 'normal'
+    CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  intake_form JSONB NOT NULL DEFAULT '{}'::JSONB,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'mayor_approved', 'endorsed', 'rejected')),
+  staff_notes TEXT,
+  mayor_remarks TEXT,
+  rejection_reason TEXT,
+  endorsement_letter TEXT,
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  approved_at TIMESTAMPTZ,
+  approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  office_form_approved_at TIMESTAMPTZ,
+  office_form_approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  rejected_at TIMESTAMPTZ,
+  rejected_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  submitted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  submitted_by_name TEXT,
+  appointment_at TIMESTAMPTZ,
+  appointment_status TEXT NOT NULL DEFAULT 'none',
+  appointment_notes TEXT,
+  no_show_count INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (application_id)
+);
+
+CREATE TABLE IF NOT EXISTS mayor_endorsement_activity_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  request_id UUID NOT NULL REFERENCES mayor_endorsement_requests(id) ON DELETE CASCADE,
+  application_id UUID REFERENCES recruitment_applications(id) ON DELETE SET NULL,
+  actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  remarks TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 INSERT INTO recruitment_exam_time_limits (exam_type, time_limit_seconds)
 VALUES
+  ('bei', 0),
   ('general', 2700),
   ('math', 2700),
   ('general_info', 600)
@@ -1804,6 +2061,8 @@ CREATE TABLE IF NOT EXISTS docutracker_workflow_steps (
   workflow_version INT NOT NULL DEFAULT 1,
   step_order INT NOT NULL CHECK (step_order > 0),
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  assignee_source TEXT NOT NULL DEFAULT 'specific_users'
+    CHECK (assignee_source IN ('specific_users', 'department_reviewers')),
   label TEXT,
   enabled BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2372,6 +2631,22 @@ DO UPDATE SET
   granted = EXCLUDED.granted,
   updated_at = now();
 
+-- Mayor endorsement account seed (idempotent)
+INSERT INTO users (email, password_hash, role, full_name, is_active)
+VALUES (
+  'mayorsoffice@test.com',
+  '$2b$10$uhPv2oXZLwC9WJ7hXjg3NOLTnYrjyWextH30e9CoR/z3JovGmHeyy',
+  'mayor',
+  'Mayor''s Office',
+  true
+)
+ON CONFLICT (email) DO UPDATE
+SET password_hash = EXCLUDED.password_hash,
+    role = EXCLUDED.role,
+    full_name = EXCLUDED.full_name,
+    is_active = true,
+    updated_at = now();
+
 -- =========================================
 -- INDEXES
 -- =========================================
@@ -2526,12 +2801,27 @@ CREATE INDEX IF NOT EXISTS idx_recruitment_applications_status
   ON recruitment_applications(status);
 CREATE INDEX IF NOT EXISTS idx_recruitment_applications_created
   ON recruitment_applications(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_recruitment_applications_applicant_number
+  ON recruitment_applications (applicant_number)
+  WHERE applicant_number IS NOT NULL AND btrim(applicant_number) <> '';
+CREATE INDEX IF NOT EXISTS idx_recruitment_applications_applicant_number
+  ON recruitment_applications (applicant_number);
 CREATE INDEX IF NOT EXISTS idx_recruitment_exam_results_application
   ON recruitment_exam_results(application_id);
 CREATE INDEX IF NOT EXISTS idx_recruitment_exam_questions_type
   ON recruitment_exam_questions(exam_type);
+CREATE INDEX IF NOT EXISTS idx_recruitment_custom_exams_created
+  ON recruitment_custom_exams(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_vacancy_announcement_updated
   ON job_vacancy_announcement(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_status
+  ON mayor_endorsement_requests(status);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_submitted
+  ON mayor_endorsement_requests(submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_office
+  ON mayor_endorsement_requests(requested_office_id, destination_office_id);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_activity_request_created
+  ON mayor_endorsement_activity_logs(request_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_selection_lineup_entries_created
   ON selection_lineup_entries(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_applicants_profile_entries_created

@@ -143,7 +143,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final isScreenActive = TickerMode.of(context);
+    final isScreenActive = TickerMode.valuesOf(context).enabled;
     if (_initialized) {
       if (_isScreenActive == isScreenActive) return;
       _isScreenActive = isScreenActive;
@@ -372,10 +372,13 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       'sickLeave' => 'Sick Leave',
       _ => request.leaveTypeLabel,
     };
+    final reservedDays = request.reservedCreditDays ?? 0;
     if (balance == null) {
-      return '$bucketLabel credits: no balance row is available yet.';
+      return '$bucketLabel credits: no paid credits are available. The request may be allocated without pay.';
     }
-    return '$bucketLabel credits: ${balance.availableDays.toStringAsFixed(1)} available (${balance.remainingDays.toStringAsFixed(1)} remaining excl. pending).';
+    final availableForThisRequest = (balance.availableDays + reservedDays)
+        .clamp(0, double.infinity);
+    return '$bucketLabel credits: ${availableForThisRequest.toStringAsFixed(1)} available for this request, including ${reservedDays.toStringAsFixed(1)} already reserved.';
   }
 
   Future<void> _safeAutoRefresh({bool forceRefresh = false}) async {

@@ -8,14 +8,15 @@ const {
 } = require('../services/holidayOverlay');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
-  ensureShiftPunchModeColumn,
   getShiftType: resolveShiftType,
   getExpectedWorkMinutes: resolveExpectedWorkMinutes,
   getExpectedWorkMinutesForCoverage,
   getExpectedAmEndMinutes,
+  getExpectedPmStartMinutes,
   computeClockOutUndertimeMinutes,
   getExpectedLogsForDay: resolveExpectedLogsForDay,
   computeTotalHoursFromRecord,
+  resolveSingleSessionPunches,
 } = require('../services/shiftAttendance');
 const {
   evaluateLocatorCoverage,
@@ -184,40 +185,40 @@ function nowMinutesInHrmsTimezone() {
   return minutesFromMidnightInTimeZone(new Date(), HRMS_TIMEZONE) ?? 0;
 }
 
-const ATTENDANCE_POLICY_CACHE_TTL_MS = 60 * 1000;
-let _cachedAttendancePolicy = null;
-let _cachedAttendancePolicyAt = 0;
-const _policyByEmployeeDateCache = new Map();
+const {
+  getAttendancePolicyCache,
+  setAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
 
 function _normalizePolicy(row) {
   return normalizeAttendancePolicy(row);
 }
 
 async function getActiveDefaultAttendancePolicy() {
-  const now = Date.now();
-  if (_cachedAttendancePolicy && now - _cachedAttendancePolicyAt < ATTENDANCE_POLICY_CACHE_TTL_MS) {
-    return _cachedAttendancePolicy;
-  }
+  const cached = getAttendancePolicyCache('dtr', 'default');
+  if (cached.found) return cached.value;
   const result = await pool.query(
-    `SELECT id, work_hours_per_day, deduct_late,
+    `SELECT id, work_hours_per_day, use_equivalent_day_conversion, deduct_late,
             convert_late_to_equivalent_day, deduct_undertime, convert_undertime_to_equivalent_day,
             absent_equals_full_day_deduction, combine_late_and_undertime, deduction_multiplier
      FROM attendance_policies
-     WHERE (is_active IS NULL OR is_active = true)
-     ORDER BY is_default DESC, updated_at DESC, created_at DESC
+     WHERE is_default = true
+       AND (is_active IS NULL OR is_active = true)
      LIMIT 1`
   );
-  _cachedAttendancePolicy = _normalizePolicy(result.rows[0]);
-  _cachedAttendancePolicyAt = now;
-  return _cachedAttendancePolicy;
+  return setAttendancePolicyCache(
+    'dtr',
+    'default',
+    _normalizePolicy(result.rows[0]),
+    { isDefault: true }
+  );
 }
 
 async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
   if (!employeeId || !dateStr) return getActiveDefaultAttendancePolicy();
   const cacheKey = `${employeeId}|${dateStr}`;
-  const now = Date.now();
-  const cached = _policyByEmployeeDateCache.get(cacheKey);
-  if (cached && now - cached.at < ATTENDANCE_POLICY_CACHE_TTL_MS) return cached.value;
+  const cached = getAttendancePolicyCache('dtr', cacheKey);
+  if (cached.found) return cached.value;
 
   const result = await pool.query(
     `WITH eff AS (
@@ -229,14 +230,13 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
        LIMIT 1
      )
-     SELECT p.id, p.work_hours_per_day, p.deduct_late,
+     SELECT p.id, p.work_hours_per_day, p.use_equivalent_day_conversion, p.deduct_late,
             p.convert_late_to_equivalent_day, p.deduct_undertime, p.convert_undertime_to_equivalent_day,
             p.absent_equals_full_day_deduction, p.combine_late_and_undertime, p.deduction_multiplier
      FROM policy_assignments pa
      JOIN attendance_policies p ON p.id = pa.attendance_policy_id
      LEFT JOIN eff e ON true
      WHERE (pa.is_active IS NULL OR pa.is_active = true)
-       AND (p.is_active IS NULL OR p.is_active = true)
        AND pa.effective_from <= $2::date
        AND (pa.effective_to IS NULL OR pa.effective_to >= $2::date)
        AND (
@@ -256,8 +256,10 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
     [employeeId, dateStr]
   );
   const resolved = result.rows[0] ? _normalizePolicy(result.rows[0]) : await getActiveDefaultAttendancePolicy();
-  _policyByEmployeeDateCache.set(cacheKey, { at: now, value: resolved });
-  return resolved;
+  return setAttendancePolicyCache('dtr', cacheKey, resolved, {
+    employeeId,
+    date: dateStr,
+  });
 }
 
 async function applyAttendancePolicyPenalties(employeeId, dateStr, rawLateMinutes, rawUndertimeMinutes) {
@@ -344,11 +346,10 @@ function getExpectedLogsForDay(shiftInfo, holidayInfo) {
 /**
  * Get the employee assignment effective on a date, including closed history.
  * Returns { startMinutes, endMinutes, graceMinutes, breakEndMinutes } or null if no assignment/shift.
- * breakEndMinutes: PM shift start (when late is checked for break_in). Null = no PM late check.
+ * breakEndMinutes: configured PM shift start; legacy full-day null values use 1:00 PM.
  * endMinutes: shift end time in minutes from midnight (for validating clock-in outside shift).
  */
 async function getAssignmentShiftForDate(employeeId, dateStr) {
-  await ensureShiftPunchModeColumn(pool);
   const result = await pool.query(
     `SELECT a.override_start_time::text AS override_start_time,
             a.override_end_time::text AS override_end_time,
@@ -410,14 +411,15 @@ async function computeStatusFromShift(employeeId, dateStr, timeInIso) {
 
 /**
  * Compute PM status: 'late' if break_in is after break_end + grace, else 'present'.
- * Returns null if no break_in, or if no shift break_end configured (no PM late check).
+ * Returns null if there is no break_in. Full-day legacy rows without break_end use 1:00 PM.
  */
 async function computePmLateStatus(employeeId, dateStr, breakInIso) {
   if (!breakInIso) return null;
   const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
-  if (!shiftInfo || shiftInfo.breakEndMinutes == null) return 'present'; // no PM cutoff = present
-  const { breakEndMinutes, graceMinutes } = shiftInfo;
-  const cutoffMinutes = breakEndMinutes + graceMinutes;
+  if (!shiftInfo) return 'present';
+  const pmStartMinutes = getExpectedPmStartMinutes(shiftInfo);
+  if (pmStartMinutes == null) return 'present';
+  const cutoffMinutes = pmStartMinutes + shiftInfo.graceMinutes;
 
   const localMins = minutesFromMidnightInTimeZone(breakInIso);
   if (localMins == null) return 'present';
@@ -445,19 +447,31 @@ async function computeLateMinutes(
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
   const shiftInfo = prefetchedShiftInfo || await getAssignmentShiftForDate(employeeId, dateStr);
   if (!shiftInfo) return 0;
-  const { startMinutes, graceMinutes, breakEndMinutes } = shiftInfo;
+  const { startMinutes, graceMinutes } = shiftInfo;
   const type = getShiftType(shiftInfo);
   let total = 0;
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
   const evalPm = !isHolidayOrSuspension || coverage !== 'pm_only';
+  if (type === 'single_session') {
+    const sessionIn = timeInIso || breakInIso;
+    const evaluateSession = shiftInfo.startMinutes >= NOON_MINUTES ? evalPm : evalAm;
+    if (evaluateSession && sessionIn) {
+      const localMins = minutesFromMidnightInTimeZone(sessionIn);
+      if (localMins != null) {
+        const cutoff = startMinutes + graceMinutes;
+        if (localMins > cutoff) total += localMins - cutoff;
+      }
+    }
+    return total;
+  }
   if (evalAm && timeInIso && type !== 'pm_only') {
     const localMins = minutesFromMidnightInTimeZone(timeInIso);
     if (localMins == null) return total;
     const cutoff = startMinutes + graceMinutes;
     if (localMins > cutoff) total += localMins - cutoff;
   }
-  const pmStartMinutes = breakEndMinutes ?? startMinutes;
-  if (evalPm && breakInIso && (type === 'pm_only' || pmStartMinutes != null)) {
+  const pmStartMinutes = getExpectedPmStartMinutes(shiftInfo);
+  if (evalPm && breakInIso && pmStartMinutes != null) {
     const localMins = minutesFromMidnightInTimeZone(breakInIso);
     if (localMins == null) return total;
     const cutoff = pmStartMinutes + graceMinutes;
@@ -517,7 +531,7 @@ async function computeUndertimeMinutes(
       (timeInIso != null || locatorSegSet.has('AM IN')) &&
       (breakOutIso != null || locatorSegSet.has('AM OUT'));
     const amEndMinutes = getExpectedAmEndMinutes(shiftInfo);
-    const pmStartMinutes = shiftInfo.breakEndMinutes ?? NOON_MINUTES;
+    const pmStartMinutes = getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
     const amWindowClosed =
       dateStr < todayStr || (dateStr === todayStr && nowMinutes >= pmStartMinutes);
     if (!hasAmLogs && amWindowClosed) {
@@ -527,8 +541,11 @@ async function computeUndertimeMinutes(
   const breakOutMins = breakOutIso
     ? minutesFromMidnightInTimeZone(breakOutIso)
     : null;
-  const timeOutMins = timeOutIso
-    ? minutesFromMidnightInTimeZone(timeOutIso)
+  const effectiveTimeOut = type === 'single_session'
+    ? (timeOutIso || breakOutIso)
+    : timeOutIso;
+  const timeOutMins = effectiveTimeOut
+    ? minutesFromMidnightInTimeZone(effectiveTimeOut)
     : null;
   const completedSegmentUndertime = computeClockOutUndertimeMinutes({
     shiftInfo,
@@ -639,9 +656,16 @@ async function computeAttendanceRemark(
   const hasPm =
     (record.break_in != null || locatorSegSet.has('PM IN')) &&
     (record.time_out != null || locatorSegSet.has('PM OUT'));
-  const hasInOut =
-    (record.time_in != null || locatorSegSet.has('AM IN')) &&
-    (record.time_out != null || locatorSegSet.has('PM OUT'));
+  const sessionPunches = resolveSingleSessionPunches(record);
+  const hasInOut = resolveShiftType(shiftInfo) === 'single_session'
+    ? (
+        (sessionPunches.timeIn != null || locatorSegSet.has('AM IN') || locatorSegSet.has('PM IN')) &&
+        (sessionPunches.timeOut != null || locatorSegSet.has('AM OUT') || locatorSegSet.has('PM OUT'))
+      )
+    : (
+        (record.time_in != null || locatorSegSet.has('AM IN')) &&
+        (record.time_out != null || locatorSegSet.has('PM OUT'))
+      );
   const missingRequired =
     (expected.needsAm && !hasAm) ||
     (expected.needsPm && !hasPm) ||
@@ -809,7 +833,6 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
   const map = new Map();
   if (!employeeIds || employeeIds.length === 0) return map;
   if (!startStr || !endStr) return map;
-  await ensureShiftPunchModeColumn(pool);
   const res = await pool.query(
     `SELECT a.id,
             a.employee_id,
@@ -2712,12 +2735,16 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
     const coverage = holidayInfo?.coverage || null;
     const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
 
+    const shiftType = resolveShiftType(shiftInfo);
+    const statusTimeIn = shiftType === 'single_session'
+      ? (existing.time_in || existing.break_in)
+      : existing.time_in;
     let status = existing.status;
     if (holidayId != null && coverage === 'whole_day') {
       status = 'holiday';
     } else if (status !== 'on_leave') {
-      status = existing.time_in
-        ? await computeStatusFromShift(employeeId, dateStr, existing.time_in)
+      status = statusTimeIn
+        ? await computeStatusFromShift(employeeId, dateStr, statusTimeIn)
         : (existing.status === 'holiday' ? 'absent' : existing.status);
     }
 

@@ -25,14 +25,18 @@ async function notifyAfterSubmit(pool, {
   startDateStr,
   endDateStr,
   departmentHeadUserId,
+  departmentReviewerUserIds = [],
 }) {
   const range = fmtRange(startDateStr, endDateStr);
   const who = employeeName || 'An employee';
   const lt = leaveLabel(leaveTypeName);
 
   if (status === 'pending_department_head' && departmentHeadUserId) {
-    await insertNotification(pool, {
-      userId: departmentHeadUserId,
+    const targets = [...new Set([
+      departmentHeadUserId,
+      ...departmentReviewerUserIds,
+    ].filter((id) => id && id !== employeeUserId))];
+    await insertNotificationForUsers(pool, targets, {
       category: 'leave',
       type: 'leave_pending_department_head',
       title: 'Leave request needs your review',

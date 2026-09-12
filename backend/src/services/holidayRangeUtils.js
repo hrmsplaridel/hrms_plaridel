@@ -22,6 +22,28 @@ function toYyyyMmDd(d) {
   return `${y}-${m}-${day}`;
 }
 
+function monthDayKey(value) {
+  return value.m * 100 + value.d;
+}
+
+function isValidRecurringMonthDay(value) {
+  if (!Number.isInteger(value.m) || !Number.isInteger(value.d)) return false;
+  // Year 2000 is a leap year, so February 29 remains a valid template date.
+  const date = new Date(Date.UTC(2000, value.m - 1, value.d));
+  return date.getUTCMonth() === value.m - 1 && date.getUTCDate() === value.d;
+}
+
+function datesInYearMatching(year, predicate) {
+  const out = [];
+  const current = new Date(year, 0, 1, 12, 0, 0);
+  while (current.getFullYear() === year) {
+    const key = (current.getMonth() + 1) * 100 + current.getDate();
+    if (predicate(key)) out.push(toYyyyMmDd(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return out;
+}
+
 /**
  * Dates in [dateFrom, dateTo] intersected with [windowStart, windowEnd], inclusive (non-recurring).
  * @param {string} dateFromStr
@@ -56,30 +78,16 @@ function expandNonRecurringToWindow(dateFromStr, dateToStr, windowStart, windowE
  * @param {number} year
  */
 function expandTemplateInYear(t0, t1, year) {
-  const start = new Date(year, t0.m - 1, t0.d, 12, 0, 0);
-  const endSameYear = new Date(year, t1.m - 1, t1.d, 12, 0, 0);
-  const out = [];
-  if (endSameYear >= start) {
-    const cur = new Date(start);
-    while (cur <= endSameYear) {
-      out.push(toYyyyMmDd(cur));
-      cur.setDate(cur.getDate() + 1);
-    }
-  } else {
-    const endDec = new Date(year, 11, 31, 12, 0, 0);
-    let cur = new Date(start);
-    while (cur <= endDec) {
-      out.push(toYyyyMmDd(cur));
-      cur.setDate(cur.getDate() + 1);
-    }
-    const endNext = new Date(year + 1, t1.m - 1, t1.d, 12, 0, 0);
-    cur = new Date(year + 1, 0, 1, 12, 0, 0);
-    while (cur <= endNext) {
-      out.push(toYyyyMmDd(cur));
-      cur.setDate(cur.getDate() + 1);
-    }
+  if (!isValidRecurringMonthDay(t0) || !isValidRecurringMonthDay(t1)) return [];
+  const startKey = monthDayKey(t0);
+  const endKey = monthDayKey(t1);
+  if (endKey >= startKey) {
+    return datesInYearMatching(year, (key) => key >= startKey && key <= endKey);
   }
-  return out;
+  return [
+    ...datesInYearMatching(year, (key) => key >= startKey),
+    ...datesInYearMatching(year + 1, (key) => key <= endKey),
+  ];
 }
 
 /**

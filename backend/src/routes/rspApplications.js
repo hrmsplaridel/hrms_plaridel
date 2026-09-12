@@ -10,7 +10,7 @@ const {
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const { isAttachmentPathAllowedInDb } = require('../utils/rspAttachmentPolicy');
-const { resolveLocalRspAttachment, RSP_SUBDIR } = require('../utils/rspLocalAttachment');
+const { resolveLocalRspAttachment, findLocalRspAttachment, RSP_SUBDIR } = require('../utils/rspLocalAttachment');
 const { sendSmtpMail, isSmtpConfigured } = require('../utils/smtpMail');
 const { notifyNewRecruitmentApplication } = require('../utils/emailJsMail');
 const recruitmentNotifications = require('../services/recruitmentNotifications');
@@ -18,6 +18,7 @@ const {
   isEmailJsConfiguredForHireEmail,
   sendHireCredentialsEmailJs,
 } = require('../utils/emailJsMail');
+const { excludeMayorIntakeStubSql } = require('../utils/mayorIntakeStub');
 const {
   verifyRspEmailVerificationToken,
   signRspApplicantAccessToken,
@@ -119,16 +120,25 @@ const RSP_DOC_KIND_COLUMNS = {
   medical_certificate: {
     pathCol: 'doc_medical_certificate_path',
     nameCol: 'doc_medical_certificate_name',
+    rejectReasonCol: 'doc_medical_certificate_reject_reason',
   },
   drug_test_result: {
     pathCol: 'doc_drug_test_path',
     nameCol: 'doc_drug_test_name',
+    rejectReasonCol: 'doc_drug_test_reject_reason',
   },
   nbi_clearance: {
     pathCol: 'doc_nbi_clearance_path',
     nameCol: 'doc_nbi_clearance_name',
+    rejectReasonCol: 'doc_nbi_clearance_reject_reason',
   },
 };
+
+const FINAL_REQUIREMENT_KINDS = new Set([
+  'medical_certificate',
+  'drug_test_result',
+  'nbi_clearance',
+]);
 
 function parseRspDocKind(value) {
   if (value == null || typeof value !== 'string') return null;
@@ -139,7 +149,7 @@ function parseRspDocKind(value) {
 }
 
 const RSP_APPLICATION_ROW_SELECT = `
-  id, full_name, first_name, middle_name, last_name, suffix, sex,
+  id, applicant_number, full_name, first_name, middle_name, last_name, suffix, sex,
   course, address, age, civil_status,
   email, phone, resume_notes, position_applied_for,
   attachment_path, attachment_name,
@@ -150,6 +160,9 @@ const RSP_APPLICATION_ROW_SELECT = `
   doc_medical_certificate_path, doc_medical_certificate_name,
   doc_drug_test_path, doc_drug_test_name,
   doc_nbi_clearance_path, doc_nbi_clearance_name,
+  doc_medical_certificate_reject_reason,
+  doc_drug_test_reject_reason,
+  doc_nbi_clearance_reject_reason,
   final_requirements_approved,
   orientation_at,
   orientation_attended,
@@ -158,6 +171,39 @@ const RSP_APPLICATION_ROW_SELECT = `
   created_at, updated_at
 `.replace(/\s+/g, ' ');
 
+/** Unambiguous alphabet (no 0/O/1/I) for human-readable applicant IDs. */
+const APPLICANT_NUMBER_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function generateApplicantNumberCandidate() {
+  let body = '';
+  for (let i = 0; i < 8; i += 1) {
+    body += APPLICANT_NUMBER_ALPHABET[
+      Math.floor(Math.random() * APPLICANT_NUMBER_ALPHABET.length)
+    ];
+  }
+  return `PLR-${body}`;
+}
+
+async function allocateUniqueApplicantNumber(client = pool) {
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const candidate = generateApplicantNumberCandidate();
+    const exists = await client.query(
+      `SELECT 1 FROM public.recruitment_applications WHERE applicant_number = $1 LIMIT 1`,
+      [candidate],
+    );
+    if (exists.rows.length === 0) return candidate;
+  }
+  throw new Error('Unable to allocate a unique applicant number');
+}
+
+function normalizeApplicantNumber(raw) {
+  if (raw == null) return '';
+  return String(raw)
+    .trim()
+    .toUpperCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^A-Z0-9-]/g, '');
+}
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 const rspAttachmentsRoot = path.join(UPLOAD_DIR, RSP_SUBDIR);
 if (!fs.existsSync(rspAttachmentsRoot)) {
@@ -237,7 +283,9 @@ async function ensureRspApplicationsTables() {
             'exam_taken',
             'passed',
             'failed',
-            'registered'
+            'registered',
+            'endorsed',
+            'rejected'
           )
         ),
       created_at TIMESTAMPTZ DEFAULT now(),
@@ -289,6 +337,9 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS doc_drug_test_name TEXT,
       ADD COLUMN IF NOT EXISTS doc_nbi_clearance_path TEXT,
       ADD COLUMN IF NOT EXISTS doc_nbi_clearance_name TEXT,
+      ADD COLUMN IF NOT EXISTS doc_medical_certificate_reject_reason TEXT,
+      ADD COLUMN IF NOT EXISTS doc_drug_test_reject_reason TEXT,
+      ADD COLUMN IF NOT EXISTS doc_nbi_clearance_reject_reason TEXT,
       ADD COLUMN IF NOT EXISTS final_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS orientation_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS orientation_attended BOOLEAN,
@@ -306,7 +357,38 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS course TEXT,
       ADD COLUMN IF NOT EXISTS address TEXT,
       ADD COLUMN IF NOT EXISTS age TEXT,
-      ADD COLUMN IF NOT EXISTS civil_status TEXT;
+      ADD COLUMN IF NOT EXISTS civil_status TEXT,
+      ADD COLUMN IF NOT EXISTS applicant_number TEXT;
+  `);
+
+  // Backfill missing applicant numbers with unique random codes.
+  {
+    const missing = await pool.query(
+      `SELECT id
+       FROM public.recruitment_applications
+       WHERE applicant_number IS NULL OR btrim(applicant_number) = ''`,
+    );
+    for (const row of missing.rows) {
+      const number = await allocateUniqueApplicantNumber();
+      await pool.query(
+        `UPDATE public.recruitment_applications
+         SET applicant_number = $2
+         WHERE id = $1::uuid
+           AND (applicant_number IS NULL OR btrim(applicant_number) = '')`,
+        [row.id, number],
+      );
+    }
+  }
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_recruitment_applications_applicant_number
+      ON public.recruitment_applications (applicant_number)
+      WHERE applicant_number IS NOT NULL AND btrim(applicant_number) <> '';
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_recruitment_applications_applicant_number
+      ON public.recruitment_applications (applicant_number);
   `);
 
   await pool.query(`
@@ -407,19 +489,22 @@ router.post('/', publicSubmissionLimiter, async (req, res) => {
       }
     }
 
+    const applicantNumber = await allocateUniqueApplicantNumber();
+
     const result = await pool.query(
       `
       INSERT INTO public.recruitment_applications
-        (full_name, first_name, middle_name, last_name, suffix, sex,
+        (applicant_number, full_name, first_name, middle_name, last_name, suffix, sex,
          course, address, age, civil_status,
          email, phone, resume_notes, position_applied_for, status, created_at, updated_at)
       VALUES
-        ($1, $2, $3, $4, $5, $6,
-         $7, $8, $9, $10,
-         $11, $12, $13, $14, $15, now(), now())
+        ($1, $2, $3, $4, $5, $6, $7,
+         $8, $9, $10, $11,
+         $12, $13, $14, $15, $16, now(), now())
       RETURNING ${RSP_APPLICATION_ROW_SELECT}
       `,
       [
+        applicantNumber,
         finalFullName,
         fn,
         mn,
@@ -524,6 +609,41 @@ router.get('/by-email', publicLookupLimiter, async (req, res) => {
   }
 });
 
+// GET /api/rsp/applications/by-applicant-number?number=PLR-XXXXXXXX
+// Lookup to verify applicant personal details by randomized ID number.
+router.get('/by-applicant-number', async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const number = normalizeApplicantNumber(req.query.number ?? req.query.id);
+    if (!number) {
+      return res.status(400).json({
+        error: 'number query param is required (e.g. PLR-AB12CD34)',
+      });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT ${RSP_APPLICATION_ROW_SELECT}
+      FROM public.recruitment_applications
+      WHERE upper(applicant_number) = $1
+      LIMIT 1
+      `,
+      [number],
+    );
+
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: 'Applicant ID not found' });
+
+    return res.json({ ok: true, application: row });
+  } catch (err) {
+    console.error('[rspApplications GET /by-applicant-number]', err);
+    return res.status(500).json({
+      error: 'Failed to look up applicant ID',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
 // GET /api/rsp/applications
 // Admin list of applicants.
 router.get('/', protect, async (_req, res) => {
@@ -533,6 +653,7 @@ router.get('/', protect, async (_req, res) => {
       `
       SELECT ${RSP_APPLICATION_ROW_SELECT}
       FROM public.recruitment_applications
+      WHERE ${excludeMayorIntakeStubSql()}
       ORDER BY created_at DESC
       `
     );
@@ -828,6 +949,102 @@ router.put('/:applicationId/final-interview-outcome', protect, async (req, res) 
     });
   }
 });
+
+// POST /api/rsp/applications/:applicationId/final-requirements/:kind/reject
+// Admin: reject one final-requirement PDF so the applicant must re-upload it.
+router.post(
+  '/:applicationId/final-requirements/:kind/reject',
+  ...protect,
+  async (req, res) => {
+    try {
+      await ensureRspApplicationsTables();
+      const { applicationId, kind: kindRaw } = req.params;
+      const docKind = parseRspDocKind(kindRaw);
+      if (!docKind || !FINAL_REQUIREMENT_KINDS.has(docKind)) {
+        return res.status(400).json({
+          error:
+            'kind must be medical_certificate, drug_test_result, or nbi_clearance',
+        });
+      }
+
+      const reasonRaw =
+        typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+      const reason =
+        reasonRaw.slice(0, 500) ||
+        'HR requested a new upload for this requirement.';
+
+      const { pathCol, nameCol, rejectReasonCol } =
+        RSP_DOC_KIND_COLUMNS[docKind];
+
+      const check = await pool.query(
+        `
+        SELECT
+          id,
+          hired_user_id,
+          status,
+          "${pathCol}" AS file_path,
+          "${nameCol}" AS file_name
+        FROM public.recruitment_applications
+        WHERE id = $1
+        `,
+        [applicationId],
+      );
+      if (!check.rows[0]) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
+      const row = check.rows[0];
+      const hired =
+        (row.hired_user_id && String(row.hired_user_id).trim() !== '') ||
+        String(row.status || '').toLowerCase() === 'registered';
+      if (hired) {
+        return res.status(400).json({
+          error:
+            'Cannot reject final requirements after the applicant is already hired.',
+        });
+      }
+      if (!row.file_path || String(row.file_path).trim() === '') {
+        return res.status(400).json({
+          error: 'No uploaded file to reject for this requirement.',
+        });
+      }
+
+      const objectPath = String(row.file_path).trim();
+      const displayName = row.file_name || path.basename(objectPath);
+      const abs =
+        findLocalRspAttachment(UPLOAD_DIR, objectPath, displayName) ||
+        resolveLocalRspAttachment(UPLOAD_DIR, objectPath);
+      if (abs && fs.existsSync(abs)) {
+        try {
+          fs.unlinkSync(abs);
+        } catch (e) {
+          console.warn('[rspApplications reject final-req] unlink', e?.message);
+        }
+      }
+
+      const result = await pool.query(
+        `
+        UPDATE public.recruitment_applications
+        SET "${pathCol}" = NULL,
+            "${nameCol}" = NULL,
+            "${rejectReasonCol}" = $1,
+            final_requirements_approved = FALSE,
+            updated_at = now()
+        WHERE id = $2
+        RETURNING ${RSP_APPLICATION_ROW_SELECT}
+        `,
+        [reason, applicationId],
+      );
+
+      return res.json({ ok: true, application: result.rows[0] });
+    } catch (err) {
+      console.error('[rspApplications POST final-requirements reject]', err);
+      return res.status(500).json({
+        error: 'Failed to reject final requirement',
+        details: err?.message ? String(err.message) : String(err),
+      });
+    }
+  },
+);
 
 // PUT /api/rsp/applications/:applicationId/final-requirements-approval
 // Admin: mark all final requirements (medical, drug test, NBI) as approved.
@@ -1140,12 +1357,18 @@ router.post(
 
       if (updateDb) {
         if (docKind) {
-          const { pathCol, nameCol } = RSP_DOC_KIND_COLUMNS[docKind];
+          const { pathCol, nameCol, rejectReasonCol } =
+            RSP_DOC_KIND_COLUMNS[docKind];
+          const clearReject =
+            FINAL_REQUIREMENT_KINDS.has(docKind) && rejectReasonCol
+              ? `, "${rejectReasonCol}" = NULL`
+              : '';
           await pool.query(
             `
             UPDATE public.recruitment_applications
             SET "${pathCol}" = $1,
-                "${nameCol}" = $2,
+                "${nameCol}" = $2
+                ${clearReject},
                 updated_at = now()
             WHERE id = $3
             `,

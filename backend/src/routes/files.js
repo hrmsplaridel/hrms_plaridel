@@ -11,6 +11,7 @@ const {
 } = require('../utils/ldTrainingRequirementPolicy');
 const {
   resolveLocalRspAttachment,
+  findLocalRspAttachment,
 } = require('../utils/rspLocalAttachment');
 
 const router = express.Router();
@@ -76,9 +77,12 @@ router.get('/recruitment-attachment', async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    const localAbs = resolveLocalRspAttachment(UPLOAD_DIR, objectPath);
+    const displayName = payload.fn || path.basename(objectPath) || 'attachment';
+    const localAbs =
+      findLocalRspAttachment(UPLOAD_DIR, objectPath, displayName) ||
+      resolveLocalRspAttachment(UPLOAD_DIR, objectPath);
     if (localAbs && fs.existsSync(localAbs)) {
-      const safeName = (payload.fn || path.basename(objectPath) || 'attachment')
+      const safeName = String(displayName)
         .replace(/[^\w.\- ()]/g, '_')
         .slice(0, 180);
       if (asDownload) {
@@ -88,6 +92,9 @@ router.get('/recruitment-attachment', async (req, res) => {
         );
       } else {
         res.setHeader('Cache-Control', 'private, max-age=300');
+        // Allow embedding in the Flutter web preview iframe (cross-origin).
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
         // Encourage inline rendering (especially for PDFs inside iframes).
         res.setHeader(
           'Content-Disposition',
@@ -139,10 +146,30 @@ router.get('/recruitment-attachment', async (req, res) => {
       return res.sendFile(path.resolve(localAbs));
     }
 
+    const missingMsg =
+      'Attachment file is missing on the server. The database still has the file name, ' +
+      'but the PDF was not found under uploads/rsp-attachments/. ' +
+      'Ask the applicant to re-upload this requirement, or restore the file from backup.';
+    // Prefer HTML so iframe preview does not show raw JSON.
+    if (!asDownload) {
+      return res
+        .status(404)
+        .type('text/html')
+        .send(
+          `<!doctype html><html><head><meta charset="utf-8"/><title>Attachment missing</title>
+<style>body{font-family:Segoe UI,Arial,sans-serif;padding:24px;color:#1f2937;background:#f8fafc}
+.card{max-width:560px;margin:40px auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px}
+h1{font-size:18px;margin:0 0 8px}p{font-size:14px;line-height:1.5;margin:0 0 8px;color:#4b5563}
+code{font-size:12px;background:#f3f4f6;padding:2px 6px;border-radius:4px}</style></head>
+<body><div class="card"><h1>Attachment not found</h1>
+<p>${escapeHtml(missingMsg)}</p>
+<p>Requested: <code>${escapeHtml(String(displayName))}</code></p>
+</div></body></html>`,
+        );
+    }
     return res.status(404).json({
       error: 'Attachment not found',
-      details:
-        'File is not under uploads/rsp-attachments/. Upload via the API or restore from backup.',
+      details: missingMsg,
     });
   } catch (e) {
     if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError') {

@@ -13,7 +13,10 @@ const { scheduleYearEndForcedLeaveCron } = require('./jobs/leaveYearEndForcedLea
 const {
   scheduleAuthRefreshTokenCleanupCron,
 } = require('./jobs/authRefreshTokenCleanupScheduler');
-const { generalApiLimiter } = require('./middleware/rateLimiters');
+const {
+  generalApiReadLimiter,
+  generalApiLimiter,
+} = require('./middleware/rateLimiters');
 
 const authRoutes = require('./routes/auth');
 const departmentsRoutes = require('./routes/departments');
@@ -39,11 +42,13 @@ const trainingDailyReportsRoutes = require('./routes/trainingDailyReports');
 const ldTrainingRequirementsRoutes = require('./routes/ldTrainingRequirements');
 const rspJobVacanciesRoutes = require('./routes/rspJobVacancies');
 const rspExamQuestionsRoutes = require('./routes/rspExamQuestions');
+const rspCustomExamsRoutes = require('./routes/rspCustomExams');
 const rspExamTimeLimitsRoutes = require('./routes/rspExamTimeLimits');
 const rspApplicationsRoutes = require('./routes/rspApplications');
 const rspEmailVerificationPublicRoutes = require('./routes/rspEmailVerificationPublic');
 const rspStorageRoutes = require('./routes/rspStorage');
 const rspLdSavedEntriesRoutes = require('./routes/rspLdSavedEntries');
+const mayorEndorsementsRoutes = require('./routes/mayorEndorsements');
 const leaveRoutes = require('./routes/leaveRoutes');
 const notificationsRoutes = require('./routes/notifications');
 const locatorSlipsRoutes = require('./routes/locatorSlips');
@@ -56,6 +61,8 @@ const { isUniSmsConfigured } = require('./utils/uniSmsSms');
 
 const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
 const { validateEmployeeSchema } = require('./services/employeeSchemaValidation');
+const { validateAssignmentSchema } = require('./services/assignmentSchemaValidation');
+const { validateHolidayTemplateSchema } = require('./services/holidayTemplateSchemaValidation');
 
 const app = express();
 app.disable('x-powered-by');
@@ -142,7 +149,7 @@ app.get('/health/db', async (_req, res) => {
 });
 
 // API routes
-app.use('/api', generalApiLimiter);
+app.use('/api', generalApiReadLimiter, generalApiLimiter);
 app.use('/auth', authRoutes);
 app.use('/api/departments', departmentsRoutes);
 app.use('/api/offices', officesRoutes);
@@ -167,11 +174,13 @@ app.use('/api/training-daily-reports', trainingDailyReportsRoutes);
 app.use('/api/ld/training-requirements', ldTrainingRequirementsRoutes);
 app.use('/api/rsp/job-vacancies', rspJobVacanciesRoutes);
 app.use('/api/rsp/exam-questions', rspExamQuestionsRoutes);
+app.use('/api/rsp/custom-exams', rspCustomExamsRoutes);
 app.use('/api/rsp/exam-time-limits', rspExamTimeLimitsRoutes);
 app.use('/api/rsp/applications', rspApplicationsRoutes);
 app.use('/api/rsp/email-verification', rspEmailVerificationPublicRoutes);
 app.use('/api/rsp/storage', rspStorageRoutes);
 app.use('/api/rsp-ld-saved-entries', rspLdSavedEntriesRoutes);
+app.use('/api/mayor/endorsements', mayorEndorsementsRoutes);
 app.use('/api/leave', leaveRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/locator-slips', locatorSlipsRoutes);
@@ -181,6 +190,10 @@ app.use('/api/contact', contactPublicRoutes);
 async function startServer() {
   await validateEmployeeSchema(pool);
   console.log('[startup] Employee database schema validated.');
+  await validateAssignmentSchema(pool);
+  console.log('[startup] Assignment database schema validated.');
+  await validateHolidayTemplateSchema(pool);
+  console.log('[startup] Holiday template database schema validated.');
 
   const server = app.listen(PORT, HOST, () => {
   console.log(`HRMS API listening on http://${HOST}:${PORT}`);

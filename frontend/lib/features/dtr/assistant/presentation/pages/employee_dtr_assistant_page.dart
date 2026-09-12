@@ -8,7 +8,9 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_api.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_leave_prefill.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_privacy_consent_storage.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_session_storage.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/dtr_assistant_turn_guard.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_input_bar.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_message_bubble.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_prompt_chips.dart';
@@ -56,7 +58,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   final _scrollController = ScrollController();
   final _messages = <DtrAssistantMessage>[];
   final _feedbackByMessageId = <String, String>{};
-  final _promptByMessageId = <String, String>{};
   final _autoExecutedActionKeys = <String>{};
   List<DtrAssistantModelProfile> _modelProfiles = const [
     DtrAssistantModelProfile(
@@ -70,11 +71,13 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     ),
   ];
   String _selectedModelProfile = 'tools_ollama';
+  String? _selectedExternalConsentVersion;
   bool _sending = false;
   bool _resettingChat = false;
   bool _sessionLoaded = false;
   String _conversationId = DtrAssistantSessionStorage.createConversationId();
   final _inputController = TextEditingController();
+  final _turnGuard = DtrAssistantTurnGuard();
   CancelToken? _cancelToken;
 
   @override
@@ -148,10 +151,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       // Local reset still helps even if the backend reset fails.
     }
     if (userId != null && userId.isNotEmpty) {
-      await DtrAssistantSessionStorage.clearMessages(
-        userId,
-        previousConversationId,
-      );
+      await DtrAssistantSessionStorage.clearAllForUser(userId);
       final nextConversationId =
           DtrAssistantSessionStorage.createConversationId();
       await DtrAssistantSessionStorage.saveConversationId(
@@ -168,11 +168,38 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ..clear()
         ..add(_welcomeMessage());
       _feedbackByMessageId.clear();
-      _promptByMessageId.clear();
       _autoExecutedActionKeys.clear();
       _resettingChat = false;
     });
     _scrollToBottom();
+  }
+
+  Future<void> _confirmClearChatHistory() async {
+    if (_sending || _resettingChat) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear chat history?'),
+        content: const Text(
+          'This permanently removes your saved HRMS Assistant conversation '
+          'from this device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep history'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.delete_outline_rounded),
+            label: const Text('Clear history'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _startNewChat();
+    }
   }
 
   @override
@@ -208,8 +235,89 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   }
 
   void _stop() {
+    if (!_sending) return;
+    _turnGuard.invalidate();
     _cancelToken?.cancel('Cancelled by user');
-    setState(() => _sending = false);
+    _cancelToken = null;
+    if (mounted) setState(() => _sending = false);
+  }
+
+  Future<void> _handleModelChanged(String id) async {
+    final profile = _modelProfiles.cast<DtrAssistantModelProfile?>().firstWhere(
+      (item) => item?.id == id,
+      orElse: () => null,
+    );
+    if (profile == null || !profile.available) return;
+
+    if (!profile.external || !profile.requiresConsent) {
+      if (!mounted) return;
+      setState(() {
+        _selectedModelProfile = profile.id;
+        _selectedExternalConsentVersion = null;
+      });
+      return;
+    }
+
+    final userId = context.read<AuthProvider>().user?.id ?? '';
+    final consentVersion = profile.consentVersion?.trim() ?? '';
+    final alreadyConsented = await DtrAssistantPrivacyConsentStorage.hasConsent(
+      userId: userId,
+      provider: profile.provider,
+      version: consentVersion,
+    );
+    if (!mounted) return;
+
+    var accepted = alreadyConsented;
+    if (!accepted) {
+      accepted = await _showExternalAiConsentDialog(profile);
+      if (!accepted || !mounted) return;
+      await DtrAssistantPrivacyConsentStorage.grantConsent(
+        userId: userId,
+        provider: profile.provider,
+        version: consentVersion,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _selectedModelProfile = profile.id;
+      _selectedExternalConsentVersion = consentVersion;
+    });
+  }
+
+  Future<bool> _showExternalAiConsentDialog(
+    DtrAssistantModelProfile profile,
+  ) async {
+    final disclosure =
+        profile.dataDisclosure ??
+        'Your question and the minimum HRMS records needed to answer it will be processed by ${profile.provider}.';
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        key: const ValueKey('dtr-assistant-external-ai-consent-dialog'),
+        icon: const Icon(Icons.cloud_outlined),
+        title: Text('Use ${profile.label}?'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Text(
+            '$disclosure\n\nThe local Qwen model remains available if you do not agree.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            key: const ValueKey('dtr-assistant-external-ai-consent-accept'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.cloud_done_outlined),
+            label: const Text('Agree and use cloud AI'),
+          ),
+        ],
+      ),
+    );
+    return accepted == true;
   }
 
   Future<void> _runPresentationAction(FutureOr<void> Function()? action) async {
@@ -221,13 +329,28 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
 
   Future<void> _send(String text, {String? intent}) async {
     if (_sending) return;
+    final selectedProfile = _modelProfiles.firstWhere(
+      (item) => item.id == _selectedModelProfile,
+      orElse: () => _modelProfiles.first,
+    );
+    if (selectedProfile.external &&
+        selectedProfile.requiresConsent &&
+        _selectedExternalConsentVersion != selectedProfile.consentVersion) {
+      await _handleModelChanged(selectedProfile.id);
+      if (!mounted ||
+          _selectedExternalConsentVersion != selectedProfile.consentVersion) {
+        return;
+      }
+    }
     setState(() {
       _messages.add(DtrAssistantMessage.user(text));
       _sending = true;
     });
+    final turnGeneration = _turnGuard.begin();
     _scrollToBottom();
     unawaited(_persistSession());
-    _cancelToken = CancelToken();
+    final cancelToken = CancelToken();
+    _cancelToken = cancelToken;
 
     try {
       final reply = await _api.sendMessage(
@@ -235,20 +358,17 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         intent: intent,
         modelProfile: _selectedModelProfile,
         conversationId: _conversationId,
-        cancelToken: _cancelToken,
+        externalConsentVersion: _selectedExternalConsentVersion,
+        cancelToken: cancelToken,
       );
-      if (!mounted) return;
+      if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       setState(() {
         _messages.add(reply);
-        final replyId = reply.id;
-        if (replyId != null && replyId.isNotEmpty) {
-          _promptByMessageId[replyId] = text;
-        }
       });
       await _persistSession();
       _runAutoAction(reply);
     } on DioException catch (e) {
-      if (!mounted) return;
+      if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       if (CancelToken.isCancel(e)) return;
       setState(
         () => _messages.add(
@@ -260,7 +380,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ),
       );
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       setState(
         () => _messages.add(
           DtrAssistantMessage(
@@ -271,7 +391,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ),
       );
     } finally {
-      if (mounted) {
+      if (mounted && _turnGuard.isCurrent(turnGeneration)) {
+        if (identical(_cancelToken, cancelToken)) _cancelToken = null;
         setState(() => _sending = false);
         await _persistSession();
         _scrollToBottom();
@@ -304,8 +425,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       await _api.submitFeedback(
         message: message,
         rating: rating,
-        modelProfile: _selectedModelProfile,
-        promptPreview: _promptByMessageId[id],
         comment: comment,
       );
       if (!mounted) return;
@@ -441,10 +560,41 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       ], subject: attachment.filename);
     } catch (e) {
       if (!mounted) return;
+      final unavailable = e is DioException && e.response?.statusCode == 404;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not prepare ${attachment.filename}: $e')),
+        SnackBar(
+          content: Text(
+            unavailable
+                ? 'This export is no longer available.'
+                : 'Could not prepare ${attachment.filename}: $e',
+          ),
+          action: unavailable
+              ? SnackBarAction(
+                  label: 'Regenerate',
+                  onPressed: () => unawaited(
+                    _send(
+                      _regenerateExportPrompt(attachment),
+                      intent: 'dtr_export_guidance',
+                    ),
+                  ),
+                )
+              : null,
+        ),
       );
     }
+  }
+
+  String _regenerateExportPrompt(DtrAssistantAttachment attachment) {
+    final match = RegExp(
+      r'dtr_export_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.',
+    ).firstMatch(attachment.filename);
+    if (match == null) return 'Generate my DTR export again.';
+    final startDate = match.group(1);
+    final endDate = match.group(2);
+    if (startDate == endDate) {
+      return 'Generate my DTR export for $startDate.';
+    }
+    return 'Generate my DTR export from $startDate to $endDate.';
   }
 
   Future<void> _executeAction(
@@ -651,9 +801,11 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
               icon: const Icon(Icons.picture_in_picture_alt_rounded),
             ),
           IconButton(
-            tooltip: 'New chat',
-            onPressed: (_sending || _resettingChat) ? null : _startNewChat,
-            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Clear chat history',
+            onPressed: (_sending || _resettingChat)
+                ? null
+                : _confirmClearChatHistory,
+            icon: const Icon(Icons.delete_outline_rounded),
           ),
           if (floating && widget.onExpand != null)
             IconButton(
@@ -724,7 +876,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
                                           _feedbackByMessageId.remove(
                                             removedId,
                                           );
-                                          _promptByMessageId.remove(removedId);
                                         }
                                       }
                                       _messages.removeRange(
@@ -764,8 +915,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
               sending: _sending,
               modelProfiles: _modelProfiles,
               selectedModelProfile: _selectedModelProfile,
-              onModelChanged: (id) =>
-                  setState(() => _selectedModelProfile = id),
+              onModelChanged: (id) => unawaited(_handleModelChanged(id)),
               onSend: _send,
               onStop: _stop,
               controller: _inputController,

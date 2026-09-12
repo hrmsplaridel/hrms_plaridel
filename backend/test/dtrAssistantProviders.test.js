@@ -167,3 +167,51 @@ test('Groq provider handles configuration and provider errors safely', async (t)
     (error) => error.code === 'AI_PROVIDER_MALFORMED_RESPONSE'
   );
 });
+
+test('AI providers cancel in-flight work when the assistant request aborts', async (t) => {
+  const previousFetch = global.fetch;
+  t.after(() => {
+    global.fetch = previousFetch;
+  });
+  global.fetch = async (_url, options) =>
+    new Promise((_resolve, reject) => {
+      const rejectAbort = () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      if (options.signal.aborted) rejectAbort();
+      else options.signal.addEventListener('abort', rejectAbort, { once: true });
+    });
+
+  const providers = [
+    createOllamaProvider({
+      timeoutMs: 1000,
+      ollama: {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'qwen-test',
+      },
+    }),
+    createGroqProvider({
+      timeoutMs: 1000,
+      groq: {
+        baseUrl: 'https://api.groq.com/openai/v1',
+        apiKey: 'test-key',
+        model: 'llama-test',
+      },
+    }),
+  ];
+
+  for (const provider of providers) {
+    const controller = new AbortController();
+    const pending = provider.chatCompletion({
+      messages: [],
+      signal: controller.signal,
+    });
+    controller.abort();
+    await assert.rejects(
+      pending,
+      (error) => error.code === 'ASSISTANT_REQUEST_ABORTED'
+    );
+  }
+});

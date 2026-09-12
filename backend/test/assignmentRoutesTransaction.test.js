@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// Keep September transfers future-dated regardless of when this suite runs.
+test.beforeEach((t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-28T04:00:00Z') });
+});
+
 function withMockedModule(modulePath, exportsValue) {
   const resolved = require.resolve(modulePath);
   const previous = require.cache[resolved];
@@ -40,6 +45,9 @@ test('failed assignment insert rolls back on the same checked-out client', async
       const normalized = String(sql).trim();
       clientCalls.push(normalized);
       if (normalized === 'BEGIN' || normalized === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.includes('FROM position_department_head_periods')) {
         return { rowCount: 0, rows: [] };
       }
       if (normalized.includes('AS employee_exists')) {
@@ -100,6 +108,7 @@ test('failed assignment insert rolls back on the same checked-out client', async
         department_id: '22222222-2222-4222-8222-222222222222',
         position_id: '33333333-3333-4333-8333-333333333333',
         shift_id: '44444444-4444-4444-8444-444444444444',
+        attendance_policy_id: '66666666-6666-4666-8666-666666666666',
         effective_from: '2026-09-01',
         is_active: true,
       },
@@ -113,6 +122,8 @@ test('failed assignment insert rolls back on the same checked-out client', async
     assert.equal(poolQueryCount, 0);
     assert.equal(clientCalls[0], 'BEGIN');
     assert.equal(clientCalls.at(-1), 'ROLLBACK');
+    assert.ok(clientCalls.some((sql) => sql.startsWith('INSERT INTO assignments')));
+    assert.equal(clientCalls.includes('COMMIT'), false);
     assert.equal(released, true);
   } finally {
     console.error = originalConsoleError;
@@ -130,6 +141,9 @@ test('failed policy insert rolls back the primary assignment on the same client'
       const normalized = String(sql).trim();
       clientCalls.push(normalized);
       if (['BEGIN', 'ROLLBACK'].includes(normalized)) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.includes('FROM position_department_head_periods')) {
         return { rowCount: 0, rows: [] };
       }
       if (normalized.includes('AS employee_exists')) {
@@ -170,6 +184,15 @@ test('failed policy insert rolls back the primary assignment on the same client'
       }
       if (normalized.startsWith('SELECT pg_advisory_xact_lock')) {
         return { rowCount: 1, rows: [{}] };
+      }
+      if (
+        normalized.startsWith('SELECT id') &&
+        normalized.includes('FROM attendance_policies')
+      ) {
+        return {
+          rowCount: 1,
+          rows: [{ id: '66666666-6666-4666-8666-666666666666' }],
+        };
       }
       if (normalized.startsWith('SELECT id, attendance_policy_id')) {
         return { rowCount: 0, rows: [] };
@@ -252,6 +275,15 @@ test('standalone policy upsert rolls back through one checked-out client', async
       if (normalized.startsWith('SELECT pg_advisory_xact_lock')) {
         return { rowCount: 1, rows: [{}] };
       }
+      if (
+        normalized.startsWith('SELECT id') &&
+        normalized.includes('FROM attendance_policies')
+      ) {
+        return {
+          rowCount: 1,
+          rows: [{ id: '66666666-6666-4666-8666-666666666666' }],
+        };
+      }
       if (normalized.startsWith('SELECT id, attendance_policy_id')) {
         return { rowCount: 0, rows: [] };
       }
@@ -318,6 +350,43 @@ test('standalone policy upsert rolls back through one checked-out client', async
   }
 });
 
+test('standalone policy upsert rejects string boolean values before opening a transaction', async () => {
+  let connectCount = 0;
+  const pool = {
+    async connect() {
+      connectCount += 1;
+      throw new Error('must not connect for an invalid request');
+    },
+  };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const routePath = require.resolve('../src/routes/policyAssignments');
+  delete require.cache[routePath];
+  try {
+    const router = require('../src/routes/policyAssignments');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/employee-upsert' && entry.route.methods.post
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const res = responseRecorder();
+
+    await handler({
+      body: {
+        employee_id: '11111111-1111-4111-8111-111111111111',
+        attendance_policy_id: '66666666-6666-4666-8666-666666666666',
+        effective_from: '2026-09-01',
+        is_active: 'false',
+      },
+    }, res);
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.error, 'is_active must be a boolean.');
+    assert.equal(connectCount, 0);
+  } finally {
+    delete require.cache[routePath];
+    restoreDb();
+  }
+});
+
 test('moving a future transfer later restores its predecessor in the update transaction', async () => {
   const previous = {
     id: '55555555-5555-4555-8555-555555555555',
@@ -345,11 +414,33 @@ test('moving a future transfer later restores its predecessor in the update tran
     async query(sql, params = []) {
       const normalized = String(sql).trim();
       calls.push({ normalized, params });
-      if (['BEGIN', 'COMMIT'].includes(normalized)) {
+      if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(normalized)) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.includes('FROM position_department_head_periods')) {
         return { rowCount: 0, rows: [] };
       }
       if (normalized.startsWith('SELECT id, employee_id')) {
         return { rowCount: 1, rows: [previous] };
+      }
+      if (normalized.includes('AS employee_exists')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            employee_exists: true,
+            employee_is_active: true,
+            employee_status: 'active',
+            employee_date_hired: '2020-01-01',
+            employee_separation_date: null,
+            department_exists: true,
+            department_is_active: true,
+            position_exists: true,
+            position_is_active: true,
+            position_department_id: previous.department_id,
+            shift_exists: true,
+            shift_is_active: true,
+          }],
+        };
       }
       if (normalized.startsWith('SELECT id, effective_from')) {
         return { rowCount: 0, rows: [] };

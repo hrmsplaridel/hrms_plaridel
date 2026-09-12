@@ -302,6 +302,7 @@ test('both scheduled runs execute accrual before DTR for the previous month', as
         };
       },
       queueLoader: async () => [],
+      queueEmployeeLoader: async () => [],
       resultBroadcaster: (result) => {
         calls.push(`broadcast:${result.runKind}`);
         return 0;
@@ -356,11 +357,20 @@ test('scheduler reconciles queued older DTR months after the regular month', asy
     queueLoader: async (_pool, options) => {
       calls.push(`queue:${options.excludeServiceMonth}`);
       return [{
-        serviceMonth: '2026-07-01',
-        targetMonth: '2026-07',
-        employeeCount: 1,
-        cutoff: new Date('2026-08-20T00:00:00.000Z'),
+       serviceMonth: '2026-07-01',
+       targetMonth: '2026-07',
+       employeeCount: 1,
+       employeeIds: ['11111111-1111-4111-8111-111111111111'],
+       cutoff: new Date('2026-08-20T00:00:00.000Z'),
       }];
+    },
+    queueEmployeeLoader: async () => [],
+    policyCacheInvalidator: ({ employeeId, dateFrom, dateTo }) => {
+      calls.push(`cache:${employeeId}:${dateFrom}:${dateTo}`);
+    },
+    dtrRebuilder: async (employeeIds, dateFrom, dateTo) => {
+      calls.push(`rebuild:${employeeIds.join(',')}:${dateFrom}:${dateTo}`);
+      return { inserted: 0, updated: 1 };
     },
     resultBroadcaster: () => 0,
   });
@@ -368,6 +378,8 @@ test('scheduler reconciles queued older DTR months after the regular month', asy
   assert.deepEqual(calls, [
     'attendance:2026-08',
     'queue:2026-08-01',
+    'cache:11111111-1111-4111-8111-111111111111:2026-07-01:2026-07-31',
+    'rebuild:11111111-1111-4111-8111-111111111111:2026-07-01:2026-07-31',
     'attendance:2026-07',
     'release',
   ]);
@@ -377,6 +389,61 @@ test('scheduler reconciles queued older DTR months after the regular month', asy
     status: 'reconciled',
     rowsUpdated: 1,
   }]);
+});
+
+test('scheduler rebuilds queued DTR before reconciling its regular target month', async () => {
+  const calls = [];
+  const client = {
+    query: async (sql) => {
+      if (sql.includes('pg_try_advisory_lock')) return { rows: [{ got: true }] };
+      if (sql.includes('pg_advisory_unlock')) {
+        return { rows: [{ pg_advisory_unlock: true }] };
+      }
+      throw new Error(`Unexpected scheduler SQL: ${sql}`);
+    },
+    release: () => calls.push('release'),
+  };
+  const pool = { connect: async () => client };
+
+  await runScheduledCompletedMonthEnd(pool, {
+    now: new Date('2026-08-15T00:00:00.000Z'),
+    accrualRunner: async (_pool, options) => ({
+      targetYearMonth: options.targetMonth,
+      rowsUpdated: 0,
+      rowsSkipped: 0,
+      dryRun: false,
+      leaveTypes: [],
+      details: [],
+    }),
+    queueEmployeeLoader: async (_pool, options) => {
+      calls.push(`employees:${options.serviceMonth}`);
+      return ['11111111-1111-4111-8111-111111111111'];
+    },
+    policyCacheInvalidator: ({ employeeId }) => calls.push(`cache:${employeeId}`),
+    dtrRebuilder: async (_employeeIds, dateFrom, dateTo) => {
+      calls.push(`rebuild:${dateFrom}:${dateTo}`);
+      return { inserted: 0, updated: 1 };
+    },
+    attendanceRunner: async (_pool, options) => {
+      calls.push(`attendance:${options.targetMonth}`);
+      return {
+        rowsUpdated: 1,
+        totalDeductedDays: 0,
+        totalWithoutPayDays: 0,
+        details: [],
+      };
+    },
+    queueLoader: async () => [],
+    resultBroadcaster: () => 0,
+  });
+
+  assert.deepEqual(calls, [
+    'employees:2026-07-01',
+    'cache:11111111-1111-4111-8111-111111111111',
+    'rebuild:2026-07-01:2026-07-31',
+    'attendance:2026-07',
+    'release',
+  ]);
 });
 
 test('reconciliation previews only the hire-date accrual difference', async () => {

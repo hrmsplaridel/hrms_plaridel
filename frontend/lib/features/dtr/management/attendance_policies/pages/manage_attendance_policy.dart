@@ -1,7 +1,9 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/attendance_policies/data/attendance_policy_request_guard.dart';
 
 class _PolicyRecord {
   const _PolicyRecord({
@@ -12,10 +14,8 @@ class _PolicyRecord {
     required this.useEquivalentDayConversion,
 
     required this.deductLate,
-    required this.convertLateToEquivalentDay,
 
     required this.deductUndertime,
-    required this.convertUndertimeToEquivalentDay,
 
     required this.absentEqualsFullDayDeduction,
 
@@ -23,6 +23,7 @@ class _PolicyRecord {
     required this.deductionMultiplier,
     required this.isDefault,
     required this.isActive,
+    required this.isUsed,
   });
   final String id;
   final String policyName;
@@ -32,10 +33,8 @@ class _PolicyRecord {
   final bool useEquivalentDayConversion;
 
   final bool deductLate;
-  final bool convertLateToEquivalentDay;
 
   final bool deductUndertime;
-  final bool convertUndertimeToEquivalentDay;
 
   final bool absentEqualsFullDayDeduction;
 
@@ -44,6 +43,7 @@ class _PolicyRecord {
 
   final bool isDefault;
   final bool isActive;
+  final bool isUsed;
 }
 
 class _ShiftWorkHoursOption {
@@ -83,11 +83,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   // Late settings
   bool _deductLate = false;
-  bool _convertLateToEquivalentDay = true;
 
   // Undertime settings
   bool _deductUndertime = true;
-  bool _convertUndertimeToEquivalentDay = true;
 
   // Absence settings
   bool _absentEqualsFullDayDeduction = true;
@@ -100,6 +98,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   int _page = 0;
   List<_PolicyRecord> _policies = [];
   bool _loading = false;
+  String? _loadError;
+  String? _loadedStatusFilter;
   _PolicyRecord? _selectedPolicy;
   bool _isDefault = false;
   bool _isActive = true;
@@ -136,6 +136,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   @override
   void dispose() {
+    _policyRequestGuard.invalidate();
     _searchController.dispose();
     _nameController.dispose();
     _descriptionController.dispose();
@@ -143,6 +144,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     _deductionMultiplierController.dispose();
     super.dispose();
   }
+
+  final _policyRequestGuard = AttendancePolicyRequestGuard();
 
   String? _validateForm() {
     final workHours = double.tryParse(_workHoursPerDayController.text.trim());
@@ -270,17 +273,21 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   }
 
   Future<void> _loadPolicies() async {
+    if (!mounted) return;
+    final requestedStatus = _statusFilter;
+    final request = _policyRequestGuard.begin(requestedStatus);
     setState(() {
       _loading = true;
+      _loadError = null;
       _page = 0;
     });
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/attendance-policies',
-        queryParameters: {'status': _statusFilter},
+        queryParameters: {'status': requestedStatus},
       );
       final data = res.data ?? [];
-      _policies = (data).map((e) {
+      final policies = (data).map((e) {
         final m = e as Map<String, dynamic>;
         return _PolicyRecord(
           id: m['id'] as String,
@@ -291,11 +298,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           useEquivalentDayConversion:
               m['use_equivalent_day_conversion'] as bool? ?? true,
           deductLate: m['deduct_late'] as bool? ?? false,
-          convertLateToEquivalentDay:
-              m['convert_late_to_equivalent_day'] as bool? ?? true,
           deductUndertime: m['deduct_undertime'] as bool? ?? true,
-          convertUndertimeToEquivalentDay:
-              m['convert_undertime_to_equivalent_day'] as bool? ?? true,
           absentEqualsFullDayDeduction:
               m['absent_equals_full_day_deduction'] as bool? ?? true,
           combineLateAndUndertime:
@@ -304,13 +307,38 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               (m['deduction_multiplier'] as num?)?.toDouble() ?? 1.0,
           isDefault: m['is_default'] as bool? ?? false,
           isActive: m['is_active'] as bool? ?? true,
+          isUsed: m['is_used'] as bool? ?? false,
         );
       }).toList();
+      if (!mounted || !_policyRequestGuard.accepts(request, _statusFilter)) {
+        return;
+      }
+      setState(() {
+        _policies = policies;
+        _loadedStatusFilter = requestedStatus;
+        _loadError = null;
+      });
     } on DioException catch (e) {
+      if (!mounted || !_policyRequestGuard.accepts(request, _statusFilter)) {
+        return;
+      }
       debugPrint('Load policies failed: ${e.response?.data ?? e.message}');
-      _policies = [];
+      setState(() {
+        _loadError = 'Unable to load attendance policies. Please try again.';
+      });
+    } catch (e) {
+      if (!mounted || !_policyRequestGuard.accepts(request, _statusFilter)) {
+        return;
+      }
+      debugPrint('Load policies failed: $e');
+      setState(() {
+        _loadError = 'Unable to load attendance policies. Please try again.';
+      });
+    } finally {
+      if (mounted && _policyRequestGuard.accepts(request, _statusFilter)) {
+        setState(() => _loading = false);
+      }
     }
-    if (mounted) setState(() => _loading = false);
   }
 
   void _selectPolicy(_PolicyRecord p) {
@@ -326,10 +354,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       _useEquivalentDayConversion = p.useEquivalentDayConversion;
 
       _deductLate = p.deductLate;
-      _convertLateToEquivalentDay = p.convertLateToEquivalentDay;
 
       _deductUndertime = p.deductUndertime;
-      _convertUndertimeToEquivalentDay = p.convertUndertimeToEquivalentDay;
 
       _absentEqualsFullDayDeduction = p.absentEqualsFullDayDeduction;
 
@@ -352,10 +378,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       _useEquivalentDayConversion = true;
 
       _deductLate = false;
-      _convertLateToEquivalentDay = true;
 
       _deductUndertime = true;
-      _convertUndertimeToEquivalentDay = true;
 
       _absentEqualsFullDayDeduction = true;
 
@@ -394,10 +418,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               double.tryParse(_workHoursPerDayController.text.trim()) ?? 8,
           'use_equivalent_day_conversion': _useEquivalentDayConversion,
           'deduct_late': _deductLate,
-          'convert_late_to_equivalent_day': _convertLateToEquivalentDay,
           'deduct_undertime': _deductUndertime,
-          'convert_undertime_to_equivalent_day':
-              _convertUndertimeToEquivalentDay,
           'absent_equals_full_day_deduction': _absentEqualsFullDayDeduction,
           'combine_late_and_undertime': _combineLateAndUndertime,
           'deduction_multiplier':
@@ -417,13 +438,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to add';
+        final message = userFacingApiError(e);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
+        ).showSnackBar(SnackBar(content: Text('Failed to add: $message')));
       }
       return false;
     }
@@ -463,10 +481,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               double.tryParse(_workHoursPerDayController.text.trim()) ?? 8,
           'use_equivalent_day_conversion': _useEquivalentDayConversion,
           'deduct_late': _deductLate,
-          'convert_late_to_equivalent_day': _convertLateToEquivalentDay,
           'deduct_undertime': _deductUndertime,
-          'convert_undertime_to_equivalent_day':
-              _convertUndertimeToEquivalentDay,
           'absent_equals_full_day_deduction': _absentEqualsFullDayDeduction,
           'combine_late_and_undertime': _combineLateAndUndertime,
           'deduction_multiplier':
@@ -486,13 +501,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to update';
+        final message = userFacingApiError(e);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
+        ).showSnackBar(SnackBar(content: Text('Failed to update: $message')));
       }
       return false;
     }
@@ -500,7 +512,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   Future<bool> _deactivatePolicy() async {
     final p = _selectedPolicy;
-    if (p == null) return false;
+    if (p == null || !p.isActive) return false;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -537,13 +549,103 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to deactivate';
+        final message = userFacingApiError(e);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed: $msg')));
+        ).showSnackBar(SnackBar(content: Text('Failed: $message')));
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _reactivatePolicy() async {
+    final policy = _selectedPolicy;
+    if (policy == null || policy.isActive) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reactivate policy?'),
+        content: Text(
+          'This will restore "${policy.policyName}" to active policy lists.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.restore_rounded, size: 18),
+            label: const Text('Reactivate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+    try {
+      await ApiClient.instance.put(
+        '/api/attendance-policies/${policy.id}',
+        data: {'is_active': true},
+      );
+      if (!mounted) return false;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Policy reactivated.')));
+      _clearForm();
+      _loadPolicies();
+      return true;
+    } on DioException catch (error) {
+      if (mounted) {
+        final message = userFacingApiError(error);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $message')));
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _deleteUnusedPolicy() async {
+    final p = _selectedPolicy;
+    if (p == null || p.isUsed) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete unused policy?'),
+        content: Text(
+          '"${p.policyName}" will be permanently deleted. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Delete'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+    try {
+      await ApiClient.instance.delete('/api/attendance-policies/${p.id}');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Unused policy deleted.')));
+        _clearForm();
+        _loadPolicies();
+      }
+      return true;
+    } on DioException catch (e) {
+      if (mounted) {
+        final message = userFacingApiError(e);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $message')));
       }
       return false;
     }
@@ -671,7 +773,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
             onPressed: () => Navigator.of(drawerContext).pop(),
             child: const Text('Cancel'),
           ),
-          if (isEditing)
+          if (isEditing && (_selectedPolicy?.isActive ?? false))
             OutlinedButton.icon(
               onPressed: () async {
                 final ok = await _deactivatePolicy();
@@ -681,6 +783,33 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               },
               icon: const Icon(Icons.person_off_rounded, size: 18),
               label: const Text('Deactivate'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          if (isEditing && !(_selectedPolicy?.isActive ?? true))
+            OutlinedButton.icon(
+              key: const Key('reactivate-attendance-policy'),
+              onPressed: () async {
+                final ok = await _reactivatePolicy();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.restore_rounded, size: 18),
+              label: const Text('Reactivate'),
+            ),
+          if (isEditing && !(_selectedPolicy?.isUsed ?? true))
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ok = await _deleteUnusedPolicy();
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
+              icon: const Icon(Icons.delete_outline_rounded, size: 18),
+              label: const Text('Delete Unused'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
@@ -711,7 +840,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   @override
   Widget build(BuildContext context) {
     final search = _searchController.text.toLowerCase();
-    final filtered = _policies
+    final hasCurrentFilterData = _loadedStatusFilter == _statusFilter;
+    final filtered = (hasCurrentFilterData ? _policies : <_PolicyRecord>[])
         .where(
           (p) =>
               p.policyName.toLowerCase().contains(search) ||
@@ -757,6 +887,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   Widget _buildListPanel(List<_PolicyRecord> filtered) {
     final dark = _isDark(context);
+    final hasCurrentFilterData = _loadedStatusFilter == _statusFilter;
     final total = filtered.length;
     final pageCount = total == 0
         ? 1
@@ -831,14 +962,45 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
             ],
           ),
           const SizedBox(height: 16),
-          if (_loading)
+          if (_loadError != null) ...[
+            Container(
+              key: const Key('attendance-policy-load-error'),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.12),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.65)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, color: Colors.red),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _loadError!,
+                      style: TextStyle(color: _headingColor(context)),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _loading ? null : _loadPolicies,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (_loading && !hasCurrentFilterData)
             const Center(
               child: Padding(
                 padding: EdgeInsets.all(32),
                 child: CircularProgressIndicator(),
               ),
             )
-          else if (filtered.isEmpty)
+          else if (!hasCurrentFilterData && _loadError != null)
+            const SizedBox(height: 120)
+          else if (filtered.isEmpty && _loadError == null)
             Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),
@@ -851,6 +1013,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           else
             Column(
               children: [
+                if (_loading) const LinearProgressIndicator(minHeight: 2),
                 ListView.separated(
                   shrinkWrap: true,
                   itemCount: paged.length,
@@ -858,56 +1021,59 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
                   itemBuilder: (_, i) {
                     final p = paged[i];
                     final isSelected = _selectedPolicy?.id == p.id;
-                    return ListTile(
-                      selected: isSelected,
-                      selectedTileColor: dark
-                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                          : AppTheme.primaryNavy.withValues(alpha: 0.08),
-                      title: Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              p.policyName,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: _headingColor(context),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (p.isDefault) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryNavy.withValues(
-                                  alpha: 0.15,
-                                ),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
+                    return Material(
+                      color: Colors.transparent,
+                      child: ListTile(
+                        selected: isSelected,
+                        selectedTileColor: dark
+                            ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                            : AppTheme.primaryNavy.withValues(alpha: 0.08),
+                        title: Row(
+                          children: [
+                            Flexible(
                               child: Text(
-                                'Default',
+                                p.policyName,
                                 style: TextStyle(
-                                  fontSize: 10,
-                                  color: AppTheme.primaryNavy,
                                   fontWeight: FontWeight.w600,
+                                  color: _headingColor(context),
                                 ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            if (p.isDefault) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.15,
+                                  ),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'Default',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: AppTheme.primaryNavy,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
-                        ],
-                      ),
-                      subtitle: Text(
-                        'Work hours/day: ${p.workHoursPerDay % 1 == 0 ? p.workHoursPerDay.toStringAsFixed(0) : p.workHoursPerDay.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _mutedColor(context),
                         ),
+                        subtitle: Text(
+                          'Work hours/day: ${p.workHoursPerDay % 1 == 0 ? p.workHoursPerDay.toStringAsFixed(0) : p.workHoursPerDay.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _mutedColor(context),
+                          ),
+                        ),
+                        onTap: () => _openPolicyDrawer(policy: p),
                       ),
-                      onTap: () => _openPolicyDrawer(policy: p),
                     );
                   },
                 ),
@@ -971,6 +1137,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   }
 
   Widget _buildFormPanel({bool framed = true, bool showActions = true}) {
+    final computationLocked = _selectedPolicy?.isUsed ?? false;
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1021,15 +1188,43 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
         const SizedBox(height: 24),
         _sectionTitle('Computation Settings'),
+        if (computationLocked) ...[
+          const SizedBox(height: 10),
+          Container(
+            key: const Key('attendance-policy-computation-lock'),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE85D04).withValues(alpha: 0.10),
+              border: Border.all(
+                color: const Color(0xFFE85D04).withValues(alpha: 0.45),
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.lock_outline_rounded, size: 18),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'This policy has already been used. Create a new policy to change computation settings.',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         _label('Calculate From Shift'),
         const SizedBox(height: 6),
-        _buildShiftTemplateDropdown(),
+        _buildShiftTemplateDropdown(enabled: !computationLocked),
         const SizedBox(height: 12),
         _label('Work Hours Per Day'),
         const SizedBox(height: 6),
         TextFormField(
+          key: const Key('attendance-policy-work-hours'),
           controller: _workHoursPerDayController,
+          enabled: !computationLocked,
           style: AppTheme.dashFieldTextStyle(context),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: _decoration('8'),
@@ -1038,6 +1233,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _switchTile(
           title: 'Use Equivalent Day Conversion',
           value: _useEquivalentDayConversion,
+          enabled: !computationLocked,
           onChanged: (v) =>
               _updatePolicyFormState(() => _useEquivalentDayConversion = v),
         ),
@@ -1048,14 +1244,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _switchTile(
           title: 'Deduct Late',
           value: _deductLate,
+          enabled: !computationLocked,
           onChanged: (v) => _updatePolicyFormState(() => _deductLate = v),
-        ),
-        const SizedBox(height: 12),
-        _switchTile(
-          title: 'Convert Late to Equivalent Day',
-          value: _convertLateToEquivalentDay,
-          onChanged: (v) =>
-              _updatePolicyFormState(() => _convertLateToEquivalentDay = v),
         ),
 
         const SizedBox(height: 24),
@@ -1064,15 +1254,8 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _switchTile(
           title: 'Deduct Undertime',
           value: _deductUndertime,
+          enabled: !computationLocked,
           onChanged: (v) => _updatePolicyFormState(() => _deductUndertime = v),
-        ),
-        const SizedBox(height: 12),
-        _switchTile(
-          title: 'Convert Undertime to Equivalent Day',
-          value: _convertUndertimeToEquivalentDay,
-          onChanged: (v) => _updatePolicyFormState(
-            () => _convertUndertimeToEquivalentDay = v,
-          ),
         ),
 
         const SizedBox(height: 24),
@@ -1081,6 +1264,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _switchTile(
           title: 'Absent Equals Full Day Deduction',
           value: _absentEqualsFullDayDeduction,
+          enabled: !computationLocked,
           onChanged: (v) =>
               _updatePolicyFormState(() => _absentEqualsFullDayDeduction = v),
         ),
@@ -1091,6 +1275,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _switchTile(
           title: 'Combine Late and Undertime',
           value: _combineLateAndUndertime,
+          enabled: !computationLocked,
           onChanged: (v) =>
               _updatePolicyFormState(() => _combineLateAndUndertime = v),
         ),
@@ -1098,7 +1283,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         _label('Deduction Multiplier'),
         const SizedBox(height: 6),
         TextFormField(
+          key: const Key('attendance-policy-deduction-multiplier'),
           controller: _deductionMultiplierController,
+          enabled: !computationLocked,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: _decoration('1.0'),
         ),
@@ -1142,6 +1329,18 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
               foregroundColor: Colors.white,
             ),
           ),
+          if (_selectedPolicy != null && !_selectedPolicy!.isUsed) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => _deleteUnusedPolicy(),
+              icon: const Icon(Icons.delete_outline_rounded, size: 18),
+              label: const Text('Delete Unused Policy'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          ],
         ],
       ],
     );
@@ -1170,21 +1369,30 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
     required String title,
     required bool value,
     required ValueChanged<bool> onChanged,
+    bool enabled = true,
   }) {
     return Row(
       children: [
         Switch(
+          key: ValueKey('attendance-policy-switch-$title'),
           value: value,
-          onChanged: onChanged,
+          onChanged: enabled ? onChanged : null,
           activeThumbColor: AppTheme.primaryNavy,
         ),
         const SizedBox(width: 8),
-        Expanded(child: Text(title)),
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              color: enabled ? _headingColor(context) : _mutedColor(context),
+            ),
+          ),
+        ),
       ],
     );
   }
 
-  Widget _buildShiftTemplateDropdown() {
+  Widget _buildShiftTemplateDropdown({bool enabled = true}) {
     return DropdownButtonFormField<String>(
       key: ValueKey(_selectedShiftTemplateId),
       initialValue: _selectedShiftTemplateId,
@@ -1212,7 +1420,9 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           ),
         ),
       ],
-      onChanged: _shiftTemplates.isEmpty ? null : _applyShiftTemplate,
+      onChanged: !enabled || _shiftTemplates.isEmpty
+          ? null
+          : _applyShiftTemplate,
     );
   }
 

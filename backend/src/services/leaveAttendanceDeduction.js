@@ -11,6 +11,7 @@
 const { loadHolidayOverlayMap } = require('./holidayOverlay');
 const {
   getExpectedWorkMinutes,
+  getExpectedPmStartMinutes,
   getShiftType,
 } = require('./shiftAttendance');
 const {
@@ -30,10 +31,12 @@ const {
   ensureDtrMonthEndReconciliationTable,
   resolveReconciliationMonth,
 } = require('./dtrMonthEndReconciliation');
+const { normalizeAttendancePolicy } = require('./attendancePolicyResolver');
 
 const VACATION_LEAVE = 'vacationLeave';
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
+const ONE_PM_MINUTES = 13 * 60;
 
 function addMonths(date, count) {
   const result = new Date(date.getTime());
@@ -85,20 +88,6 @@ function timeToMinutes(value) {
   const minutes = parseInt(match[2], 10);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
   return hours * 60 + minutes;
-}
-
-function normalizePolicy(row) {
-  return {
-    id: row?.id || row?.attendance_policy_id || null,
-    workHoursPerDay:
-      row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
-    useEquivalentDayConversion: row?.use_equivalent_day_conversion ?? true,
-    deductLate: row?.deduct_late ?? false,
-    deductUndertime: row?.deduct_undertime ?? true,
-    absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ?? true,
-    deductionMultiplier:
-      row?.deduction_multiplier != null ? parseFloat(row.deduction_multiplier) : 1,
-  };
 }
 
 function policyWorkMinutes(policy) {
@@ -178,7 +167,7 @@ function expectedMinutesForCoverage(assignment, coverage) {
   if (coverage === 'am_only') {
     if (shiftType === 'am_only') return 0;
     if (shiftType === 'pm_only' || shiftType === 'single_session') return full;
-    const pmStart = assignment.breakEndMinutes ?? NOON_MINUTES;
+    const pmStart = getExpectedPmStartMinutes(assignment) ?? ONE_PM_MINUTES;
     return Math.max(0, (assignment.endMinutes ?? pmStart) - pmStart);
   }
   if (coverage === 'pm_only') {
@@ -300,11 +289,11 @@ async function loadPolicies(client, assignmentsByEmployee, employeeIds, startStr
             deduct_late, deduct_undertime, absent_equals_full_day_deduction,
             deduction_multiplier
      FROM attendance_policies
-     WHERE (is_active IS NULL OR is_active = true)
-     ORDER BY is_default DESC, updated_at DESC, created_at DESC
+     WHERE is_default = true
+       AND (is_active IS NULL OR is_active = true)
      LIMIT 1`
   );
-  const defaultPolicy = normalizePolicy(defaultResult.rows[0]);
+  const defaultPolicy = normalizeAttendancePolicy(defaultResult.rows[0]);
 
   const departmentIds = new Set();
   const shiftIds = new Set();
@@ -326,7 +315,6 @@ async function loadPolicies(client, assignmentsByEmployee, employeeIds, startStr
      FROM policy_assignments pa
      JOIN attendance_policies p ON p.id = pa.attendance_policy_id
      WHERE (pa.is_active IS NULL OR pa.is_active = true)
-       AND (p.is_active IS NULL OR p.is_active = true)
        AND pa.effective_from <= $5::date
        AND (pa.effective_to IS NULL OR pa.effective_to >= $4::date)
        AND (
@@ -355,7 +343,7 @@ async function loadPolicies(client, assignmentsByEmployee, employeeIds, startStr
         row.created_at instanceof Date
           ? row.created_at.toISOString()
           : String(row.created_at || ''),
-      policy: normalizePolicy(row),
+      policy: normalizeAttendancePolicy(row),
     })),
   };
 }

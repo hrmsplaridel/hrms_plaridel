@@ -7,9 +7,11 @@ const {
   extractLeavePrefill,
 } = require('../src/services/dtrAssistant/dtrAssistantActionPrefill');
 const {
+  beginAssistantTurn,
   clearAssistantMemory,
   DEFAULT_TTL_MS,
   getAssistantMemory,
+  isAssistantTurnCurrent,
   setAssistantMemory,
 } = require('../src/services/dtrAssistant/dtrAssistantMemoryService');
 const {
@@ -95,6 +97,40 @@ test('DTR assistant memory: conversation IDs isolate context for the same user',
   assert.equal(getAssistantMemory(userId, 'conversation-leave'), null);
   assert.ok(getAssistantMemory(userId, 'conversation-locator'));
   clearAssistantMemory(userId, 'conversation-locator');
+});
+
+test('DTR assistant memory: a superseded turn cannot overwrite newer context', () => {
+  const userId = 'user-turn-order-test';
+  const conversationId = 'conversation-turn-order';
+  const firstTurn = beginAssistantTurn(userId, conversationId);
+  const secondTurn = beginAssistantTurn(userId, conversationId);
+
+  assert.equal(isAssistantTurnCurrent(userId, conversationId, firstTurn), false);
+  assert.equal(isAssistantTurnCurrent(userId, conversationId, secondTurn), true);
+  assert.equal(
+    setAssistantMemory(
+      userId,
+      { intent: 'today_dtr' },
+      undefined,
+      conversationId,
+      secondTurn
+    ),
+    true
+  );
+  assert.equal(
+    setAssistantMemory(
+      userId,
+      { intent: 'leave_balance' },
+      undefined,
+      conversationId,
+      firstTurn
+    ),
+    false
+  );
+  assert.equal(getAssistantMemory(userId, conversationId).intent, 'today_dtr');
+
+  clearAssistantMemory(userId, conversationId);
+  assert.equal(isAssistantTurnCurrent(userId, conversationId, secondTurn), false);
 });
 
 test('DTR assistant action prefill: special-leave details reach the form action', () => {

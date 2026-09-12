@@ -16,7 +16,10 @@ const {
   dtrExportRows,
 } = require('../src/services/dtrAssistant/dtrAssistantExportService');
 const {
+  issueDtrAssistantFeedbackToken,
   normalizeRating,
+  submitDtrAssistantFeedback,
+  verifyDtrAssistantFeedbackToken,
   __test: feedbackServiceTest,
 } = require('../src/services/dtrAssistant/dtrAssistantFeedbackService');
 const {
@@ -1807,6 +1810,11 @@ test('DTR assistant regression: DTR export rows include no-record scheduled days
       startDate: '2026-06-01',
       endDate: '2026-06-02',
     },
+    data_completeness: {
+      dtr_records: { complete: true, capped: false, returned_count: 1 },
+      dtr_calendar_days: { complete: true, capped: false, returned_count: 2 },
+      dtr_export: { complete: true },
+    },
     dtr_records: [
       {
         attendance_date: '2026-06-01',
@@ -1847,6 +1855,128 @@ test('DTR assistant regression: feedback rating aliases normalize safely', () =>
   assert.equal(feedbackServiceTest.normalizeConfidence('-1'), 0);
   assert.equal(feedbackServiceTest.normalizeConfidence('bad'), null);
   assert.match(feedbackServiceTest.hashText('pila akong absent?'), /^[a-f0-9]{64}$/);
+});
+
+test('DTR assistant regression: feedback tokens reject foreign, altered, and expired use', () => {
+  const secret = 'feedback-test-secret-with-sufficient-entropy';
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const token = issueDtrAssistantFeedbackToken(
+    {
+      userId,
+      messageId: '33333333-3333-4333-8333-333333333333',
+      intent: 'leave_balance',
+      provider: 'hrms',
+      model: 'hrms-intent-rules',
+      modelProfile: 'tools_ollama',
+      intentConfidence: 0.92,
+      intentSource: 'intent_rules',
+      prompt: 'What is my leave balance?',
+      response: 'You have 5 days remaining.',
+    },
+    { secret, expiresInSeconds: 1 }
+  );
+  const claims = verifyDtrAssistantFeedbackToken(token, userId, { secret });
+  assert.equal(claims.intent, 'leave_balance');
+  assert.match(claims.promptHash, /^[a-f0-9]{64}$/);
+  assert.match(claims.responseHash, /^[a-f0-9]{64}$/);
+
+  assert.throws(
+    () =>
+      verifyDtrAssistantFeedbackToken(
+        token,
+        '22222222-2222-4222-8222-222222222222',
+        { secret }
+      ),
+    (error) =>
+      error.statusCode === 403 &&
+      error.code === 'DTR_ASSISTANT_FEEDBACK_TOKEN_FORBIDDEN'
+  );
+
+  const replacement = token.endsWith('a') ? 'b' : 'a';
+  const altered = `${token.slice(0, -1)}${replacement}`;
+  assert.throws(
+    () => verifyDtrAssistantFeedbackToken(altered, userId, { secret }),
+    (error) =>
+      error.statusCode === 400 &&
+      error.code === 'DTR_ASSISTANT_FEEDBACK_TOKEN_INVALID'
+  );
+
+  const tokenPayload = JSON.parse(
+    Buffer.from(token.split('.')[1], 'base64url').toString('utf8')
+  );
+  assert.throws(
+    () =>
+      verifyDtrAssistantFeedbackToken(token, userId, {
+        secret,
+        clockTimestamp: tokenPayload.iat + 2,
+      }),
+    (error) =>
+      error.statusCode === 410 &&
+      error.code === 'DTR_ASSISTANT_FEEDBACK_TOKEN_EXPIRED'
+  );
+});
+
+test('DTR assistant regression: feedback ignores fabricated client telemetry and upserts replays', async (t) => {
+  const previousSecret = process.env.DTR_ASSISTANT_FEEDBACK_SECRET;
+  process.env.DTR_ASSISTANT_FEEDBACK_SECRET =
+    'feedback-submit-test-secret-with-sufficient-entropy';
+  t.after(() => {
+    if (previousSecret == null) {
+      delete process.env.DTR_ASSISTANT_FEEDBACK_SECRET;
+    } else {
+      process.env.DTR_ASSISTANT_FEEDBACK_SECRET = previousSecret;
+    }
+  });
+
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const token = issueDtrAssistantFeedbackToken({
+    userId,
+    messageId: '44444444-4444-4444-8444-444444444444',
+    intent: 'dtr_late_summary',
+    provider: 'hrms',
+    model: 'trusted-model',
+    modelProfile: 'tools_ollama',
+    intentConfidence: 0.87,
+    intentSource: 'intent_rules',
+    prompt: 'Was I late this month?',
+    response: 'You were late once.',
+  });
+  const inserts = [];
+  const pool = {
+    query: async (sql, params) => {
+      if (/^DELETE FROM dtr_assistant_feedback/i.test(sql.trim())) {
+        return { rows: [], rowCount: 0 };
+      }
+      inserts.push({ sql, params });
+      return {
+        rows: [{ id: 'feedback-1', rating: params[2] }],
+        rowCount: 1,
+      };
+    },
+  };
+  const forgedTelemetry = {
+    userId,
+    feedbackToken: token,
+    rating: 'down',
+    comment: 'The result was incorrect.',
+    messageId: '55555555-5555-4555-8555-555555555555',
+    intent: 'forged_intent',
+    model: 'forged-model',
+    promptPreview: 'fabricated prompt',
+    contentPreview: 'fabricated response',
+  };
+
+  await submitDtrAssistantFeedback(pool, forgedTelemetry);
+  await submitDtrAssistantFeedback(pool, forgedTelemetry);
+
+  assert.equal(inserts.length, 2);
+  assert.match(inserts[0].sql, /ON CONFLICT \(user_id, message_id\)/i);
+  assert.equal(inserts[0].params[1], '44444444-4444-4444-8444-444444444444');
+  assert.equal(inserts[0].params[3], 'dtr_late_summary');
+  assert.equal(inserts[0].params[5], 'trusted-model');
+  assert.notEqual(inserts[0].params[3], forgedTelemetry.intent);
+  assert.notEqual(inserts[0].params[5], forgedTelemetry.model);
+  assert.equal(inserts[0].params[11], forgedTelemetry.comment);
 });
 
 test('DTR assistant regression: revoked locator status includes audit context', () => {

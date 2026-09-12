@@ -16,6 +16,7 @@ function createHarness() {
     notifications: [],
     broadcasts: [],
     history: [],
+    reviewerSnapshots: [],
     reviewSnapshotDates: [],
     released: 0,
     nextId: 1,
@@ -75,6 +76,13 @@ function createHarness() {
       return {
         departmentId: DEPARTMENT_ID,
         departmentHeadUserId: HEAD_ID,
+        reviewerUserIds: [HEAD_ID],
+        reviewers: [{
+          reviewerId: HEAD_ID,
+          reviewerName: 'Department Head',
+          reviewerRole: 'primary',
+          backupRank: null,
+        }],
       };
     },
     validateWorkingDay: async () => ({ ok: true }),
@@ -118,6 +126,9 @@ function createHarness() {
     recordHistory: async (_client, event) => {
       state.history.push(event);
     },
+    snapshotReviewers: async (_client, snapshot) => {
+      state.reviewerSnapshots.push(snapshot);
+    },
     nowProvider: () => new Date('2026-08-11T00:00:00.000Z'),
     logger: { error() {} },
   });
@@ -156,6 +167,7 @@ test('plain and multipart locator submissions share reviewer notifications', asy
   assert.equal(state.notifications.length, 2);
   assert.equal(state.broadcasts.length, 2);
   assert.equal(state.history.length, 2);
+  assert.equal(state.reviewerSnapshots.length, 2);
   assert.equal(state.released, 2);
   assert.deepEqual(
     state.notifications.map((item) => item.status),

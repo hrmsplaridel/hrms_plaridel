@@ -6,7 +6,7 @@ const {
   resolveApprovalAllocation,
 } = require('../src/services/leaveApprovalAllocation');
 
-test('approval allocation deducts only with-pay days and releases the full pending request', () => {
+test('approval allocation deducts only with-pay days', () => {
   const allocation = resolveApprovalAllocation({
     requestedDays: 5,
     approvedDaysWithPay: 2,
@@ -17,7 +17,6 @@ test('approval allocation deducts only with-pay days and releases the full pendi
     requestedDays: 5,
     approvedDaysWithPay: 2,
     approvedDaysWithoutPay: 3,
-    pendingDaysToRelease: 5,
     usedDaysToDeduct: 2,
   });
 });
@@ -30,7 +29,6 @@ test('approval allocation permits a request that is entirely without pay', () =>
   });
 
   assert.equal(allocation.usedDaysToDeduct, 0);
-  assert.equal(allocation.pendingDaysToRelease, 3);
 });
 
 test('approval allocation rejects missing, negative, and mismatched values', () => {

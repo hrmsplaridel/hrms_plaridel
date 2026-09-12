@@ -117,7 +117,9 @@ class DtrAssistantMessageBubble extends StatelessWidget {
                 if (isUser && onEdit != null) const SizedBox(width: 8),
                 if (!isUser &&
                     message.id != null &&
-                    message.id!.isNotEmpty) ...[
+                    message.id!.isNotEmpty &&
+                    message.feedbackToken != null &&
+                    message.feedbackToken!.isNotEmpty) ...[
                   IconButton(
                     icon: Icon(
                       feedback == 'up'
@@ -176,11 +178,7 @@ MarkdownStyleSheet _assistantMarkdownStyleSheet(
   BuildContext context, {
   required Color textColor,
 }) {
-  final base = TextStyle(
-    color: textColor,
-    fontSize: 14,
-    height: 1.35,
-  );
+  final base = TextStyle(color: textColor, fontSize: 14, height: 1.35);
 
   return MarkdownStyleSheet(
     p: base,
@@ -194,11 +192,7 @@ MarkdownStyleSheet _assistantMarkdownStyleSheet(
     h2: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
     h3: base.copyWith(fontSize: 15, fontWeight: FontWeight.w700),
     horizontalRuleDecoration: BoxDecoration(
-      border: Border(
-        top: BorderSide(
-          color: AppTheme.dashHairlineOf(context),
-        ),
-      ),
+      border: Border(top: BorderSide(color: AppTheme.dashHairlineOf(context))),
     ),
   );
 }
@@ -240,9 +234,17 @@ class _AssistantAttachmentButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return OutlinedButton.icon(
-      onPressed: () => _shareAttachment(context),
-      icon: const Icon(Icons.download_rounded, size: 18),
-      label: Text(attachment.filename, overflow: TextOverflow.ellipsis),
+      onPressed: attachment.isExpired ? null : () => _shareAttachment(context),
+      icon: Icon(
+        attachment.isExpired ? Icons.history_rounded : Icons.download_rounded,
+        size: 18,
+      ),
+      label: Text(
+        attachment.isExpired
+            ? '${attachment.filename} (expired)'
+            : attachment.filename,
+        overflow: TextOverflow.ellipsis,
+      ),
     );
   }
 }

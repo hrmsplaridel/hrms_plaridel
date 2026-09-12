@@ -34,6 +34,10 @@ function createGroqProvider(config) {
     const model = String(options.model || defaultModel).trim();
     const timeoutMs = options.timeoutMs || defaultTimeoutMs;
     const controller = new AbortController();
+    const externalSignal = options.signal;
+    const abortFromExternal = () => controller.abort(externalSignal?.reason);
+    if (externalSignal?.aborted) abortFromExternal();
+    else externalSignal?.addEventListener('abort', abortFromExternal, { once: true });
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     let response;
@@ -44,7 +48,7 @@ function createGroqProvider(config) {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        signal: options.signal || controller.signal,
+        signal: controller.signal,
         body: JSON.stringify({
           model,
           messages: options.messages || [],
@@ -54,17 +58,27 @@ function createGroqProvider(config) {
         }),
       });
     } catch (cause) {
-      const timedOut = cause?.name === 'AbortError';
+      const requestAborted = externalSignal?.aborted === true;
+      const timedOut = !requestAborted && cause?.name === 'AbortError';
       throw new LlmError(
-        timedOut ? 'Groq provider timed out.' : 'Groq provider is not available.',
+        requestAborted
+          ? 'Assistant request was cancelled.'
+          : timedOut
+            ? 'Groq provider timed out.'
+            : 'Groq provider is not available.',
         {
-          code: timedOut ? 'AI_PROVIDER_TIMEOUT' : 'AI_PROVIDER_UNAVAILABLE',
+          code: requestAborted
+            ? 'ASSISTANT_REQUEST_ABORTED'
+            : timedOut
+              ? 'AI_PROVIDER_TIMEOUT'
+              : 'AI_PROVIDER_UNAVAILABLE',
           provider: 'groq',
           cause,
         }
       );
     } finally {
       clearTimeout(timeout);
+      externalSignal?.removeEventListener('abort', abortFromExternal);
     }
 
     if (!response.ok) {

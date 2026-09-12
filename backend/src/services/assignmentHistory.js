@@ -1,4 +1,5 @@
 const { addDays } = require('../utils/dateRangeParser');
+const { assignmentStatusContext } = require('./assignmentStatus');
 
 class AssignmentHistoryError extends Error {
   constructor(message, statusCode = 400) {
@@ -19,6 +20,11 @@ const ASSIGNMENT_RECORD_TYPES = Object.freeze({
     entityType: 'employee_other_position',
     notFoundMessage: 'Employee other position not found',
   },
+  policy: {
+    table: 'policy_assignments',
+    entityType: 'policy_assignment',
+    notFoundMessage: 'Policy assignment not found',
+  },
 });
 
 function normalizeChangeReason(value) {
@@ -36,6 +42,19 @@ function configFor(recordType) {
   const config = ASSIGNMENT_RECORD_TYPES[recordType];
   if (!config) throw new Error(`Unsupported assignment record type: ${recordType}`);
   return config;
+}
+
+function assignmentDateOnly(value) {
+  if (value == null || value === '') return null;
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return match[0];
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  throw new AssignmentHistoryError('Assignment contains an invalid effective date', 500);
 }
 
 async function writeAssignmentHistoryAudit(
@@ -73,7 +92,7 @@ async function deactivateAssignmentRecord(
 
   const before = existing.rows[0];
   if (before.is_active === false) {
-    return { changed: false, record: before };
+    return { changed: false, before, record: before };
   }
 
   const updated = await db.query(
@@ -111,7 +130,7 @@ async function deactivateAssignmentRecord(
       after: restoredPredecessor.after,
     });
   }
-  return { changed: true, record: after, restoredPredecessor };
+  return { changed: true, before, record: after, restoredPredecessor };
 }
 
 async function findPrimaryAssignmentDependencies(db, record) {
@@ -121,7 +140,15 @@ async function findPrimaryAssignmentDependencies(db, record) {
          SELECT 1
            FROM dtr_daily_summary
           WHERE assignment_id = $1::uuid
-       ) AS has_dtr,
+        ) AS has_dtr,
+       EXISTS (
+         SELECT 1
+           FROM biometric_attendance_logs
+          WHERE user_id = $2::uuid
+            AND (logged_at AT TIME ZONE $5)::date >= $3::date
+            AND (logged_at AT TIME ZONE $5)::date <=
+              COALESCE($4::date, 'infinity'::date)
+       ) AS has_biometric,
        EXISTS (
          SELECT 1
            FROM leave_requests
@@ -136,7 +163,13 @@ async function findPrimaryAssignmentDependencies(db, record) {
             AND slip_date >= $3::date
             AND slip_date <= COALESCE($4::date, 'infinity'::date)
        ) AS has_locator`,
-    [record.id, record.employee_id, record.effective_from, record.effective_to]
+    [
+      record.id,
+      record.employee_id,
+      record.effective_from,
+      record.effective_to,
+      process.env.HRMS_TIMEZONE || 'Asia/Manila',
+    ]
   );
   return result.rows[0] || {};
 }
@@ -144,6 +177,7 @@ async function findPrimaryAssignmentDependencies(db, record) {
 function dependencyMessage(dependencies) {
   const labels = [];
   if (dependencies.has_dtr) labels.push('DTR records');
+  if (dependencies.has_biometric) labels.push('biometric punches');
   if (dependencies.has_leave) labels.push('leave requests');
   if (dependencies.has_locator) labels.push('locator requests');
   return labels.length > 0
@@ -197,8 +231,8 @@ async function repairPrimaryPredecessorAfterFutureChange(
 ) {
   if (!previousRecord || previousRecord.is_active === false) return null;
   const futureCheck = await db.query(
-    `SELECT $1::date > (now() AT TIME ZONE 'Asia/Manila')::date AS is_future`,
-    [previousRecord.effective_from]
+    `SELECT $1::date > $2::date AS is_future`,
+    [previousRecord.effective_from, assignmentStatusContext('All').today]
   );
   if (futureCheck.rows[0]?.is_future !== true) return null;
 
@@ -231,14 +265,30 @@ async function permanentlyDeleteFutureAssignment(
     throw new AssignmentHistoryError(config.notFoundMessage, 404);
   }
 
-  const record = existing.rows[0];
+  const record = {
+    ...existing.rows[0],
+    effective_from: assignmentDateOnly(existing.rows[0].effective_from),
+    effective_to: assignmentDateOnly(existing.rows[0].effective_to),
+  };
+  const allowsSameDay = recordType === 'primary';
+  const officialToday = assignmentStatusContext('All').today;
+  const timeZone = process.env.HRMS_TIMEZONE || 'Asia/Manila';
   const futureCheck = await db.query(
-    `SELECT $1::date > (now() AT TIME ZONE 'Asia/Manila')::date AS is_future`,
-    [record.effective_from]
+    allowsSameDay
+      ? `SELECT (
+           $1::date >= $2::date
+           OR ($3::timestamptz AT TIME ZONE $4)::date = $2::date
+         ) AS is_future`
+      : `SELECT $1::date > $2::date AS is_future`,
+    allowsSameDay
+      ? [record.effective_from, officialToday, record.created_at, timeZone]
+      : [record.effective_from, officialToday]
   );
   if (futureCheck.rows[0]?.is_future !== true) {
     throw new AssignmentHistoryError(
-      'Only an assignment that has not started can be permanently deleted',
+      allowsSameDay
+        ? 'Only an unused assignment starting today or later, or created today, can be permanently deleted'
+        : 'Only an assignment that has not started can be permanently deleted',
       409
     );
   }

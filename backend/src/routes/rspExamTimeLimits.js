@@ -6,14 +6,19 @@ const { requireAdminOrSupervisor } = require('../middleware/rbac');
 const router = express.Router();
 const protect = [authMiddleware];
 
-const ALLOWED_TYPES = new Set(['general', 'math', 'general_info']);
 const MAX_SECONDS = 24 * 60 * 60; // 24 hours
+const EXAM_TYPE_RE = /^(bei|general|math|general_info|custom_[a-z0-9_]{1,80})$/;
 
 const DEFAULT_SECONDS = {
+  bei: 0,
   general: 45 * 60,
   math: 45 * 60,
   general_info: 10 * 60,
 };
+
+function isAllowedExamType(examType) {
+  return typeof examType === 'string' && EXAM_TYPE_RE.test(examType);
+}
 
 async function ensureTable() {
   await pool.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);
@@ -49,14 +54,15 @@ router.get('/', async (_req, res) => {
     const result = await pool.query(
       `SELECT exam_type, time_limit_seconds
        FROM public.recruitment_exam_time_limits
-       WHERE exam_type = ANY($1::text[])`,
-      [Array.from(ALLOWED_TYPES)]
+       ORDER BY exam_type`
     );
     const limits = { ...DEFAULT_SECONDS };
     for (const row of result.rows) {
-      if (ALLOWED_TYPES.has(row.exam_type)) {
-        limits[row.exam_type] = Math.max(0, Math.min(MAX_SECONDS, Number(row.time_limit_seconds) || 0));
-      }
+      if (!isAllowedExamType(row.exam_type)) continue;
+      limits[row.exam_type] = Math.max(
+        0,
+        Math.min(MAX_SECONDS, Number(row.time_limit_seconds) || 0)
+      );
     }
     res.json({ limits });
   } catch (err) {
@@ -71,9 +77,11 @@ router.put('/', protect, requireAdminOrSupervisor, async (req, res) => {
     await ensureTable();
     const body = req.body || {};
     const updates = typeof body === 'object' && !Array.isArray(body) ? body : {};
-    const keys = Object.keys(updates).filter((k) => ALLOWED_TYPES.has(k));
+    const keys = Object.keys(updates).filter((k) => isAllowedExamType(k));
     if (keys.length === 0) {
-      return res.status(400).json({ error: 'No valid exam types in body (general, math, general_info)' });
+      return res.status(400).json({
+        error: 'No valid exam types in body (bei, general, math, general_info, or custom_*)',
+      });
     }
     for (const k of keys) {
       const sec = normalizeSeconds(updates[k]);
@@ -94,14 +102,15 @@ router.put('/', protect, requireAdminOrSupervisor, async (req, res) => {
     const result = await pool.query(
       `SELECT exam_type, time_limit_seconds
        FROM public.recruitment_exam_time_limits
-       WHERE exam_type = ANY($1::text[])`,
-      [Array.from(ALLOWED_TYPES)]
+       ORDER BY exam_type`
     );
     const limits = { ...DEFAULT_SECONDS };
     for (const row of result.rows) {
-      if (ALLOWED_TYPES.has(row.exam_type)) {
-        limits[row.exam_type] = Math.max(0, Math.min(MAX_SECONDS, Number(row.time_limit_seconds) || 0));
-      }
+      if (!isAllowedExamType(row.exam_type)) continue;
+      limits[row.exam_type] = Math.max(
+        0,
+        Math.min(MAX_SECONDS, Number(row.time_limit_seconds) || 0)
+      );
     }
     res.json({ ok: true, limits });
   } catch (err) {

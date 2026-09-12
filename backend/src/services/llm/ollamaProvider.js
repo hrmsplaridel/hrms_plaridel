@@ -25,6 +25,10 @@ function createOllamaProvider(config) {
     const model = String(options.model || defaultModel).trim();
     const timeoutMs = options.timeoutMs || defaultTimeoutMs;
     const controller = new AbortController();
+    const externalSignal = options.signal;
+    const abortFromExternal = () => controller.abort(externalSignal?.reason);
+    if (externalSignal?.aborted) abortFromExternal();
+    else externalSignal?.addEventListener('abort', abortFromExternal, { once: true });
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     let response;
@@ -34,7 +38,7 @@ function createOllamaProvider(config) {
         headers: {
           'Content-Type': 'application/json',
         },
-        signal: options.signal || controller.signal,
+        signal: controller.signal,
         body: JSON.stringify({
           model,
           stream: false,
@@ -50,19 +54,27 @@ function createOllamaProvider(config) {
         }),
       });
     } catch (cause) {
-      const timedOut = cause?.name === 'AbortError';
+      const requestAborted = externalSignal?.aborted === true;
+      const timedOut = !requestAborted && cause?.name === 'AbortError';
       throw new LlmError(
-        timedOut
+        requestAborted
+          ? 'Assistant request was cancelled.'
+          : timedOut
           ? 'Local AI provider timed out.'
           : 'Local AI is not available. Start Ollama and pull the configured model.',
         {
-          code: timedOut ? 'AI_PROVIDER_TIMEOUT' : 'AI_LOCAL_UNAVAILABLE',
+          code: requestAborted
+            ? 'ASSISTANT_REQUEST_ABORTED'
+            : timedOut
+              ? 'AI_PROVIDER_TIMEOUT'
+              : 'AI_LOCAL_UNAVAILABLE',
           provider: 'ollama',
           cause,
         }
       );
     } finally {
       clearTimeout(timeout);
+      externalSignal?.removeEventListener('abort', abortFromExternal);
     }
 
     if (!response.ok) {

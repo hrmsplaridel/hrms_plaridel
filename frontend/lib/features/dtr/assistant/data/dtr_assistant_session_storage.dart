@@ -1,17 +1,34 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class DtrAssistantSessionStorage {
   DtrAssistantSessionStorage._();
 
+  /// Assistant history is local-only and expires even if the user stays signed in.
+  static const historyRetention = Duration(days: 30);
+  static const _storageTimeout = Duration(seconds: 5);
+
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      // ignore: deprecated_member_use
+      encryptedSharedPreferences: false,
+      resetOnError: true,
+    ),
+  );
+
   static String _conversationKey(String userId) =>
       'dtr_assistant_conversation_$userId';
 
+  static String _storagePrefix(String userId) =>
+      'dtr_assistant_chat_${userId}_';
+
   static String _storageKey(String userId, String conversationId) =>
-      'dtr_assistant_chat_${userId}_$conversationId';
+      '${_storagePrefix(userId)}$conversationId';
 
   static String _legacyStorageKey(String userId) =>
       'dtr_assistant_chat_$userId';
@@ -27,11 +44,11 @@ class DtrAssistantSessionStorage {
 
   static Future<String> loadOrCreateConversationId(String userId) async {
     if (userId.trim().isEmpty) return createConversationId();
-    final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getString(_conversationKey(userId))?.trim();
+    await _removeLegacyPlaintext(userId);
+    final stored = (await _safeRead(_conversationKey(userId)))?.trim();
     if (stored != null && stored.isNotEmpty) return stored;
     final created = createConversationId();
-    await prefs.setString(_conversationKey(userId), created);
+    await _safeWrite(_conversationKey(userId), created);
     return created;
   }
 
@@ -40,8 +57,8 @@ class DtrAssistantSessionStorage {
     String conversationId,
   ) async {
     if (userId.trim().isEmpty || conversationId.trim().isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_conversationKey(userId), conversationId.trim());
+    await _removeLegacyPlaintext(userId);
+    await _safeWrite(_conversationKey(userId), conversationId.trim());
   }
 
   static Future<List<DtrAssistantMessage>> loadMessages(
@@ -49,16 +66,28 @@ class DtrAssistantSessionStorage {
     String conversationId,
   ) async {
     if (userId.trim().isEmpty || conversationId.trim().isEmpty) return const [];
-    final prefs = await SharedPreferences.getInstance();
+    await _removeLegacyPlaintext(userId);
     final key = _storageKey(userId, conversationId);
-    final raw =
-        prefs.getString(key) ?? prefs.getString(_legacyStorageKey(userId));
+    final raw = await _safeRead(key);
     if (raw == null || raw.trim().isEmpty) return const [];
 
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is! List) return const [];
-      final messages = decoded
+      if (decoded is! Map) {
+        await _safeDelete(key);
+        return const [];
+      }
+      final payload = Map<String, dynamic>.from(decoded);
+      final savedAt = DateTime.tryParse(payload['savedAt']?.toString() ?? '');
+      final rawMessages = payload['messages'];
+      if (savedAt == null ||
+          rawMessages is! List ||
+          DateTime.now().toUtc().difference(savedAt.toUtc()) >
+              historyRetention) {
+        await _safeDelete(key);
+        return const [];
+      }
+      return rawMessages
           .whereType<Map>()
           .map(
             (item) =>
@@ -66,12 +95,8 @@ class DtrAssistantSessionStorage {
           )
           .where((item) => item.content.trim().isNotEmpty)
           .toList(growable: false);
-      if (!prefs.containsKey(key)) {
-        await prefs.setString(key, raw);
-        await prefs.remove(_legacyStorageKey(userId));
-      }
-      return messages;
     } catch (_) {
+      await _safeDelete(key);
       return const [];
     }
   }
@@ -82,9 +107,12 @@ class DtrAssistantSessionStorage {
     List<DtrAssistantMessage> messages,
   ) async {
     if (userId.trim().isEmpty || conversationId.trim().isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
-    final payload = jsonEncode(messages.map((item) => item.toJson()).toList());
-    await prefs.setString(_storageKey(userId, conversationId), payload);
+    await _removeLegacyPlaintext(userId);
+    final payload = jsonEncode({
+      'savedAt': DateTime.now().toUtc().toIso8601String(),
+      'messages': messages.map((item) => item.toJson()).toList(),
+    });
+    await _safeWrite(_storageKey(userId, conversationId), payload);
   }
 
   static Future<void> clearMessages(
@@ -92,8 +120,81 @@ class DtrAssistantSessionStorage {
     String conversationId,
   ) async {
     if (userId.trim().isEmpty || conversationId.trim().isEmpty) return;
+    await _safeDelete(_storageKey(userId, conversationId));
+    await _removeLegacyPlaintext(userId);
+  }
+
+  /// Removes every assistant conversation and pointer owned by [userId].
+  static Future<void> clearAllForUser(String userId) async {
+    final normalizedUserId = userId.trim();
+    if (normalizedUserId.isEmpty) return;
+    final activeConversationId = (await _safeRead(
+      _conversationKey(normalizedUserId),
+    ))?.trim();
+    final allValues = await _safeReadAll();
+    final keys = allValues.keys
+        .where(
+          (key) =>
+              key == _conversationKey(normalizedUserId) ||
+              key == _legacyStorageKey(normalizedUserId) ||
+              key.startsWith(_storagePrefix(normalizedUserId)),
+        )
+        .toList(growable: false);
+    await Future.wait(keys.map(_safeDelete));
+    if (activeConversationId != null && activeConversationId.isNotEmpty) {
+      await _safeDelete(_storageKey(normalizedUserId, activeConversationId));
+    }
+    await _safeDelete(_conversationKey(normalizedUserId));
+    await _removeLegacyPlaintext(normalizedUserId);
+  }
+
+  static Future<void> _removeLegacyPlaintext(String userId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_storageKey(userId, conversationId));
-    await prefs.remove(_legacyStorageKey(userId));
+    final keys = prefs
+        .getKeys()
+        .where(
+          (key) =>
+              key == _conversationKey(userId) ||
+              key == _legacyStorageKey(userId) ||
+              key.startsWith(_storagePrefix(userId)),
+        )
+        .toList(growable: false);
+    await Future.wait(keys.map(prefs.remove));
+  }
+
+  static Future<String?> _safeRead(String key) async {
+    try {
+      return await _secureStorage.read(key: key).timeout(_storageTimeout);
+    } catch (error) {
+      debugPrint('[DtrAssistantSessionStorage] read failed: $error');
+      return null;
+    }
+  }
+
+  static Future<Map<String, String>> _safeReadAll() async {
+    try {
+      return await _secureStorage.readAll().timeout(_storageTimeout);
+    } catch (error) {
+      debugPrint('[DtrAssistantSessionStorage] readAll failed: $error');
+      return const {};
+    }
+  }
+
+  static Future<void> _safeWrite(String key, String value) async {
+    try {
+      await _secureStorage
+          .write(key: key, value: value)
+          .timeout(_storageTimeout);
+    } catch (error) {
+      debugPrint('[DtrAssistantSessionStorage] write failed: $error');
+    }
+  }
+
+  static Future<void> _safeDelete(String key) async {
+    try {
+      await _secureStorage.delete(key: key).timeout(_storageTimeout);
+    } catch (error) {
+      debugPrint('[DtrAssistantSessionStorage] delete failed: $error');
+    }
   }
 }

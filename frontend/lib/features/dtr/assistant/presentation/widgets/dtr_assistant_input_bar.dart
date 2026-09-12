@@ -151,7 +151,9 @@ class _AssistantModelSelector extends StatelessWidget {
         return profiles.map((profile) {
           final isSelected = profile.id == selected.id;
           final subtitle = profile.available
-              ? '${profile.provider} ${profile.engine}'
+              ? profile.external
+                    ? 'Cloud processing - ${profile.provider}'
+                    : '${profile.provider} ${profile.engine}'
               : profile.unavailableReason ?? 'Unavailable';
           return PopupMenuItem<String>(
             value: profile.id,
@@ -190,6 +192,14 @@ class _AssistantModelSelector extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (profile.external) ...[
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.cloud_outlined,
+                    size: 17,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
+                ],
               ],
             ),
           );
@@ -219,7 +229,9 @@ class _AssistantModelSelector extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    Icons.tune_rounded,
+                    selected.external
+                        ? Icons.cloud_outlined
+                        : Icons.tune_rounded,
                     size: 18,
                     color: AppTheme.dashTextSecondaryOf(context),
                   ),

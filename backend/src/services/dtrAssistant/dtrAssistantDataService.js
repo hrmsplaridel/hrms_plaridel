@@ -1,4 +1,8 @@
-const { parseAssistantDateRange } = require('../../utils/dateRangeParser');
+const {
+  MAX_ASSISTANT_DATE_RANGE_DAYS,
+  assertAssistantDateRange,
+  parseAssistantDateRange,
+} = require('../../utils/dateRangeParser');
 const {
   buildDtrPolicyKnowledge,
   buildLocatorPolicyKnowledge,
@@ -30,6 +34,206 @@ function compactText(value, max = 360) {
   return `${text.slice(0, max - 1)}...`;
 }
 
+function assistantQueryTimeoutMs(env = process.env) {
+  const parsed = Number.parseInt(
+    String(env.DTR_ASSISTANT_QUERY_TIMEOUT_MS || '10000'),
+    10
+  );
+  if (!Number.isFinite(parsed)) return 10000;
+  return Math.max(1000, Math.min(parsed, 60000));
+}
+
+function throwIfAssistantQueryAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('Assistant request was cancelled.');
+  error.statusCode = 499;
+  error.code = 'ASSISTANT_REQUEST_ABORTED';
+  throw error;
+}
+
+function runAssistantQuery(pool, text, values = []) {
+  return pool.query({
+    text,
+    values,
+    query_timeout: assistantQueryTimeoutMs(),
+  });
+}
+
+const ASSISTANT_CONTEXT_SOURCES = [
+  'employee',
+  'dtrRecords',
+  'dtrCalendarDays',
+  'leaveBalances',
+  'leaveRequests',
+  'leaveAnnualUsage',
+  'leaveTypes',
+  'locatorSlips',
+  'locatorTypes',
+];
+
+const DTR_RECORD_INTENTS = new Set([
+  'today_dtr',
+  'missing_logs',
+  'dtr_daily_record',
+  'dtr_range_summary',
+  'dtr_missing_logs',
+  'dtr_missing_log_reason',
+  'dtr_late_summary',
+  'dtr_late_reason',
+  'dtr_undertime_summary',
+  'dtr_overtime_summary',
+  'dtr_absent_summary',
+  'dtr_status_explanation',
+  'dtr_correction_guidance',
+  'dtr_export_guidance',
+  'dtr_hours_summary',
+]);
+
+const LEAVE_REQUEST_INTENTS = new Set([
+  'latest_leave_request',
+  'pending_leave_requests',
+  'approved_leave_requests',
+  'rejected_leave_requests',
+  'leave_history',
+  'leave_overlap_check',
+  'leave_request_summary',
+  'leave_request_lookup',
+  'leave_rejection_reason',
+  'leave_approval_tracker',
+  'leave_approval_history',
+]);
+
+const LEAVE_BALANCE_INTENTS = new Set([
+  'leave_balance',
+  'leave_pending_days_explanation',
+  'leave_balance_after_filing',
+  'leave_balance_projection',
+]);
+
+const LEAVE_FILING_CHECK_INTENTS = new Set([
+  'leave_availability_check',
+  'leave_guided_filing',
+]);
+
+const LOCATOR_HISTORY_INTENTS = new Set([
+  'latest_locator_request',
+  'locator_status',
+  'locator_summary',
+  'locator_rejection_reason',
+  'locator_approval_tracker',
+]);
+
+function allAssistantContextSources() {
+  return Object.fromEntries(
+    ASSISTANT_CONTEXT_SOURCES.map((source) => [source, true])
+  );
+}
+
+function assistantContextLoadPlan(intents) {
+  const normalized = [...new Set(
+    (Array.isArray(intents) ? intents : [intents])
+      .map((intent) => String(intent || '').trim())
+      .filter(Boolean)
+  )];
+  if (
+    normalized.length === 0 ||
+    normalized.some((intent) => intent === 'unknown' || intent === 'direct_ai')
+  ) {
+    return allAssistantContextSources();
+  }
+
+  const plan = Object.fromEntries(
+    ASSISTANT_CONTEXT_SOURCES.map((source) => [source, false])
+  );
+  plan.employee = true;
+
+  for (const intent of normalized) {
+    if (DTR_RECORD_INTENTS.has(intent)) {
+      plan.dtrRecords = true;
+      plan.dtrCalendarDays = true;
+      continue;
+    }
+    if (intent === 'dtr_holiday_check' || intent === 'dtr_schedule_context') {
+      plan.dtrCalendarDays = true;
+      continue;
+    }
+    if (intent === 'dtr_leave_coverage_check') {
+      plan.leaveRequests = true;
+      plan.leaveTypes = true;
+      continue;
+    }
+    if (intent === 'dtr_locator_coverage_check') {
+      plan.dtrCalendarDays = true;
+      plan.locatorSlips = true;
+      plan.locatorTypes = true;
+      continue;
+    }
+    if (intent === 'dtr_policy_guidance') continue;
+
+    if (intent.startsWith('leave_') || LEAVE_REQUEST_INTENTS.has(intent)) {
+      plan.leaveTypes = true;
+      if (LEAVE_REQUEST_INTENTS.has(intent)) plan.leaveRequests = true;
+      if (LEAVE_BALANCE_INTENTS.has(intent)) plan.leaveBalances = true;
+      if (intent === 'leave_pending_days_explanation') {
+        plan.leaveRequests = true;
+      }
+      if (LEAVE_FILING_CHECK_INTENTS.has(intent)) {
+        plan.leaveBalances = true;
+        plan.leaveRequests = true;
+        plan.leaveAnnualUsage = true;
+      }
+      continue;
+    }
+
+    if (intent.startsWith('locator_') || LOCATOR_HISTORY_INTENTS.has(intent)) {
+      plan.locatorTypes = true;
+      if (LOCATOR_HISTORY_INTENTS.has(intent)) plan.locatorSlips = true;
+      if (intent === 'locator_availability_check') {
+        plan.dtrCalendarDays = true;
+        plan.locatorSlips = true;
+      }
+      continue;
+    }
+
+    return allAssistantContextSources();
+  }
+
+  return plan;
+}
+
+const catalogCacheByPool = new WeakMap();
+
+function assistantCatalogCacheMs(env = process.env) {
+  const parsed = Number.parseInt(
+    String(env.DTR_ASSISTANT_CATALOG_CACHE_MS || '60000'),
+    10
+  );
+  if (!Number.isFinite(parsed)) return 60000;
+  return Math.max(0, Math.min(parsed, 5 * 60 * 1000));
+}
+
+async function loadCachedAssistantCatalog(pool, key, loader) {
+  const ttlMs = assistantCatalogCacheMs();
+  if (ttlMs <= 0 || !pool || typeof pool !== 'object') return loader();
+  const now = Date.now();
+  const poolCache = catalogCacheByPool.get(pool) || new Map();
+  const cached = poolCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise || cached.value;
+  }
+  const promise = Promise.resolve().then(loader);
+  poolCache.set(key, { promise, expiresAt: now + ttlMs });
+  catalogCacheByPool.set(pool, poolCache);
+  try {
+    const value = await promise;
+    poolCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    return value;
+  } catch (error) {
+    if (poolCache.get(key)?.promise === promise) poolCache.delete(key);
+    throw error;
+  }
+}
+
 function parseJsonArray(value) {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -45,7 +249,8 @@ function parseJsonArray(value) {
 }
 
 async function loadEmployeeProfile(pool, userId) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT id, full_name, role, sex, civil_status, date_of_birth::text AS date_of_birth
      FROM users
      WHERE id = $1::uuid
@@ -66,7 +271,8 @@ async function loadEmployeeProfile(pool, userId) {
 }
 
 async function loadDtrRecords(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `WITH active_leave_coverage AS (
        SELECT c.*
        FROM dtr_leave_coverage c
@@ -101,8 +307,7 @@ async function loadDtrRecords(pool, userId, dateRange) {
      WHERE COALESCE(d.employee_id, coverage.employee_id) = $1::uuid
        AND COALESCE(d.attendance_date, coverage.attendance_date)
          BETWEEN $2::date AND $3::date
-     ORDER BY COALESCE(d.attendance_date, coverage.attendance_date) DESC
-     LIMIT 70`,
+     ORDER BY COALESCE(d.attendance_date, coverage.attendance_date) DESC`,
     [userId, dateRange.startDate, dateRange.endDate]
   );
 
@@ -128,7 +333,8 @@ async function loadDtrRecords(pool, userId, dateRange) {
 }
 
 async function loadDtrCalendarDays(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT day.day::date::text AS attendance_date,
             assignment.id AS assignment_id,
             shift.id AS shift_id,
@@ -143,7 +349,14 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
             holiday.name AS holiday_name,
             holiday.holiday_type,
             holiday.coverage AS holiday_coverage
-     FROM generate_series($2::date, $3::date, interval '1 day') AS day(day)
+     FROM generate_series(
+       $2::date,
+       LEAST(
+         $3::date,
+         $2::date + (($4::int - 1) * interval '1 day')
+       ),
+       interval '1 day'
+     ) AS day(day)
      LEFT JOIN LATERAL (
        SELECT a.*
        FROM assignments a
@@ -166,7 +379,12 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
        LIMIT 1
      ) holiday ON true
      ORDER BY day.day ASC`,
-    [userId, dateRange.startDate, dateRange.endDate]
+    [
+      userId,
+      dateRange.startDate,
+      dateRange.endDate,
+      MAX_ASSISTANT_DATE_RANGE_DAYS,
+    ]
   );
 
   return result.rows.map((row) => ({
@@ -188,7 +406,8 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
 }
 
 async function loadLeaveBalances(pool, userId) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT leave_type,
             earned_days,
             used_days,
@@ -222,7 +441,8 @@ async function loadLeaveBalances(pool, userId) {
 }
 
 async function loadRecentLeaveRequests(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT lr.id,
             lr.start_date::text AS start_date,
             lr.end_date::text AS end_date,
@@ -348,7 +568,8 @@ async function loadAnnualLeaveUsage(pool, userId, dateRange) {
   const year = parseInt(String(dateRange?.startDate || '').slice(0, 4), 10);
   if (!Number.isInteger(year)) return [];
   const trackedTypes = ['specialPrivilegeLeave', 'soloParentLeave', 'tenDayVawcLeave'];
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT lt.name AS leave_type_key,
             COALESCE(SUM(COALESCE(lr.number_of_days, lr.total_days, 0)), 0)::float8 AS days,
             COUNT(*)::int AS request_count
@@ -393,8 +614,9 @@ async function loadAnnualLeaveUsage(pool, userId, dateRange) {
   );
 }
 
-async function loadLeaveTypes(pool) {
-  const result = await pool.query(
+async function queryLeaveTypes(pool) {
+  const result = await runAssistantQuery(
+    pool,
     `SELECT id,
             name,
             display_name,
@@ -441,8 +663,15 @@ async function loadLeaveTypes(pool) {
   }));
 }
 
+function loadLeaveTypes(pool) {
+  return loadCachedAssistantCatalog(pool, 'leaveTypes', () =>
+    queryLeaveTypes(pool)
+  );
+}
+
 async function loadRecentLocatorSlips(pool, userId, dateRange) {
-  const result = await pool.query(
+  const result = await runAssistantQuery(
+    pool,
     `SELECT ls.id,
             ls.slip_date::text AS slip_date,
             ls.request_type,
@@ -533,8 +762,9 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
   }));
 }
 
-async function loadLocatorTypes(pool) {
-  const result = await pool.query(
+async function queryLocatorTypes(pool) {
+  const result = await runAssistantQuery(
+    pool,
     `SELECT code,
             label,
             short_label,
@@ -567,8 +797,21 @@ async function loadLocatorTypes(pool) {
   }));
 }
 
-async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: dateRangeOverride }) {
-  const dateRange = dateRangeOverride || parseAssistantDateRange(message);
+function loadLocatorTypes(pool) {
+  return loadCachedAssistantCatalog(pool, 'locatorTypes', () =>
+    queryLocatorTypes(pool)
+  );
+}
+
+async function loadEmployeeAssistantContext(
+  pool,
+  { userId, message, dateRange: dateRangeOverride, intents, signal }
+) {
+  throwIfAssistantQueryAborted(signal);
+  const dateRange = assertAssistantDateRange(
+    dateRangeOverride || parseAssistantDateRange(message)
+  );
+  const loadPlan = assistantContextLoadPlan(intents);
   const [
     employee,
     dtrRecords,
@@ -581,20 +824,48 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
     locatorTypes,
   ] =
     await Promise.all([
-      loadEmployeeProfile(pool, userId),
-      loadDtrRecords(pool, userId, dateRange),
-      loadDtrCalendarDays(pool, userId, dateRange),
-      loadLeaveBalances(pool, userId),
-      loadRecentLeaveRequests(pool, userId, dateRange),
-      loadAnnualLeaveUsage(pool, userId, dateRange),
-      loadLeaveTypes(pool),
-      loadRecentLocatorSlips(pool, userId, dateRange),
-      loadLocatorTypes(pool),
+      loadPlan.employee ? loadEmployeeProfile(pool, userId) : null,
+      loadPlan.dtrRecords ? loadDtrRecords(pool, userId, dateRange) : [],
+      loadPlan.dtrCalendarDays
+        ? loadDtrCalendarDays(pool, userId, dateRange)
+        : [],
+      loadPlan.leaveBalances ? loadLeaveBalances(pool, userId) : [],
+      loadPlan.leaveRequests
+        ? loadRecentLeaveRequests(pool, userId, dateRange)
+        : [],
+      loadPlan.leaveAnnualUsage
+        ? loadAnnualLeaveUsage(pool, userId, dateRange)
+        : [],
+      loadPlan.leaveTypes ? loadLeaveTypes(pool) : [],
+      loadPlan.locatorSlips
+        ? loadRecentLocatorSlips(pool, userId, dateRange)
+        : [],
+      loadPlan.locatorTypes ? loadLocatorTypes(pool) : [],
     ]);
+  throwIfAssistantQueryAborted(signal);
 
   return {
     scope: 'employee_self',
     date_range: dateRange,
+    context_sources: {
+      intents: Array.isArray(intents) ? intents : intents ? [intents] : [],
+      loaded: ASSISTANT_CONTEXT_SOURCES.filter((source) => loadPlan[source]),
+    },
+    data_completeness: {
+      dtr_records: {
+        complete: loadPlan.dtrRecords,
+        capped: false,
+        returned_count: dtrRecords.length,
+      },
+      dtr_calendar_days: {
+        complete: loadPlan.dtrCalendarDays,
+        capped: false,
+        returned_count: dtrCalendarDays.length,
+      },
+      dtr_export: {
+        complete: loadPlan.dtrRecords && loadPlan.dtrCalendarDays,
+      },
+    },
     employee,
     dtr_records: dtrRecords,
     dtr_calendar_days: dtrCalendarDays,
@@ -611,4 +882,11 @@ async function loadEmployeeAssistantContext(pool, { userId, message, dateRange: 
   };
 }
 
-module.exports = { loadEmployeeAssistantContext };
+module.exports = {
+  loadEmployeeAssistantContext,
+  __test: {
+    assistantQueryTimeoutMs,
+    assistantCatalogCacheMs,
+    assistantContextLoadPlan,
+  },
+};

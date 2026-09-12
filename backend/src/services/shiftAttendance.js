@@ -7,28 +7,10 @@ const VALID_PUNCH_MODES = new Set([
   'pm_only',
   'single_session',
 ]);
-const ensuredPunchModePools = new WeakMap();
 
 function normalizePunchMode(value) {
   const raw = value == null ? 'auto' : String(value).trim().toLowerCase();
   return VALID_PUNCH_MODES.has(raw) ? raw : 'auto';
-}
-
-async function ensureShiftPunchModeColumn(pool) {
-  let promise = ensuredPunchModePools.get(pool);
-  if (!promise) {
-    promise = pool.query(
-      `ALTER TABLE shifts
-       ADD COLUMN IF NOT EXISTS punch_mode TEXT NOT NULL DEFAULT 'auto'`
-    );
-    ensuredPunchModePools.set(pool, promise);
-  }
-  try {
-    await promise;
-  } catch (err) {
-    ensuredPunchModePools.delete(pool);
-    throw err;
-  }
 }
 
 function getShiftType(shiftInfo) {
@@ -43,6 +25,15 @@ function getShiftType(shiftInfo) {
     return 'am_only';
   }
   return 'full_day';
+}
+
+function getExpectedPmStartMinutes(shiftInfo) {
+  const type = getShiftType(shiftInfo);
+  if (type === 'pm_only') return shiftInfo?.startMinutes ?? null;
+  if (type === 'full_day') {
+    return shiftInfo?.breakEndMinutes ?? ONE_PM_MINUTES;
+  }
+  return null;
 }
 
 function getExpectedWorkMinutes(shiftInfo) {
@@ -71,7 +62,7 @@ function getExpectedWorkMinutesForCoverage(shiftInfo, coverage) {
     if (type === 'am_only') return 0;
     if (type === 'pm_only') return fullMinutes;
     if (type === 'full_day') {
-      const pmStart = shiftInfo.breakEndMinutes ?? ONE_PM_MINUTES;
+      const pmStart = getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
       return Math.max(0, (shiftInfo.endMinutes ?? pmStart) - pmStart);
     }
     if (type === 'single_session') {
@@ -219,12 +210,38 @@ function computeTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType) {
   return Math.max(0, Math.round(hours * 100) / 100);
 }
 
+/**
+ * A historical assignment correction can change a row from AM/PM slot semantics
+ * to a single session. Preserve the punches and treat either complete slot pair
+ * as the session boundaries instead of rewriting manual attendance evidence.
+ */
+function resolveSingleSessionPunches(record) {
+  return {
+    timeIn:
+      record?.time_in ??
+      record?.timeIn ??
+      record?.break_in ??
+      record?.breakIn ??
+      null,
+    timeOut:
+      record?.time_out ??
+      record?.timeOut ??
+      record?.break_out ??
+      record?.breakOut ??
+      null,
+  };
+}
+
 function computeTotalHoursFromRecord(record, shiftInfo = null) {
   const timeIn = record.time_in ?? record.timeIn ?? null;
   const breakOut = record.break_out ?? record.breakOut ?? null;
   const breakIn = record.break_in ?? record.breakIn ?? null;
   const timeOut = record.time_out ?? record.timeOut ?? null;
   const shiftType = getShiftType(shiftInfo);
+  if (shiftType === 'single_session') {
+    const session = resolveSingleSessionPunches(record);
+    return computeTotalHours(session.timeIn, session.timeOut, null, null, shiftType);
+  }
   if (shiftType) return computeTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType);
 
   if (timeIn && breakOut && breakIn && timeOut) {
@@ -271,9 +288,7 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
   } else {
     const firstPunchMins = minutesFromMidnightInTimeZone(punches[0], timeZone);
     const pmStartThreshold =
-      shiftInfo && Number.isFinite(shiftInfo.breakEndMinutes)
-        ? shiftInfo.breakEndMinutes
-        : NOON_MINUTES;
+      getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
     const isAfternoonFirstPunch =
       firstPunchMins != null && firstPunchMins >= pmStartThreshold;
 
@@ -331,8 +346,8 @@ module.exports = {
   ONE_PM_MINUTES,
   VALID_PUNCH_MODES,
   normalizePunchMode,
-  ensureShiftPunchModeColumn,
   getShiftType,
+  getExpectedPmStartMinutes,
   getExpectedWorkMinutes,
   getExpectedWorkMinutesForCoverage,
   getExpectedAmEndMinutes,
@@ -342,5 +357,6 @@ module.exports = {
   minutesFromMidnightInTimeZone,
   computeTotalHours,
   computeTotalHoursFromRecord,
+  resolveSingleSessionPunches,
   interpretPunchesForShift,
 };

@@ -10,6 +10,14 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+/** Mayor-only module access. */
+function requireMayor(req, res, next) {
+  if (req.user?.role !== 'mayor') {
+    return res.status(403).json({ error: 'Mayor access required' });
+  }
+  next();
+}
+
 /** Admin, HR, or supervisor (e.g. for approving overtime/leave). */
 function requireAdminOrSupervisor(req, res, next) {
   const role = req.user?.role;
@@ -37,4 +45,10 @@ function requireAdminOrHr(req, res, next) {
   next();
 }
 
-module.exports = { requireAdmin, requireAdminOrHr, requireAdminOrSupervisor, requireRole };
+module.exports = {
+  requireAdmin,
+  requireMayor,
+  requireAdminOrHr,
+  requireAdminOrSupervisor,
+  requireRole,
+};

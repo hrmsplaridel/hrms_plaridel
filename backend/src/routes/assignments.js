@@ -2,7 +2,11 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
-const { resolveAssignmentEmployeeAccess } = require('../services/assignmentAccess');
+const {
+  assignmentAccessDeniedForRows,
+  filterAssignmentRowsForAccess,
+  resolveAssignmentEmployeeAccess,
+} = require('../services/assignmentAccess');
 const {
   AssignmentTransitionError,
   createAssignmentTransition,
@@ -20,9 +24,71 @@ const {
   EmployeePolicyAssignmentError,
   upsertEmployeePolicyAssignment,
 } = require('../services/employeePolicyAssignment');
+const {
+  queueAssignmentReconciliation,
+  rebuildAfterAssignmentCommit,
+} = require('../services/assignmentReconciliation');
+const {
+  AssignmentStatusError,
+  assignmentDatePickerContext,
+  assignmentStatusContext,
+  assignmentStatusWhereSql,
+  computedAssignmentStatusSql,
+} = require('../services/assignmentStatus');
+const {
+  invalidateAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
 
 const router = express.Router();
 const protect = [authMiddleware];
+const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
+
+// GET /api/assignments/context?employee_id=uuid
+router.get('/context', protect, async (req, res) => {
+  try {
+    const access = resolveAssignmentEmployeeAccess(req.user, req.query.employee_id);
+    if (!access.allowed) {
+      return res.status(access.statusCode).json({ error: access.error });
+    }
+    const result = await pool.query(
+      `SELECT u.id,
+              u.date_hired::text AS date_hired,
+              u.separation_date::text AS separation_date,
+              history.earliest_effective_date
+         FROM users u
+         LEFT JOIN LATERAL (
+           SELECT MIN(period.effective_from)::text AS earliest_effective_date
+             FROM (
+               SELECT effective_from FROM assignments WHERE employee_id = u.id
+               UNION ALL
+               SELECT effective_from FROM policy_assignments WHERE employee_id = u.id
+               UNION ALL
+               SELECT effective_from FROM employee_other_positions WHERE employee_id = u.id
+             ) period
+         ) history ON true
+        WHERE u.id = $1::uuid`,
+      [access.employeeId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    const row = result.rows[0];
+    const context = assignmentDatePickerContext({
+      dateHired: row.date_hired,
+      separationDate: row.separation_date,
+      earliestEffectiveDate: row.earliest_effective_date,
+    });
+    res.json({
+      official_date: context.officialDate,
+      first_date: context.firstDate,
+      last_date: context.lastDate,
+      future_horizon_years: context.futureHorizonYears,
+    });
+  } catch (err) {
+    console.error('[assignments context GET]', err);
+    res.status(500).json({ error: 'Failed to load assignment date context' });
+  }
+});
 
 function parseDate(val) {
   if (!val) return null;
@@ -52,7 +118,19 @@ function effectiveToBeforeFrom(ef, et) {
   return ef != null && et != null && et < ef;
 }
 
-// GET /api/assignments?employee_id=uuid - list assignments for employee (Schema v2: effective_from/to, override times)
+function assignmentComputationChanged(before, after) {
+  if (!before || !after) return true;
+  return [
+    'department_id',
+    'position_id',
+    'shift_id',
+    'effective_from',
+    'effective_to',
+    'is_active',
+  ].some((key) => String(before[key] ?? '') !== String(after[key] ?? ''));
+}
+
+// GET /api/assignments?employee_id=uuid&status=Current|Upcoming|Expired|Archived|All
 router.get('/', protect, async (req, res) => {
   try {
     const access = resolveAssignmentEmployeeAccess(req.user, req.query.employee_id);
@@ -60,11 +138,12 @@ router.get('/', protect, async (req, res) => {
       return res.status(access.statusCode).json({ error: access.error });
     }
     const employeeId = access.employeeId;
-    const status = req.query.status || 'Active';
-
-    let statusWhere = '';
-    if (status === 'Active') statusWhere = 'AND (a.is_active IS NULL OR a.is_active = true)';
-    else if (status === 'Inactive') statusWhere = 'AND a.is_active = false';
+    const statusContext = assignmentStatusContext(req.query.status);
+    const statusWhere = assignmentStatusWhereSql(
+      'a',
+      statusContext.status,
+      '$2'
+    );
 
     const result = await pool.query(
       `SELECT a.id, a.employee_id, a.department_id, a.position_id, a.shift_id,
@@ -72,7 +151,39 @@ router.get('/', protect, async (req, res) => {
               a.effective_from::text AS effective_from,
               a.effective_to::text AS effective_to,
               a.is_active, a.remarks,
+              ${computedAssignmentStatusSql('a', '$2')} AS computed_status,
+              (
+                (
+                  a.effective_from >= $2::date
+                  OR (a.created_at AT TIME ZONE $3)::date = $2::date
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM dtr_daily_summary dtr
+                   WHERE dtr.assignment_id = a.id
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM biometric_attendance_logs bal
+                   WHERE bal.user_id = a.employee_id
+                     AND (bal.logged_at AT TIME ZONE $3)::date >= a.effective_from
+                     AND (bal.logged_at AT TIME ZONE $3)::date <=
+                       COALESCE(a.effective_to, 'infinity'::date)
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM leave_requests lr
+                   WHERE lr.employee_id = a.employee_id
+                     AND lr.end_date >= a.effective_from
+                     AND lr.start_date <= COALESCE(a.effective_to, 'infinity'::date)
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM locator_slips ls
+                   WHERE ls.employee_id = a.employee_id
+                     AND ls.slip_date >= a.effective_from
+                     AND ls.slip_date <= COALESCE(a.effective_to, 'infinity'::date)
+                )
+              ) AS can_permanently_delete,
               d.name AS department_name, p.name AS position_name, s.name AS shift_name,
+              employee_policy.attendance_policy_id,
+              employee_policy.attendance_policy_name,
               s.start_time AS shift_start_time, s.end_time AS shift_end_time,
               s.break_end AS shift_break_end, s.punch_mode,
               s.working_days AS shift_working_days
@@ -80,12 +191,44 @@ router.get('/', protect, async (req, res) => {
        LEFT JOIN departments d ON a.department_id = d.id
        LEFT JOIN positions p ON a.position_id = p.id
        LEFT JOIN shifts s ON a.shift_id = s.id
+       LEFT JOIN LATERAL (
+         SELECT pa.attendance_policy_id, ap.name AS attendance_policy_name
+           FROM policy_assignments pa
+           JOIN attendance_policies ap ON ap.id = pa.attendance_policy_id
+          WHERE pa.employee_id = a.employee_id
+            AND pa.department_id IS NULL
+            AND pa.shift_id IS NULL
+            AND pa.is_active = true
+            AND pa.effective_from <= CASE
+              WHEN a.effective_from <= $2::date
+               AND COALESCE(a.effective_to, 'infinity'::date) >= $2::date
+                THEN $2::date
+              WHEN a.effective_from > $2::date THEN a.effective_from
+              ELSE COALESCE(a.effective_to, a.effective_from)
+            END
+            AND COALESCE(pa.effective_to, 'infinity'::date) >= CASE
+              WHEN a.effective_from <= $2::date
+               AND COALESCE(a.effective_to, 'infinity'::date) >= $2::date
+                THEN $2::date
+              WHEN a.effective_from > $2::date THEN a.effective_from
+              ELSE COALESCE(a.effective_to, a.effective_from)
+            END
+          ORDER BY pa.effective_from DESC, pa.created_at DESC, pa.id DESC
+          LIMIT 1
+       ) employee_policy ON true
        WHERE a.employee_id = $1 ${statusWhere}
        ORDER BY a.effective_from DESC`,
-      [employeeId]
+      [employeeId, statusContext.today, HRMS_TIMEZONE]
     );
 
-    res.json(result.rows.map((r) => {
+    const visibleRows = await filterAssignmentRowsForAccess(pool, access, result.rows);
+    if (assignmentAccessDeniedForRows(access, result.rows, visibleRows)) {
+      return res.status(403).json({
+        error: 'You can only view assignments within your supervised departments',
+      });
+    }
+
+    res.json(visibleRows.map((r) => {
       const wd = r.shift_working_days;
       const workingDays = Array.isArray(wd)
         ? wd.map((x) => (typeof x === 'number' ? x : parseInt(x, 10))).filter((x) => Number.isFinite(x))
@@ -96,9 +239,14 @@ router.get('/', protect, async (req, res) => {
         department_id: r.department_id,
         position_id: r.position_id,
         shift_id: r.shift_id,
+        attendance_policy_id: r.attendance_policy_id,
+        attendance_policy_name: r.attendance_policy_name,
         effective_from: r.effective_from,
         effective_to: r.effective_to,
         is_active: r.is_active ?? true,
+        computed_status: r.computed_status,
+        official_date: statusContext.today,
+        can_permanently_delete: r.can_permanently_delete === true,
         remarks: r.remarks,
         department_name: r.department_name,
         position_name: r.position_name,
@@ -112,6 +260,9 @@ router.get('/', protect, async (req, res) => {
       };
     }));
   } catch (err) {
+    if (err instanceof AssignmentStatusError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[assignments GET]', err);
     res.status(500).json({ error: 'Failed to fetch assignments' });
   }
@@ -137,8 +288,10 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       req.body || {},
       'attendance_policy_id'
     );
-    if (!employee_id || !effective_from) {
-      return res.status(400).json({ error: 'employee_id and effective_from are required' });
+    if (!employee_id || !effective_from || !String(attendance_policy_id || '').trim()) {
+      return res.status(400).json({
+        error: 'employee_id, effective_from, and attendance_policy_id are required',
+      });
     }
     const ef = parseDate(effective_from);
     if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
@@ -150,7 +303,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
     await client.query('BEGIN');
     try {
-      const assignment = await createAssignmentTransition(client, {
+      const assignmentTransition = await createAssignmentTransition(client, {
         employeeId: employee_id,
         departmentId: department_id,
         positionId: position_id,
@@ -159,20 +312,69 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         effectiveTo: et,
         isActive: is_active === true,
         remarks,
+        includeTransition: true,
       });
-      const policyAssignment = hasPolicyChange
+      const assignment = assignmentTransition.assignment;
+      const policyTransition = hasPolicyChange
         ? await upsertEmployeePolicyAssignment(client, {
             employeeId: employee_id,
             attendancePolicyId: attendance_policy_id,
             effectiveFrom: assignment.effective_from,
             effectiveTo: assignment.effective_to,
             isActive: assignment.is_active !== false,
+            includeTransition: true,
           })
         : null;
+      const policyAssignment = policyTransition?.assignment || null;
+      const auditReason = String(remarks || '').trim() || 'Primary assignment created';
+      await writeAssignmentHistoryAudit(client, {
+        actorId: req.user?.id,
+        recordType: 'primary',
+        recordId: assignment.id,
+        action: 'assignment_created',
+        reason: auditReason,
+        before: null,
+        after: assignment,
+      });
+      if (assignmentTransition.closedPredecessor) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: assignmentTransition.closedPredecessor.after.id,
+          action: 'assignment_predecessor_closed',
+          reason: `New primary assignment starts ${assignment.effective_from}`,
+          before: assignmentTransition.closedPredecessor.before,
+          after: assignmentTransition.closedPredecessor.after,
+        });
+      }
+      if (policyTransition) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'policy',
+          recordId: policyAssignment?.id || policyTransition.before[0]?.id || null,
+          action: 'employee_policy_assignment_updated',
+          reason: 'Initial attendance policy saved with primary assignment',
+          before: policyTransition.before,
+          after: policyTransition.after,
+        });
+      }
+      const queued = await queueAssignmentReconciliation(client, {
+        employeeId: assignment.employee_id,
+        before: null,
+        after: assignment,
+        reason: 'assignment_created',
+        metadata: { assignment_id: assignment.id },
+      });
       await client.query('COMMIT');
+      invalidateAttendancePolicyCache({ employeeId: assignment.employee_id });
+      const reconciliation = await rebuildAfterAssignmentCommit(
+        assignment.employee_id,
+        queued
+      );
       res.status(201).json({
         ...assignment,
         policy_assignment: policyAssignment,
+        reconciliation,
       });
     } catch (e) {
       await client.query('ROLLBACK');
@@ -219,6 +421,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       req.body || {},
       'attendance_policy_id'
     );
+    if (hasPolicyChange && !String(attendance_policy_id || '').trim()) {
+      return res.status(400).json({ error: 'attendance_policy_id is required' });
+    }
     if (
       department_id === undefined &&
       position_id === undefined &&
@@ -227,6 +432,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       effective_to === undefined &&
       is_active === undefined &&
       remarks === undefined
+      && !hasPolicyChange
     ) {
       return res.status(400).json({ error: 'No fields to update' });
     }
@@ -262,7 +468,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       const deactivationReason = isDeactivating
         ? normalizeChangeReason(change_reason)
         : null;
-      const assignment = await updateAssignmentTransition(client, {
+      const assignmentTransition = await updateAssignmentTransition(client, {
         assignmentId: id,
         changes: {
           departmentId: department_id,
@@ -273,7 +479,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           isActive: is_active === undefined ? undefined : is_active === true,
           remarks,
         },
+        includeTransition: true,
       });
+      const assignment = assignmentTransition.assignment;
       const shouldRepairPredecessor =
         isDeactivating ||
         (
@@ -286,15 +494,17 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
             replacementRecord: assignment,
           })
         : null;
-      const policyAssignment = hasPolicyChange
+      const policyTransition = hasPolicyChange
         ? await upsertEmployeePolicyAssignment(client, {
             employeeId: assignment.employee_id,
             attendancePolicyId: attendance_policy_id,
             effectiveFrom: assignment.effective_from,
             effectiveTo: assignment.effective_to,
             isActive: assignment.is_active !== false,
+            includeTransition: true,
           })
         : null;
+      const policyAssignment = policyTransition?.assignment || null;
       if (isDeactivating) {
         await writeAssignmentHistoryAudit(client, {
           actorId: req.user?.id,
@@ -320,11 +530,66 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
           after: restoredPredecessor.after,
         });
       }
+      if (assignmentTransition.closedPredecessor) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: assignmentTransition.closedPredecessor.after.id,
+          action: 'assignment_predecessor_closed',
+          reason:
+            String(change_reason || '').trim() ||
+            `Updated primary assignment starts ${assignment.effective_from}`,
+          before: assignmentTransition.closedPredecessor.before,
+          after: assignmentTransition.closedPredecessor.after,
+        });
+      }
+      if (!isDeactivating) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'primary',
+          recordId: id,
+          action: 'assignment_updated',
+          reason:
+            String(change_reason || '').trim() ||
+            String(remarks || '').trim() ||
+            'Primary assignment updated',
+          before,
+          after: assignment,
+        });
+      }
+      if (policyTransition) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'policy',
+          recordId: policyAssignment?.id || policyTransition.before[0]?.id || null,
+          action: 'employee_policy_assignment_updated',
+          reason: 'Attendance policy updated with primary assignment',
+          before: policyTransition.before,
+          after: policyTransition.after,
+        });
+      }
+      const needsReconciliation =
+        assignmentComputationChanged(before, assignment) || hasPolicyChange;
+      const queued = needsReconciliation
+        ? await queueAssignmentReconciliation(client, {
+            employeeId: assignment.employee_id,
+            before,
+            after: assignment,
+            reason: 'assignment_updated',
+            metadata: { assignment_id: assignment.id },
+          })
+        : { range: null, count: 0, months: [] };
       await client.query('COMMIT');
+      invalidateAttendancePolicyCache({ employeeId: assignment.employee_id });
+      const reconciliation = await rebuildAfterAssignmentCommit(
+        assignment.employee_id,
+        queued
+      );
       res.json({
         ...assignment,
         policy_assignment: policyAssignment,
         predecessor_restored: restoredPredecessor?.after || null,
+        reconciliation,
       });
     } catch (e) {
       await client.query('ROLLBACK');
@@ -364,13 +629,28 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
         recordId: req.params.id,
         reason: req.body?.reason,
       });
+      const queued = result.changed
+        ? await queueAssignmentReconciliation(client, {
+            employeeId: result.record.employee_id,
+            before: result.before,
+            after: result.record,
+            reason: 'assignment_deactivated',
+            metadata: { assignment_id: result.record.id },
+          })
+        : { range: null, count: 0, months: [] };
       await client.query('COMMIT');
+      invalidateAttendancePolicyCache({ employeeId: result.record.employee_id });
+      const reconciliation = await rebuildAfterAssignmentCommit(
+        result.record.employee_id,
+        queued
+      );
       res.json({
         message: result.changed
           ? 'Assignment deactivated and retained in history'
           : 'Assignment is already inactive',
         assignment: result.record,
         predecessor_restored: result.restoredPredecessor?.after || null,
+        reconciliation,
       });
     } catch (error) {
       await client.query('ROLLBACK');
@@ -387,7 +667,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /api/assignments/:id/permanent - remove an unused future mistake only
+// DELETE /api/assignments/:id/permanent - remove an unused current/future mistake only
 router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
   let client;
   try {
@@ -400,10 +680,30 @@ router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
         recordId: req.params.id,
         reason: req.body?.reason,
       });
+      const policyTransition = await upsertEmployeePolicyAssignment(client, {
+        employeeId: result.deleted.employee_id,
+        attendancePolicyId: null,
+        effectiveFrom: result.deleted.effective_from,
+        effectiveTo: result.deleted.effective_to,
+        includeTransition: true,
+      });
+      if (policyTransition.before.length > 0) {
+        await writeAssignmentHistoryAudit(client, {
+          actorId: req.user?.id,
+          recordType: 'policy',
+          recordId: policyTransition.before[0]?.id || null,
+          action: 'employee_policy_assignment_removed_with_assignment',
+          reason: req.body?.reason,
+          before: policyTransition.before,
+          after: policyTransition.after,
+        });
+      }
       await client.query('COMMIT');
+      invalidateAttendancePolicyCache({ employeeId: result.deleted.employee_id });
       res.json({
-        message: 'Mistaken future assignment permanently deleted',
+        message: 'Mistaken unused assignment permanently deleted',
         restored_previous_assignment: result.restoredPredecessor?.after || null,
+        policy_assignment_removed: policyTransition.before.length > 0,
       });
     } catch (error) {
       await client.query('ROLLBACK');

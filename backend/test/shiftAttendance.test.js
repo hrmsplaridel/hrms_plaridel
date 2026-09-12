@@ -3,12 +3,40 @@ const assert = require('node:assert/strict');
 
 const {
   getShiftType,
+  getExpectedPmStartMinutes,
   getExpectedWorkMinutesForCoverage,
   getShiftExpectedLogs,
   interpretPunchesForShift,
   computeTotalHoursFromRecord,
   computeClockOutUndertimeMinutes,
 } = require('../src/services/shiftAttendance');
+
+test('PM cutoff uses one consistent rule for current and legacy shifts', () => {
+  assert.equal(getExpectedPmStartMinutes({
+    startMinutes: 8 * 60,
+    endMinutes: 17 * 60,
+    breakEndMinutes: 13 * 60,
+    punchMode: 'full_day',
+  }), 13 * 60);
+  assert.equal(getExpectedPmStartMinutes({
+    startMinutes: 8 * 60,
+    endMinutes: 17 * 60,
+    breakEndMinutes: null,
+    punchMode: 'full_day',
+  }), 13 * 60);
+  assert.equal(getExpectedPmStartMinutes({
+    startMinutes: 14 * 60,
+    endMinutes: 18 * 60,
+    breakEndMinutes: null,
+    punchMode: 'pm_only',
+  }), 14 * 60);
+  assert.equal(getExpectedPmStartMinutes({
+    startMinutes: 8 * 60,
+    endMinutes: 12 * 60,
+    breakEndMinutes: null,
+    punchMode: 'am_only',
+  }), null);
+});
 
 test('partial holiday coverage keeps only the scheduled shift session', () => {
   const fullDay = {
@@ -111,6 +139,44 @@ test('single-session total hours use direct Time In to Time Out span', () => {
       shift
     ),
     3.25
+  );
+});
+
+test('single-session total hours accept a historical PM slot pair', () => {
+  const shift = {
+    startMinutes: 18 * 60,
+    endMinutes: 19 * 60,
+    punchMode: 'single_session',
+  };
+
+  assert.equal(
+    computeTotalHoursFromRecord(
+      {
+        break_in: '2026-06-01T10:00:00.000Z',
+        time_out: '2026-06-01T11:00:00.000Z',
+      },
+      shift
+    ),
+    1
+  );
+});
+
+test('single-session total hours accept a historical AM slot pair', () => {
+  const shift = {
+    startMinutes: 8 * 60,
+    endMinutes: 12 * 60,
+    punchMode: 'single_session',
+  };
+
+  assert.equal(
+    computeTotalHoursFromRecord(
+      {
+        time_in: '2026-06-01T00:00:00.000Z',
+        break_out: '2026-06-01T04:00:00.000Z',
+      },
+      shift
+    ),
+    4
   );
 });
 

@@ -43,6 +43,7 @@ async function notifyAfterSubmit(
     pmOut,
     requestType,
     departmentHeadUserId,
+    departmentReviewerUserIds = [],
   }
 ) {
   const dateLabel = fmtDate(slipDate);
@@ -52,8 +53,11 @@ async function notifyAfterSubmit(
   const bodyBase = `${who} filed a ${requestLabel} for ${dateLabel}${segmentLabel ? ` (${segmentLabel})` : ''}.`;
 
   if (status === 'pending_department_head' && departmentHeadUserId) {
-    await insertNotification(pool, {
-      userId: departmentHeadUserId,
+    const targets = [...new Set([
+      departmentHeadUserId,
+      ...departmentReviewerUserIds,
+    ].filter((id) => id && id !== employeeUserId))];
+    await insertNotificationForUsers(pool, targets, {
       category: 'locator',
       type: 'locator_pending_department_head',
       title: 'Locator request needs your review',

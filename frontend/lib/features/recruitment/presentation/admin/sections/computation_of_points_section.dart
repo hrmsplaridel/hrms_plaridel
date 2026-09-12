@@ -153,7 +153,7 @@ class _RspComputationOfPointsSectionState
         Text(
           'Computation of Points',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: AppTheme.dashTextPrimaryOf(context),
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
@@ -161,7 +161,7 @@ class _RspComputationOfPointsSectionState
         const SizedBox(height: 8),
         Text(
           'Personnel Selection Board scoring sheet: position details, minimum requirements, and candidate points (education, eligibility, experience, training, performance, potential, work attitude).',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(color: AppTheme.dashTextSecondaryOf(context), fontSize: 14),
         ),
         const SizedBox(height: 24),
         if (_editing != null) ...[
@@ -416,6 +416,99 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
     );
   }
 
+  static DateTime? _tryParseDate(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    final iso = DateTime.tryParse(s);
+    if (iso != null) return iso;
+    final slash = RegExp(r'^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$');
+    final m1 = slash.firstMatch(s);
+    if (m1 != null) {
+      final a = int.tryParse(m1.group(1)!);
+      final b = int.tryParse(m1.group(2)!);
+      final y = int.tryParse(m1.group(3)!);
+      if (a != null && b != null && y != null) {
+        final month = a <= 12 ? a : b;
+        final day = a <= 12 ? b : a;
+        if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+          return DateTime(y, month, day);
+        }
+      }
+    }
+    const months = <String, int>{
+      'jan': 1,
+      'january': 1,
+      'feb': 2,
+      'february': 2,
+      'mar': 3,
+      'march': 3,
+      'apr': 4,
+      'april': 4,
+      'may': 5,
+      'jun': 6,
+      'june': 6,
+      'jul': 7,
+      'july': 7,
+      'aug': 8,
+      'august': 8,
+      'sep': 9,
+      'sept': 9,
+      'september': 9,
+      'oct': 10,
+      'october': 10,
+      'nov': 11,
+      'november': 11,
+      'dec': 12,
+      'december': 12,
+    };
+    final named = RegExp(
+      r'^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$',
+    ).firstMatch(s);
+    if (named != null) {
+      final month = months[named.group(1)!.toLowerCase()];
+      final day = int.tryParse(named.group(2)!);
+      final year = int.tryParse(named.group(3)!);
+      if (month != null && day != null && year != null) {
+        return DateTime(year, month, day);
+      }
+    }
+    return null;
+  }
+
+  static String _formatCopDate(DateTime date) {
+    const monthNames = <String>[
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    final d = date.toLocal();
+    return '${monthNames[d.month - 1]} ${d.day}, ${d.year}';
+  }
+
+  Future<void> _pickDate() async {
+    if (widget.readOnly) return;
+    final now = DateTime.now();
+    final parsed = _tryParseDate(_date.text);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: parsed ?? now,
+      firstDate: DateTime(now.year - 20),
+      lastDate: DateTime(now.year + 5),
+      helpText: 'Select date',
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _date.text = _formatCopDate(picked));
+  }
+
   @override
   Widget build(BuildContext context) {
     final ro = widget.readOnly;
@@ -441,7 +534,7 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
               child: Text(
                 'OFFICE OF THE MUNICIPAL MAYOR',
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -452,12 +545,25 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 SizedBox(
-                  width: 200,
+                  width: 220,
                   child: RspSpacedOutlineField(
                     child: TextFormField(
                       controller: _date,
-                      readOnly: ro,
-                      decoration: rspUnderlinedField('Date'),
+                      readOnly: true,
+                      onTap: ro ? null : _pickDate,
+                      decoration: rspUnderlinedField('Date').copyWith(
+                        hintText: ro ? null : 'Select date',
+                        suffixIcon: ro
+                            ? null
+                            : IconButton(
+                                tooltip: 'Pick date',
+                                icon: const Icon(
+                                  Icons.calendar_today_rounded,
+                                  size: 18,
+                                ),
+                                onPressed: _pickDate,
+                              ),
+                      ),
                     ),
                   ),
                 ),
@@ -468,7 +574,7 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
               child: Text(
                 '(${_positionLevel.text.trim().isEmpty ? "Second Level Position" : _positionLevel.text.trim()})',
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(context),
                   fontSize: 12,
                   fontStyle: FontStyle.italic,
                 ),
@@ -842,9 +948,9 @@ class _ComputationOfPointsList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(e.position ?? '', bold: true),
-              rspRecordsTextCell(e.date ?? ''),
-              rspRecordsTextCell(
+              rspRecordsTextCell(context,e.position ?? '', bold: true),
+              rspRecordsTextCell(context,e.date ?? ''),
+              rspRecordsTextCell(context,
                 '${e.candidates.length}',
                 align: TextAlign.center,
                 bold: true,

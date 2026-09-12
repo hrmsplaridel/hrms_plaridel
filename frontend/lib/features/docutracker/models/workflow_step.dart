@@ -4,6 +4,7 @@ class WorkflowStep {
   const WorkflowStep({
     required this.stepOrder,
     required this.assigneeType,
+    this.assigneeSource = 'specific_users',
     this.roleId,
     this.departmentId,
     this.officeId,
@@ -18,6 +19,9 @@ class WorkflowStep {
 
   /// Who receives at this step: role | department | office | user
   final String assigneeType;
+
+  /// specific_users | department_reviewers
+  final String assigneeSource;
 
   /// Role ID when assigneeType is 'role'
   final String? roleId;
@@ -45,6 +49,7 @@ class WorkflowStep {
     return WorkflowStep(
       stepOrder: (json['step_order'] as num?)?.toInt() ?? 1,
       assigneeType: json['assignee_type'] as String? ?? 'user',
+      assigneeSource: json['assignee_source'] as String? ?? 'specific_users',
       roleId: json['role_id']?.toString(),
       departmentId: json['department_id']?.toString(),
       officeId: json['office_id']?.toString(),
@@ -60,6 +65,7 @@ class WorkflowStep {
   Map<String, dynamic> toJson() => {
     'step_order': stepOrder,
     'assignee_type': assigneeType,
+    'assignee_source': assigneeSource,
     if (roleId != null) 'role_id': roleId,
     if (departmentId != null) 'department_id': departmentId,
     if (officeId != null) 'office_id': officeId,
