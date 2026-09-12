@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const { clearModule, withMockedModule } = require('./helpers/moduleMocks');
 
 const userId = '11111111-1111-4111-8111-111111111111';
+const deviceId = '22222222-2222-4222-8222-222222222222';
 const loggedAt = '2026-09-12T08:00:00+08:00';
 
 async function invokeIngestionRoute({
@@ -13,12 +14,25 @@ async function invokeIngestionRoute({
   gateReason,
   insertRowCount = 1,
   hasStoredPunch = false,
+  processError = null,
 }) {
   const events = [];
   const processCalls = [];
+  const syncUpdates = [];
   const pool = {
-    async query(sql) {
+    async query(sql, params = []) {
       const text = String(sql);
+      if (text.includes('FROM biometric_devices') && text.includes('WHERE id = $1::uuid')) {
+        return { rows: [{ id: params[0], is_active: true }], rowCount: 1 };
+      }
+      if (text.includes('UPDATE biometric_devices') && text.includes('last_sync_at = now()')) {
+        events.push('sync');
+        syncUpdates.push(params[0]);
+        return {
+          rows: [{ last_sync_at: '2026-09-12T00:05:00.000Z' }],
+          rowCount: 1,
+        };
+      }
       if (text.includes('FROM users WHERE biometric_user_id = ANY')) {
         return {
           rows: [{ id: userId, biometric_user_id: '1001' }],
@@ -61,6 +75,7 @@ async function invokeIngestionRoute({
     processBiometricLogsToSummary: async (...args) => {
       events.push('process');
       processCalls.push(args);
+      if (processError) throw processError;
       return { inserted: 0, updated: 0 };
     },
   });
@@ -85,7 +100,7 @@ async function invokeIngestionRoute({
       (entry) => entry.route?.path === path && entry.route.methods.post
     );
     await route.route.stack.at(-1).handle({ body }, res);
-    return { res, events, processCalls };
+    return { res, events, processCalls, syncUpdates };
   } finally {
     clearModule(routePath);
     restoreProcessing();
@@ -170,4 +185,41 @@ test('device push processes only dates represented in the incoming batch', async
     [[userId], '2026-09-10', '2026-09-10'],
     [[userId], '2026-09-12', '2026-09-12'],
   ]);
+});
+
+test('successful empty device heartbeat advances last_sync_at', async () => {
+  const { res, events, processCalls, syncUpdates } = await invokeIngestionRoute({
+    path: '/push',
+    gateReason: null,
+    body: {
+      punches: [],
+      biometric_device_id: deviceId,
+      sync_heartbeat: true,
+    },
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.sync_heartbeat, true);
+  assert.equal(res.body.biometric_device_id, deviceId);
+  assert.equal(res.body.last_sync_at, '2026-09-12T00:05:00.000Z');
+  assert.deepEqual(syncUpdates, [deviceId]);
+  assert.deepEqual(processCalls, []);
+  assert.deepEqual(events, ['sync']);
+});
+
+test('failed attendance processing does not advance device last_sync_at', async () => {
+  const { res, events, syncUpdates } = await invokeIngestionRoute({
+    path: '/push',
+    gateReason: null,
+    processError: new Error('simulated processing failure'),
+    body: {
+      punches: [{ biometric_user_id: '1001', logged_at: loggedAt }],
+      biometric_device_id: deviceId,
+      source_name: 'test-clock',
+    },
+  });
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(syncUpdates, []);
+  assert.equal(events.includes('sync'), false);
 });

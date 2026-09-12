@@ -23,10 +23,13 @@ python scripts/zkteco-sync-py.py
 | `ZK_LIVE_CAPTURE_TIMEOUT` | 10              | Socket timeout for live capture; also controls stop responsiveness |
 | `ZK_LIVE_RECONNECT_DELAY` | 5               | Delay before reconnecting after a live listener error              |
 | `ZK_FALLBACK_INTERVAL` | 300                 | Backfill interval in realtime mode, used to recover missed punches |
+| `ZK_HEARTBEAT_INTERVAL` | 60                 | Minimum seconds between successful empty-device heartbeats         |
 | `ZK_TIMEZONE_OFFSET` | +08:00                | Device local time offset (Philippines: +08:00)                     |
 | `ZK_SYNC_STATE_FILE` | (internal)            | State is stored in `backend/.zkteco-sync-state.json` per device IP |
 
 Active device IPs are loaded from **`GET /api/biometric-attendance-logs/devices`** (rows in `biometric_devices`). You do not set a single `ZK_DEVICE_IP` in the Python sync unless you change the script.
+
+Each successful device read reports the registered device UUID to HRMS. Successful punch batches and throttled empty-device heartbeats update `biometric_devices.last_sync_at`; failed reads, uploads, or DTR processing do not advance it.
 
 ## Setup
 

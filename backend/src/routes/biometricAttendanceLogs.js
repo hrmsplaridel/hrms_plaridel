@@ -11,6 +11,7 @@ const {
 
 const router = express.Router();
 const protect = [authMiddleware];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Middleware: allow if X-Api-Key matches BIO_SYNC_API_KEY, else require JWT auth. */
 function pushAuth(req, res, next) {
@@ -71,6 +72,39 @@ async function processBiometricScopes(scopes) {
     updated += Number(result?.updated || 0);
   }
   return { inserted, updated };
+}
+
+async function loadActiveSyncDevice(rawDeviceId) {
+  const deviceId = String(rawDeviceId || '').trim();
+  if (!deviceId) return { ok: true, deviceId: null };
+  if (!UUID_PATTERN.test(deviceId)) {
+    return { ok: false, statusCode: 400, error: 'biometric_device_id must be a valid UUID' };
+  }
+  const result = await pool.query(
+    `SELECT id, is_active
+     FROM biometric_devices
+     WHERE id = $1::uuid`,
+    [deviceId]
+  );
+  if (result.rowCount === 0) {
+    return { ok: false, statusCode: 404, error: 'Biometric device not found' };
+  }
+  if (result.rows[0].is_active === false) {
+    return { ok: false, statusCode: 409, error: 'Biometric device is inactive' };
+  }
+  return { ok: true, deviceId };
+}
+
+async function markBiometricDeviceSynchronized(deviceId) {
+  if (!deviceId) return null;
+  const result = await pool.query(
+    `UPDATE biometric_devices
+     SET last_sync_at = now(), updated_at = now()
+     WHERE id = $1::uuid
+     RETURNING last_sync_at`,
+    [deviceId]
+  );
+  return result.rows[0]?.last_sync_at || null;
 }
 
 function sortByLoggedAtAsc(items, getLoggedAt) {
@@ -312,10 +346,31 @@ router.get('/devices', pushAuth, async (req, res) => {
  */
 router.post('/push', pushAuth, async (req, res) => {
   try {
-    const { punches = [], device_id, source_name } = req.body;
+    const {
+      punches = [],
+      device_id,
+      biometric_device_id,
+      source_name,
+      sync_heartbeat = false,
+    } = req.body || {};
     const sourceFileName = source_name || device_id || 'zk-sync';
 
+    const syncDevice = await loadActiveSyncDevice(biometric_device_id);
+    if (!syncDevice.ok) {
+      return res.status(syncDevice.statusCode).json({ error: syncDevice.error });
+    }
+
     if (!Array.isArray(punches) || punches.length === 0) {
+      if (sync_heartbeat === true && syncDevice.deviceId) {
+        const lastSyncAt = await markBiometricDeviceSynchronized(syncDevice.deviceId);
+        return res.json({
+          inserted: 0,
+          duplicates_skipped: 0,
+          sync_heartbeat: true,
+          biometric_device_id: syncDevice.deviceId,
+          last_sync_at: lastSyncAt,
+        });
+      }
       return res.status(400).json({
         error: 'No punches to push',
         inserted: 0,
@@ -429,6 +484,7 @@ router.post('/push', pushAuth, async (req, res) => {
     const processed = await processBiometricScopes(processingScopes);
     const summariesInserted = processed.inserted;
     const summariesUpdated = processed.updated;
+    const lastSyncAt = await markBiometricDeviceSynchronized(syncDevice.deviceId);
 
     res.json({
       inserted,
@@ -441,6 +497,8 @@ router.post('/push', pushAuth, async (req, res) => {
       duplicates_skipped: duplicatesSkipped,
       summaries_inserted: summariesInserted,
       summaries_updated: summariesUpdated,
+      biometric_device_id: syncDevice.deviceId,
+      last_sync_at: lastSyncAt,
     });
   } catch (err) {
     console.error('[biometric-attendance-logs push]', err);

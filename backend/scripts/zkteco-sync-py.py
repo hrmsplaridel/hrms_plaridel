@@ -43,9 +43,12 @@ TZ_OFFSET            = os.environ.get("ZK_TIMEZONE_OFFSET", "+08:00")
 REALTIME_ENABLED     = os.environ.get("ZK_REALTIME", "1").strip().lower() not in ("0", "false", "no", "off")
 DISCOVERY_INTERVAL   = int(os.environ.get("ZK_DISCOVERY_INTERVAL", "30"))
 FALLBACK_INTERVAL    = int(os.environ.get("ZK_FALLBACK_INTERVAL", "300"))
+HEARTBEAT_INTERVAL   = int(os.environ.get("ZK_HEARTBEAT_INTERVAL", "60"))
 LIVE_CAPTURE_TIMEOUT = int(os.environ.get("ZK_LIVE_CAPTURE_TIMEOUT", "10"))
 LIVE_RECONNECT_DELAY = int(os.environ.get("ZK_LIVE_RECONNECT_DELAY", "5"))
 STATE_LOCK           = threading.Lock()
+HEARTBEAT_LOCK       = threading.Lock()
+LAST_HEARTBEAT_AT    = {}
 STOP_EVENT           = threading.Event()
 
 
@@ -149,11 +152,31 @@ def get_devices():
         return []
 
 
-def push_punches(state_key, punches, latest_ts=None, source_name=None):
+def push_punches(
+    state_key,
+    punches,
+    latest_ts=None,
+    source_name=None,
+    biometric_device_id=None,
+):
     import requests
-    if not punches:
+    device_uuid = str(biometric_device_id or "").strip()
+    now_monotonic = time.monotonic()
+    if not punches and not device_uuid:
         return {"pushed": 0}
-    payload = {"punches": punches, "source_name": source_name or f"bio-sync-{state_key}"}
+    if not punches:
+        with HEARTBEAT_LOCK:
+            last_heartbeat = LAST_HEARTBEAT_AT.get(device_uuid, 0)
+        if now_monotonic - last_heartbeat < HEARTBEAT_INTERVAL:
+            return {"pushed": 0, "heartbeat_throttled": True}
+
+    payload = {
+        "punches": punches,
+        "source_name": source_name or f"bio-sync-{state_key}",
+        "sync_heartbeat": not punches,
+    }
+    if device_uuid:
+        payload["biometric_device_id"] = device_uuid
     try:
         r = requests.post(
             f"{API_URL}/api/biometric-attendance-logs/push",
@@ -163,6 +186,9 @@ def push_punches(state_key, punches, latest_ts=None, source_name=None):
         )
         r.raise_for_status()
         body = r.json()
+        if device_uuid:
+            with HEARTBEAT_LOCK:
+                LAST_HEARTBEAT_AT[device_uuid] = now_monotonic
         if latest_ts:
             save_last_sync(state_key, ts_to_iso(latest_ts) if hasattr(latest_ts, "strftime") else str(latest_ts))
         return body
@@ -235,7 +261,13 @@ class ZKTecoDriver:
             if latest_ts is None or (hasattr(ts, "__gt__") and ts > latest_ts):
                 latest_ts = ts
 
-        return push_punches(state_key, punches, latest_ts=latest_ts, source_name=source_name)
+        return push_punches(
+            state_key,
+            punches,
+            latest_ts=latest_ts,
+            source_name=source_name,
+            biometric_device_id=self.dev.get("id"),
+        )
 
     # ------------------------------------------------------------------
     def poll_until_stopped(self, stop_event, label_prefix="Poll"):
@@ -289,7 +321,13 @@ class ZKTecoDriver:
                     if not uid or not ts:
                         continue
                     punch  = {"biometric_user_id": uid, "logged_at": ts_to_iso(ts)}
-                    result = push_punches(state_key, [punch], latest_ts=ts, source_name=source_name)
+                    result = push_punches(
+                        state_key,
+                        [punch],
+                        latest_ts=ts,
+                        source_name=source_name,
+                        biometric_device_id=self.dev.get("id"),
+                    )
                     log_push_result(f"Live {self.ip}", result)
 
             except Exception as e:
@@ -428,14 +466,12 @@ class HikvisionDriver:
             except Exception:
                 pass
 
-        if not punches:
-            return {"pushed": 0}
-
         return push_punches(
             state_key,
             punches,
             latest_ts=latest_ts,
             source_name=source_name or device_source(self.dev, self.PREFIX),
+            biometric_device_id=self.dev.get("id"),
         )
 
     # ------------------------------------------------------------------
@@ -593,6 +629,7 @@ class AnvizDriver:
             punches,
             latest_ts=latest_ts,
             source_name=source_name or device_source(self.dev, self.PREFIX),
+            biometric_device_id=self.dev.get("id"),
         )
 
     # ------------------------------------------------------------------
@@ -713,6 +750,7 @@ def main():
     print(f"[bio-sync] API: {API_URL}")
     print(f"[bio-sync] Mode: {'real-time live capture' if REALTIME_ENABLED else 'polling'}")
     print(f"[bio-sync] Poll interval: {POLL_INTERVAL}s")
+    print(f"[bio-sync] Empty heartbeat interval: {HEARTBEAT_INTERVAL}s")
     if REALTIME_ENABLED:
         print(f"[bio-sync] Device discovery interval: {DISCOVERY_INTERVAL}s")
         print(f"[bio-sync] Live capture timeout: {LIVE_CAPTURE_TIMEOUT}s")
