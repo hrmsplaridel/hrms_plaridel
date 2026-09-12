@@ -40,6 +40,7 @@ void main() {
           <String, dynamic>{'insert': 'Memo body\n'},
         ],
       ],
+      'format_version': 2,
       'revision': 4,
       'can_edit_layout': false,
       'can_sign': false,
@@ -67,6 +68,7 @@ void main() {
 
     expect(data.pages.single.delta.single['insert'], 'Memo body\n');
     expect(data.revision, 4);
+    expect(data.formatVersion, 2);
     expect(data.currentUserId, 'user-2');
     expect(data.signatureFields.single.isSigned, isTrue);
     expect(data.signatureFields.single.pageNumber, 1);
@@ -100,6 +102,7 @@ void main() {
     });
 
     expect(data.canSign, isTrue);
+    expect(data.formatVersion, 1);
     expect(data.signatureFields.single.canSign, isTrue);
     expect(data.signatureFields.single.assignedSignerName, 'Assigned Signer');
   });

@@ -76,7 +76,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'Create the draft, then compose it on real A4 pages with formatting and e-signatures.',
+                                'Your title and description will prefill an editable A4 draft. Replace the placeholders, review the text, then Save.',
                                 style: TextStyle(
                                   color: Theme.of(ctx).hintColor,
                                   fontSize: 13,
@@ -338,6 +338,7 @@ Future<void> showDocuTrackerCreateDocumentDialog(
                                         builder: (_) =>
                                             DocuTrackerDocumentBuilderScreen(
                                               document: created,
+                                              prefillNewDraft: true,
                                             ),
                                       ),
                                     );

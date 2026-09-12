@@ -90,7 +90,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | Column | Type | Description |
 |--------|------|-------------|
 | document_id | UUID | Primary key and FK to DocuTracker document |
-| format_version | INT | Stored builder format version |
+| format_version | INT | Stored builder format version; version 2 uses the official printable `assets/forms/a4_letter.pdf` full-page Municipality/HRMD letterhead |
 | pages | JSONB | Array of A4 pages; each page contains Quill Delta operations |
 | page_size | TEXT | Fixed to A4 |
 | margins | JSONB | Normalized page margins |

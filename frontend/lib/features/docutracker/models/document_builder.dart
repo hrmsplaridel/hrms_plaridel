@@ -182,6 +182,7 @@ class DocuTrackerDocumentBuilderData {
     required this.revision,
     required this.canEditLayout,
     required this.canSign,
+    this.formatVersion = 1,
   });
 
   final String documentId;
@@ -191,6 +192,7 @@ class DocuTrackerDocumentBuilderData {
   final int revision;
   final bool canEditLayout;
   final bool canSign;
+  final int formatVersion;
 
   factory DocuTrackerDocumentBuilderData.fromJson(Map<String, dynamic> json) {
     final rawPages = json['pages'];
@@ -217,6 +219,7 @@ class DocuTrackerDocumentBuilderData {
       revision: (json['revision'] as num?)?.toInt() ?? 0,
       canEditLayout: json['can_edit_layout'] == true,
       canSign: json['can_sign'] == true,
+      formatVersion: (json['format_version'] as num?)?.toInt() ?? 1,
     );
   }
 }

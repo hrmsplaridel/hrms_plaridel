@@ -64,7 +64,17 @@ class DocuTrackerSignatureFieldVisual extends StatelessWidget {
           Expanded(
             child: field.signatureImageBytes == null
                 ? const Icon(Icons.verified_rounded, color: Color(0xFF15803D))
-                : Image.memory(field.signatureImageBytes!, fit: BoxFit.contain),
+                : Image.memory(
+                    field.signatureImageBytes!,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) => const Center(
+                      child: Text(
+                        'Signature image unavailable',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 10),
+                      ),
+                    ),
+                  ),
           ),
           Text(
             field.signerName ?? field.assignedSignerName ?? 'Signed',

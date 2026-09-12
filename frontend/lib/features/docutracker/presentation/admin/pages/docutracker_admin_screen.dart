@@ -213,14 +213,15 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     DocuTrackerProvider provider,
   ) async {
     final typeNameController = TextEditingController();
-    final configuredTypes = <DocumentType>{
-      ...DocumentType.values,
-      ...provider.routingConfigs.map((config) => config.documentType),
-    }.toList()..sort(
-      (a, b) => a.displayName.toLowerCase().compareTo(
-        b.displayName.toLowerCase(),
-      ),
-    );
+    final configuredTypes =
+        <DocumentType>{
+          ...DocumentType.values,
+          ...provider.routingConfigs.map((config) => config.documentType),
+        }.toList()..sort(
+          (a, b) => a.displayName.toLowerCase().compareTo(
+            b.displayName.toLowerCase(),
+          ),
+        );
     final type = await showDialog<DocumentType>(
       context: context,
       builder: (ctx) {
@@ -230,7 +231,8 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
           builder: (ctx, setModal) {
             final filteredTypes = configuredTypes
                 .where(
-                  (type) => type.displayName.toLowerCase().contains(
+                  (type) =>
+                      type.displayName.toLowerCase().contains(
                         query.toLowerCase(),
                       ) ||
                       type.value.toLowerCase().contains(query.toLowerCase()),
@@ -318,8 +320,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                 'Create "${customTypeToAdd.displayName}"',
                               ),
                               subtitle: Text(customTypeToAdd.value),
-                              onTap: () =>
-                                  Navigator.pop(ctx, customTypeToAdd),
+                              onTap: () => Navigator.pop(ctx, customTypeToAdd),
                             ),
                           if (filteredTypes.isEmpty && customTypeToAdd == null)
                             const Padding(
@@ -409,47 +410,62 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
 
   /// Switch between workflow routing UI and document permission matrix (single focus area).
   Widget _buildAdminSectionToggle() {
-    return DocuTrackerWarmSurfaceCard(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      child: SizedBox(
-        width: double.infinity,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Admin controls',
-              style: TextStyle(
-                color: DocuTrackerTokens.textPrimaryOf(context),
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
+    return Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      children: [
+        _adminNavButton(
+          label: 'Workflows',
+          icon: Icons.account_tree_outlined,
+          selected: _adminTab == 0,
+          onTap: () => setState(() => _adminTab = 0),
+        ),
+        _adminNavButton(
+          label: 'Permissions',
+          icon: Icons.lock_outline_rounded,
+          selected: _adminTab == 1,
+          onTap: () => setState(() => _adminTab = 1),
+        ),
+      ],
+    );
+  }
+
+  Widget _adminNavButton({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final dark = AppTheme.dashIsDark(context);
+    final foreground = selected
+        ? (dark ? Colors.white : AppTheme.primaryNavy)
+        : AppTheme.dashTextPrimaryOf(context);
+    return Material(
+      color: selected
+          ? AppTheme.primaryNavy.withValues(alpha: dark ? 0.38 : 0.12)
+          : (dark ? AppTheme.dashMutedSurfaceOf(context) : AppTheme.lightGray),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        key: ValueKey('docutracker-admin-${label.toLowerCase()}'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 20, color: foreground),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  color: foreground,
+                  fontSize: 14,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                ),
               ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              'Switch between routing workflows and access permissions.',
-              style: DocuTrackerTokens.subtitleStyle(
-                context,
-              ).copyWith(fontSize: 11.5),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              children: [
-                DocuTrackerWarmFilterChip(
-                  label: 'Workflows',
-                  icon: Icons.account_tree_outlined,
-                  selected: _adminTab == 0,
-                  onTap: () => setState(() => _adminTab = 0),
-                ),
-                DocuTrackerWarmFilterChip(
-                  label: 'Permissions',
-                  icon: Icons.lock_outline_rounded,
-                  selected: _adminTab == 1,
-                  onTap: () => setState(() => _adminTab = 1),
-                ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

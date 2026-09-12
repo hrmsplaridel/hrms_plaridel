@@ -106,7 +106,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   final GlobalKey _trainingRequirementsPreKey = GlobalKey();
   final GlobalKey _trainingRequirementsPostKey = GlobalKey();
   final GlobalKey _docuTrackerHeaderKey = GlobalKey();
-  final GlobalKey _docuTrackerNavigationKey = GlobalKey();
   final GlobalKey _docuTrackerContentKey = GlobalKey();
   final GlobalKey _profileHeroKey = GlobalKey();
   final GlobalKey _profileTabsKey = GlobalKey();
@@ -246,7 +245,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   List<EmployeeTutorialTarget> get _docuTrackerTutorialTargets =>
       EmployeeDocuTrackerTutorial.targets(
         headerKey: _docuTrackerHeaderKey,
-        navigationKey: _docuTrackerNavigationKey,
         contentKey: _docuTrackerContentKey,
       );
 
@@ -564,7 +562,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         return DocuTrackerMain(
           isAdmin: false,
           tutorialHeaderKey: _docuTrackerHeaderKey,
-          tutorialNavigationKey: _docuTrackerNavigationKey,
           tutorialContentKey: _docuTrackerContentKey,
         );
       case _profileNavIndex:

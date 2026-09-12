@@ -1,29 +1,40 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_printable_page_frame.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_field_visual.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_fields_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_pdf_export.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_printable_template.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_geometry.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_draft_text.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_purchase_items_table.dart';
 
 class DocuTrackerDocumentBuilderScreen extends StatefulWidget {
-  const DocuTrackerDocumentBuilderScreen({super.key, required this.document});
+  const DocuTrackerDocumentBuilderScreen({
+    super.key,
+    required this.document,
+    this.prefillNewDraft = false,
+  });
 
   final DocuTrackerDocument document;
+  final bool prefillNewDraft;
 
   @override
   State<DocuTrackerDocumentBuilderScreen> createState() =>
@@ -37,13 +48,17 @@ class _DocuTrackerDocumentBuilderScreenState
   static const double _horizontalMargin = 68;
   static const double _verticalMargin = 72;
   static const double _signaturePanelBreakpoint = 1180;
+  static const int _letterheadFormatVersion = 2;
+  static const String _letterheadLogoAsset = 'assets/images/Plaridel Logo.jpg';
 
   final EmployeeDirectoryLookup _directory = EmployeeDirectoryLookup();
   final List<_EditorPage> _pages = <_EditorPage>[];
   final List<GlobalKey> _pageKeys = <GlobalKey>[];
   List<DocuTrackerSignatureField> _signatureFields =
       <DocuTrackerSignatureField>[];
+  Uint8List? _letterheadBackgroundBytes;
   int _revision = 0;
+  int _formatVersion = 1;
   String _currentUserId = '';
   int _activePage = 0;
   int _localFieldCounter = 0;
@@ -51,6 +66,7 @@ class _DocuTrackerDocumentBuilderScreenState
   String? _error;
   bool _loading = true;
   bool _saving = false;
+  bool _loadingDirectory = false;
   bool _exporting = false;
   bool _canEditLayout = false;
   bool _dirty = false;
@@ -58,6 +74,12 @@ class _DocuTrackerDocumentBuilderScreenState
   double? _signedDragOriginX;
   double? _signedDragOriginY;
   double _zoom = 1;
+  bool _fitWidth = false;
+  bool _signaturePanelOpen = false;
+  int? _capturePage;
+  double _renderScale = 1;
+  TextSelection? _formatSelection;
+  bool get _busy => _saving || _exporting || _loadingDirectory;
 
   DocuTrackerProvider get _provider => context.read<DocuTrackerProvider>();
 
@@ -84,12 +106,8 @@ class _DocuTrackerDocumentBuilderScreenState
       });
       return;
     }
-    final results = await Future.wait<dynamic>([
-      _provider.loadDocumentBuilder(documentId),
-      _directory.load(),
-    ]);
+    final data = await _provider.loadDocumentBuilder(documentId);
     if (!mounted) return;
-    final data = results.first as DocuTrackerDocumentBuilderData?;
     if (data == null) {
       setState(() {
         _loading = false;
@@ -98,7 +116,30 @@ class _DocuTrackerDocumentBuilderScreenState
       });
       return;
     }
+    if (data.formatVersion >= _letterheadFormatVersion) {
+      final background =
+          await DocuTrackerPrintableTemplate.loadA4LetterheadPng();
+      if (!mounted) return;
+      if (background != null) {
+        await precacheImage(MemoryImage(background), context);
+      } else {
+        await precacheImage(const AssetImage(_letterheadLogoAsset), context);
+      }
+      if (!mounted) return;
+      _letterheadBackgroundBytes = background;
+    }
     _replaceFromServer(data);
+    if (widget.prefillNewDraft && DocuTrackerDraftText.canPrefill(data)) {
+      _pages.first.controller.replaceText(
+        0,
+        0,
+        quill.Document.fromJson(
+          DocuTrackerDraftText.composePage(widget.document).delta,
+        ).toDelta(),
+        const TextSelection.collapsed(offset: 0),
+      );
+      setState(() => _dirty = true);
+    }
   }
 
   void _replaceFromServer(DocuTrackerDocumentBuilderData data) {
@@ -117,7 +158,7 @@ class _DocuTrackerDocumentBuilderScreenState
       final editorPage = _EditorPage(controller: controller);
       final pageIndex = index;
       editorPage.focusNode.addListener(() {
-        if (editorPage.focusNode.hasFocus && mounted) {
+        if (editorPage.focusNode.hasFocus && mounted && !_exporting) {
           setState(() => _activePage = pageIndex);
         }
       });
@@ -132,6 +173,7 @@ class _DocuTrackerDocumentBuilderScreenState
         data.signatureFields,
       );
       _revision = data.revision;
+      _formatVersion = data.formatVersion;
       _currentUserId = data.currentUserId;
       _canEditLayout = data.canEditLayout;
       _activePage = _activePage.clamp(0, _pages.length - 1);
@@ -156,7 +198,7 @@ class _DocuTrackerDocumentBuilderScreenState
 
   Future<bool> _save() async {
     final documentId = widget.document.id;
-    if (!_canEditLayout || documentId == null || _saving) return false;
+    if (!_canEditLayout || documentId == null || _busy) return false;
     setState(() {
       _saving = true;
       _error = null;
@@ -184,12 +226,12 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   void _addPage() {
-    if (!_canEditLayout || _pages.length >= 50) return;
+    if (!_canEditLayout || _busy || _pages.length >= 50) return;
     final controller = quill.QuillController.basic();
     final page = _EditorPage(controller: controller);
     final pageIndex = _pages.length;
     page.focusNode.addListener(() {
-      if (page.focusNode.hasFocus && mounted) {
+      if (page.focusNode.hasFocus && mounted && !_exporting) {
         setState(() => _activePage = pageIndex);
       }
     });
@@ -202,13 +244,22 @@ class _DocuTrackerDocumentBuilderScreenState
       _activePage = pageIndex;
       _dirty = true;
     });
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => page.focusNode.requestFocus(),
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_exporting) page.focusNode.requestFocus();
+    });
   }
 
   Future<void> _addSignatureField() async {
-    if (!_canEditLayout) return;
+    if (!_canEditLayout || _busy) return;
+    if (!_directory.isLoaded) {
+      setState(() => _loadingDirectory = true);
+      try {
+        await _directory.load();
+      } finally {
+        if (mounted) setState(() => _loadingDirectory = false);
+      }
+    }
+    if (!mounted || _busy) return;
     if (!_directory.isLoaded || _directory.entries.isEmpty) {
       setState(() => _error = 'Active employee directory is unavailable.');
       return;
@@ -302,7 +353,7 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   Future<void> _signField(DocuTrackerSignatureField field) async {
-    if (!field.canSign || _saving) return;
+    if (!field.canSign || _busy) return;
     if (field.id.startsWith('local-')) {
       setState(
         () => _error = 'Save the document before signing this placeholder.',
@@ -341,7 +392,7 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   Future<void> _insertOwnSignature() async {
-    if (!_canEditLayout || _currentUserId.isEmpty) return;
+    if (!_canEditLayout || _currentUserId.isEmpty || _busy) return;
     final choice = await showDocuTrackerSignatureDialog(
       context,
       provider: _provider,
@@ -408,7 +459,31 @@ class _DocuTrackerDocumentBuilderScreenState
       });
       return;
     }
+    final signedField = signed.signatureFields
+        .where((item) => item.id == field.id)
+        .firstOrNull;
+    var previewFailed = false;
+    final imageBytes = signedField?.signatureImageBytes;
+    if (imageBytes != null) {
+      try {
+        await _precacheDocumentImage(imageBytes);
+      } catch (_) {
+        // Signing succeeded on the server even if its preview cannot decode.
+        previewFailed = true;
+      }
+    }
+    if (!mounted) return;
     _replaceFromServer(signed);
+    if (signedField != null) await _focusSignatureField(signedField);
+    if (!mounted) return;
+    if (previewFailed) {
+      setState(() {
+        _error =
+            'Signature saved, but its image could not be displayed. '
+            'Reload the document to try again.';
+      });
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -557,17 +632,8 @@ class _DocuTrackerDocumentBuilderScreenState
     return (x: 0.35, y: 0.04);
   }
 
-  void _deleteSelectedField() {
-    if (!_canEditLayout || _selectedFieldId == null) return;
-    final field = _signatureFields
-        .cast<DocuTrackerSignatureField?>()
-        .firstWhere((item) => item?.id == _selectedFieldId, orElse: () => null);
-    if (field == null) return;
-    _deleteSignatureField(field);
-  }
-
   void _deleteSignatureField(DocuTrackerSignatureField field) {
-    if (!_canEditLayout || field.isSigned) return;
+    if (!_canEditLayout || field.isSigned || _busy) return;
     setState(() {
       _signatureFields.removeWhere((item) => item.id == field.id);
       if (_selectedFieldId == field.id) _selectedFieldId = null;
@@ -576,30 +642,40 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   Future<void> _goToPage(int pageIndex, {String? selectedFieldId}) async {
-    if (pageIndex < 0 || pageIndex >= _pages.length) return;
+    if (_busy || pageIndex < 0 || pageIndex >= _pages.length) return;
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _activePage = pageIndex;
       _selectedFieldId = selectedFieldId;
     });
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
-    final pageContext = _pageKeys[pageIndex].currentContext;
-    if (pageContext == null || !pageContext.mounted) return;
-    await Scrollable.ensureVisible(
-      pageContext,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-      alignment: 0.05,
-    );
   }
 
-  Future<void> _focusSignatureField(DocuTrackerSignatureField field) =>
-      _goToPage(field.pageNumber - 1, selectedFieldId: field.id);
+  Future<void> _focusSignatureField(DocuTrackerSignatureField field) async {
+    await _goToPage(field.pageNumber - 1, selectedFieldId: field.id);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || _busy) return;
+    final page = _pages[_activePage];
+    if (page.canvasScroll.hasClients) {
+      final target = field.y * _paperHeight * _renderScale - 48;
+      page.canvasScroll.jumpTo(
+        target.clamp(0.0, page.canvasScroll.position.maxScrollExtent),
+      );
+    }
+    if (page.horizontalScroll.hasClients) {
+      final target = field.x * _paperWidth * _renderScale - 24;
+      page.horizontalScroll.jumpTo(
+        target.clamp(0.0, page.horizontalScroll.position.maxScrollExtent),
+      );
+    }
+  }
 
-  void _changeZoom(double change) {
-    final nextZoom = (_zoom + change).clamp(0.6, 1.0);
-    if (nextZoom == _zoom) return;
-    setState(() => _zoom = nextZoom);
+  void _toggleSignatures() {
+    if (_busy) return;
+    if (MediaQuery.sizeOf(context).width >= _signaturePanelBreakpoint) {
+      setState(() => _signaturePanelOpen = !_signaturePanelOpen);
+    } else {
+      unawaited(_showSignatureFieldsSheet());
+    }
   }
 
   Future<void> _showSignatureFieldsSheet() async {
@@ -625,7 +701,13 @@ class _DocuTrackerDocumentBuilderScreenState
               activePage: _activePage + 1,
               selectedFieldId: _selectedFieldId,
               canEditLayout: _canEditLayout,
-              isBusy: _saving,
+              isBusy: _busy,
+              onAddField: _canEditLayout
+                  ? () => closeThen(() => unawaited(_addSignatureField()))
+                  : null,
+              onInsertOwn: _canEditLayout
+                  ? () => closeThen(() => unawaited(_insertOwnSignature()))
+                  : null,
               onClose: () => Navigator.of(sheetContext).pop(),
               onSelect: (field) =>
                   closeThen(() => unawaited(_focusSignatureField(field))),
@@ -639,43 +721,140 @@ class _DocuTrackerDocumentBuilderScreenState
     );
   }
 
+  Future<void> _precacheDocumentImage(Uint8List bytes) async {
+    Object? imageError;
+    await precacheImage(
+      MemoryImage(bytes),
+      context,
+      onError: (error, _) => imageError = error,
+    );
+    if (imageError != null) throw StateError('An image could not be rendered.');
+  }
+
   Future<Uint8List> _buildPdf() async {
-    FocusManager.instance.primaryFocus?.unfocus();
+    if (_busy || _pages.isEmpty) throw StateError('Document is busy.');
+    final selectedField = _selectedFieldId;
+    final selections = _pages.map((page) => page.controller.selection).toList();
+    final readOnly = _pages.map((page) => page.controller.readOnly).toList();
+    final focusedPage = _pages.indexWhere((page) => page.focusNode.hasFocus);
+    final offsets = _pages
+        .map(
+          (page) => (
+            x: page.horizontalScroll.hasClients
+                ? page.horizontalScroll.offset
+                : 0.0,
+            y: page.canvasScroll.hasClients ? page.canvasScroll.offset : 0.0,
+          ),
+        )
+        .toList();
     setState(() {
       _exporting = true;
       _selectedFieldId = null;
     });
-    await WidgetsBinding.instance.endOfFrame;
-    final pageImages = <Uint8List>[];
-    for (final key in _pageKeys) {
-      final boundary =
-          key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) {
-        throw StateError('A document page is not ready to export.');
+    FocusManager.instance.primaryFocus?.unfocus();
+    try {
+      for (final page in _pages) {
+        page.controller.readOnly = true;
       }
-      final image = await boundary.toImage(pixelRatio: 2);
-      final data = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (data == null) {
-        throw StateError('A document page could not be rendered.');
+      if (_formatVersion >= _letterheadFormatVersion) {
+        final background =
+            _letterheadBackgroundBytes ??
+            await DocuTrackerPrintableTemplate.loadA4LetterheadPng();
+        if (!mounted) throw StateError('Document was closed.');
+        if (background != null) {
+          await _precacheDocumentImage(background);
+          _letterheadBackgroundBytes = background;
+        }
       }
-      pageImages.add(data.buffer.asUint8List());
+      if (!mounted) throw StateError('Document was closed.');
+      for (final field in _signatureFields) {
+        final bytes = field.signatureImageBytes;
+        if (bytes != null && bytes.isNotEmpty) {
+          await _precacheDocumentImage(bytes);
+          if (!mounted) throw StateError('Document was closed.');
+        }
+      }
+      final pageImages = <Uint8List>[];
+      for (var index = 0; index < _pages.length; index++) {
+        if (!mounted) throw StateError('Document was closed.');
+        setState(() => _capturePage = index);
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) throw StateError('Document was closed.');
+        final boundary =
+            _pageKeys[index].currentContext?.findRenderObject()
+                as RenderRepaintBoundary?;
+        if (boundary == null) throw StateError('Page is not ready.');
+        final captured = await boundary.toImage(pixelRatio: 2);
+        try {
+          final data = await captured.toByteData(
+            format: ui.ImageByteFormat.png,
+          );
+          if (data == null) throw StateError('Page could not be rendered.');
+          pageImages.add(data.buffer.asUint8List());
+        } finally {
+          captured.dispose();
+        }
+      }
+      return await buildDocuTrackerA4Pdf(pageImages);
+    } finally {
+      if (mounted) {
+        for (var i = 0; i < _pages.length; i++) {
+          _pages[i].controller.readOnly = readOnly[i];
+          _pages[i].controller.updateSelection(
+            selections[i],
+            quill.ChangeSource.local,
+          );
+        }
+        setState(() {
+          _capturePage = null;
+          _selectedFieldId = selectedField;
+        });
+        await WidgetsBinding.instance.endOfFrame;
+        if (mounted) {
+          final page = _pages[_activePage];
+          if (page.canvasScroll.hasClients) {
+            page.canvasScroll.jumpTo(
+              offsets[_activePage].y.clamp(
+                0.0,
+                page.canvasScroll.position.maxScrollExtent,
+              ),
+            );
+          }
+          if (page.horizontalScroll.hasClients) {
+            page.horizontalScroll.jumpTo(
+              offsets[_activePage].x.clamp(
+                0.0,
+                page.horizontalScroll.position.maxScrollExtent,
+              ),
+            );
+          }
+          setState(() => _exporting = false);
+          if (focusedPage >= 0) _pages[focusedPage].focusNode.requestFocus();
+        }
+      }
     }
-    final bytes = await buildDocuTrackerA4Pdf(pageImages);
-    if (mounted) setState(() => _exporting = false);
-    return bytes;
   }
 
   Future<void> _printDocument() async {
+    if (_busy) return;
     try {
-      await Printing.layoutPdf(onLayout: (_) => _buildPdf());
-    } catch (error) {
-      if (mounted) setState(() => _error = 'Print failed: $error');
-    } finally {
-      if (mounted) setState(() => _exporting = false);
+      final bytes = await _buildPdf();
+      await Printing.layoutPdf(
+        onLayout: (_) async => bytes,
+        format: PdfPageFormat.a4,
+        dynamicLayout: false,
+      );
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error = 'Could not print the document. Please try again.',
+        );
+      }
     }
   }
 
   Future<void> _exportPdf() async {
+    if (_busy) return;
     try {
       final bytes = await _buildPdf();
       final safeName = widget.document.title
@@ -685,10 +864,10 @@ class _DocuTrackerDocumentBuilderScreenState
         bytes: bytes,
         filename: '${safeName.isEmpty ? 'document' : safeName}.pdf',
       );
-    } catch (error) {
-      if (mounted) setState(() => _error = 'PDF export failed: $error');
-    } finally {
-      if (mounted) setState(() => _exporting = false);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = 'Could not export the PDF. Please try again.');
+      }
     }
   }
 
@@ -697,76 +876,325 @@ class _DocuTrackerDocumentBuilderScreenState
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    if (_pages.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: const BackButton(),
+          title: const Text('Document'),
+        ),
+        body: DocuTrackerErrorBanner(
+          message: _error ?? 'Document is unavailable.',
+        ),
+      );
+    }
+    final compact = MediaQuery.sizeOf(context).width < 600;
+    final status = _saving
+        ? 'Saving...'
+        : _dirty
+        ? 'Unsaved changes'
+        : 'Saved';
     return Localizations.override(
       context: context,
       delegates: const <LocalizationsDelegate<dynamic>>[
         quill.FlutterQuillLocalizations.delegate,
       ],
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF1F3F6),
-        appBar: AppBar(
-          leading: const BackButton(),
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(widget.document.title, overflow: TextOverflow.ellipsis),
-              Text(
-                _canEditLayout ? 'A4 document builder' : 'Document preview',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-            ],
-          ),
-          actions: [
-            IconButton(
-              tooltip: 'Print',
-              onPressed: _exporting ? null : _printDocument,
-              icon: const Icon(Icons.print_outlined),
-            ),
-            IconButton(
-              tooltip: 'Export PDF',
-              onPressed: _exporting ? null : _exportPdf,
-              icon: const Icon(Icons.picture_as_pdf_outlined),
-            ),
-            if (_canEditLayout)
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: FilledButton.icon(
-                  onPressed: _saving || !_dirty ? null : _save,
-                  icon: _saving
-                      ? const SizedBox.square(
-                          dimension: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Icon(
-                          _dirty
-                              ? Icons.save_outlined
-                              : Icons.check_circle_outline,
+      child: PopScope(
+        canPop: !_exporting,
+        child: Stack(
+          children: [
+            AbsorbPointer(
+              absorbing: _exporting,
+              child: Scaffold(
+                backgroundColor: DocuTrackerTokens.canvasOf(context),
+                appBar: AppBar(
+                  leading: BackButton(
+                    onPressed: _exporting
+                        ? null
+                        : () => Navigator.maybePop(context),
+                  ),
+                  titleSpacing: 0,
+                  title: Tooltip(
+                    message: widget.document.title,
+                    child: Text(
+                      widget.document.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  actions: [
+                    if (_canEditLayout) ...[
+                      if (!compact)
+                        Text(
+                          status,
+                          style: Theme.of(context).textTheme.labelSmall,
                         ),
-                  label: Text(
-                    _saving
-                        ? 'Saving...'
-                        : _dirty
-                        ? 'Unsaved changes'
-                        : 'Saved',
+                      SizedBox(
+                        width: compact ? 56 : 48,
+                        child: Tooltip(
+                          message: 'Save — $status',
+                          child: InkWell(
+                            onTap: _busy || !_dirty ? null : _save,
+                            child: Semantics(
+                              button: true,
+                              enabled: !_busy && _dirty,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  if (_saving)
+                                    const SizedBox.square(
+                                      dimension: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  else
+                                    Icon(
+                                      _dirty
+                                          ? Icons.save_outlined
+                                          : Icons.check_circle_outline,
+                                    ),
+                                  if (compact)
+                                    Text(
+                                      _saving
+                                          ? 'Saving'
+                                          : _dirty
+                                          ? 'Unsaved'
+                                          : 'Saved',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.labelSmall,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    IconButton(
+                      tooltip: 'Signatures',
+                      onPressed: _busy ? null : _toggleSignatures,
+                      isSelected: _signaturePanelOpen,
+                      icon: const Icon(Icons.draw_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Print',
+                      onPressed: _busy ? null : _printDocument,
+                      icon: const Icon(Icons.print_outlined),
+                    ),
+                    PopupMenuButton<String>(
+                      tooltip: 'More',
+                      enabled: !_busy,
+                      onOpened: () => _formatSelection =
+                          _pages[_activePage].controller.selection,
+                      onSelected: _handleMoreAction,
+                      itemBuilder: (_) => [
+                        if (_canEditLayout)
+                          const PopupMenuItem(
+                            value: 'format',
+                            child: Text('Format'),
+                          ),
+                        if (_canEditLayout && _pages.length < 50)
+                          const PopupMenuItem(
+                            value: 'add',
+                            child: Text('Add Page'),
+                          ),
+                        const PopupMenuItem(
+                          value: 'export',
+                          child: Text('Export PDF'),
+                        ),
+                        const PopupMenuItem(value: 'zoom', child: Text('Zoom')),
+                      ],
+                    ),
+                  ],
+                ),
+                body: Column(
+                  children: [
+                    if (_error != null)
+                      Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: DocuTrackerErrorBanner(message: _error!),
+                      ),
+                    Expanded(child: _buildWorkspace()),
+                    _buildCanvasControls(),
+                  ],
+                ),
+              ),
+            ),
+            if (_exporting) ...[
+              const Positioned.fill(
+                child: ModalBarrier(
+                  key: ValueKey('builder-export-barrier'),
+                  dismissible: false,
+                  color: Color(0x88000000),
+                ),
+              ),
+              Center(
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 16),
+                        Text(
+                          _capturePage == null
+                              ? 'Preparing PDF...'
+                              : 'Preparing page ${_capturePage! + 1} of ${_pages.length}',
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
+            ],
           ],
         ),
-        body: Column(
-          children: [
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: DocuTrackerErrorBanner(message: _error!),
+      ),
+    );
+  }
+
+  void _handleMoreAction(String action) {
+    switch (action) {
+      case 'format':
+        unawaited(_showFormatTools());
+      case 'add':
+        _addPage();
+      case 'export':
+        unawaited(_exportPdf());
+      case 'zoom':
+        unawaited(_showZoomTools());
+    }
+  }
+
+  Future<void> _showToolSurface(Widget child) async {
+    if (MediaQuery.sizeOf(context).width < 600) {
+      await showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(padding: const EdgeInsets.all(16), child: child),
+          ),
+        ),
+      );
+    } else {
+      await showDialog<void>(
+        context: context,
+        barrierColor: Colors.transparent,
+        builder: (_) => Dialog(
+          alignment: Alignment.topRight,
+          insetPadding: const EdgeInsets.fromLTRB(24, 64, 24, 24),
+          child: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Padding(padding: const EdgeInsets.all(16), child: child),
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _showFormatTools() async {
+    final controller = _pages[_activePage].controller;
+    final selection = _formatSelection ?? controller.selection;
+    controller.updateSelection(selection, quill.ChangeSource.local);
+    await _showToolSurface(
+      Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _toolHeading('Format'),
+          const SizedBox(height: 8),
+          _buildToolbar(),
+        ],
+      ),
+    );
+  }
+
+  Widget _toolHeading(String title) => Builder(
+    // Resolve the navigator inside the tool route, not the builder's navigator.
+    builder: (toolContext) => Row(
+      children: [
+        Expanded(
+          child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+        ),
+        IconButton(
+          tooltip: 'Close $title',
+          onPressed: () => Navigator.of(toolContext).pop(),
+          icon: const Icon(Icons.close),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _showZoomTools() async {
+    await _showToolSurface(
+      StatefulBuilder(
+        builder: (context, updateTools) {
+          void update(VoidCallback change) {
+            setState(change);
+            updateTools(() {});
+          }
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _toolHeading('Zoom'),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton(
+                    onPressed: () => update(() {
+                      _fitWidth = false;
+                      _zoom = 1;
+                    }),
+                    child: const Text('Fit page'),
+                  ),
+                  TextButton(
+                    onPressed: () => update(() {
+                      _fitWidth = true;
+                      _zoom = 1;
+                    }),
+                    child: const Text('Fit width'),
+                  ),
+                ],
               ),
-            _buildToolbar(),
-            Expanded(child: _buildWorkspace()),
-          ],
-        ),
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Zoom out',
+                    onPressed: _zoom <= 0.5
+                        ? null
+                        : () => update(
+                            () => _zoom = (_zoom - 0.1).clamp(0.5, 3.0),
+                          ),
+                    icon: const Icon(Icons.zoom_out),
+                  ),
+                  Expanded(
+                    child: Text(
+                      '${(_zoom * 100).round()}% of ${_fitWidth ? 'page width' : 'page fit'}',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Zoom in',
+                    onPressed: _zoom >= 3
+                        ? null
+                        : () => update(
+                            () => _zoom = (_zoom + 0.1).clamp(0.5, 3.0),
+                          ),
+                    icon: const Icon(Icons.zoom_in),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -774,28 +1202,37 @@ class _DocuTrackerDocumentBuilderScreenState
   Widget _buildWorkspace() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final showSidePanel = constraints.maxWidth >= _signaturePanelBreakpoint;
-        if (!showSidePanel) return _buildDocumentCanvas();
+        final showPanel =
+            _signaturePanelOpen &&
+            constraints.maxWidth >= _signaturePanelBreakpoint;
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(child: _buildDocumentCanvas()),
-            SizedBox(
-              width: 336,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(0, 16, 16, 16),
-                child: DocuTrackerSignatureFieldsPanel(
-                  fields: _signatureFields,
-                  activePage: _activePage + 1,
-                  selectedFieldId: _selectedFieldId,
-                  canEditLayout: _canEditLayout,
-                  isBusy: _saving,
-                  onSelect: (field) => unawaited(_focusSignatureField(field)),
-                  onSign: (field) => unawaited(_signField(field)),
-                  onDelete: _deleteSignatureField,
+            if (showPanel)
+              SizedBox(
+                width: 336,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 12, 12, 12),
+                  child: DocuTrackerSignatureFieldsPanel(
+                    fields: _signatureFields,
+                    activePage: _activePage + 1,
+                    selectedFieldId: _selectedFieldId,
+                    canEditLayout: _canEditLayout,
+                    isBusy: _busy,
+                    onClose: () => setState(() => _signaturePanelOpen = false),
+                    onAddField: _canEditLayout
+                        ? () => unawaited(_addSignatureField())
+                        : null,
+                    onInsertOwn: _canEditLayout
+                        ? () => unawaited(_insertOwnSignature())
+                        : null,
+                    onSelect: (field) => unawaited(_focusSignatureField(field)),
+                    onSign: (field) => unawaited(_signField(field)),
+                    onDelete: _deleteSignatureField,
+                  ),
                 ),
               ),
-            ),
           ],
         );
       },
@@ -803,328 +1240,183 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   Widget _buildDocumentCanvas() {
-    return Column(
-      children: [
-        _buildCanvasControls(),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final fittedScale = ((constraints.maxWidth - 32) / _paperWidth)
-                  .clamp(0.42, 1.0);
-              final scale = (fittedScale * _zoom).clamp(0.30, 1.0);
-              return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 48),
-                child: Column(
-                  children: [
-                    for (var index = 0; index < _pages.length; index++) ...[
-                      _buildPage(index, scale),
-                      if (index != _pages.length - 1)
-                        const SizedBox(height: 24),
-                    ],
-                  ],
+    final index = _capturePage ?? _activePage;
+    final page = _pages[index];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final widthFit = math.max(
+          0.01,
+          (constraints.maxWidth - 24) / _paperWidth,
+        );
+        final heightFit = math.max(
+          0.01,
+          (constraints.maxHeight - 24) / _paperHeight,
+        );
+        final scale =
+            (_fitWidth ? widthFit : math.min(widthFit, heightFit)) * _zoom;
+        _renderScale = scale;
+        return SingleChildScrollView(
+          key: ValueKey('canvas-$index'),
+          controller: page.canvasScroll,
+          child: SingleChildScrollView(
+            controller: page.horizontalScroll,
+            scrollDirection: Axis.horizontal,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minWidth: constraints.maxWidth,
+                minHeight: constraints.maxHeight,
+              ),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: _buildPage(index, scale),
                 ),
-              );
-            },
+              ),
+            ),
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 
   Widget _buildCanvasControls() {
-    final zoomPercent = (_zoom * 100).round();
-    return Material(
-      color: DocuTrackerTokens.surfaceOf(context),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 600;
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
-              children: [
-                IconButton(
-                  tooltip: 'Previous page',
-                  onPressed: _activePage > 0
-                      ? () => unawaited(_goToPage(_activePage - 1))
-                      : null,
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                Text(
-                  compact
-                      ? '${_activePage + 1}/${_pages.length}'
-                      : 'Page ${_activePage + 1} of ${_pages.length}',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                IconButton(
-                  tooltip: 'Next page',
-                  onPressed: _activePage < _pages.length - 1
-                      ? () => unawaited(_goToPage(_activePage + 1))
-                      : null,
-                  icon: const Icon(Icons.chevron_right),
-                ),
-                const Spacer(),
-                IconButton(
-                  tooltip: 'Zoom out',
-                  onPressed: _zoom > 0.6 ? () => _changeZoom(-0.1) : null,
-                  icon: const Icon(Icons.zoom_out),
-                ),
-                SizedBox(
-                  width: 42,
-                  child: Text(
-                    '$zoomPercent%',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.labelMedium,
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Zoom in',
-                  onPressed: _zoom < 1 ? () => _changeZoom(0.1) : null,
-                  icon: const Icon(Icons.zoom_in),
-                ),
-                if (!compact)
-                  IconButton(
-                    tooltip: 'Reset zoom',
-                    onPressed: _zoom == 1
-                        ? null
-                        : () => setState(() => _zoom = 1),
-                    icon: const Icon(Icons.fit_screen_outlined),
-                  ),
-              ],
+    return SafeArea(
+      top: false,
+      child: Material(
+        color: DocuTrackerTokens.surfaceOf(context),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Previous page',
+              onPressed: !_busy && _activePage > 0
+                  ? () => _goToPage(_activePage - 1)
+                  : null,
+              icon: const Icon(Icons.chevron_left),
             ),
-          );
-        },
+            PopupMenuButton<int>(
+              tooltip: 'Choose page',
+              enabled: !_busy,
+              onSelected: (index) => unawaited(_goToPage(index)),
+              itemBuilder: (_) => List.generate(
+                _pages.length,
+                (index) => PopupMenuItem(
+                  value: index,
+                  child: Text('Page ${index + 1}'),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                child: Text('Page ${_activePage + 1} of ${_pages.length}'),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Next page',
+              onPressed: !_busy && _activePage < _pages.length - 1
+                  ? () => _goToPage(_activePage + 1)
+                  : null,
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildToolbar() {
-    final enabled = _canEditLayout && _pages.isNotEmpty;
+    final enabled = _canEditLayout && !_busy;
     final controller = _pages[_activePage].controller;
-    final actionableForCurrentUser = _signatureFields
-        .where((field) => field.canSign)
-        .toList(growable: false);
-    final pendingForCurrentUser = actionableForCurrentUser
-        .where((field) => !field.isSigned)
-        .toList(growable: false);
-    final signedForCurrentUser = actionableForCurrentUser
-        .where((field) => field.isSigned)
-        .toList(growable: false);
-    DocuTrackerSignatureField? toolbarField;
-    for (final field in pendingForCurrentUser) {
-      if (field.pageNumber == _activePage + 1) {
-        toolbarField = field;
-        break;
-      }
-    }
-    toolbarField ??= pendingForCurrentUser.isEmpty
-        ? null
-        : pendingForCurrentUser.first;
-    if (toolbarField == null) {
-      for (final field in signedForCurrentUser) {
-        if (field.pageNumber == _activePage + 1) {
-          toolbarField = field;
-          break;
-        }
-      }
-    }
-    toolbarField ??= signedForCurrentUser.isEmpty
-        ? null
-        : signedForCurrentUser.first;
-    final selectedField = _signatureFields
-        .cast<DocuTrackerSignatureField?>()
-        .firstWhere(
-          (field) => field?.id == _selectedFieldId,
-          orElse: () => null,
-        );
-    final canDeleteSelected =
-        enabled && selectedField != null && !selectedField.isSigned;
-    final showSignatureFieldsButton =
-        MediaQuery.sizeOf(context).width < _signaturePanelBreakpoint;
-    return Material(
-      color: Colors.white,
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _FormatButton(
-                    tooltip: 'Bold',
-                    icon: Icons.format_bold,
-                    enabled: enabled,
-                    onPressed: () => _toggle(controller, quill.Attribute.bold),
-                  ),
-                  _FormatButton(
-                    tooltip: 'Italic',
-                    icon: Icons.format_italic,
-                    enabled: enabled,
-                    onPressed: () =>
-                        _toggle(controller, quill.Attribute.italic),
-                  ),
-                  _FormatButton(
-                    tooltip: 'Underline',
-                    icon: Icons.format_underline,
-                    enabled: enabled,
-                    onPressed: () =>
-                        _toggle(controller, quill.Attribute.underline),
-                  ),
-                  const VerticalDivider(),
-                  _PopupFormat<int>(
-                    tooltip: 'Heading',
-                    icon: Icons.title,
-                    enabled: enabled,
-                    items: const <PopupMenuEntry<int>>[
-                      PopupMenuItem(value: 0, child: Text('Normal text')),
-                      PopupMenuItem(value: 1, child: Text('Heading 1')),
-                      PopupMenuItem(value: 2, child: Text('Heading 2')),
-                      PopupMenuItem(value: 3, child: Text('Heading 3')),
-                    ],
-                    onSelected: (level) => controller.formatSelection(
-                      quill.HeaderAttribute(level: level == 0 ? null : level),
-                    ),
-                  ),
-                  _PopupFormat<String>(
-                    tooltip: 'Font size',
-                    icon: Icons.format_size,
-                    enabled: enabled,
-                    items: const <PopupMenuEntry<String>>[
-                      PopupMenuItem(value: '12', child: Text('12 pt')),
-                      PopupMenuItem(value: '14', child: Text('14 pt')),
-                      PopupMenuItem(value: '16', child: Text('16 pt')),
-                      PopupMenuItem(value: '18', child: Text('18 pt')),
-                      PopupMenuItem(value: '24', child: Text('24 pt')),
-                    ],
-                    onSelected: (size) =>
-                        controller.formatSelection(quill.SizeAttribute(size)),
-                  ),
-                  const VerticalDivider(),
-                  _FormatButton(
-                    tooltip: 'Align left',
-                    icon: Icons.format_align_left,
-                    enabled: enabled,
-                    onPressed: () => controller.formatSelection(
-                      const quill.AlignAttribute(null),
-                    ),
-                  ),
-                  _FormatButton(
-                    tooltip: 'Align center',
-                    icon: Icons.format_align_center,
-                    enabled: enabled,
-                    onPressed: () => controller.formatSelection(
-                      const quill.AlignAttribute('center'),
-                    ),
-                  ),
-                  _FormatButton(
-                    tooltip: 'Align right',
-                    icon: Icons.format_align_right,
-                    enabled: enabled,
-                    onPressed: () => controller.formatSelection(
-                      const quill.AlignAttribute('right'),
-                    ),
-                  ),
-                  _FormatButton(
-                    tooltip: 'Bulleted list',
-                    icon: Icons.format_list_bulleted,
-                    enabled: enabled,
-                    onPressed: () => _toggle(
-                      controller,
-                      const quill.ListAttribute('bullet'),
-                    ),
-                  ),
-                  _FormatButton(
-                    tooltip: 'Numbered list',
-                    icon: Icons.format_list_numbered,
-                    enabled: enabled,
-                    onPressed: () => _toggle(
-                      controller,
-                      const quill.ListAttribute('ordered'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 16),
-            Text(
-              'Document actions',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: DocuTrackerTokens.textMutedOf(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 40),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                  ),
-                  onPressed: enabled ? _addPage : null,
-                  icon: const Icon(Icons.note_add_outlined),
-                  label: Text('Add Page (${_pages.length})'),
-                ),
-                FilledButton.tonalIcon(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 40),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    backgroundColor: DocuTrackerTokens.brandSoft,
-                    foregroundColor: DocuTrackerTokens.brandDark,
-                  ),
-                  onPressed: enabled ? _addSignatureField : null,
-                  icon: const Icon(Icons.add_box_outlined),
-                  label: const Text('Add Signature Field'),
-                ),
-                if (showSignatureFieldsButton)
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 40),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                    ),
-                    onPressed: _showSignatureFieldsSheet,
-                    icon: const Icon(Icons.view_sidebar_outlined),
-                    label: Text(
-                      'Signature Fields (${_signatureFields.length})',
-                    ),
-                  ),
-                FilledButton.icon(
-                  style: DocuTrackerTokens.brandFilledStyle(),
-                  onPressed: _saving
-                      ? null
-                      : toolbarField != null
-                      ? () => _signField(toolbarField!)
-                      : enabled
-                      ? _insertOwnSignature
-                      : null,
-                  icon: const Icon(Icons.gesture_rounded),
-                  label: Text(
-                    toolbarField?.isSigned == true
-                        ? 'Change E-Signature'
-                        : 'Insert E-Signature',
-                  ),
-                ),
-                if (canDeleteSelected)
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 40),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      foregroundColor: const Color(0xFFB91C1C),
-                    ),
-                    onPressed: _deleteSelectedField,
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('Delete Field'),
-                  ),
-              ],
-            ),
-          ],
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        _FormatButton(
+          tooltip: 'Bold',
+          icon: Icons.format_bold,
+          enabled: enabled,
+          onPressed: () => _toggle(controller, quill.Attribute.bold),
         ),
-      ),
+        _FormatButton(
+          tooltip: 'Italic',
+          icon: Icons.format_italic,
+          enabled: enabled,
+          onPressed: () => _toggle(controller, quill.Attribute.italic),
+        ),
+        _FormatButton(
+          tooltip: 'Underline',
+          icon: Icons.format_underline,
+          enabled: enabled,
+          onPressed: () => _toggle(controller, quill.Attribute.underline),
+        ),
+        const SizedBox(width: 8),
+        _PopupFormat<int>(
+          tooltip: 'Heading',
+          icon: Icons.title,
+          enabled: enabled,
+          items: const <PopupMenuEntry<int>>[
+            PopupMenuItem(value: 0, child: Text('Normal text')),
+            PopupMenuItem(value: 1, child: Text('Heading 1')),
+            PopupMenuItem(value: 2, child: Text('Heading 2')),
+            PopupMenuItem(value: 3, child: Text('Heading 3')),
+          ],
+          onSelected: (level) => controller.formatSelection(
+            quill.HeaderAttribute(level: level == 0 ? null : level),
+          ),
+        ),
+        _PopupFormat<String>(
+          tooltip: 'Font size',
+          icon: Icons.format_size,
+          enabled: enabled,
+          items: const <PopupMenuEntry<String>>[
+            PopupMenuItem(value: '12', child: Text('12 pt')),
+            PopupMenuItem(value: '14', child: Text('14 pt')),
+            PopupMenuItem(value: '16', child: Text('16 pt')),
+            PopupMenuItem(value: '18', child: Text('18 pt')),
+            PopupMenuItem(value: '24', child: Text('24 pt')),
+          ],
+          onSelected: (size) =>
+              controller.formatSelection(quill.SizeAttribute(size)),
+        ),
+        const SizedBox(width: 8),
+        _FormatButton(
+          tooltip: 'Align left',
+          icon: Icons.format_align_left,
+          enabled: enabled,
+          onPressed: () =>
+              controller.formatSelection(const quill.AlignAttribute(null)),
+        ),
+        _FormatButton(
+          tooltip: 'Align center',
+          icon: Icons.format_align_center,
+          enabled: enabled,
+          onPressed: () =>
+              controller.formatSelection(const quill.AlignAttribute('center')),
+        ),
+        _FormatButton(
+          tooltip: 'Align right',
+          icon: Icons.format_align_right,
+          enabled: enabled,
+          onPressed: () =>
+              controller.formatSelection(const quill.AlignAttribute('right')),
+        ),
+        _FormatButton(
+          tooltip: 'Bulleted list',
+          icon: Icons.format_list_bulleted,
+          enabled: enabled,
+          onPressed: () =>
+              _toggle(controller, const quill.ListAttribute('bullet')),
+        ),
+        _FormatButton(
+          tooltip: 'Numbered list',
+          icon: Icons.format_list_numbered,
+          enabled: enabled,
+          onPressed: () =>
+              _toggle(controller, const quill.ListAttribute('ordered')),
+        ),
+      ],
     );
   }
 
@@ -1142,70 +1434,62 @@ class _DocuTrackerDocumentBuilderScreenState
         .where((field) => field.pageNumber == index + 1)
         .toList(growable: false);
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          'Page ${index + 1}',
-          style: const TextStyle(
-            color: DocuTrackerTokens.textMuted,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 6),
         SizedBox(
           width: _paperWidth * scale,
           height: _paperHeight * scale,
-          child: Transform.scale(
-            scale: scale,
+          child: FittedBox(
+            fit: BoxFit.fill,
             alignment: Alignment.topLeft,
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                boxShadow: <BoxShadow>[
-                  BoxShadow(
-                    color: Color(0x26000000),
-                    blurRadius: 18,
-                    offset: Offset(0, 7),
-                  ),
-                ],
-              ),
-              child: RepaintBoundary(
-                key: _pageKeys[index],
-                child: Container(
-                  width: _paperWidth,
-                  height: _paperHeight,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    border: Border.all(color: const Color(0xFFD7DCE3)),
-                  ),
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Positioned.fill(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                            _horizontalMargin,
-                            _verticalMargin,
-                            _horizontalMargin,
-                            _verticalMargin,
-                          ),
-                          child: quill.QuillEditor.basic(
-                            controller: page.controller,
-                            focusNode: page.focusNode,
-                            scrollController: page.scrollController,
-                            config: quill.QuillEditorConfig(
-                              scrollable: false,
-                              expands: true,
-                              padding: EdgeInsets.zero,
-                              autoFocus: false,
-                              placeholder: _canEditLayout
-                                  ? 'Start typing your document…'
-                                  : null,
-                              enableInteractiveSelection: true,
-                            ),
-                          ),
+            child: SizedBox(
+              width: _paperWidth,
+              height: _paperHeight,
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: Color(0x26000000),
+                      blurRadius: 18,
+                      offset: Offset(0, 7),
+                    ),
+                  ],
+                ),
+                child: RepaintBoundary(
+                  key: _pageKeys[index],
+                  child: Container(
+                    width: _paperWidth,
+                    height: _paperHeight,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: _exporting
+                          ? null
+                          : Border.all(color: const Color(0xFFD7DCE3)),
+                    ),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Positioned.fill(
+                          child: _formatVersion >= _letterheadFormatVersion
+                              ? DocuTrackerPrintablePageFrame(
+                                  documentTitle: widget.document.title,
+                                  letterheadImageBytes:
+                                      _letterheadBackgroundBytes,
+                                  child: _buildPageEditor(page),
+                                )
+                              : Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    _horizontalMargin,
+                                    _verticalMargin,
+                                    _horizontalMargin,
+                                    _verticalMargin,
+                                  ),
+                                  child: _buildPageEditor(page),
+                                ),
                         ),
-                      ),
-                      for (final field in fields) _buildSignatureField(field),
-                    ],
+                        for (final field in fields) _buildSignatureField(field),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1213,6 +1497,30 @@ class _DocuTrackerDocumentBuilderScreenState
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildPageEditor(_EditorPage page) {
+    return quill.QuillEditor.basic(
+      key: ObjectKey(page),
+      controller: page.controller,
+      focusNode: page.focusNode,
+      scrollController: page.scrollController,
+      config: quill.QuillEditorConfig(
+        embedBuilders: [
+          DocuTrackerPurchaseItemsEmbedBuilder(
+            editable: _canEditLayout && !_busy,
+          ),
+        ],
+        scrollable: false,
+        expands: true,
+        padding: EdgeInsets.zero,
+        autoFocus: false,
+        placeholder: _canEditLayout && !_exporting
+            ? 'Start typing your document…'
+            : null,
+        enableInteractiveSelection: true,
+      ),
     );
   }
 
@@ -1254,7 +1562,9 @@ class _DocuTrackerDocumentBuilderScreenState
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: field.isSigned
-                      ? Colors.white.withValues(alpha: 0.92)
+                      // A signed field overlays the document like ink, not a
+                      // white card that obscures its name/designation lines.
+                      ? Colors.transparent
                       : const Color(0xFFFFF7ED).withValues(alpha: 0.94),
                   border: Border.all(
                     color: _exporting && field.isSigned
@@ -1314,6 +1624,8 @@ class _EditorPage {
   final quill.QuillController controller;
   final FocusNode focusNode = FocusNode();
   final ScrollController scrollController = ScrollController();
+  final ScrollController canvasScroll = ScrollController();
+  final ScrollController horizontalScroll = ScrollController();
   StreamSubscription<dynamic>? changeSubscription;
 
   void dispose() {
@@ -1321,6 +1633,8 @@ class _EditorPage {
     controller.dispose();
     focusNode.dispose();
     scrollController.dispose();
+    canvasScroll.dispose();
+    horizontalScroll.dispose();
   }
 }
 

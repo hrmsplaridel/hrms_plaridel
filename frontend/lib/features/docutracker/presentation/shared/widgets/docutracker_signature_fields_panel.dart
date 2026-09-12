@@ -15,6 +15,8 @@ class DocuTrackerSignatureFieldsPanel extends StatelessWidget {
     required this.onSign,
     required this.onDelete,
     this.onClose,
+    this.onAddField,
+    this.onInsertOwn,
   });
 
   final List<DocuTrackerSignatureField> fields;
@@ -26,6 +28,8 @@ class DocuTrackerSignatureFieldsPanel extends StatelessWidget {
   final ValueChanged<DocuTrackerSignatureField> onSign;
   final ValueChanged<DocuTrackerSignatureField> onDelete;
   final VoidCallback? onClose;
+  final VoidCallback? onAddField;
+  final VoidCallback? onInsertOwn;
 
   @override
   Widget build(BuildContext context) {
@@ -81,6 +85,28 @@ class DocuTrackerSignatureFieldsPanel extends StatelessWidget {
             ),
           ),
           if (isBusy) const LinearProgressIndicator(minHeight: 2),
+          if (canEditLayout && (onAddField != null || onInsertOwn != null))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (onAddField != null)
+                    OutlinedButton.icon(
+                      onPressed: isBusy ? null : onAddField,
+                      icon: const Icon(Icons.add_box_outlined),
+                      label: const Text('Add Signature Field'),
+                    ),
+                  if (onInsertOwn != null)
+                    FilledButton.icon(
+                      onPressed: isBusy ? null : onInsertOwn,
+                      icon: const Icon(Icons.gesture),
+                      label: const Text('Insert My Signature'),
+                    ),
+                ],
+              ),
+            ),
           Divider(height: 1, color: DocuTrackerTokens.borderSubtleOf(context)),
           if (ordered.isEmpty)
             const Expanded(child: _EmptySignatureFields())

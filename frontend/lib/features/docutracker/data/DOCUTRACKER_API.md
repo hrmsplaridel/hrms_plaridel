@@ -31,6 +31,19 @@ capability calculated from the authenticated backend user. The Flutter client
 uses these server-authoritative values instead of deciding signer identity from
 locally passed navigation data.
 
+Builder responses also include `format_version`. New builder content uses
+version `2`, which renders the official `assets/forms/a4_letter.pdf` full-page
+Municipality/HRMD letterhead background on every A4 page and includes it in
+print/PDF output. Existing saved version `1` content keeps its original
+plain-page layout.
+
+New purchase-request templates may include a `docutracker-purchase-items` block
+inside a page's existing Delta array. Its value is a JSON string containing
+`rows` (six string cells per row: item number, unit, description, quantity, unit
+cost, total cost) and `total` (an editable string). The Flutter builder renders
+and edits this block as a ruled table. It uses the same builder GET/PUT and
+revision checks; it does not approve a request or change procurement workflow.
+
 The builder PUT body is:
 
 ```json

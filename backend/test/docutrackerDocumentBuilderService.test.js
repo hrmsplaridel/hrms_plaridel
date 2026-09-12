@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  getDocumentBuilder,
+  saveDocumentBuilder,
   createSignatureAsset,
   listSavedSignatureAssets,
   signDocumentField,
@@ -12,6 +14,111 @@ const onePixelPng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64'
 );
+
+test('new builder content starts with the printable letterhead format', async () => {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const userId = '33333333-3333-4333-8333-333333333333';
+  const document = {
+    id: documentId,
+    document_type: 'memo',
+    status: 'draft',
+    created_by: userId,
+  };
+  const pool = {
+    async query(sql) {
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      if (sql.includes('SELECT format_version, pages, revision')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT f.*')) {
+        return { rowCount: 0, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await getDocumentBuilder(
+    pool,
+    { id: userId, role: 'admin' },
+    documentId
+  );
+
+  assert.equal(result.format_version, 2);
+  assert.deepEqual(result.pages, [[{ insert: '\n' }]]);
+});
+
+test('first builder save persists printable format version 2', async () => {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const userId = '33333333-3333-4333-8333-333333333333';
+  const document = {
+    id: documentId,
+    document_type: 'memo',
+    status: 'draft',
+    created_by: userId,
+  };
+  let contentInsertParams;
+  const client = {
+    async query(sql, params = []) {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      if (sql.includes('SELECT revision FROM docutracker_document_contents')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('INSERT INTO docutracker_document_contents')) {
+        contentInsertParams = params;
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('SELECT * FROM docutracker_signature_fields')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('UPDATE docutracker_documents')) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected transaction query: ${sql}`);
+    },
+    release() {},
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+    async query(sql) {
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      if (sql.includes('SELECT format_version, pages, revision')) {
+        return {
+          rowCount: 1,
+          rows: [{ format_version: 2, pages: [[{ insert: '\n' }]], revision: 1 }],
+        };
+      }
+      if (sql.includes('SELECT f.*')) {
+        return { rowCount: 0, rows: [] };
+      }
+      throw new Error(`Unexpected response query: ${sql}`);
+    },
+  };
+
+  const result = await saveDocumentBuilder(
+    pool,
+    { id: userId, role: 'admin' },
+    documentId,
+    {
+      pages: [[{ insert: '\n' }]],
+      signature_fields: [],
+      revision: 0,
+    }
+  );
+
+  assert.equal(contentInsertParams[1], 2);
+  assert.equal(result.format_version, 2);
+});
 
 test('createSignatureAsset validates and stores a current-user PNG', async () => {
   let queryArgs;
@@ -139,8 +246,11 @@ test('assigned signer can replace a locked signature with a new audit entry', as
       if (sql.includes('SELECT * FROM docutracker_documents')) {
         return { rowCount: 1, rows: [document] };
       }
-      if (sql.includes('SELECT pages, revision')) {
-        return { rowCount: 1, rows: [{ pages: [[{ insert: '\n' }]], revision: 1 }] };
+      if (sql.includes('SELECT format_version, pages, revision')) {
+        return {
+          rowCount: 1,
+          rows: [{ format_version: 2, pages: [[{ insert: '\n' }]], revision: 1 }],
+        };
       }
       if (sql.includes('SELECT f.*')) {
         return {
@@ -285,8 +395,11 @@ test('assigned signer can move a signed field with a metadata audit entry', asyn
       if (sql.includes('SELECT * FROM docutracker_documents')) {
         return { rowCount: 1, rows: [document] };
       }
-      if (sql.includes('SELECT pages, revision')) {
-        return { rowCount: 1, rows: [{ pages: [[{ insert: '\n' }]], revision: 1 }] };
+      if (sql.includes('SELECT format_version, pages, revision')) {
+        return {
+          rowCount: 1,
+          rows: [{ format_version: 2, pages: [[{ insert: '\n' }]], revision: 1 }],
+        };
       }
       if (sql.includes('SELECT f.*')) {
         return {

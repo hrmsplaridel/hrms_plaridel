@@ -6,6 +6,7 @@ const {
 const MAX_PAGES = 50;
 const MAX_CONTENT_BYTES = 2 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_FORMAT_VERSION = 2;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function serviceError(code, message) {
@@ -145,7 +146,7 @@ async function canEditBuilder(client, document, user) {
 
 async function serializeBuilder(client, document, user) {
   const contentResult = await client.query(
-    `SELECT pages, revision
+    `SELECT format_version, pages, revision
      FROM docutracker_document_contents
      WHERE document_id = $1`,
     [document.id]
@@ -169,6 +170,9 @@ async function serializeBuilder(client, document, user) {
   return {
     document_id: document.id,
     current_user_id: user.id,
+    format_version: Number(
+      contentResult.rows[0]?.format_version ?? DEFAULT_FORMAT_VERSION
+    ),
     pages: contentResult.rows[0]?.pages || [[{ insert: '\n' }]],
     revision: Number(contentResult.rows[0]?.revision || 0),
     signature_fields: signatureFields,
@@ -223,14 +227,20 @@ async function saveDocumentBuilder(pool, user, documentId, input) {
     const nextRevision = currentRevision + 1;
     await client.query(
       `INSERT INTO docutracker_document_contents
-         (document_id, pages, revision, updated_by)
-       VALUES ($1, $2::jsonb, $3, $4)
+         (document_id, format_version, pages, revision, updated_by)
+       VALUES ($1, $2, $3::jsonb, $4, $5)
        ON CONFLICT (document_id) DO UPDATE SET
          pages = EXCLUDED.pages,
          revision = EXCLUDED.revision,
          updated_by = EXCLUDED.updated_by,
          updated_at = now()`,
-      [documentId, JSON.stringify(pages), nextRevision, user.id]
+      [
+        documentId,
+        DEFAULT_FORMAT_VERSION,
+        JSON.stringify(pages),
+        nextRevision,
+        user.id,
+      ]
     );
 
     const existingResult = await client.query(
