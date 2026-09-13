@@ -92,7 +92,7 @@ function pushUserScriptFailure(res, err, stdout, stderr) {
 
 // GET /api/biometric-devices - list (?status=Active|Inactive|All)
 // Optional: ?probe_online=0 — skip TCP probe (faster; no `online` field)
-router.get('/', protect, async (req, res) => {
+router.get('/', protect, requireAdmin, async (req, res) => {
   try {
     const status = req.query.status || 'Active';
     let where = '';
