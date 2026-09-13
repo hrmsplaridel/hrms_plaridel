@@ -53,6 +53,14 @@ const protect = [authMiddleware];
 
 const ZK_SCRIPT_OPTS = { maxBuffer: 10 * 1024 * 1024, timeout: 120000, windowsHide: true };
 const PUSH_USER_SCRIPT_OPTS = { maxBuffer: 1024 * 1024, timeout: 120000, windowsHide: true };
+const ZK_USER_MANAGEMENT_UNSUPPORTED = {
+  error: 'Employee management is currently supported only for ZKTeco devices.',
+  code: 'BIOMETRIC_VENDOR_USER_MANAGEMENT_UNSUPPORTED',
+};
+
+function isZktecoDevice(device) {
+  return String(device?.vendor || 'zkteco').trim().toLowerCase() === 'zkteco';
+}
 
 /** Parse stdout JSON from zk_actions.py; fall back to stderr / generic hint. */
 function pushUserScriptFailure(res, err, stdout, stderr) {
@@ -225,10 +233,17 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
 router.get('/:id/users', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT ip_address FROM biometric_devices WHERE id = $1', [id]);
+    const result = await pool.query(
+      'SELECT ip_address, vendor FROM biometric_devices WHERE id = $1',
+      [id]
+    );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Device not found' });
-    
-    const ip = result.rows[0].ip_address;
+
+    const device = result.rows[0];
+    if (!isZktecoDevice(device)) {
+      return res.status(422).json(ZK_USER_MANAGEMENT_UNSUPPORTED);
+    }
+    const ip = device.ip_address;
     if (!ip) return res.status(400).json({ error: 'Device has no IP address configured' });
 
     const pyScript = path.join(__dirname, '../../scripts/zk_actions.py');
@@ -275,11 +290,15 @@ router.post('/:id/push-user', protect, requireAdmin, async (req, res) => {
     }
 
     const devRes = await pool.query(
-      'SELECT ip_address FROM biometric_devices WHERE id = $1',
+      'SELECT ip_address, vendor FROM biometric_devices WHERE id = $1',
       [id]
     );
     if (devRes.rowCount === 0) return res.status(404).json({ error: 'Device not found' });
-    const ip = devRes.rows[0].ip_address;
+    const device = devRes.rows[0];
+    if (!isZktecoDevice(device)) {
+      return res.status(422).json(ZK_USER_MANAGEMENT_UNSUPPORTED);
+    }
+    const ip = device.ip_address;
     if (!ip) return res.status(400).json({ error: 'Device has no IP address configured' });
 
     const userRes = await pool.query(

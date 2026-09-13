@@ -35,6 +35,12 @@ const Set<String> _separationEmploymentStatuses = {
 bool _requiresSeparationDate(String? status) =>
     _separationEmploymentStatuses.contains(status);
 
+bool _supportsBiometricUserManagement(dynamic rawDevice) {
+  if (rawDevice is! Map) return false;
+  final vendor = rawDevice['vendor']?.toString().trim().toLowerCase();
+  return vendor == null || vendor.isEmpty || vendor == 'zkteco';
+}
+
 String _employeeDateText(DateTime date) =>
     '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
@@ -355,7 +361,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
         queryParameters: const {'status': 'Active', 'probe_online': '0'},
       );
       if (!mounted) return;
-      final list = res.data ?? [];
+      final list = (res.data ?? [])
+          .where(_supportsBiometricUserManagement)
+          .toList();
       setState(() {
         _biometricDevicesForFilter = list;
         final fid = _biometricDeviceFilterId;

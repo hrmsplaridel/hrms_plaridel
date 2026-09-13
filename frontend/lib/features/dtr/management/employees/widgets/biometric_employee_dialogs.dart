@@ -62,7 +62,9 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
       );
       if (mounted) {
         setState(() {
-          _devices = res.data ?? [];
+          _devices = (res.data ?? [])
+              .where(_supportsBiometricUserManagement)
+              .toList();
           if (_devices.isNotEmpty) {
             _selectedDeviceId = _devices.first['id'];
           }
@@ -166,7 +168,7 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
             if (_loadingDevices)
               const CircularProgressIndicator()
             else if (_devices.isEmpty)
-              const Text('No devices found.')
+              const Text('No active ZKTeco devices found.')
             else
               Row(
                 children: [
@@ -554,7 +556,9 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
       );
       if (!mounted) return;
       setState(() {
-        _devices = res.data ?? [];
+        _devices = (res.data ?? [])
+            .where(_supportsBiometricUserManagement)
+            .toList();
         _loadingDevices = false;
       });
     } catch (_) {
