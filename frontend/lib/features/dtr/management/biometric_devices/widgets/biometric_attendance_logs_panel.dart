@@ -284,6 +284,7 @@ class _BiometricAttendanceLogsPanelState
                   DataColumn(label: Text('Biometric ID')),
                   DataColumn(label: Text('Punch date')),
                   DataColumn(label: Text('Punch time')),
+                  DataColumn(label: Text('Device')),
                   DataColumn(label: Text('Source')),
                   DataColumn(label: Text('Imported')),
                 ],
@@ -350,6 +351,12 @@ class _BiometricAttendanceLogsPanelState
         DataCell(Text(_formatTime(localPunch, includeSeconds: true))),
         DataCell(
           SizedBox(
+            width: 190,
+            child: Text(_deviceLabel(row), overflow: TextOverflow.ellipsis),
+          ),
+        ),
+        DataCell(
+          SizedBox(
             width: 170,
             child: Text(
               row.sourceName?.trim().isNotEmpty == true
@@ -364,6 +371,13 @@ class _BiometricAttendanceLogsPanelState
         ),
       ],
     );
+  }
+
+  String _deviceLabel(BiometricAttendanceLog row) {
+    final name = row.deviceName?.trim() ?? '';
+    final registeredId = row.registeredDeviceId?.trim() ?? '';
+    if (name.isEmpty) return 'Not recorded';
+    return registeredId.isEmpty ? name : '$name ($registeredId)';
   }
 }
 
