@@ -209,6 +209,13 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
     if (result.rowCount === 0) return res.status(404).json({ error: 'Biometric device not found' });
     res.status(204).send();
   } catch (err) {
+    if (err.code === '23503') {
+      return res.status(409).json({
+        error:
+          'This device cannot be deleted because it has biometric attendance history. Deactivate it instead.',
+        code: 'BIOMETRIC_DEVICE_HAS_ATTENDANCE_HISTORY',
+      });
+    }
     console.error('[biometric-devices DELETE]', err);
     res.status(500).json({ error: 'Failed to delete biometric device' });
   }

@@ -1268,6 +1268,7 @@ CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_intent_source_created
 CREATE TABLE IF NOT EXISTS biometric_attendance_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_ref_id UUID REFERENCES biometric_devices(id) ON DELETE RESTRICT,
   biometric_user_id TEXT NOT NULL,
   logged_at TIMESTAMPTZ NOT NULL,
   verify_code TEXT,
@@ -2661,6 +2662,7 @@ WHERE status IN ('pending', 'pending_department_head', 'pending_hr', 'approved')
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_user_id ON biometric_attendance_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_logged_at ON biometric_attendance_logs(logged_at);
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_biometric_user_id ON biometric_attendance_logs(biometric_user_id);
+CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_device_ref_id ON biometric_attendance_logs(device_ref_id);
 CREATE INDEX IF NOT EXISTS idx_biometric_logs_user_logged
 ON biometric_attendance_logs(user_id, logged_at);
 

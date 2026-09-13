@@ -19,6 +19,7 @@ async function invokeIngestionRoute({
   const events = [];
   const processCalls = [];
   const syncUpdates = [];
+  const rawInserts = [];
   const pool = {
     async query(sql, params = []) {
       const text = String(sql);
@@ -46,6 +47,7 @@ async function invokeIngestionRoute({
       }
       if (text.includes('INSERT INTO biometric_attendance_logs')) {
         events.push('insert');
+        rawInserts.push({ text, params });
         return insertRowCount > 0
           ? { rows: [{ id: 'raw-log-id' }], rowCount: insertRowCount }
           : { rows: [], rowCount: 0 };
@@ -100,7 +102,7 @@ async function invokeIngestionRoute({
       (entry) => entry.route?.path === path && entry.route.methods.post
     );
     await route.route.stack.at(-1).handle({ body }, res);
-    return { res, events, processCalls, syncUpdates };
+    return { res, events, processCalls, syncUpdates, rawInserts };
   } finally {
     clearModule(routePath);
     restoreProcessing();
@@ -114,6 +116,7 @@ test('device push preserves a matched raw punch when no schedule is configured',
     gateReason: 'no_schedule',
     body: {
       punches: [{ biometric_user_id: '1001', logged_at: loggedAt }],
+      biometric_device_id: deviceId,
       source_name: 'test-clock',
     },
   });
@@ -155,6 +158,7 @@ test('device push reprocesses duplicate punches after a prior processing failure
     hasStoredPunch: true,
     body: {
       punches: [{ biometric_user_id: '1001', logged_at: loggedAt }],
+      biometric_device_id: deviceId,
       source_name: 'test-clock',
     },
   });
@@ -175,6 +179,7 @@ test('device push processes only dates represented in the incoming batch', async
         { biometric_user_id: '1001', logged_at: '2026-09-10T08:00:00+08:00' },
         { biometric_user_id: '1001', logged_at: '2026-09-12T08:00:00+08:00' },
       ],
+      biometric_device_id: deviceId,
       source_name: 'test-clock',
     },
   });
@@ -205,6 +210,38 @@ test('successful empty device heartbeat advances last_sync_at', async () => {
   assert.deepEqual(syncUpdates, [deviceId]);
   assert.deepEqual(processCalls, []);
   assert.deepEqual(events, ['sync']);
+});
+
+test('registered device push stores its authoritative UUID on every raw punch', async () => {
+  const { res, rawInserts } = await invokeIngestionRoute({
+    path: '/push',
+    gateReason: null,
+    body: {
+      punches: [{ biometric_user_id: '1001', logged_at: loggedAt }],
+      biometric_device_id: deviceId,
+      source_name: 'editable-device-label',
+    },
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(rawInserts.length, 1);
+  assert.match(rawInserts[0].text, /source_file_name, device_ref_id/);
+  assert.equal(rawInserts[0].params[5], deviceId);
+});
+
+test('device push rejects punches without a registered device UUID', async () => {
+  const { res, rawInserts } = await invokeIngestionRoute({
+    path: '/push',
+    gateReason: null,
+    body: {
+      punches: [{ biometric_user_id: '1001', logged_at: loggedAt }],
+      source_name: 'unattributed-clock',
+    },
+  });
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /biometric_device_id is required/i);
+  assert.deepEqual(rawInserts, []);
 });
 
 test('failed attendance processing does not advance device last_sync_at', async () => {

@@ -76,7 +76,9 @@ async function processBiometricScopes(scopes) {
 
 async function loadActiveSyncDevice(rawDeviceId) {
   const deviceId = String(rawDeviceId || '').trim();
-  if (!deviceId) return { ok: true, deviceId: null };
+  if (!deviceId) {
+    return { ok: false, statusCode: 400, error: 'biometric_device_id is required' };
+  }
   if (!UUID_PATTERN.test(deviceId)) {
     return { ok: false, statusCode: 400, error: 'biometric_device_id must be a valid UUID' };
   }
@@ -189,11 +191,14 @@ router.get('/', protect, requireAdmin, async (req, res) => {
     const rowsResult = await pool.query(
       `SELECT l.id, l.user_id, l.biometric_user_id, l.logged_at,
               l.verify_code, l.punch_code, l.work_code,
-              l.source_file_name, l.imported_at,
+              l.source_file_name, l.imported_at, l.device_ref_id,
+              d.name AS device_name,
+              d.device_id AS registered_device_id,
               u.full_name AS employee_name,
               u.employee_number
        FROM biometric_attendance_logs l
        JOIN users u ON u.id = l.user_id
+       LEFT JOIN biometric_devices d ON d.id = l.device_ref_id
        ${where}
        ORDER BY l.logged_at DESC, l.id DESC
        LIMIT ${limitParam} OFFSET ${offsetParam}`,
@@ -245,10 +250,14 @@ router.get('/export', protect, requireAdmin, async (req, res) => {
               to_char(l.logged_at AT TIME ZONE $3, 'YYYY-MM-DD HH24:MI:SS') AS logged_at_local,
               l.verify_code, l.punch_code, l.work_code,
               l.source_file_name,
+              l.device_ref_id,
+              d.name AS device_name,
+              d.device_id AS registered_device_id,
               u.employee_number,
               u.full_name AS employee_name
        FROM biometric_attendance_logs l
        JOIN users u ON u.id = l.user_id
+       LEFT JOIN biometric_devices d ON d.id = l.device_ref_id
        WHERE (l.logged_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
        ORDER BY l.logged_at ASC, l.id ASC
        LIMIT 100001`,
@@ -290,6 +299,9 @@ router.get('/export', protect, requireAdmin, async (req, res) => {
       'verify_code',
       'punch_code',
       'work_code',
+      'device_ref_id',
+      'device_name',
+      'registered_device_id',
       'source',
     ];
     const lines = result.rows.map((row) => [
@@ -300,6 +312,9 @@ router.get('/export', protect, requireAdmin, async (req, res) => {
       row.verify_code,
       row.punch_code,
       row.work_code,
+      row.device_ref_id,
+      row.device_name,
+      row.registered_device_id,
       row.source_file_name,
     ].map(csvCell).join(','));
     const filename = `biometric_attendance_${compactFrom}_${compactTo}.csv`;
@@ -337,7 +352,7 @@ router.get('/devices', pushAuth, async (req, res) => {
  * POST /api/biometric-attendance-logs/push
  * Push raw punches from a biometric device (e.g. ZKTeco sync service).
  * Auth: X-Api-Key header (BIO_SYNC_API_KEY) or JWT + admin.
- * Body: { punches: [{ biometric_user_id, logged_at }], device_id?, source_name? }
+ * Body: { punches: [{ biometric_user_id, logged_at }], biometric_device_id, device_id?, source_name? }
  * - Looks up user_id from users WHERE biometric_user_id = ?
  * - Skips punches for unmatched biometric_user_id (logged)
  * - Preserves valid matched raw punches even when attendance processing is blocked
@@ -439,11 +454,11 @@ router.post('/push', pushAuth, async (req, res) => {
 
       const result = await pool.query(
         `INSERT INTO biometric_attendance_logs
-          (user_id, biometric_user_id, logged_at, raw_line, source_file_name)
-         VALUES ($1::uuid, $2, $3::timestamptz, $4, $5)
+          (user_id, biometric_user_id, logged_at, raw_line, source_file_name, device_ref_id)
+         VALUES ($1::uuid, $2, $3::timestamptz, $4, $5, $6::uuid)
          ON CONFLICT (biometric_user_id, logged_at) DO NOTHING
          RETURNING id`,
-        [userId, biometricUserId, loggedAt, rawLine, sourceFileName]
+        [userId, biometricUserId, loggedAt, rawLine, sourceFileName, syncDevice.deviceId]
       );
 
       if (result.rowCount > 0) {
