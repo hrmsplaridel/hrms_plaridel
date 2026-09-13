@@ -29,6 +29,10 @@ const {
   signDocumentField,
   moveSignedDocumentField,
 } = require('../services/docutrackerDocumentBuilderService');
+const {
+  getLeaveSourceSignatures,
+  signLeaveSourceApplicant,
+} = require('../services/docutrackerLeaveSignatureService');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -465,6 +469,53 @@ router.post('/signature-assets', protect, async (req, res) => {
     res.status(mapped.status).json({ error: mapped.error });
   }
 });
+
+/** GET linked DTR leave-form signatures without copying the leave request. */
+router.get(
+  '/sources/:sourceModule/:sourceTable/:sourceRecordId/signatures',
+  protect,
+  async (req, res) => {
+    try {
+      res.json(
+        await getLeaveSourceSignatures(
+          pool,
+          req.user,
+          req.params.sourceModule,
+          req.params.sourceTable,
+          req.params.sourceRecordId
+        )
+      );
+    } catch (err) {
+      console.error('[docutracker GET /sources/:source/signatures]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+/** Sign or replace the authenticated applicant's linked leave-form signature. */
+router.post(
+  '/sources/:sourceModule/:sourceTable/:sourceRecordId/signatures/applicant/sign',
+  protect,
+  async (req, res) => {
+    try {
+      res.json(
+        await signLeaveSourceApplicant(
+          pool,
+          req.user,
+          req.params.sourceModule,
+          req.params.sourceTable,
+          req.params.sourceRecordId,
+          req.body || {}
+        )
+      );
+    } catch (err) {
+      console.error('[docutracker POST /sources/:source/signatures/applicant/sign]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
 
 /** GET /api/docutracker/documents/:id/builder - A4 content and signature fields. */
 router.get('/documents/:id/builder', protect, async (req, res) => {
@@ -2062,6 +2113,9 @@ function mapWorkflowServiceError(err) {
   if (code === 'FORBIDDEN') return { status: 403, error: err.message || 'Forbidden' };
   if (code === 'NOT_FOUND') return { status: 404, error: err.message || 'Not found' };
   if (code === 'CONFLICT') return { status: 409, error: err.message || 'Conflict' };
+  if (code === 'UNAVAILABLE') {
+    return { status: 503, error: err.message || 'Service unavailable' };
+  }
   if (code === 'VALIDATION') {
     return { status: 400, error: err.message || 'Request could not be completed.' };
   }

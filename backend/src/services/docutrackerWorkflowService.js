@@ -153,8 +153,20 @@ function mapSourceStatusToDocuTracker(sourceModule, sourceStatus) {
   if (sourceModule === 'dtr') {
     if (status === 'approved') return 'approved';
     if (status === 'returned') return 'returned';
-    if (status === 'rejected') return 'rejected';
+    if (
+      status === 'rejected' ||
+      status === 'rejected_by_department_head' ||
+      status === 'rejected_by_hr'
+    ) {
+      return 'rejected';
+    }
     if (status === 'cancelled') return 'cancelled';
+    if (
+      status === 'pending_department_head' ||
+      status === 'pending_hr'
+    ) {
+      return 'in_review';
+    }
     return 'pending';
   }
 
@@ -323,11 +335,32 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
        FROM leave_requests l
        JOIN users u ON u.id = COALESCE(l.user_id, l.employee_id)
        WHERE ${
-         user.role === 'admin'
+         user.role === 'admin' || user.role === 'hr'
            ? '1=1'
-           : '(l.user_id = $1::uuid OR l.employee_id = $1::uuid)'
+           : `(
+               l.user_id = $1::uuid
+               OR l.employee_id = $1::uuid
+               OR l.assigned_department_head_id = $1::uuid
+               OR EXISTS (
+                 SELECT 1
+                 FROM leave_request_department_reviewers lrr
+                 WHERE lrr.leave_request_id = l.id
+                   AND lrr.reviewer_id = $1::uuid
+               )
+               OR EXISTS (
+                 SELECT 1
+                 FROM leave_request_history lrh
+                 WHERE lrh.leave_request_id = l.id
+                   AND lrh.acted_by = $1::uuid
+                   AND lrh.action IN (
+                     'department_head_approved',
+                     'department_head_rejected',
+                     'department_head_returned'
+                   )
+               )
+             )`
        }`,
-      user.role === 'admin' ? [] : [user.id]
+      user.role === 'admin' || user.role === 'hr' ? [] : [user.id]
     );
     pieces.push(...leaveRows);
   }

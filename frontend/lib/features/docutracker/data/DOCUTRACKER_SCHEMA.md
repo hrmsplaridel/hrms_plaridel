@@ -18,6 +18,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | docutracker_document_contents | Versioned A4 page content stored as Quill Delta JSON |
 | docutracker_signature_assets | Private drawn/uploaded signature images owned by users |
 | docutracker_signature_fields | Page placement, assigned signer, signed date, and lock state |
+| docutracker_leave_signatures | Fixed signature slots linked to authoritative DTR leave requests |
 
 ## docutracker_documents
 
@@ -134,6 +135,26 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | created_by | UUID | User who prepared the field |
 | created_at | TIMESTAMPTZ | Creation time |
 | updated_at | TIMESTAMPTZ | Last update |
+
+## docutracker_leave_signatures
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| leave_request_id | UUID | DTR leave request; one signature per slot |
+| slot_key | TEXT | applicant, certification, recommendation, or approving_authority |
+| assigned_signer_id | UUID | Existing active user assigned to the fixed form slot |
+| signature_asset_id | UUID | Private DocuTracker signature asset selected by the signer |
+| signed_by | UUID | Authenticated signer; must equal assigned_signer_id |
+| signer_name_snapshot | TEXT | Printed signer name retained with the signing event |
+| signed_at | TIMESTAMPTZ | Backend-authoritative signing time |
+| created_by | UUID | User who first signed the slot |
+| created_at | TIMESTAMPTZ | Creation time |
+| updated_at | TIMESTAMPTZ | Latest replacement time |
+
+The leave request remains the source of truth for form data, status, reviewers,
+balances, and DTR effects. Signature creation or replacement also appends an
+entry to `leave_request_history`.
 
 ## docutracker_permissions
 

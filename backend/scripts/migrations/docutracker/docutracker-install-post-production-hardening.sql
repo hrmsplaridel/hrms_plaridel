@@ -1,5 +1,5 @@
 -- =============================================================================
--- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-16)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-18)
 -- =============================================================================
 -- PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.
 -- Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.
@@ -8,6 +8,8 @@
 -- Section 14 is additive and keeps existing app-facing table/column names stable.
 -- Section 15 allows configuration steps with zero assignees while preserving assigned-step invariants.
 -- Section 16 adds A4 document content and server-locked e-signature persistence.
+-- Section 17 allows the server-audited signed history action.
+-- Section 18 links audited applicant signatures to DTR leave requests without copying leave data.
 --
 -- TABLE OF CONTENTS
 --   10 - STATUS SEMANTICS V2 (drop forwarded as document status)
@@ -17,6 +19,8 @@
 --   14 - SAFE SCHEMA IMPROVEMENTS (metadata, files, notifications)
 --   15 - ALLOW UNASSIGNED WORKFLOW STEPS
 --   16 - DOCUMENT BUILDER + E-SIGNATURES
+--   17 - E-SIGNATURE HISTORY ACTION
+--   18 - LINKED DTR LEAVE E-SIGNATURES
 --
 -- =============================================================================
 
@@ -736,5 +740,78 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_document_page
 CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_signer_pending
   ON docutracker_signature_fields(assigned_signer_id, document_id)
   WHERE signed_at IS NULL;
+
+COMMIT;
+
+
+-- #############################################################################
+-- 17 - E-SIGNATURE HISTORY ACTION
+-- Source file: migrate-docutracker-history-signed-action-v1.sql
+-- #############################################################################
+
+-- Allow the server-audited e-signature event in DocuTracker history.
+-- Safe to re-run after the document builder/e-signature migration.
+
+BEGIN;
+
+ALTER TABLE docutracker_document_history
+  DROP CONSTRAINT IF EXISTS chk_docutracker_history_action;
+
+ALTER TABLE docutracker_document_history
+  ADD CONSTRAINT chk_docutracker_history_action
+  CHECK (action IS NULL OR action IN (
+    'created',
+    'submitted',
+    'forwarded',
+    'approved',
+    'rejected',
+    'returned',
+    'metadata_updated',
+    'remark',
+    'escalated',
+    'overdue',
+    'assigned',
+    'signed'
+  )) NOT VALID;
+
+ALTER TABLE docutracker_document_history
+  VALIDATE CONSTRAINT chk_docutracker_history_action;
+
+COMMIT;
+
+
+-- #############################################################################
+-- 18 - LINKED DTR LEAVE E-SIGNATURES
+-- Source file: migrate-docutracker-leave-signatures-v1.sql
+-- #############################################################################
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS docutracker_leave_signatures (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leave_request_id UUID NOT NULL
+    REFERENCES leave_requests(id) ON DELETE CASCADE,
+  slot_key TEXT NOT NULL,
+  assigned_signer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  signature_asset_id UUID NOT NULL
+    REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
+  signed_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  signer_name_snapshot TEXT NOT NULL,
+  signed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_leave_signatures_slot_check
+    CHECK (slot_key = 'applicant'),
+  CONSTRAINT docutracker_leave_signatures_signer_check
+    CHECK (assigned_signer_id = signed_by),
+  CONSTRAINT docutracker_leave_signatures_name_check
+    CHECK (length(btrim(signer_name_snapshot)) BETWEEN 1 AND 200),
+  CONSTRAINT docutracker_leave_signatures_request_slot_unique
+    UNIQUE (leave_request_id, slot_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_leave_signatures_signer
+  ON docutracker_leave_signatures(assigned_signer_id, leave_request_id);
 
 COMMIT;

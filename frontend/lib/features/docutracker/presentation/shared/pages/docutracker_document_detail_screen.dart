@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
-import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
@@ -27,7 +26,10 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
+import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/employee_leave_actions.dart';
 
 /// Step 9: Document detail with audit trail timeline.
 /// Step 8: Document actions - Review, Approve, Reject, Return, Forward, Add remarks.
@@ -75,6 +77,71 @@ class _DocuTrackerDocumentDetailScreenState
   bool _canDownloadAttachment = false;
   bool _canModifyAttachment = false;
   Map<String, DocuTrackerPermissionExplanation> _permissionExplanations = {};
+
+  bool _isLinkedLeave(DocuTrackerDocument doc) =>
+      doc.sourceModule == 'dtr' &&
+      doc.sourceTable == 'leave_requests' &&
+      (doc.sourceRecordId ?? '').isNotEmpty;
+
+  Future<void> _openLinkedLeaveForm(DocuTrackerDocument doc) async {
+    final sourceRecordId = doc.sourceRecordId;
+    if (sourceRecordId == null || sourceRecordId.isEmpty) return;
+    final leaveProvider = context.read<LeaveProvider>();
+    final request = await leaveProvider.loadRequestById(sourceRecordId);
+    if (!mounted) return;
+    if (request == null) {
+      final error =
+          leaveProvider.error?.replaceFirst('Exception: ', '') ??
+          'The linked leave request could not be opened.';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+    await EmployeeLeaveActions(
+      context: context,
+      isMounted: () => mounted,
+    ).editRequest(request);
+  }
+
+  Widget _buildLinkedLeaveSection(
+    DocuTrackerDocument doc,
+    String currentUserId,
+  ) {
+    final sourceRecordId = doc.sourceRecordId!;
+    final isApplicant = doc.createdBy == currentUserId;
+    return DocuTrackerDetailSectionCard(
+      icon: Icons.event_note_rounded,
+      title: 'Linked Leave Form',
+      subtitle: 'One DTR request, tracked and signed through DocuTracker',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          DocuTrackerSourceSignatureCard(
+            sourceModule: 'dtr',
+            sourceTable: 'leave_requests',
+            sourceRecordId: sourceRecordId,
+          ),
+          const SizedBox(height: 12),
+          if (isApplicant)
+            FilledButton.icon(
+              onPressed: () => _openLinkedLeaveForm(doc),
+              icon: const Icon(Icons.open_in_new_rounded),
+              label: const Text('Open, Edit, or Submit Leave Form'),
+            )
+          else
+            const Text(
+              'The leave details and approval decision remain controlled by '
+              'the DTR Leave workflow.',
+              style: TextStyle(
+                color: DocuTrackerTokens.textMuted,
+                fontSize: 12,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _refreshEffectivePermissions({
     required DocuTrackerDocument doc,
@@ -497,6 +564,10 @@ class _DocuTrackerDocumentDetailScreenState
                   final rightColumn = Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (_isLinkedLeave(doc)) ...[
+                        _buildLinkedLeaveSection(doc, userId),
+                        const SizedBox(height: 24),
+                      ],
                       if (showActions) ...[
                         _buildActionsCard(
                           doc,
@@ -545,6 +616,10 @@ class _DocuTrackerDocumentDetailScreenState
                           canReject: canReject,
                           canReturn: canReturn,
                         ),
+                        const SizedBox(height: 24),
+                      ],
+                      if (_isLinkedLeave(doc)) ...[
+                        _buildLinkedLeaveSection(doc, userId),
                         const SizedBox(height: 24),
                       ],
                       _buildAttachmentSection(doc),

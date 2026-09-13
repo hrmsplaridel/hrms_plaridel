@@ -34,6 +34,13 @@ abstract final class DocuTrackerDocumentVisibility {
     final uid = userId.trim();
     if (uid.isEmpty) return false;
 
+    // Source-only records are already relationship-filtered by the backend
+    // source adapter (owner, assigned reviewer, or authorized module role).
+    // They do not have native DocuTracker routing rows/current holders, so
+    // applying the persisted-document relationship filter would hide valid
+    // source results from their assigned reviewers.
+    if (doc.sourceOnly) return true;
+
     if (_sameId(doc.createdBy, uid)) return true;
     if (_sameId(doc.currentHolderId, uid)) return true;
     if (doc.signatureSignerIds.any((id) => _sameId(id, uid))) return true;

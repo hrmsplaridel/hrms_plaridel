@@ -141,7 +141,7 @@ test('POST /documents/:id/transition forwards idempotency key in body', async ()
   const handler = getRouteHandler(router, 'post', '/documents/:id/transition');
 
   const req = {
-    params: { id: 'doc-99' },
+    params: { id: '00000000-0000-4000-8000-000000000099' },
     body: { action: 'approve', remarks: 'ok', idempotency_key: 'idem-99' },
     headers: {},
     user: { id: 'user-2', role: 'admin' },

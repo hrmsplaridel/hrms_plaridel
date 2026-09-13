@@ -411,6 +411,82 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  String _sourceSignaturePath({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+  }) {
+    final module = Uri.encodeComponent(sourceModule);
+    final table = Uri.encodeComponent(sourceTable);
+    final recordId = Uri.encodeComponent(sourceRecordId);
+    return '$_base/sources/$module/$table/$recordId/signatures';
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
+  getSourceSignatures({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+  }) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        _sourceSignaturePath(
+          sourceModule: sourceModule,
+          sourceTable: sourceTable,
+          sourceRecordId: sourceRecordId,
+        ),
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure(
+          'The linked document signatures could not be loaded',
+        );
+      }
+      return DocuTrackerSuccess(
+        DocuTrackerSourceSignatureBundle.fromJson(data),
+      );
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
+  signSourceApplicant({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    try {
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '${_sourceSignaturePath(sourceModule: sourceModule, sourceTable: sourceTable, sourceRecordId: sourceRecordId)}/applicant/sign',
+        data: <String, dynamic>{
+          if (signatureAssetId != null)
+            'signature_asset_id': signatureAssetId
+          else ...<String, dynamic>{
+            'image_base64': base64Encode(imageBytes ?? Uint8List(0)),
+            'mime_type': mimeType,
+            'source_type': sourceType,
+            'is_saved': saveForReuse,
+          },
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The leave form was not signed');
+      }
+      return DocuTrackerSuccess(
+        DocuTrackerSourceSignatureBundle.fromJson(data),
+      );
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
   Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>> signDocumentField({
     required String documentId,
     required String fieldId,

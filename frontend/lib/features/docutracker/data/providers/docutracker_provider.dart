@@ -42,6 +42,8 @@ class DocuTrackerProvider extends ChangeNotifier {
   DocuTrackerDocumentBuilderData? _builderData;
   bool _builderLoading = false;
   String? _builderError;
+  bool _sourceSignatureLoading = false;
+  String? _sourceSignatureError;
 
   // Prevent duplicate transitions due to double taps / retries.
   final Set<String> _transitionInFlight = <String>{};
@@ -631,6 +633,70 @@ class DocuTrackerProvider extends ChangeNotifier {
       DocuTrackerFailure<List<DocuTrackerSignatureAsset>>(:final message) =>
         throw Exception(message),
     };
+  }
+
+  bool get sourceSignatureLoading => _sourceSignatureLoading;
+  String? get sourceSignatureError => _sourceSignatureError;
+
+  Future<DocuTrackerSourceSignatureBundle?> loadSourceSignatures({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+  }) async {
+    _sourceSignatureLoading = true;
+    _sourceSignatureError = null;
+    notifyListeners();
+    final result = await _repo.getSourceSignatures(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+    );
+    _sourceSignatureLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>(:final value):
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerSourceSignatureBundle>(:final message):
+        _sourceSignatureError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<DocuTrackerSourceSignatureBundle?> signSourceApplicant({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    if (_sourceSignatureLoading) return null;
+    _sourceSignatureLoading = true;
+    _sourceSignatureError = null;
+    notifyListeners();
+    final result = await _repo.signSourceApplicant(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+      signatureAssetId: signatureAssetId,
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      saveForReuse: saveForReuse,
+    );
+    _sourceSignatureLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>(:final value):
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerSourceSignatureBundle>(:final message):
+        _sourceSignatureError = message;
+        notifyListeners();
+        return null;
+    }
   }
 
   Future<DocuTrackerDocumentBuilderData?> signDocumentField({

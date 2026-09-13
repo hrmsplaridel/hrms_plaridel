@@ -1,4 +1,7 @@
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
+import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 
 class LeaveFormSignatoryInfo {
@@ -27,10 +30,12 @@ class LeaveFormSignatories {
   const LeaveFormSignatories({
     this.certificationOfficer,
     this.recommendationOfficer,
+    this.applicantSignature,
   });
 
   final LeaveFormSignatoryInfo? certificationOfficer;
   final LeaveFormSignatoryInfo? recommendationOfficer;
+  final DocuTrackerSourceSignature? applicantSignature;
 }
 
 Future<LeaveFormSignatories> loadLeaveFormSignatories({
@@ -38,6 +43,7 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
 }) async {
   LeaveFormSignatoryInfo? certification;
   LeaveFormSignatoryInfo? recommendation;
+  DocuTrackerSourceSignature? applicantSignature;
 
   try {
     final res = await ApiClient.instance.get<Map<String, dynamic>>(
@@ -59,6 +65,18 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
     // Printing should still work even if the optional signatory lookup fails.
   }
 
+  final requestId = request.id;
+  if (requestId != null && requestId.isNotEmpty) {
+    final result = await DocuTrackerRepository.instance.getSourceSignatures(
+      sourceModule: 'dtr',
+      sourceTable: 'leave_requests',
+      sourceRecordId: requestId,
+    );
+    if (result is DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>) {
+      applicantSignature = result.value.signatureFor('applicant');
+    }
+  }
+
   final departmentHeadName = _nonBlank(request.departmentHeadReviewerName);
   if (recommendation == null && departmentHeadName != null) {
     recommendation = LeaveFormSignatoryInfo(
@@ -70,6 +88,7 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
   return LeaveFormSignatories(
     certificationOfficer: certification?.hasName == true ? certification : null,
     recommendationOfficer: recommendation,
+    applicantSignature: applicantSignature,
   );
 }
 

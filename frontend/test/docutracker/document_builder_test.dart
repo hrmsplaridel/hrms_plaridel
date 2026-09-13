@@ -77,6 +77,35 @@ void main() {
     expect(data.signatureFields.single.canSign, isFalse);
   });
 
+  test('linked source signature decodes image and server capability', () {
+    final bundle = DocuTrackerSourceSignatureBundle.fromJson(<String, dynamic>{
+      'source_module': 'dtr',
+      'source_table': 'leave_requests',
+      'source_record_id': 'leave-1',
+      'source_status': 'pending_department_head',
+      'signatures': <dynamic>[
+        <String, dynamic>{
+          'id': 'signature-1',
+          'slot_key': 'applicant',
+          'label': 'Signature of Applicant',
+          'assigned_signer_id': 'employee-1',
+          'can_sign': true,
+          'signature_asset_id': 'asset-1',
+          'signature_image_base64': 'AQID\nBA==',
+          'signed_by': 'employee-1',
+          'signer_name_snapshot': 'Employee One',
+          'signed_at': '2026-09-13T01:00:00.000Z',
+        },
+      ],
+    });
+
+    final signature = bundle.signatureFor('applicant');
+    expect(signature, isNotNull);
+    expect(signature!.isSigned, isTrue);
+    expect(signature.canSign, isTrue);
+    expect(signature.signatureImageBytes, <int>[1, 2, 3, 4]);
+  });
+
   test('builder trusts server field-level signing capability', () {
     final data = DocuTrackerDocumentBuilderData.fromJson(<String, dynamic>{
       'document_id': 'document-1',
@@ -135,4 +164,26 @@ void main() {
       );
     },
   );
+
+  test('frontend trusts backend filtering for source-only records', () {
+    final document = DocuTrackerDocument.fromJson(<String, dynamic>{
+      'id': 'source:dtr:leave-1',
+      'document_type': 'dtr',
+      'title': 'Leave request',
+      'created_by': 'employee-1',
+      'status': 'in_review',
+      'source_module': 'dtr',
+      'source_table': 'leave_requests',
+      'source_record_id': 'leave-1',
+      'source_only': true,
+    });
+
+    expect(
+      DocuTrackerDocumentVisibility.isVisible(
+        doc: document,
+        userId: 'assigned-reviewer-returned-by-server',
+      ),
+      isTrue,
+    );
+  });
 }

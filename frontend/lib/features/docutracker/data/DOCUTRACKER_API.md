@@ -25,6 +25,8 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | POST | `/api/docutracker/signature-assets` | Save a drawn or uploaded PNG/JPEG signature owned by the authenticated user |
 | POST | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/sign` | Sign or replace the signature image in one field assigned to the authenticated user |
 | PATCH | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/position` | Move an already-signed field assigned to the authenticated user without changing its size, signer, or image |
+| GET | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures` | Load fixed e-signature slots for an authorized linked DTR leave request |
+| POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/applicant/sign` | Add or replace the authenticated applicant's signature while the leave request remains active |
 
 Builder responses include `current_user_id` and a per-field `can_sign`
 capability calculated from the authenticated backend user. The Flutter client
@@ -71,6 +73,13 @@ assigned active user can reposition a signed field or replace its signature
 image. Repositioning appends a `metadata_updated` history entry, and replacement
 appends another `signed` entry; neither operation overwrites prior history. Saved
 signature assets are private to their owner.
+
+Linked DTR leave requests remain authoritative in the Leave module. DocuTracker
+stores only the applicant signature binding and audit metadata; it does not copy
+leave dates, balances, status, attachments, or approval decisions. Source
+signature responses expose a backend-calculated `can_sign` capability. Only the
+leave applicant can use the applicant signing operation. A replacement appends
+a new leave history event rather than overwriting the audit trail.
 
 **Query params:**
 - `document_type=eq.memo` - Filter by type

@@ -14,6 +14,10 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_guidance_widgets.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_dialog.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
 
 typedef LeaveRequestAction = Future<bool> Function(LeaveRequest request);
 typedef LeaveRequestAttachmentAction =
@@ -70,6 +74,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   DateTime? _startDate;
   DateTime? _endDate;
   bool _busy = false;
+  bool _submitFlowInFlight = false;
+  bool _checkingStatus = false;
+  bool _submissionCompleted = false;
+  String? _statusError;
   LeaveRequest? _savedRequest;
   bool _attachmentUploading = false;
   List<int>? _pendingAttachmentBytes;
@@ -79,6 +87,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   int _workingDaysRequestSerial = 0;
   LeaveAnnualEntitlementPreview? _annualEntitlementPreview;
   Map<String, dynamic> _customDetailValues = {};
+  DocuTrackerSourceSignatureBundle? _leaveSignatures;
 
   late final TextEditingController _customLeaveTypeController;
   late final TextEditingController _reasonController;
@@ -96,6 +105,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     super.initState();
     final initial = widget.initialRequest;
     _savedRequest = initial;
+    _checkingStatus = (initial?.id ?? '').isNotEmpty;
     _leaveType = initial?.leaveType ?? LeaveType.vacationLeave;
     _leaveTypeName = initial?.effectiveLeaveTypeName ?? _leaveType.value;
     _locationOption = initial?.locationOption;
@@ -149,11 +159,112 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     _coerceSelectedLeaveTypeForAccount();
     _loadLeaveTypes();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _refreshSavedStatus();
       _loadCreditContext();
       if (_startDate != null && _endDate != null) {
         _syncWorkingDaysFromDates();
       }
     });
+  }
+
+  bool get _canEditRequest =>
+      !_submissionCompleted &&
+      ((_savedRequest ?? widget.initialRequest)?.status.canEmployeeEdit ??
+          true);
+
+  Future<bool> _refreshSavedStatus() async {
+    final id = (_savedRequest ?? widget.initialRequest)?.id;
+    if (id == null || id.isEmpty) return true;
+    setState(() {
+      _checkingStatus = true;
+      _statusError = null;
+    });
+    final fresh = await context.read<LeaveProvider>().refreshRequestById(id);
+    if (!mounted) return false;
+    setState(() {
+      _checkingStatus = false;
+      if (fresh != null) {
+        _savedRequest = fresh;
+      } else {
+        _statusError =
+            'Could not check the latest request status. Please retry.';
+      }
+    });
+    return fresh != null && _canEditRequest;
+  }
+
+  void _completeSubmission() {
+    final saved = context.read<LeaveProvider>().selectedRequest;
+    setState(() {
+      _submissionCompleted = true;
+      if (saved != null && saved.id == _savedRequest?.id) {
+        _savedRequest = saved;
+      }
+    });
+    Navigator.of(context).pop(kLeaveFormResultSubmitted);
+  }
+
+  Future<bool> _ensureApplicantSignature() async {
+    var requestId = (_savedRequest ?? widget.initialRequest)?.id;
+    if (requestId == null || requestId.isEmpty) {
+      await _submit(isDraft: true);
+      if (!mounted) return false;
+      requestId = _savedRequest?.id;
+      if (requestId == null || requestId.isEmpty) {
+        _showMessage('Save the leave request before adding a signature.');
+        return false;
+      }
+    }
+
+    var bundle = _leaveSignatures;
+    if (bundle == null || bundle.sourceRecordId != requestId) {
+      bundle = await context.read<DocuTrackerProvider>().loadSourceSignatures(
+        sourceModule: 'dtr',
+        sourceTable: 'leave_requests',
+        sourceRecordId: requestId,
+      );
+      if (!mounted) return false;
+      if (bundle == null) {
+        final error = context.read<DocuTrackerProvider>().sourceSignatureError;
+        _showMessage(error ?? 'The applicant signature could not be loaded.');
+        return false;
+      }
+      setState(() => _leaveSignatures = bundle);
+    }
+
+    final existing = bundle.signatureFor('applicant');
+    if (existing?.isSigned == true) return true;
+    if (existing?.canSign != true) {
+      _showMessage('Only the applicant can sign this leave request.');
+      return false;
+    }
+
+    final docuTracker = context.read<DocuTrackerProvider>();
+    final choice = await showDocuTrackerSignatureDialog(
+      context,
+      provider: docuTracker,
+    );
+    if (!mounted || choice == null) return false;
+    final signed = await docuTracker.signSourceApplicant(
+      sourceModule: 'dtr',
+      sourceTable: 'leave_requests',
+      sourceRecordId: requestId,
+      signatureAssetId: choice.signatureAssetId,
+      imageBytes: choice.imageBytes,
+      mimeType: choice.mimeType,
+      sourceType: choice.sourceType,
+      saveForReuse: choice.saveForReuse,
+    );
+    if (!mounted) return false;
+    if (signed == null) {
+      _showMessage(
+        docuTracker.sourceSignatureError ?? 'The leave form was not signed.',
+      );
+      return false;
+    }
+    setState(() => _leaveSignatures = signed);
+    return signed.signatureFor('applicant')?.isSigned == true;
   }
 
   @override
@@ -535,6 +646,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Future<void> _saveDraft() async {
+    if (_busy || _submitFlowInFlight || _checkingStatus || !_canEditRequest) {
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
     if (!_validateCustomDetails()) return;
     final accountEligibilityMessage = _selectedAccountEligibilityMessage();
@@ -555,47 +669,57 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Future<void> _submitRequest() async {
-    if (!_formKey.currentState!.validate()) return;
-    final accountEligibilityMessage = _selectedAccountEligibilityMessage();
-    if (accountEligibilityMessage != null) {
-      _showMessage(accountEligibilityMessage);
+    if (_submitFlowInFlight || _busy || _checkingStatus || !_canEditRequest) {
       return;
     }
-    if (_startDate == null || _endDate == null) {
-      _showMessage('Please select start and end dates');
-      return;
-    }
-    if (!_validateSelectedDates()) return;
+    setState(() => _submitFlowInFlight = true);
+    try {
+      if (!_formKey.currentState!.validate()) return;
+      final accountEligibilityMessage = _selectedAccountEligibilityMessage();
+      if (accountEligibilityMessage != null) {
+        _showMessage(accountEligibilityMessage);
+        return;
+      }
+      if (_startDate == null || _endDate == null) {
+        _showMessage('Please select start and end dates');
+        return;
+      }
+      if (!_validateSelectedDates()) return;
 
-    if (_workingDaysLoading) {
-      _showMessage('Please wait while working days are computed.');
-      return;
-    }
-    final entered = _currentWorkingDaysApplied;
-    if (entered == null) {
-      _showMessage('Please enter a valid number of working days.');
-      return;
-    }
-    if (entered <= 0) {
-      _showMessage('Working days must be greater than 0.');
-      return;
-    }
+      if (_workingDaysLoading) {
+        _showMessage('Please wait while working days are computed.');
+        return;
+      }
+      final entered = _currentWorkingDaysApplied;
+      if (entered == null) {
+        _showMessage('Please enter a valid number of working days.');
+        return;
+      }
+      if (entered <= 0) {
+        _showMessage('Working days must be greater than 0.');
+        return;
+      }
 
-    if (!_validateRequiredLeaveDetails()) return;
+      if (!_validateRequiredLeaveDetails()) return;
 
-    if (_leaveType == LeaveType.maternityLeave &&
-        _maternityDeliveryType == null) {
-      _showMessage('Please choose the maternity leave classification.');
-      return;
-    }
-    if (!_validateEventDateRules()) return;
-    if (!_validateAnnualQuotaLimit()) return;
-    if (_shouldShowAttachmentSection() && !_hasAttachment()) {
-      _showMessage('Attachment is required for this leave type.');
-      return;
-    }
+      if (_leaveType == LeaveType.maternityLeave &&
+          _maternityDeliveryType == null) {
+        _showMessage('Please choose the maternity leave classification.');
+        return;
+      }
+      if (!_validateEventDateRules()) return;
+      if (!_validateAnnualQuotaLimit()) return;
+      if (_shouldShowAttachmentSection() && !_hasAttachment()) {
+        _showMessage('Attachment is required for this leave type.');
+        return;
+      }
 
-    await _submit(isDraft: false);
+      if (!await _refreshSavedStatus() || !mounted) return;
+      if (!await _ensureApplicantSignature()) return;
+      await _submit(isDraft: false);
+    } finally {
+      if (mounted) setState(() => _submitFlowInFlight = false);
+    }
   }
 
   double? get _currentWorkingDaysApplied =>
@@ -1077,6 +1201,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   Future<void> _submit({required bool isDraft}) async {
     setState(() => _busy = true);
     try {
+      if (!await _refreshSavedStatus() || !mounted) return;
       final initial = widget.initialRequest;
       final auth = context.read<AuthProvider>();
       final userId = auth.user!.id;
@@ -1220,7 +1345,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           final success = await action(req, pendingBytes, pendingName);
           if (!mounted) return;
           if (success) {
-            Navigator.of(context).pop(kLeaveFormResultSubmitted);
+            _completeSubmission();
           } else {
             final err = context.read<LeaveProvider>().error;
             _showMessage(
@@ -1233,7 +1358,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             final success = await action(req);
             if (!mounted) return;
             if (success) {
-              Navigator.of(context).pop(kLeaveFormResultSubmitted);
+              _completeSubmission();
             } else {
               final err = context.read<LeaveProvider>().error;
               _showMessage(
@@ -1246,6 +1371,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     } catch (e) {
       _showMessage('Error: $e');
     } finally {
+      // A failed response can follow a committed update, or another window can
+      // submit while this form is open. Reconcile before offering another save.
+      if (mounted && !_submissionCompleted) await _refreshSavedStatus();
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -1253,6 +1381,51 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   @override
   Widget build(BuildContext context) {
     final formMaxWidth = 800.0; // Clean, narrow column for digital entry
+
+    if (_checkingStatus || _statusError != null || !_canEditRequest) {
+      final status = (_savedRequest ?? widget.initialRequest)?.status;
+      return Scaffold(
+        backgroundColor: AppTheme.dashCanvasOf(context),
+        appBar: AppBar(title: const Text('Leave Request')),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_checkingStatus)
+                const Center(child: CircularProgressIndicator())
+              else if (_statusError != null) ...[
+                Text(_statusError!),
+                TextButton(
+                  onPressed: _refreshSavedStatus,
+                  child: const Text('Retry'),
+                ),
+              ] else ...[
+                Text(
+                  _submissionCompleted
+                      ? 'Request submitted'
+                      : 'Status: ${status?.displayName}',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  status?.isPending == true || _submissionCompleted
+                      ? 'This request has already been submitted. You can track its progress in the leave list.'
+                      : 'This request cannot be edited in its current status.',
+                ),
+                const SizedBox(height: 24),
+                _buildApplicantSignatureSection(),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
 
     return ScaffoldMessenger(
       key: _messengerKey,
@@ -1505,6 +1678,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                           ],
                         ),
                       ),
+                      const SizedBox(height: 16),
+
+                      _buildApplicantSignatureSection(),
                       const SizedBox(height: 32),
 
                       // Actions
@@ -1513,7 +1689,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                         children: [
                           if (widget.onSaveDraft != null)
                             OutlinedButton(
-                              onPressed: _busy ? null : _saveDraft,
+                              onPressed: _busy || _submitFlowInFlight
+                                  ? null
+                                  : _saveDraft,
                               style: OutlinedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 24,
@@ -1525,14 +1703,16 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                           const SizedBox(width: 16),
                           if (widget.onSubmitRequest != null)
                             FilledButton(
-                              onPressed: _busy ? null : _submitRequest,
+                              onPressed: _busy || _submitFlowInFlight
+                                  ? null
+                                  : _submitRequest,
                               style: FilledButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 24,
                                   vertical: 16,
                                 ),
                               ),
-                              child: _busy
+                              child: _busy || _submitFlowInFlight
                                   ? const SizedBox(
                                       width: 20,
                                       height: 20,
@@ -1553,6 +1733,54 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildApplicantSignatureSection() {
+    final requestId = (_savedRequest ?? widget.initialRequest)?.id;
+    if (requestId != null && requestId.isNotEmpty) {
+      return DocuTrackerSourceSignatureCard(
+        sourceModule: 'dtr',
+        sourceTable: 'leave_requests',
+        sourceRecordId: requestId,
+        onChanged: (bundle) {
+          if (!mounted) return;
+          setState(() => _leaveSignatures = bundle);
+        },
+      );
+    }
+    return _buildCard(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.draw_outlined, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Applicant E-Signature',
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'When you submit, the form will first be saved as a draft '
+                  'and then ask for your signature. The same signed form will '
+                  'appear in DocuTracker.',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1687,7 +1915,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: AppTheme.dashSurfaceCard(context, radius: 16),
-      child: child,
+      child: Material(type: MaterialType.transparency, child: child),
     );
   }
 

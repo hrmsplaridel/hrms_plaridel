@@ -70,6 +70,108 @@ class DocuTrackerSignatureAsset {
   }
 }
 
+/// A fixed signature slot belonging to a record created by another HRMS
+/// module. The source data remains authoritative in that module; DocuTracker
+/// only owns the e-signature and its audit metadata.
+class DocuTrackerSourceSignature {
+  const DocuTrackerSourceSignature({
+    required this.slotKey,
+    required this.label,
+    required this.assignedSignerId,
+    required this.canSign,
+    this.id,
+    this.assignedSignerName,
+    this.signatureAssetId,
+    this.signatureImageBytes,
+    this.mimeType,
+    this.signedBy,
+    this.signerName,
+    this.signedAt,
+  });
+
+  final String? id;
+  final String slotKey;
+  final String label;
+  final String assignedSignerId;
+  final String? assignedSignerName;
+  final bool canSign;
+  final String? signatureAssetId;
+  final Uint8List? signatureImageBytes;
+  final String? mimeType;
+  final String? signedBy;
+  final String? signerName;
+  final DateTime? signedAt;
+
+  bool get isSigned =>
+      signatureAssetId != null &&
+      signatureImageBytes != null &&
+      signatureImageBytes!.isNotEmpty &&
+      signedAt != null;
+
+  factory DocuTrackerSourceSignature.fromJson(Map<String, dynamic> json) {
+    final encoded = json['signature_image_base64']?.toString();
+    return DocuTrackerSourceSignature(
+      id: json['id']?.toString(),
+      slotKey: json['slot_key']?.toString() ?? '',
+      label: json['label']?.toString() ?? 'Signature',
+      assignedSignerId: json['assigned_signer_id']?.toString() ?? '',
+      assignedSignerName: json['assigned_signer_name']?.toString(),
+      canSign: json['can_sign'] == true,
+      signatureAssetId: json['signature_asset_id']?.toString(),
+      signatureImageBytes: encoded == null || encoded.isEmpty
+          ? null
+          : _decodeBase64Image(encoded),
+      mimeType: json['mime_type']?.toString(),
+      signedBy: json['signed_by']?.toString(),
+      signerName: json['signer_name_snapshot']?.toString(),
+      signedAt: DateTime.tryParse(json['signed_at']?.toString() ?? ''),
+    );
+  }
+}
+
+class DocuTrackerSourceSignatureBundle {
+  const DocuTrackerSourceSignatureBundle({
+    required this.sourceModule,
+    required this.sourceTable,
+    required this.sourceRecordId,
+    required this.sourceStatus,
+    required this.signatures,
+  });
+
+  final String sourceModule;
+  final String sourceTable;
+  final String sourceRecordId;
+  final String sourceStatus;
+  final List<DocuTrackerSourceSignature> signatures;
+
+  DocuTrackerSourceSignature? signatureFor(String slotKey) {
+    for (final signature in signatures) {
+      if (signature.slotKey == slotKey) return signature;
+    }
+    return null;
+  }
+
+  factory DocuTrackerSourceSignatureBundle.fromJson(Map<String, dynamic> json) {
+    final rawSignatures = json['signatures'];
+    return DocuTrackerSourceSignatureBundle(
+      sourceModule: json['source_module']?.toString() ?? '',
+      sourceTable: json['source_table']?.toString() ?? '',
+      sourceRecordId: json['source_record_id']?.toString() ?? '',
+      sourceStatus: json['source_status']?.toString() ?? '',
+      signatures: rawSignatures is List
+          ? rawSignatures
+                .whereType<Map>()
+                .map(
+                  (item) => DocuTrackerSourceSignature.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .toList(growable: false)
+          : const <DocuTrackerSourceSignature>[],
+    );
+  }
+}
+
 class DocuTrackerSignatureField {
   const DocuTrackerSignatureField({
     required this.id,

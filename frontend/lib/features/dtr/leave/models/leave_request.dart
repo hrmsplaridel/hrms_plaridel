@@ -16,6 +16,13 @@ enum LeaveRequestStatus {
 }
 
 extension LeaveRequestStatusExtension on LeaveRequestStatus {
+  /// Mirrors the employee edit states in the backend leave workflow rules.
+  bool get canEmployeeEdit =>
+      this == LeaveRequestStatus.draft ||
+      this == LeaveRequestStatus.returned ||
+      this == LeaveRequestStatus.rejectedByDepartmentHead ||
+      this == LeaveRequestStatus.rejectedByHr;
+
   /// Return the snake_case value for API serialization.
   String get value => switch (this) {
     LeaveRequestStatus.draft => 'draft',

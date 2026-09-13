@@ -110,6 +110,8 @@ class EmployeeLeaveActions {
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,
         recommendationOfficerTitle:
             formSignatories.recommendationOfficer?.title,
+        applicantSignatureBytes:
+            formSignatories.applicantSignature?.signatureImageBytes,
         name: 'Leave_Application_${target.id ?? target.userId}.pdf',
       );
     } catch (e) {

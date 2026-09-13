@@ -1,5 +1,7 @@
 // ignore_for_file: unused_element
 
+import 'dart:typed_data';
+
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -277,6 +279,7 @@ class LeaveRequestPdf {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    Uint8List? applicantSignatureBytes,
   }) async {
     return _LeaveRequestPdfFixedEngine.buildPdf(
       request: request,
@@ -285,6 +288,7 @@ class LeaveRequestPdf {
       certificationOfficerTitle: certificationOfficerTitle,
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
+      applicantSignatureBytes: applicantSignatureBytes,
     );
   }
 
@@ -298,6 +302,7 @@ class LeaveRequestPdf {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    Uint8List? applicantSignatureBytes,
   }) async {
     return _LeaveRequestPdfFixedEngine.printLeaveRequest(
       request: request,
@@ -307,6 +312,7 @@ class LeaveRequestPdf {
       certificationOfficerTitle: certificationOfficerTitle,
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
+      applicantSignatureBytes: applicantSignatureBytes,
     );
   }
 
@@ -1645,6 +1651,7 @@ class _LeaveRequestPdfFixedEngine {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    Uint8List? applicantSignatureBytes,
   }) async {
     final b = balances ?? const <LeaveBalance>[];
     final vl = b
@@ -1669,6 +1676,10 @@ class _LeaveRequestPdfFixedEngine {
     final certifierTitle = _s(certificationOfficerTitle);
     final recommendationName = _s(recommendationOfficerName);
     final recommendationTitle = _s(recommendationOfficerTitle);
+    final applicantSignatureImage =
+        applicantSignatureBytes == null || applicantSignatureBytes.isEmpty
+        ? null
+        : pw.MemoryImage(applicantSignatureBytes);
     final hasDepartmentHeadRecommendation =
         request.departmentHeadAction == 'department_head_approved';
     final hasDepartmentHeadDisapproval =
@@ -2262,7 +2273,16 @@ class _LeaveRequestPdfFixedEngine {
                                       request.commutation ==
                                           LeaveCommutationOption.requested,
                                     ),
-                                    pw.SizedBox(height: 12),
+                                    if (applicantSignatureImage != null)
+                                      pw.SizedBox(
+                                        height: 28,
+                                        child: pw.Image(
+                                          applicantSignatureImage,
+                                          fit: pw.BoxFit.contain,
+                                        ),
+                                      )
+                                    else
+                                      pw.SizedBox(height: 12),
                                     pw.Container(
                                       height: 1,
                                       color: _borderColor,
@@ -2881,6 +2901,7 @@ class _LeaveRequestPdfFixedEngine {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    Uint8List? applicantSignatureBytes,
   }) async {
     final doc = await buildPdf(
       request: request,
@@ -2889,6 +2910,7 @@ class _LeaveRequestPdfFixedEngine {
       certificationOfficerTitle: certificationOfficerTitle,
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
+      applicantSignatureBytes: applicantSignatureBytes,
     );
     await Printing.layoutPdf(
       onLayout: (format) async => doc.save(),
