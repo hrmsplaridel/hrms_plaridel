@@ -8,12 +8,14 @@ class EmployeeDirectoryEntry {
     required this.id,
     required this.fullName,
     this.departmentName,
+    this.departmentId,
     this.positionName,
   });
 
   final String id;
   final String fullName;
   final String? departmentName;
+  final String? departmentId;
   final String? positionName;
 
   /// "Full Name · Department" (department omitted if unknown).
@@ -69,6 +71,7 @@ class EmployeeDirectoryLookup {
           id: id,
           fullName: m['full_name']?.toString() ?? 'Unknown',
           departmentName: m['current_department_name']?.toString(),
+          departmentId: m['current_department_id']?.toString(),
           positionName: m['current_position_name']?.toString(),
         );
       }
@@ -98,6 +101,7 @@ class EmployeeDirectoryLookup {
           id: id,
           fullName: m['full_name']?.toString() ?? 'Unknown',
           departmentName: m['current_department_name']?.toString(),
+          departmentId: m['current_department_id']?.toString(),
           positionName: m['current_position_name']?.toString(),
         );
       } catch (_) {}

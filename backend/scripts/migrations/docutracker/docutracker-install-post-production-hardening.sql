@@ -21,6 +21,7 @@
 --   16 - DOCUMENT BUILDER + E-SIGNATURES
 --   17 - E-SIGNATURE HISTORY ACTION
 --   18 - LINKED DTR LEAVE E-SIGNATURES
+--   19 - DEPARTMENT HEAD LEAVE E-SIGNATURE
 --
 -- =============================================================================
 
@@ -813,5 +814,22 @@ CREATE TABLE IF NOT EXISTS docutracker_leave_signatures (
 
 CREATE INDEX IF NOT EXISTS idx_docutracker_leave_signatures_signer
   ON docutracker_leave_signatures(assigned_signer_id, leave_request_id);
+
+COMMIT;
+
+
+-- #############################################################################
+-- 19 - DEPARTMENT HEAD LEAVE E-SIGNATURE
+-- Source file: migrate-docutracker-leave-signatures-v2.sql
+-- #############################################################################
+
+BEGIN;
+
+ALTER TABLE docutracker_leave_signatures
+  DROP CONSTRAINT IF EXISTS docutracker_leave_signatures_slot_check;
+
+ALTER TABLE docutracker_leave_signatures
+  ADD CONSTRAINT docutracker_leave_signatures_slot_check
+  CHECK (slot_key IN ('applicant', 'department_head'));
 
 COMMIT;

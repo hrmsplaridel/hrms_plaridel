@@ -27,6 +27,7 @@ const postSections = [
   ["16 - DOCUMENT BUILDER + E-SIGNATURES", "migrate-docutracker-document-builder-esign-v1.sql"],
   ["17 - E-SIGNATURE HISTORY ACTION", "migrate-docutracker-history-signed-action-v1.sql"],
   ["18 - LINKED DTR LEAVE E-SIGNATURES", "migrate-docutracker-leave-signatures-v1.sql"],
+  ["19 - DEPARTMENT HEAD LEAVE E-SIGNATURE", "migrate-docutracker-leave-signatures-v2.sql"],
 ];
 
 function readBody(file) {

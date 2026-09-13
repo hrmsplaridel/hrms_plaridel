@@ -9,7 +9,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | docutracker_documents | Main document records |
 | docutracker_routing_records | Per-step routing tracking |
 | docutracker_document_history | Audit trail, overdue/escalation logs |
-| docutracker_permissions | Role/user action permissions |
+| docutracker_permissions | System-level role/user security permissions; not workflow routing |
 | docutracker_routing_configs | Workflow definitions per document type |
 | docutracker_workflow_steps | Normalized workflow steps per type and version |
 | docutracker_workflow_step_assignees | Selected users assigned to each workflow step |
@@ -142,7 +142,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 |--------|------|-------------|
 | id | UUID | Primary key |
 | leave_request_id | UUID | DTR leave request; one signature per slot |
-| slot_key | TEXT | applicant, certification, recommendation, or approving_authority |
+| slot_key | TEXT | applicant or department_head |
 | assigned_signer_id | UUID | Existing active user assigned to the fixed form slot |
 | signature_asset_id | UUID | Private DocuTracker signature asset selected by the signer |
 | signed_by | UUID | Authenticated signer; must equal assigned_signer_id |
@@ -157,6 +157,10 @@ balances, and DTR effects. Signature creation or replacement also appends an
 entry to `leave_request_history`.
 
 ## docutracker_permissions
+
+This table stays in place for system-level security and explicit user
+overrides. Primary/backup workflow routing and workflow action availability are
+configured on workflow steps instead of being duplicated here.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -173,7 +177,7 @@ entry to `leave_request_history`.
 |--------|------|-------------|
 | id | UUID | Primary key |
 | document_type | TEXT | memo, purchaseRequest |
-| steps | JSONB | Array of {step_order, assignee_type, role_id, department_id, label} |
+| steps | JSONB | Versioned steps including label, ordered user_ids, allowed_actions, and legacy routing fields |
 | review_deadline_hours | INT | Default deadline in hours |
 
 ## docutracker_workflow_steps
@@ -198,8 +202,20 @@ entry to `leave_request_history`.
 | is_primary | BOOLEAN | Primary reviewer marker |
 | backup_rank | INT | Backup order; null for the primary |
 | is_enabled | BOOLEAN | Whether this assignment can receive work |
-| allowed_actions | TEXT[] | Existing allowed workflow actions |
+| allowed_actions | TEXT[] | Step actions shared by the primary and enabled backups |
 
 A workflow step may have zero assignee rows while it is being configured. When
 one or more assignees exist, at least one must be enabled and exactly one enabled
 assignee must be primary. Runtime routing rejects entry into an unassigned step.
+
+The first configured `user_id` is normalized as the primary assignee; later
+entries are backups. Existing workflows with multiple backups remain valid even
+though the normal editor presents one optional backup. No table or column is
+removed by the simplified UI.
+
+Document visibility is derived from relationships and immutable routing
+snapshots: creator, active-step assignees, assignees from reached steps,
+signature assignees, and admins may view as applicable. Assignment to an
+unreached future step alone does not grant access. Workflow actions additionally
+require an enabled assignment on the document's current step and a matching
+`allowed_actions` value.

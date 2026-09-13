@@ -165,6 +165,27 @@ void main() {
     },
   );
 
+  test('routing assignee returned by backend can see the document', () {
+    final document = DocuTrackerDocument.fromJson(<String, dynamic>{
+      'id': 'document-1',
+      'document_type': 'memo',
+      'title': 'Assigned document',
+      'created_by': 'creator-1',
+      'status': 'in_review',
+      'current_holder_id': 'primary-assignee',
+      'current_step': 1,
+      'viewer_is_routing_assignee': true,
+    });
+
+    expect(
+      DocuTrackerDocumentVisibility.isVisible(
+        doc: document,
+        userId: 'backup-assignee',
+      ),
+      isTrue,
+    );
+  });
+
   test('frontend trusts backend filtering for source-only records', () {
     final document = DocuTrackerDocument.fromJson(<String, dynamic>{
       'id': 'source:dtr:leave-1',
@@ -184,6 +205,37 @@ void main() {
         userId: 'assigned-reviewer-returned-by-server',
       ),
       isTrue,
+    );
+  });
+
+  test('linked leave signatures parse applicant and department head slots', () {
+    final bundle = DocuTrackerSourceSignatureBundle.fromJson(<String, dynamic>{
+      'source_module': 'dtr',
+      'source_table': 'leave_requests',
+      'source_record_id': 'leave-1',
+      'source_status': 'pending_department_head',
+      'signatures': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'slot_key': 'applicant',
+          'label': 'Signature of Applicant',
+          'assigned_signer_id': 'employee-1',
+          'can_sign': false,
+        },
+        <String, dynamic>{
+          'slot_key': 'department_head',
+          'label': 'Department Head Signature',
+          'assigned_signer_id': 'head-1',
+          'assigned_signer_name': 'Department Head One',
+          'can_sign': true,
+        },
+      ],
+    });
+
+    expect(bundle.signatureFor('applicant'), isNotNull);
+    expect(bundle.signatureFor('department_head')?.canSign, isTrue);
+    expect(
+      bundle.signatureFor('department_head')?.assignedSignerName,
+      'Department Head One',
     );
   });
 }

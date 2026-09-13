@@ -673,14 +673,39 @@ class DocuTrackerProvider extends ChangeNotifier {
     String sourceType = 'drawn',
     bool saveForReuse = false,
   }) async {
+    return signSourceSignature(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+      slotKey: 'applicant',
+      signatureAssetId: signatureAssetId,
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      saveForReuse: saveForReuse,
+    );
+  }
+
+  Future<DocuTrackerSourceSignatureBundle?> signSourceSignature({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    required String slotKey,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
     if (_sourceSignatureLoading) return null;
     _sourceSignatureLoading = true;
     _sourceSignatureError = null;
     notifyListeners();
-    final result = await _repo.signSourceApplicant(
+    final result = await _repo.signSourceSignature(
       sourceModule: sourceModule,
       sourceTable: sourceTable,
       sourceRecordId: sourceRecordId,
+      slotKey: slotKey,
       signatureAssetId: signatureAssetId,
       imageBytes: imageBytes,
       mimeType: mimeType,

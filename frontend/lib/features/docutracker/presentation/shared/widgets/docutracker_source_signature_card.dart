@@ -12,12 +12,22 @@ class DocuTrackerSourceSignatureCard extends StatefulWidget {
     required this.sourceModule,
     required this.sourceTable,
     required this.sourceRecordId,
+    this.slotKey = 'applicant',
+    this.title = 'Applicant E-Signature',
+    this.unsignedMessage = 'No applicant signature yet',
+    this.waitingMessage = 'Waiting for the applicant to sign.',
+    this.savedMessage = 'Signature saved.',
     this.onChanged,
   });
 
   final String sourceModule;
   final String sourceTable;
   final String sourceRecordId;
+  final String slotKey;
+  final String title;
+  final String unsignedMessage;
+  final String waitingMessage;
+  final String savedMessage;
   final ValueChanged<DocuTrackerSourceSignatureBundle>? onChanged;
 
   @override
@@ -73,10 +83,11 @@ class _DocuTrackerSourceSignatureCardState
       _signing = true;
       _error = null;
     });
-    final bundle = await provider.signSourceApplicant(
+    final bundle = await provider.signSourceSignature(
       sourceModule: widget.sourceModule,
       sourceTable: widget.sourceTable,
       sourceRecordId: widget.sourceRecordId,
+      slotKey: widget.slotKey,
       signatureAssetId: choice.signatureAssetId,
       imageBytes: choice.imageBytes,
       mimeType: choice.mimeType,
@@ -95,9 +106,9 @@ class _DocuTrackerSourceSignatureCardState
     });
     if (bundle != null) {
       widget.onChanged?.call(bundle);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Applicant signature saved.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(widget.savedMessage)));
     }
   }
 
@@ -110,7 +121,7 @@ class _DocuTrackerSourceSignatureCardState
 
   @override
   Widget build(BuildContext context) {
-    final signature = _bundle?.signatureFor('applicant');
+    final signature = _bundle?.signatureFor(widget.slotKey);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -125,10 +136,13 @@ class _DocuTrackerSourceSignatureCardState
             children: [
               const Icon(Icons.draw_outlined, size: 20),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Applicant E-Signature',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  widget.title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
                 ),
               ),
               if (signature?.isSigned == true)
@@ -173,9 +187,11 @@ class _DocuTrackerSourceSignatureCardState
                       fit: BoxFit.contain,
                       filterQuality: FilterQuality.high,
                     )
-                  : const Text(
-                      'No applicant signature yet',
-                      style: TextStyle(color: DocuTrackerTokens.textMuted),
+                  : Text(
+                      widget.unsignedMessage,
+                      style: const TextStyle(
+                        color: DocuTrackerTokens.textMuted,
+                      ),
                     ),
             ),
             if (signature?.isSigned == true) ...[
@@ -220,7 +236,7 @@ class _DocuTrackerSourceSignatureCardState
               Text(
                 signature?.isSigned == true
                     ? 'The signature is part of this leave form.'
-                    : 'Waiting for the applicant to sign.',
+                    : widget.waitingMessage,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: DocuTrackerTokens.textMuted,

@@ -60,11 +60,8 @@ void main() {
     }
   }
 
-  testWidgets('tapping a workflow card updates highlighted step', (
-    tester,
-  ) async {
+  testWidgets('tapping a workflow card opens its step editor', (tester) async {
     await pumpEditor(tester);
-    expect(find.text('Step 1 highlighted'), findsOneWidget);
 
     final financeText = find.text('Finance Review');
     await scrollMainUntilVisible(tester, financeText);
@@ -78,33 +75,17 @@ void main() {
     await tester.tap(financeCardTapTarget);
     await tester.pumpAndSettle();
 
-    expect(find.text('Step 2 highlighted'), findsOneWidget);
+    expect(find.text('Edit step 2'), findsOneWidget);
+    expect(find.text('Step Name'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('tapping route preview chip updates highlighted step', (
+  testWidgets('route preview is removed from the simplified editor', (
     tester,
   ) async {
     await pumpEditor(tester);
-    expect(find.text('Step 1 highlighted'), findsOneWidget);
-
-    final previewScrollable = find.byWidgetPredicate(
-      (w) => w is SingleChildScrollView && w.scrollDirection == Axis.horizontal,
-    );
-    expect(previewScrollable, findsOneWidget);
-
-    final previewStep = find
-        .descendant(
-          of: previewScrollable,
-          matching: find.text('Final Approval'),
-        )
-        .hitTestable();
-    expect(previewStep, findsOneWidget);
-
-    await tester.tap(previewStep.first);
-    await tester.pumpAndSettle();
-
-    expect(find.text('Step 3 highlighted'), findsOneWidget);
+    expect(find.text('Route preview'), findsNothing);
+    expect(find.text('Final Approval'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

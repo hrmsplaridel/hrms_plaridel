@@ -5,6 +5,7 @@ const {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const APPLICANT_SLOT = 'applicant';
+const DEPARTMENT_HEAD_SLOT = 'department_head';
 const APPLICANT_SIGNABLE_STATUSES = new Set([
   'draft',
   'returned',
@@ -29,6 +30,10 @@ function canApplicantSignStatus(status) {
   );
 }
 
+function canDepartmentHeadSignStatus(status) {
+  return String(status || '').trim().toLowerCase() === 'pending_department_head';
+}
+
 function assertSupportedLeaveSource(sourceModule, sourceTable) {
   if (sourceModule !== 'dtr' || sourceTable !== 'leave_requests') {
     throw serviceError('NOT_FOUND', 'Linked source document not found');
@@ -45,6 +50,8 @@ async function loadLeaveContext(db, leaveRequestId, user, { forUpdate = false } 
             COALESCE(lr.user_id, lr.employee_id) AS employee_user_id,
             employee.full_name AS employee_name,
             lr.assigned_department_head_id,
+            assigned_head.full_name AS department_head_name,
+            viewer.full_name AS viewer_name,
             EXISTS (
               SELECT 1
               FROM leave_request_department_reviewers lrr
@@ -65,6 +72,10 @@ async function loadLeaveContext(db, leaveRequestId, user, { forUpdate = false } 
      FROM leave_requests lr
      LEFT JOIN users employee
        ON employee.id = COALESCE(lr.user_id, lr.employee_id)
+     LEFT JOIN users assigned_head
+       ON assigned_head.id = lr.assigned_department_head_id
+     LEFT JOIN users viewer
+       ON viewer.id = $2::uuid
      WHERE lr.id = $1::uuid
      ${forUpdate ? 'FOR UPDATE OF lr' : ''}`,
     [leaveRequestId, user.id]
@@ -84,6 +95,32 @@ async function loadLeaveContext(db, leaveRequestId, user, { forUpdate = false } 
     throw serviceError('FORBIDDEN', 'You do not have access to this leave form');
   }
   return { ...row, isOwner, isHrOrAdmin, isReviewer };
+}
+
+function mapDepartmentHeadSignature(context, row, user) {
+  const canSign =
+    context.isReviewer && canDepartmentHeadSignStatus(context.status);
+  return {
+    id: row?.id || null,
+    slot_key: DEPARTMENT_HEAD_SLOT,
+    label: 'Department Head Signature',
+    assigned_signer_id:
+      row?.assigned_signer_id ||
+      context.assigned_department_head_id ||
+      (context.isReviewer ? user.id : null),
+    assigned_signer_name:
+      row?.signer_name_snapshot ||
+      (context.isReviewer ? context.viewer_name : null) ||
+      context.department_head_name ||
+      null,
+    can_sign: canSign,
+    signature_asset_id: row?.signature_asset_id || null,
+    signature_image_base64: row?.signature_image_base64 || null,
+    mime_type: row?.mime_type || null,
+    signed_by: row?.signed_by || null,
+    signer_name_snapshot: row?.signer_name_snapshot || null,
+    signed_at: row?.signed_at || null,
+  };
 }
 
 function mapApplicantSignature(context, row, user) {
@@ -121,6 +158,7 @@ async function getLeaveSourceSignatures(
     result = await pool.query(
       `SELECT s.id,
               s.slot_key,
+              s.assigned_signer_id,
               s.signature_asset_id,
               s.signed_by,
               s.signer_name_snapshot,
@@ -130,9 +168,8 @@ async function getLeaveSourceSignatures(
        FROM docutracker_leave_signatures s
        JOIN docutracker_signature_assets a ON a.id = s.signature_asset_id
        WHERE s.leave_request_id = $1::uuid
-         AND s.slot_key = $2
-       LIMIT 1`,
-      [leaveRequestId, APPLICANT_SLOT]
+         AND s.slot_key = ANY($2::text[])`,
+      [leaveRequestId, [APPLICANT_SLOT, DEPARTMENT_HEAD_SLOT]]
     );
   } catch (error) {
     if (error?.code === '42P01') {
@@ -148,16 +185,28 @@ async function getLeaveSourceSignatures(
     source_table: sourceTable,
     source_record_id: leaveRequestId,
     source_status: context.status,
-    signatures: [mapApplicantSignature(context, result.rows[0], user)],
+    signatures: [
+      mapApplicantSignature(
+        context,
+        result.rows.find((row) => row.slot_key === APPLICANT_SLOT),
+        user
+      ),
+      mapDepartmentHeadSignature(
+        context,
+        result.rows.find((row) => row.slot_key === DEPARTMENT_HEAD_SLOT),
+        user
+      ),
+    ],
   };
 }
 
-async function signLeaveSourceApplicant(
+async function signLeaveSourceSlot(
   pool,
   user,
   sourceModule,
   sourceTable,
   leaveRequestId,
+  slotKey,
   input
 ) {
   assertSupportedLeaveSource(sourceModule, sourceTable);
@@ -167,14 +216,31 @@ async function signLeaveSourceApplicant(
     const context = await loadLeaveContext(client, leaveRequestId, user, {
       forUpdate: true,
     });
-    if (!context.isOwner) {
-      throw serviceError('FORBIDDEN', 'Only the applicant can sign this field');
-    }
-    if (!canApplicantSignStatus(context.status)) {
-      throw serviceError(
-        'CONFLICT',
-        'This leave request can no longer change the applicant signature'
-      );
+    if (slotKey === APPLICANT_SLOT) {
+      if (!context.isOwner) {
+        throw serviceError('FORBIDDEN', 'Only the applicant can sign this field');
+      }
+      if (!canApplicantSignStatus(context.status)) {
+        throw serviceError(
+          'CONFLICT',
+          'This leave request can no longer change the applicant signature'
+        );
+      }
+    } else if (slotKey === DEPARTMENT_HEAD_SLOT) {
+      if (!context.isReviewer) {
+        throw serviceError(
+          'FORBIDDEN',
+          'Only an assigned department head can sign this field'
+        );
+      }
+      if (!canDepartmentHeadSignStatus(context.status)) {
+        throw serviceError(
+          'CONFLICT',
+          'The department head signature can only be added while awaiting department head review'
+        );
+      }
+    } else {
+      throw serviceError('NOT_FOUND', 'Leave signature field not found');
     }
 
     let assetId = String(input.signature_asset_id || '').trim();
@@ -203,7 +269,7 @@ async function signLeaveSourceApplicant(
       [user.id]
     );
     if (!activeUser.rowCount) {
-      throw serviceError('FORBIDDEN', 'Only an active applicant can sign');
+      throw serviceError('FORBIDDEN', 'Only an active assigned signer can sign');
     }
     const signerName = activeUser.rows[0].full_name;
     const previous = await client.query(
@@ -211,7 +277,7 @@ async function signLeaveSourceApplicant(
        FROM docutracker_leave_signatures
        WHERE leave_request_id = $1::uuid AND slot_key = $2
        FOR UPDATE`,
-      [leaveRequestId, APPLICANT_SLOT]
+      [leaveRequestId, slotKey]
     );
     const isReplacement = previous.rowCount > 0;
 
@@ -227,7 +293,7 @@ async function signLeaveSourceApplicant(
          signer_name_snapshot = EXCLUDED.signer_name_snapshot,
          signed_at = now(),
          updated_at = now()`,
-      [leaveRequestId, APPLICANT_SLOT, user.id, assetId, signerName]
+      [leaveRequestId, slotKey, user.id, assetId, signerName]
     );
     await client.query(
       `INSERT INTO leave_request_history
@@ -240,9 +306,9 @@ async function signLeaveSourceApplicant(
         context.status,
         user.id,
         isReplacement
-          ? 'Applicant replaced the e-signature'
-          : 'Applicant added an e-signature',
-        JSON.stringify({ slot_key: APPLICANT_SLOT, source_module: 'dtr' }),
+          ? `${slotKey === APPLICANT_SLOT ? 'Applicant' : 'Department head'} replaced the e-signature`
+          : `${slotKey === APPLICANT_SLOT ? 'Applicant' : 'Department head'} added an e-signature`,
+        JSON.stringify({ slot_key: slotKey, source_module: 'dtr' }),
       ]
     );
     await client.query('COMMIT');
@@ -271,9 +337,75 @@ async function signLeaveSourceApplicant(
   );
 }
 
+function signLeaveSourceApplicant(
+  pool,
+  user,
+  sourceModule,
+  sourceTable,
+  leaveRequestId,
+  input
+) {
+  return signLeaveSourceSlot(
+    pool,
+    user,
+    sourceModule,
+    sourceTable,
+    leaveRequestId,
+    APPLICANT_SLOT,
+    input
+  );
+}
+
+function signLeaveSourceDepartmentHead(
+  pool,
+  user,
+  sourceModule,
+  sourceTable,
+  leaveRequestId,
+  input
+) {
+  return signLeaveSourceSlot(
+    pool,
+    user,
+    sourceModule,
+    sourceTable,
+    leaveRequestId,
+    DEPARTMENT_HEAD_SLOT,
+    input
+  );
+}
+
+async function requireDepartmentHeadApprovalSignature(
+  db,
+  leaveRequestId,
+  reviewerId
+) {
+  const result = await db.query(
+    `SELECT 1
+     FROM docutracker_leave_signatures
+     WHERE leave_request_id = $1::uuid
+       AND slot_key = $2
+       AND assigned_signer_id = $3::uuid
+       AND signed_by = $3::uuid
+     LIMIT 1`,
+    [leaveRequestId, DEPARTMENT_HEAD_SLOT, reviewerId]
+  );
+  if (result.rowCount > 0) return;
+  const error = serviceError(
+    'CONFLICT',
+    'Add your department head signature before approving this leave request.'
+  );
+  error.statusCode = 409;
+  throw error;
+}
+
 module.exports = {
   APPLICANT_SLOT,
+  DEPARTMENT_HEAD_SLOT,
   canApplicantSignStatus,
+  canDepartmentHeadSignStatus,
   getLeaveSourceSignatures,
   signLeaveSourceApplicant,
+  signLeaveSourceDepartmentHead,
+  requireDepartmentHeadApprovalSignature,
 };

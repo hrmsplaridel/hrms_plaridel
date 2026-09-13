@@ -60,38 +60,35 @@ void main() {
     }
   }
 
-  testWidgets('renders workflow editor and defaults to step 1 highlighted', (
-    tester,
-  ) async {
+  testWidgets('renders the simplified workflow editor', (tester) async {
     await pumpEditor(tester);
 
-    expect(find.text('Workflow Builder'), findsOneWidget);
-    expect(find.text('Route preview'), findsOneWidget);
-    expect(find.text('Step 1 highlighted'), findsOneWidget);
+    expect(find.text('Memo workflow'), findsOneWidget);
+    expect(find.text('Default deadline (hours)'), findsOneWidget);
+    expect(find.text('Publish workflow'), findsOneWidget);
+    expect(find.text('Save workflow'), findsNothing);
+    expect(find.text('Route preview'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('route preview renders later-step labels', (tester) async {
+  testWidgets('ordered step list renders later-step labels', (tester) async {
     await pumpEditor(tester);
 
-    final previewRow = find.byWidgetPredicate(
-      (w) => w is SingleChildScrollView && w.scrollDirection == Axis.horizontal,
-    );
-    final financeLabel = find.descendant(
-      of: previewRow,
-      matching: find.text('Finance Review'),
-    );
-    expect(financeLabel, findsOneWidget);
+    expect(find.text('Draft Intake'), findsOneWidget);
+    expect(find.text('Finance Review'), findsOneWidget);
+    expect(find.text('Final Approval'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('Add after opens the step editor dialog', (tester) async {
     await pumpEditor(tester);
 
-    final addAfter = find.widgetWithText(OutlinedButton, 'Add after');
-    await scrollMainUntilVisible(tester, addAfter);
-    expect(addAfter, findsWidgets);
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Add after').first);
+    final more = find.byTooltip('More step actions');
+    await scrollMainUntilVisible(tester, more);
+    expect(more, findsWidgets);
+    await tester.tap(more.first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add step after').last);
     await tester.pumpAndSettle();
 
     expect(find.text('Add step after 1'), findsOneWidget);

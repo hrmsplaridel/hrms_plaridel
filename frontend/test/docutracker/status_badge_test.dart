@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 
 void main() {
   Future<void> pumpBadge(
@@ -10,6 +11,7 @@ void main() {
     bool compact = false,
     bool showIcon = true,
     bool dotStyle = false,
+    String? label,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -20,6 +22,7 @@ void main() {
               compact: compact,
               showIcon: showIcon,
               dotStyle: dotStyle,
+              label: label,
             ),
           ),
         ),
@@ -74,5 +77,25 @@ void main() {
     } finally {
       semantics.dispose();
     }
+  });
+
+  testWidgets('supports a contextual display label without changing status', (
+    tester,
+  ) async {
+    await pumpBadge(tester, status: DocumentStatus.pending, label: 'Draft');
+
+    expect(find.text('Draft'), findsOneWidget);
+    expect(find.text('Pending'), findsNothing);
+  });
+
+  test('removes raw exception and transport wording from displayed errors', () {
+    expect(
+      docuTrackerDisplayError('Exception: Invalid workflow'),
+      'Invalid workflow',
+    );
+    expect(
+      docuTrackerDisplayError('DioException: connection failed'),
+      'Could not complete the request. Check your connection and try again.',
+    );
   });
 }

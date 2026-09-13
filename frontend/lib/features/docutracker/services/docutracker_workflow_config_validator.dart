@@ -90,6 +90,27 @@ class DocuTrackerWorkflowConfigValidator {
         );
       }
 
+      const supportedActions = {'approve', 'forward', 'return', 'reject'};
+      final actions = step.allowedActions
+          .map((action) => action.trim().toLowerCase())
+          .where((action) => action.isNotEmpty)
+          .toSet();
+      if (actions.isEmpty) {
+        issues.add(
+          DocuTrackerWorkflowValidationIssue(
+            message: 'Choose at least one allowed action.',
+            stepOrder: step.stepOrder,
+          ),
+        );
+      } else if (actions.any((action) => !supportedActions.contains(action))) {
+        issues.add(
+          DocuTrackerWorkflowValidationIssue(
+            message: 'The step contains an unsupported workflow action.',
+            stepOrder: step.stepOrder,
+          ),
+        );
+      }
+
       if (!step.enabled) {
         // Disabled steps are allowed, but warn if it’s the only enabled path.
         continue;
@@ -98,7 +119,10 @@ class DocuTrackerWorkflowConfigValidator {
       if (type == 'user') {
         final ids = step.userIds ?? const [];
         final hasUsers = ids.where((e) => e.trim().isNotEmpty).isNotEmpty;
-        if ((step.departmentId ?? '').trim().isEmpty) {
+        final usesAutomaticReviewers =
+            step.assigneeSource == 'department_reviewers';
+        if (usesAutomaticReviewers &&
+            (step.departmentId ?? '').trim().isEmpty) {
           issues.add(
             DocuTrackerWorkflowValidationIssue(
               message:
@@ -107,7 +131,7 @@ class DocuTrackerWorkflowConfigValidator {
             ),
           );
         }
-        if (!hasUsers) {
+        if (!usesAutomaticReviewers && !hasUsers) {
           issues.add(
             DocuTrackerWorkflowValidationIssue(
               message: 'Choose a primary reviewer (and optional backups).',

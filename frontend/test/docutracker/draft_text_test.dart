@@ -80,9 +80,10 @@ Future<void> _pump(
   bool prefill = true,
   bool create = false,
   DocuTrackerDocument document = _document,
+  Size size = const Size(1440, 1000),
 }) async {
   tester.view.devicePixelRatio = 1;
-  tester.view.physicalSize = const Size(1440, 1000);
+  tester.view.physicalSize = size;
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(provider.dispose);
@@ -370,7 +371,7 @@ void main() {
   }
 
   testWidgets(
-    'Create and Open Builder prefills the entered title and description',
+    'Create Draft opens Builder with the entered title and description',
     (tester) async {
       final provider = _DraftProvider(_data());
       await _pump(tester, provider, create: true);
@@ -381,7 +382,7 @@ void main() {
         find.byType(TextField).last,
         'Discuss the new attendance guidelines.',
       );
-      await tester.tap(find.text('Create & Open Builder'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Create Draft'));
       await tester.pumpAndSettle();
       final text = _controller(tester).document.toPlainText();
       expect(text, contains('SUBJECT: Staff orientation'));
@@ -390,4 +391,20 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('Create Draft uses a mobile bottom sheet without clipping', (
+    tester,
+  ) async {
+    final provider = _DraftProvider(_data());
+    await _pump(tester, provider, create: true, size: const Size(360, 800));
+    await tester.tap(find.text('New document'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.byType(DropdownButtonFormField<DocumentType>), findsOneWidget);
+    expect(find.byType(TextField), findsNWidgets(2));
+    expect(find.text('Add attachment'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Create Draft'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -10,11 +10,13 @@ class DocuTrackerStatusBadge extends StatelessWidget {
     this.compact = false,
     this.showIcon = true,
     this.dotStyle = false,
+    this.label,
   });
 
   final DocumentStatus status;
   final bool compact;
   final bool showIcon;
+  final String? label;
 
   /// When true, renders a colored dot instead of an icon.
   final bool dotStyle;
@@ -27,8 +29,9 @@ class DocuTrackerStatusBadge extends StatelessWidget {
     final padV = compact ? 3.0 : 5.0;
     final radius = compact ? 7.0 : 8.0;
 
+    final displayLabel = label ?? status.displayName;
     return Semantics(
-      label: 'Status: ${status.displayName}',
+      label: 'Status: $displayLabel',
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
         curve: Curves.easeOutCubic,
@@ -58,7 +61,7 @@ class DocuTrackerStatusBadge extends StatelessWidget {
               SizedBox(width: compact ? 4 : 6),
             ],
             Text(
-              status.displayName,
+              displayLabel,
               style: TextStyle(
                 color: fg,
                 fontSize: fontSize,

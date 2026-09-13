@@ -451,10 +451,11 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   }
 
   Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
-  signSourceApplicant({
+  signSourceSignature({
     required String sourceModule,
     required String sourceTable,
     required String sourceRecordId,
+    required String slotKey,
     String? signatureAssetId,
     Uint8List? imageBytes,
     String mimeType = 'image/png',
@@ -463,7 +464,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   }) async {
     try {
       final response = await ApiClient.instance.post<Map<String, dynamic>>(
-        '${_sourceSignaturePath(sourceModule: sourceModule, sourceTable: sourceTable, sourceRecordId: sourceRecordId)}/applicant/sign',
+        '${_sourceSignaturePath(sourceModule: sourceModule, sourceTable: sourceTable, sourceRecordId: sourceRecordId)}/${Uri.encodeComponent(slotKey)}/sign',
         data: <String, dynamic>{
           if (signatureAssetId != null)
             'signature_asset_id': signatureAssetId
@@ -485,6 +486,30 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     } catch (error) {
       return DocuTrackerFailure(_apiErrorMessage(error));
     }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
+  signSourceApplicant({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) {
+    return signSourceSignature(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+      slotKey: 'applicant',
+      signatureAssetId: signatureAssetId,
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      saveForReuse: saveForReuse,
+    );
   }
 
   Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>> signDocumentField({
@@ -874,7 +899,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   }) async {
     // When a concrete document is provided, always delegate to backend explanation
     // because document-level rules include creator/holder/step-assignee context.
-    if (!isAdmin && documentId != null && documentId.trim().isNotEmpty) {
+    if (documentId != null && documentId.trim().isNotEmpty) {
       try {
         final res = await ApiClient.instance.get<Map<String, dynamic>>(
           '$_base/permission-explain',

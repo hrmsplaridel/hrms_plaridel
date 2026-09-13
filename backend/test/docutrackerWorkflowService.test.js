@@ -11,6 +11,8 @@ const {
   filterDocumentsViewableByUser,
   transitionDocument,
   getEffectivePermissionExplanation,
+  recoverDocumentAssignment,
+  listDocuments,
 } = require('../src/services/docutrackerWorkflowService');
 
 test('VALID_STATUSES includes workflow statuses', () => {
@@ -171,6 +173,12 @@ test('transitionDocument replays previous response for same idempotency key', as
       return {
         rowCount: 1,
         rows: [{ actor_id: 'admin-1', response_payload: replayPayload }],
+      };
+    }
+    if (sql.includes('FROM docutracker_workflow_steps s') && sql.includes('allowed_actions')) {
+      return {
+        rowCount: 1,
+        rows: [{ is_enabled: true, allowed_actions: ['approve'], is_primary: true }],
       };
     }
     return { rowCount: 0, rows: [] };
@@ -471,4 +479,366 @@ test('filterDocumentsViewableByUser excludes unrelated rows when role view is gr
 
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].id, 'doc-mine');
+});
+
+test('listDocuments returns the current holder name', async () => {
+  let documentListSql = '';
+  const pool = {
+    query: async (sql) => {
+      if (sql.includes('FROM docutracker_documents d')) {
+        documentListSql = sql;
+        return {
+          rowCount: 1,
+          rows: [{
+            id: 'doc-holder-name', document_type: 'memo', title: 'Memo',
+            status: 'in_review', current_holder_id: 'holder-1',
+            creator_name: 'Sender Name', assignee_name: 'Department Head',
+          }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const result = await listDocuments(pool, { id: 'admin-1', role: 'admin' });
+
+  assert.match(documentListSql, /LEFT JOIN users holder ON holder\.id = d\.current_holder_id/);
+  assert.equal(result.documents[0].assignee_name, 'Department Head');
+});
+
+test('current primary and backup assignees can use a step-enabled action', async () => {
+  const mockClient = {
+    query: async (sql, params = []) => {
+      if (sql.includes('FROM docutracker_workflow_steps s') && sql.includes('allowed_actions')) {
+        const userId = params[3];
+        if (userId === 'primary-1' || userId === 'backup-1') {
+          return {
+            rowCount: 1,
+            rows: [
+              {
+                is_enabled: true,
+                allowed_actions: ['approve', 'return'],
+                is_primary: userId === 'primary-1',
+                backup_rank: userId === 'backup-1' ? 1 : null,
+              },
+            ],
+          };
+        }
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  const document = {
+    id: 'doc-current',
+    document_type: 'memo',
+    workflow_version: 2,
+    current_step: 2,
+    current_holder_id: 'primary-1',
+    created_by: 'creator-1',
+    status: 'in_review',
+  };
+
+  for (const id of ['primary-1', 'backup-1']) {
+    const allowed = await canUserPerformDocumentAction(mockClient, {
+      user: { id, role: 'employee' },
+      document,
+      action: 'approve',
+    });
+    assert.equal(allowed, true);
+  }
+});
+
+test('current step assignee can resume a returned document', async () => {
+  const client = {
+    query: async (sql) => {
+      if (sql.includes('FROM docutracker_workflow_steps s') && sql.includes('allowed_actions')) {
+        return {
+          rowCount: 1,
+          rows: [{ is_enabled: true, allowed_actions: ['approve'], is_primary: true }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  assert.equal(await canUserPerformDocumentAction(client, {
+    user: { id: 'step-one-primary', role: 'employee' },
+    action: 'approve',
+    document: {
+      id: 'returned-doc',
+      document_type: 'memo',
+      workflow_version: 3,
+      current_step: 1,
+      current_holder_id: 'step-one-primary',
+      created_by: 'creator',
+      status: 'returned',
+    },
+  }), true);
+});
+
+test('a returned document at step one still cannot be returned further', async () => {
+  const client = { query: async () => { throw new Error('must not query'); } };
+  assert.equal(await canUserPerformDocumentAction(client, {
+    user: { id: 'step-one-primary', role: 'employee' },
+    action: 'return',
+    document: {
+      id: 'returned-doc', document_type: 'memo', workflow_version: 3,
+      current_step: 1, current_holder_id: 'step-one-primary',
+      created_by: 'creator', status: 'returned',
+    },
+  }), false);
+});
+
+function createRecoveryPool({ failHistory = false } = {}) {
+  const calls = [];
+  const client = {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: 'doc-recovery', document_type: 'memo', workflow_version: 2,
+            current_step: 1, current_holder_id: 'old-holder', created_by: 'creator',
+            status: 'returned', title: 'Returned memo',
+          }],
+        };
+      }
+      if (sql.includes('FROM users') && sql.includes('is_active')) {
+        return { rowCount: 1, rows: [{ id: params[0] }] };
+      }
+      if (sql.includes('FROM docutracker_routing_config_versions')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            document_type: 'memo', version: 2, review_deadline_hours: 24,
+            steps: [{
+              step_order: 1, assignee_type: 'user', assignee_source: 'specific_users',
+              user_ids: ['new-holder', 'backup-holder'], allowed_actions: ['approve'],
+              deadline_hours: 12, enabled: true,
+            }],
+          }],
+        };
+      }
+      if (sql.includes('FROM docutracker_workflow_steps s') && sql.includes('allowed_actions')) {
+        return {
+          rowCount: 1,
+          rows: [{ is_enabled: true, is_primary: true, allowed_actions: ['approve'] }],
+        };
+      }
+      if (sql.includes('SELECT id') && sql.includes('FROM docutracker_routing_records')) {
+        return { rowCount: 1, rows: [{ id: 'routing-1' }] };
+      }
+      if (sql.includes('UPDATE docutracker_documents')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: 'doc-recovery', document_type: 'memo', workflow_version: 2,
+            current_step: 1, current_holder_id: 'new-holder', status: 'returned',
+            needs_admin_intervention: false,
+          }],
+        };
+      }
+      if (sql.includes('SELECT a.user_id::text AS user_id')) {
+        return {
+          rowCount: 2,
+          rows: [{ user_id: 'new-holder' }, { user_id: 'backup-holder' }],
+        };
+      }
+      if (failHistory && sql.includes('INSERT INTO docutracker_document_history')) {
+        const error = new Error('history failed');
+        error.code = '23514';
+        throw error;
+      }
+      return { rowCount: 1, rows: [{ id: 'row-1' }] };
+    },
+    release: () => {},
+  };
+  return { pool: { connect: async () => client }, calls };
+}
+
+test('admin recovery atomically reassigns the current step without changing status', async () => {
+  const { pool, calls } = createRecoveryPool();
+  const result = await recoverDocumentAssignment(
+    pool,
+    { id: 'admin-1', role: 'admin' },
+    'doc-recovery',
+    { current_holder_id: 'new-holder', remarks: 'Recover overdue assignment' }
+  );
+
+  assert.equal(result.status, 'returned');
+  assert.equal(result.current_holder_id, 'new-holder');
+  assert.ok(calls.some((call) => call.sql.includes('UPDATE docutracker_routing_records')));
+  assert.equal(
+    calls.filter((call) => call.sql.includes('INSERT INTO docutracker_routing_record_assignees')).length,
+    2
+  );
+  assert.ok(calls.some((call) =>
+    call.sql.includes('INSERT INTO docutracker_document_history') && call.params[1] === 'assigned'
+  ));
+  assert.ok(calls.some((call) => call.sql === 'COMMIT'));
+});
+
+test('admin recovery rolls back when audit history cannot be written', async () => {
+  const { pool, calls } = createRecoveryPool({ failHistory: true });
+  await assert.rejects(
+    () => recoverDocumentAssignment(
+      pool,
+      { id: 'admin-1', role: 'admin' },
+      'doc-recovery',
+      { current_holder_id: 'new-holder', remarks: 'Recover assignment' }
+    ),
+    (error) => error.code === 'DB_FAILURE'
+  );
+  assert.ok(calls.some((call) => call.sql === 'ROLLBACK'));
+  assert.equal(calls.some((call) => call.sql === 'COMMIT'), false);
+});
+
+test('non-admin callers cannot invoke assignment recovery through the service', async () => {
+  const { pool, calls } = createRecoveryPool();
+  await assert.rejects(
+    () => recoverDocumentAssignment(
+      pool,
+      { id: 'employee-1', role: 'employee' },
+      'doc-recovery',
+      { current_holder_id: 'new-holder', remarks: 'Unauthorized' }
+    ),
+    (error) => error.code === 'FORBIDDEN'
+  );
+  assert.ok(calls.some((call) => call.sql === 'ROLLBACK'));
+  assert.equal(calls.some((call) => call.sql.includes('SELECT * FROM docutracker_documents')), false);
+});
+
+test('admin cannot perform a workflow action unless assigned to the current step', async () => {
+  const mockClient = {
+    query: async () => ({ rowCount: 0, rows: [] }),
+  };
+  const allowed = await canUserPerformDocumentAction(mockClient, {
+    user: { id: 'admin-unassigned', role: 'admin' },
+    document: {
+      id: 'doc-secure',
+      document_type: 'memo',
+      workflow_version: 1,
+      current_step: 2,
+      current_holder_id: 'primary-2',
+      created_by: 'creator-2',
+      status: 'in_review',
+    },
+    action: 'approve',
+  });
+
+  assert.equal(allowed, false);
+});
+
+test('permission explanation denies an unassigned admin workflow action', async () => {
+  const result = await getEffectivePermissionExplanation(
+    { query: async () => ({ rowCount: 0, rows: [] }) },
+    {
+      user: { id: 'admin', role: 'admin' }, action: 'approve', documentType: 'memo',
+      document: { id: 'doc', document_type: 'memo', workflow_version: 1,
+        current_step: 2, current_holder_id: 'primary', status: 'in_review' },
+    }
+  );
+  assert.equal(result.final_decision, false);
+});
+
+test('removed normalized assignee is not restored from legacy workflow JSON', async () => {
+  const client = {
+    query: async (sql) => {
+      if (sql.includes('SELECT id FROM docutracker_workflow_steps')) {
+        return { rowCount: 1, rows: [{ id: 'step' }] };
+      }
+      if (sql.includes('routing_config')) {
+        return { rowCount: 1, rows: [{ version: 1, steps: [
+          { step_order: 1, assignee_type: 'user', user_ids: ['removed-user'] },
+        ] }] };
+      }
+      if (sql.includes('FROM users')) throw new Error('Must not validate stale assignment');
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  assert.equal(await canUserPerformDocumentAction(client, {
+    user: { id: 'removed-user', role: 'employee' }, action: 'approve',
+    document: { id: 'doc', document_type: 'memo', workflow_version: 1,
+      current_step: 1, current_holder_id: 'primary', status: 'in_review' },
+  }), false);
+});
+
+test('previous and future assignees cannot act on the current step', async () => {
+  for (const userId of ['previous-user', 'future-user']) {
+    const client = {
+      query: async (sql, params) => {
+        if (sql.includes('a.allowed_actions')) {
+          assert.equal(params[2], 2);
+          assert.equal(params[3], userId);
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    };
+    assert.equal(await canUserPerformDocumentAction(client, {
+      user: { id: userId, role: 'employee' }, action: 'approve',
+      document: { id: 'doc', document_type: 'memo', workflow_version: 1,
+        current_step: 2, current_holder_id: 'primary', status: 'in_review' },
+    }), false);
+  }
+});
+
+test('filterDocumentsViewableByUser marks a routing assignee for the client', async () => {
+  const row = {
+    id: 'doc-assigned',
+    document_type: 'memo',
+    status: 'in_review',
+    created_by: 'creator-id',
+    current_holder_id: 'primary-id',
+    current_step: 1,
+  };
+  const pool = {
+    query: async (sql) => {
+      if (sql.includes('docutracker_permissions')) return { rows: [] };
+      if (sql.includes('rr.step_order = d.current_step')) {
+        return { rows: [{ id: row.id }] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const filtered = await filterDocumentsViewableByUser(
+    pool,
+    { id: 'backup-id', role: 'employee' },
+    [row]
+  );
+
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].viewer_is_routing_assignee, true);
+  assert.equal(mapDocumentRow(filtered[0]).viewer_is_routing_assignee, true);
+});
+
+test('filterDocumentsViewableByUser does not expose a future-step assignee', async () => {
+  const row = {
+    id: 'doc-future',
+    document_type: 'memo',
+    status: 'in_review',
+    created_by: 'creator-id',
+    current_holder_id: 'step-one-primary',
+    current_step: 1,
+  };
+  const pool = {
+    query: async (sql) => {
+      if (sql.includes('docutracker_permissions')) return { rows: [] };
+      if (sql.includes('docutracker_document_history')) return { rows: [] };
+      if (sql.includes('docutracker_signature_fields')) return { rows: [] };
+      return { rows: [] };
+    },
+  };
+
+  const filtered = await filterDocumentsViewableByUser(
+    pool,
+    { id: 'step-three-primary', role: 'employee' },
+    [row]
+  );
+
+  assert.deepEqual(filtered, []);
 });

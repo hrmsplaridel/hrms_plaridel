@@ -11,9 +11,11 @@ import 'package:provider/provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  final requestedPaths = <String>[];
   const secureStorage = MethodChannel(
     'plugins.it_nomads.com/flutter_secure_storage',
   );
+  const packageInfo = MethodChannel('dev.fluttercommunity.plus/package_info');
 
   setUpAll(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -21,13 +23,69 @@ void main() {
           if (call.method == 'containsKey') return false;
           return null;
         });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(packageInfo, (call) async {
+          if (call.method != 'getAll') return null;
+          return <String, dynamic>{
+            'appName': 'HRMS Test',
+            'packageName': 'hrms_plaridel',
+            'version': '1.0.0',
+            'buildNumber': '1',
+            'buildSignature': '',
+            'installerStore': null,
+          };
+        });
     ApiClient.instance.init();
     ApiClient.instance.dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
-          final data = options.path == '/api/docutracker/permission-explain'
-              ? <String, dynamic>{'final_decision': true}
-              : <dynamic>[];
+          final path = options.uri.path;
+          requestedPaths.add(path);
+          final data = switch (path) {
+            '/api/docutracker/permission-explain' => <String, dynamic>{
+              'final_decision': true,
+            },
+            '/api/docutracker/documents' => <dynamic>[
+              <String, dynamic>{
+                'id': '00000000-0000-4000-8000-000000000001',
+                'document_type': 'memo',
+                'title': 'Responsive memo',
+                'status': 'in_review',
+                'current_step': 1,
+                'current_holder_id': '00000000-0000-4000-8000-000000000002',
+                'assignee_name': 'Department Head',
+              },
+              <String, dynamic>{
+                'id': '00000000-0000-4000-8000-000000000003',
+                'document_type': 'memo',
+                'title': 'Editable draft',
+                'status': 'pending',
+              },
+              <String, dynamic>{
+                'id': '00000000-0000-4000-8000-000000000004',
+                'document_type': 'memo',
+                'title': 'Finished memo',
+                'status': 'approved',
+                'current_step': 2,
+              },
+              <String, dynamic>{
+                'id': 'source:dtr:leave-1',
+                'document_type': 'dtr',
+                'title': 'Linked leave',
+                'status': 'pending',
+                'source_module': 'dtr',
+                'source_only': true,
+              },
+              <String, dynamic>{
+                'id': '00000000-0000-4000-8000-000000000005',
+                'document_type': 'memo',
+                'title': 'Missing assignment',
+                'status': 'in_review',
+                'current_step': 2,
+              },
+            ],
+            _ => <dynamic>[],
+          };
           handler.resolve(
             Response(requestOptions: options, statusCode: 200, data: data),
           );
@@ -39,6 +97,8 @@ void main() {
   tearDownAll(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorage, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(packageInfo, null);
   });
 
   test(
@@ -86,6 +146,10 @@ void main() {
         find.byKey(const ValueKey('docutracker-document-search')),
         findsOneWidget,
       );
+      if (width == 360) {
+        expect(find.text('Filters'), findsOneWidget);
+        expect(find.text('Create Draft'), findsWidgets);
+      }
       expect(tester.takeException(), isNull);
     });
   }
@@ -94,7 +158,6 @@ void main() {
     tester,
   ) async {
     await _pumpMain(tester, isAdmin: true);
-
     expect(find.text('Documents'), findsOneWidget);
     expect(find.text('Admin'), findsOneWidget);
     expect(find.text('Dashboard'), findsNothing);
@@ -102,6 +165,65 @@ void main() {
       find.byKey(const ValueKey('docutracker-document-search')),
       findsOneWidget,
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('desktop table shows the current assignee', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+
+    await _pumpMain(tester, isAdmin: true);
+    for (
+      var i = 0;
+      i < 100 && find.text('Responsive memo').evaluate().isEmpty;
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+
+    expect(
+      find.text('Responsive memo'),
+      findsOneWidget,
+      reason: 'Requests: $requestedPaths',
+    );
+    expect(find.text('Department Head'), findsOneWidget);
+    expect(find.text('Current assignee'), findsOneWidget);
+    expect(find.text('Draft'), findsWidgets);
+    expect(find.text('Not submitted'), findsOneWidget);
+    expect(find.text('Workflow complete'), findsOneWidget);
+    expect(find.text('Managed in DTR'), findsOneWidget);
+    expect(find.text('Unassigned'), findsOneWidget);
+    final tableSize = tester.getSize(find.byType(DataTable));
+    expect(tableSize.width, greaterThan(1300));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('admin More exposes tools and opens Audit log directly', (
+    tester,
+  ) async {
+    await _pumpMain(tester, isAdmin: true);
+    await tester.tap(find.text('Admin').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('More admin tools'));
+    await tester.pumpAndSettle();
+    expect(find.text('System access'), findsOneWidget);
+    expect(find.text('Audit log'), findsOneWidget);
+    expect(find.text('Escalation rules'), findsOneWidget);
+
+    await tester.tap(find.text('Audit log'));
+    for (
+      var i = 0;
+      i < 30 && find.text('Governance audit log').evaluate().isEmpty;
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(find.text('Governance audit log'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
