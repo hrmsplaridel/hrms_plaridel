@@ -106,9 +106,28 @@ def device_port(dev, fallback=4370):
 
 def device_key(dev):
     device_uuid = str(dev.get("id") or "").strip()
+    if device_uuid:
+        return device_uuid
     ip = str(dev.get("ip_address") or "").strip()
-    endpoint = f"{ip}:{device_port(dev)}"
-    return f"{device_uuid}@{endpoint}" if device_uuid else f"unregistered@{endpoint}"
+    return f"unregistered@{ip}:{device_port(dev)}"
+
+
+def device_worker_signature(dev):
+    """Return all discovered settings captured by a realtime worker."""
+    vendor = str(dev.get("vendor") or "zkteco").strip().lower()
+    fallback_port = {
+        "zkteco": 4370,
+        "hikvision": 80,
+        "anviz": 5010,
+        "other": 4370,
+    }.get(vendor, 4370)
+    return (
+        str(dev.get("id") or "").strip(),
+        vendor,
+        str(dev.get("device_id") or "").strip(),
+        str(dev.get("ip_address") or "").strip(),
+        device_port(dev, fallback=fallback_port),
+    )
 
 
 def device_state_identity(dev):
@@ -789,42 +808,67 @@ def _live_worker_wrapper(dev, stop_event):
     driver.live_worker(stop_event)
 
 
+def _stop_realtime_worker(key, worker, reason):
+    print(f"[bio-sync] Stopping listener for {reason} {key}")
+    worker["stop"].set()
+    worker["thread"].join(timeout=LIVE_CAPTURE_TIMEOUT + 2)
+    if worker["thread"].is_alive():
+        print(f"[bio-sync] Listener {key} has not stopped yet; replacement deferred")
+        return False
+    return True
+
+
+def reconcile_realtime_workers(workers, devices, thread_factory=threading.Thread):
+    active_keys = set()
+
+    for dev in devices:
+        ip = str(dev.get("ip_address") or "").strip()
+        if not ip:
+            continue
+
+        key = device_key(dev)
+        signature = device_worker_signature(dev)
+        active_keys.add(key)
+        worker = workers.get(key)
+
+        if worker and worker["thread"].is_alive():
+            if worker.get("signature") == signature:
+                continue
+            if not _stop_realtime_worker(key, worker, "changed device"):
+                continue
+
+        stop_event = threading.Event()
+        thread = thread_factory(
+            target=_live_worker_wrapper,
+            args=(dev, stop_event),
+            name=f"bio-live-{key}",
+            daemon=True,
+        )
+        workers[key] = {
+            "thread": thread,
+            "stop": stop_event,
+            "signature": signature,
+        }
+        thread.start()
+
+    for key in list(workers.keys()):
+        if key in active_keys:
+            continue
+        if _stop_realtime_worker(key, workers[key], "inactive device"):
+            del workers[key]
+
+
 def run_realtime_service():
     workers = {}
 
     try:
         while not STOP_EVENT.is_set():
-            devices    = get_devices()
-            active_keys = set()
+            devices = get_devices()
 
             if not devices:
                 print("[bio-sync] No active devices found. Waiting...")
 
-            for dev in devices:
-                ip = str(dev.get("ip_address") or "").strip()
-                if not ip:
-                    continue
-                key = device_key(dev)
-                active_keys.add(key)
-                worker = workers.get(key)
-                if not worker or not worker["thread"].is_alive():
-                    stop_event = threading.Event()
-                    thread     = threading.Thread(
-                        target=_live_worker_wrapper,
-                        args=(dev, stop_event),
-                        name=f"bio-live-{key}",
-                        daemon=True,
-                    )
-                    workers[key] = {"thread": thread, "stop": stop_event}
-                    thread.start()
-
-            for key in list(workers.keys()):
-                if key in active_keys:
-                    continue
-                print(f"[bio-sync] Stopping listener for inactive device {key}")
-                workers[key]["stop"].set()
-                workers[key]["thread"].join(timeout=LIVE_CAPTURE_TIMEOUT + 2)
-                del workers[key]
+            reconcile_realtime_workers(workers, devices)
 
             STOP_EVENT.wait(DISCOVERY_INTERVAL)
     finally:

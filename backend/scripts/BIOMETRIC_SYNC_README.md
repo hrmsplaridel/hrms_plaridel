@@ -71,6 +71,8 @@ nohup python scripts/zkteco-sync-py.py > zkteco-sync.log 2>&1 &
 
 Realtime mode is enabled by default (`ZK_REALTIME=1`). The service starts one live listener per active device. When the device reports a new attendance event, the listener immediately pushes it to the backend; the backend then processes the log and broadcasts a WebSocket refresh to the Flutter UI.
 
+Active workers are reconciled by registered device UUID and a signature of the vendor, configured device ID, IP address, and port. Updating any of those settings safely stops the old listener before starting one with the new configuration. An IP-only change restarts the connection while preserving the UUID-based attendance cursor.
+
 Expected display time in Time Logs is usually **1-3 seconds** after a successful face/fingerprint punch, depending on network/device response time.
 
 The service still runs a periodic backfill every `ZK_FALLBACK_INTERVAL` seconds. This protects against missed live events during reconnects, device restarts, or short network drops. Duplicate rows remain safe because the backend ignores repeated `(biometric_user_id, logged_at)` pairs.

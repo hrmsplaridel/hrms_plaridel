@@ -40,7 +40,11 @@ class BiometricSyncStateTest(unittest.TestCase):
             SYNC.device_state_identity(first),
             SYNC.device_state_identity(moved),
         )
-        self.assertNotEqual(SYNC.device_key(first), SYNC.device_key(moved))
+        self.assertEqual(SYNC.device_key(first), SYNC.device_key(moved))
+        self.assertNotEqual(
+            SYNC.device_worker_signature(first),
+            SYNC.device_worker_signature(moved),
+        )
 
     def test_replacement_at_same_endpoint_cannot_inherit_another_uuid_cursor(self):
         old_device = self.device()
@@ -105,6 +109,92 @@ class BiometricSyncStateTest(unittest.TestCase):
         state_key, fingerprint = SYNC.device_state_identity(self.device())
 
         self.assertIsNone(SYNC.load_last_sync(state_key, fingerprint))
+
+    def test_worker_signature_changes_for_runtime_device_settings(self):
+        original = self.device()
+
+        self.assertNotEqual(
+            SYNC.device_worker_signature(original),
+            SYNC.device_worker_signature(self.device(vendor="hikvision")),
+        )
+        self.assertNotEqual(
+            SYNC.device_worker_signature(original),
+            SYNC.device_worker_signature(self.device(device_id="ZK-SERIAL-02")),
+        )
+        self.assertNotEqual(
+            SYNC.device_worker_signature(original),
+            SYNC.device_worker_signature(self.device(ip_address="192.168.1.21")),
+        )
+
+    def test_reconciler_restarts_worker_when_configuration_changes(self):
+        threads = []
+
+        class FakeThread:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.started = False
+                self.alive = False
+                threads.append(self)
+
+            def start(self):
+                self.started = True
+                self.alive = True
+
+            def is_alive(self):
+                return self.alive
+
+            def join(self, timeout=None):
+                del timeout
+                self.alive = False
+
+        workers = {}
+        original = self.device()
+        SYNC.reconcile_realtime_workers(workers, [original], thread_factory=FakeThread)
+        key = SYNC.device_key(original)
+        old_worker = workers[key]
+
+        updated = self.device(device_id="ZK-SERIAL-02")
+        SYNC.reconcile_realtime_workers(workers, [updated], thread_factory=FakeThread)
+
+        self.assertEqual(len(threads), 2)
+        self.assertTrue(old_worker["stop"].is_set())
+        self.assertIsNot(workers[key]["thread"], old_worker["thread"])
+        self.assertEqual(
+            workers[key]["signature"],
+            SYNC.device_worker_signature(updated),
+        )
+
+    def test_reconciler_retains_unchanged_worker_and_stops_inactive_worker(self):
+        threads = []
+
+        class FakeThread:
+            def __init__(self, **kwargs):
+                self.alive = False
+                threads.append(self)
+
+            def start(self):
+                self.alive = True
+
+            def is_alive(self):
+                return self.alive
+
+            def join(self, timeout=None):
+                del timeout
+                self.alive = False
+
+        workers = {}
+        device = self.device()
+        key = SYNC.device_key(device)
+        SYNC.reconcile_realtime_workers(workers, [device], thread_factory=FakeThread)
+        worker = workers[key]
+        SYNC.reconcile_realtime_workers(workers, [device], thread_factory=FakeThread)
+
+        self.assertEqual(len(threads), 1)
+        self.assertIs(workers[key], worker)
+
+        SYNC.reconcile_realtime_workers(workers, [], thread_factory=FakeThread)
+        self.assertTrue(worker["stop"].is_set())
+        self.assertEqual(workers, {})
 
 
 if __name__ == "__main__":
