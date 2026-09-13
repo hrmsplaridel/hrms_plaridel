@@ -526,7 +526,8 @@ router.post('/push', pushAuth, async (req, res) => {
 /**
  * POST /api/biometric-attendance-logs/import
  * Import matched biometric logs into biometric_attendance_logs, then process into dtr_daily_summary.
- * Body: { rows: [{ user_id, biometric_user_id, logged_at, raw_line, verify_code?, punch_code?, work_code? }], source_file_name }
+ * Body: { rows: [{ user_id?, biometric_user_id, logged_at, raw_line, verify_code?, punch_code?, work_code? }], source_file_name }
+ * Resolves the authoritative user_id from the current biometric_user_id mapping.
  * Uses ON CONFLICT (biometric_user_id, logged_at) DO NOTHING to skip duplicates.
  * Preserves valid raw rows even when attendance processing is blocked for the day.
  * Admin only.
@@ -539,6 +540,8 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         error: 'No rows to import',
         inserted: 0,
         duplicates_skipped: 0,
+        skipped_unmatched: 0,
+        skipped_identity_mismatch: 0,
         skipped_no_schedule: 0,
         skipped_holiday: 0,
         skipped_leave: 0,
@@ -549,8 +552,25 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
       });
     }
 
+    const uniqueBiometricIds = [...new Set(
+      rows
+        .map((row) => String(row?.biometric_user_id || '').trim())
+        .filter(Boolean)
+    )];
+    const userLookup = uniqueBiometricIds.length > 0
+      ? await pool.query(
+        `SELECT id, biometric_user_id FROM users WHERE biometric_user_id = ANY($1::text[])`,
+        [uniqueBiometricIds]
+      )
+      : { rows: [] };
+    const biometricToUserId = new Map(
+      userLookup.rows.map((row) => [String(row.biometric_user_id).trim(), row.id])
+    );
+
     let inserted = 0;
     let duplicatesSkipped = 0;
+    let skippedUnmatched = 0;
+    let skippedIdentityMismatch = 0;
     let skippedNoSchedule = 0;
     let skippedHoliday = 0;
     let skippedLeave = 0;
@@ -561,12 +581,22 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
     const existingDayPunchCache = new Map();
 
     for (const row of sortByLoggedAtAsc(rows, (item) => item?.logged_at)) {
-      const userId = row.user_id;
-      const biometricUserId = row.biometric_user_id;
+      const suppliedUserId = String(row.user_id || '').trim();
+      const biometricUserId = String(row.biometric_user_id || '').trim();
       const loggedAt = row.logged_at;
       const rawLine = row.raw_line;
 
-      if (!userId || !biometricUserId || !loggedAt || !rawLine) {
+      if (!biometricUserId || !loggedAt || !rawLine) {
+        continue;
+      }
+
+      const userId = biometricToUserId.get(biometricUserId);
+      if (!userId) {
+        skippedUnmatched++;
+        continue;
+      }
+      if (suppliedUserId && suppliedUserId.toLowerCase() !== String(userId).toLowerCase()) {
+        skippedIdentityMismatch++;
         continue;
       }
 
@@ -635,6 +665,8 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
     res.json({
       inserted,
       duplicates_skipped: duplicatesSkipped,
+      skipped_unmatched: skippedUnmatched,
+      skipped_identity_mismatch: skippedIdentityMismatch,
       skipped_no_schedule: skippedNoSchedule,
       skipped_holiday: skippedHoliday,
       skipped_leave: skippedLeave,

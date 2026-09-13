@@ -15,6 +15,7 @@ async function invokeIngestionRoute({
   insertRowCount = 1,
   hasStoredPunch = false,
   processError = null,
+  userLookupRows = [{ id: userId, biometric_user_id: '1001' }],
 }) {
   const events = [];
   const processCalls = [];
@@ -36,8 +37,8 @@ async function invokeIngestionRoute({
       }
       if (text.includes('FROM users WHERE biometric_user_id = ANY')) {
         return {
-          rows: [{ id: userId, biometric_user_id: '1001' }],
-          rowCount: 1,
+          rows: userLookupRows,
+          rowCount: userLookupRows.length,
         };
       }
       if (text.includes('SELECT 1') && text.includes('FROM biometric_attendance_logs')) {
@@ -148,6 +149,74 @@ test('manual import preserves a matched raw punch during blocking leave', async 
   assert.equal(res.body.skipped_leave, 1);
   assert.ok(events.indexOf('insert') < events.indexOf('gate'));
   assert.deepEqual(processCalls, [[[userId], '2026-09-12', '2026-09-12']]);
+});
+
+test('manual import resolves employee identity from the current biometric mapping', async () => {
+  const { res, rawInserts } = await invokeIngestionRoute({
+    path: '/import',
+    gateReason: null,
+    body: {
+      rows: [{
+        biometric_user_id: '1001',
+        logged_at: loggedAt,
+        raw_line: `1001\t${loggedAt}`,
+      }],
+      source_file_name: 'attlog.dat',
+    },
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.inserted, 1);
+  assert.equal(res.body.skipped_unmatched, 0);
+  assert.equal(res.body.skipped_identity_mismatch, 0);
+  assert.equal(rawInserts.length, 1);
+  assert.equal(rawInserts[0].params[0], userId);
+});
+
+test('manual import skips a stale employee and biometric identity pair', async () => {
+  const staleUserId = '33333333-3333-4333-8333-333333333333';
+  const { res, rawInserts, processCalls } = await invokeIngestionRoute({
+    path: '/import',
+    gateReason: null,
+    body: {
+      rows: [{
+        user_id: staleUserId,
+        biometric_user_id: '1001',
+        logged_at: loggedAt,
+        raw_line: `1001\t${loggedAt}`,
+      }],
+      source_file_name: 'attlog.dat',
+    },
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.inserted, 0);
+  assert.equal(res.body.skipped_identity_mismatch, 1);
+  assert.deepEqual(rawInserts, []);
+  assert.deepEqual(processCalls, []);
+});
+
+test('manual import skips a biometric ID without a current employee mapping', async () => {
+  const { res, rawInserts, processCalls } = await invokeIngestionRoute({
+    path: '/import',
+    gateReason: null,
+    userLookupRows: [],
+    body: {
+      rows: [{
+        user_id: userId,
+        biometric_user_id: '1001',
+        logged_at: loggedAt,
+        raw_line: `1001\t${loggedAt}`,
+      }],
+      source_file_name: 'attlog.dat',
+    },
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.inserted, 0);
+  assert.equal(res.body.skipped_unmatched, 1);
+  assert.deepEqual(rawInserts, []);
+  assert.deepEqual(processCalls, []);
 });
 
 test('device push reprocesses duplicate punches after a prior processing failure', async () => {
