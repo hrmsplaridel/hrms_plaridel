@@ -152,18 +152,83 @@ router.get('/', protect, requireAdmin, async (req, res) => {
 
 const VALID_VENDORS = new Set(['zkteco', 'hikvision', 'anviz', 'other']);
 
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function isValidDeviceHost(value) {
+  if (net.isIP(value)) return true;
+  if (value.length > 253 || /^[0-9.]+$/.test(value)) return false;
+
+  const hostname = value.endsWith('.') ? value.slice(0, -1) : value;
+  if (!hostname) return false;
+  return hostname.split('.').every(
+    (label) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label)
+  );
+}
+
+function validateDevicePayload(body, { partial = false } = {}) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { error: 'Request body must be a JSON object.' };
+  }
+
+  const values = {};
+  if (!partial || hasOwn(body, 'name')) {
+    if (typeof body.name !== 'string') {
+      return { error: 'Name must be a string.' };
+    }
+    values.name = body.name.trim();
+    if (!values.name) return { error: 'Name is required.' };
+  }
+
+  for (const field of ['device_id', 'location', 'ip_address']) {
+    if (!partial || hasOwn(body, field)) {
+      const rawValue = body[field];
+      if (rawValue !== undefined && rawValue !== null && typeof rawValue !== 'string') {
+        return { error: `${field} must be a string or null.` };
+      }
+      values[field] = typeof rawValue === 'string' ? rawValue.trim() || null : null;
+    }
+  }
+
+  if (values.ip_address && !isValidDeviceHost(values.ip_address)) {
+    return { error: 'ip_address must be a valid IP address or hostname.' };
+  }
+
+  if (!partial || hasOwn(body, 'vendor')) {
+    const rawVendor = hasOwn(body, 'vendor') ? body.vendor : 'zkteco';
+    if (typeof rawVendor !== 'string') {
+      return { error: 'vendor must be a string.' };
+    }
+    values.vendor = rawVendor.trim().toLowerCase();
+    if (!VALID_VENDORS.has(values.vendor)) {
+      return { error: 'vendor must be one of: zkteco, hikvision, anviz, other.' };
+    }
+  }
+
+  if (!partial || hasOwn(body, 'is_active')) {
+    const rawIsActive = hasOwn(body, 'is_active') ? body.is_active : true;
+    if (typeof rawIsActive !== 'boolean') {
+      return { error: 'is_active must be a boolean.' };
+    }
+    values.is_active = rawIsActive;
+  }
+
+  return { values };
+}
+
 // POST /api/biometric-devices - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { name, device_id, location, ip_address, vendor = 'zkteco', is_active = true } = req.body;
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
-    const safeVendor = VALID_VENDORS.has((vendor || '').toLowerCase()) ? vendor.toLowerCase() : 'zkteco';
+    const validation = validateDevicePayload(req.body);
+    if (validation.error) return res.status(400).json({ error: validation.error });
+    const { name, device_id, location, ip_address, vendor, is_active } = validation.values;
 
     const result = await pool.query(
       `INSERT INTO biometric_devices (name, device_id, location, ip_address, vendor, is_active)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, name, device_id, location, ip_address, vendor, last_sync_at, is_active, created_at`,
-      [name.trim(), device_id?.trim() || null, location?.trim() || null, ip_address?.trim() || null, safeVendor, !!is_active]
+      [name, device_id, location, ip_address, vendor, is_active]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -177,21 +242,16 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, device_id, location, ip_address, vendor, is_active } = req.body;
+    const validation = validateDevicePayload(req.body, { partial: true });
+    if (validation.error) return res.status(400).json({ error: validation.error });
 
     const updates = [];
     const values = [];
     let i = 1;
-    if (name !== undefined) { updates.push(`name = $${i++}`); values.push(name.trim()); }
-    if (device_id !== undefined) { updates.push(`device_id = $${i++}`); values.push(device_id?.trim() || null); }
-    if (location !== undefined) { updates.push(`location = $${i++}`); values.push(location?.trim() || null); }
-    if (ip_address !== undefined) { updates.push(`ip_address = $${i++}`); values.push(ip_address?.trim() || null); }
-    if (vendor !== undefined) {
-      const safeVendor = VALID_VENDORS.has((vendor || '').toLowerCase()) ? vendor.toLowerCase() : 'zkteco';
-      updates.push(`vendor = $${i++}`);
-      values.push(safeVendor);
+    for (const [field, value] of Object.entries(validation.values)) {
+      updates.push(`${field} = $${i++}`);
+      values.push(value);
     }
-    if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(!!is_active); }
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
     updates.push('updated_at = now()');
     values.push(id);
