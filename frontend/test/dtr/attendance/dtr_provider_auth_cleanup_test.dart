@@ -71,6 +71,78 @@ void main() {
     expect(provider.filterUserId, isNull);
     expect(provider.loading, isFalse);
   });
+
+  test(
+    'an older attendance response cannot replace the latest range',
+    () async {
+      final adapter = _OutOfOrderAttendanceAdapter();
+      ApiClient.instance.dio.httpClientAdapter = adapter;
+      final provider = DtrProvider();
+      addTearDown(provider.dispose);
+
+      provider.onAuthUserChanged('employee-a');
+      final augustLoad = provider.loadTimeRecordsForUser(
+        startDate: DateTime(2026, 8),
+        endDate: DateTime(2026, 8, 31),
+      );
+      await adapter.augustStarted.future;
+
+      final septemberLoad = provider.loadTimeRecordsForUser(
+        startDate: DateTime(2026, 9),
+        endDate: DateTime(2026, 9, 30),
+      );
+      await adapter.septemberStarted.future;
+
+      adapter.completeSeptember();
+      await septemberLoad;
+      expect(provider.timeRecords.single.recordDate.month, 9);
+      expect(provider.filterStart, DateTime(2026, 9));
+      expect(provider.filterEnd, DateTime(2026, 9, 30));
+      expect(provider.loading, isFalse);
+
+      adapter.completeAugust();
+      await augustLoad;
+      expect(provider.timeRecords.single.recordDate.month, 9);
+      expect(provider.filterStart, DateTime(2026, 9));
+      expect(provider.filterEnd, DateTime(2026, 9, 30));
+      expect(provider.loading, isFalse);
+      expect(provider.error, isNull);
+    },
+  );
+
+  test(
+    'an older attendance failure cannot disturb the latest result',
+    () async {
+      final adapter = _OutOfOrderAttendanceAdapter();
+      ApiClient.instance.dio.httpClientAdapter = adapter;
+      final provider = DtrProvider();
+      addTearDown(provider.dispose);
+
+      provider.onAuthUserChanged('employee-a');
+      final augustLoad = provider.loadTimeRecordsForUser(
+        startDate: DateTime(2026, 8),
+        endDate: DateTime(2026, 8, 31),
+      );
+      await adapter.augustStarted.future;
+
+      final septemberLoad = provider.loadTimeRecordsForUser(
+        startDate: DateTime(2026, 9),
+        endDate: DateTime(2026, 9, 30),
+      );
+      await adapter.septemberStarted.future;
+
+      adapter.completeSeptember();
+      await septemberLoad;
+      adapter.failAugust();
+      await augustLoad;
+
+      expect(provider.timeRecords.single.recordDate.month, 9);
+      expect(provider.filterStart, DateTime(2026, 9));
+      expect(provider.filterEnd, DateTime(2026, 9, 30));
+      expect(provider.loading, isFalse);
+      expect(provider.error, isNull);
+    },
+  );
 }
 
 const _attendancePayload = <Map<String, dynamic>>[
@@ -86,6 +158,26 @@ const _attendancePayload = <Map<String, dynamic>>[
 
 ResponseBody _attendanceResponse() => ResponseBody.fromString(
   jsonEncode(_attendancePayload),
+  200,
+  headers: {
+    Headers.contentTypeHeader: [Headers.jsonContentType],
+    'x-total-count': ['1'],
+    'x-limit': ['500'],
+    'x-offset': ['0'],
+  },
+);
+
+ResponseBody _attendanceResponseFor(String date) => ResponseBody.fromString(
+  jsonEncode([
+    <String, dynamic>{
+      'id': 'record-$date',
+      'user_id': 'employee-a',
+      'record_date': date,
+      'time_in': '${date}T00:00:00.000Z',
+      'time_out': '${date}T09:00:00.000Z',
+      'status': 'present',
+    },
+  ]),
   200,
   headers: {
     Headers.contentTypeHeader: [Headers.jsonContentType],
@@ -121,6 +213,52 @@ class _DelayedAttendanceAdapter implements HttpClientAdapter {
   ) {
     if (!requestStarted.isCompleted) requestStarted.complete();
     return _response.future;
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _OutOfOrderAttendanceAdapter implements HttpClientAdapter {
+  final augustStarted = Completer<void>();
+  final septemberStarted = Completer<void>();
+  final _augustResponse = Completer<ResponseBody>();
+  final _septemberResponse = Completer<ResponseBody>();
+
+  void completeAugust() =>
+      _augustResponse.complete(_attendanceResponseFor('2026-08-03'));
+
+  void failAugust() => _augustResponse.complete(
+    ResponseBody.fromString(
+      jsonEncode({'error': 'August unavailable'}),
+      503,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    ),
+  );
+
+  void completeSeptember() =>
+      _septemberResponse.complete(_attendanceResponseFor('2026-09-03'));
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) {
+    switch (options.queryParameters['start_date']) {
+      case '2026-08-01':
+        if (!augustStarted.isCompleted) augustStarted.complete();
+        return _augustResponse.future;
+      case '2026-09-01':
+        if (!septemberStarted.isCompleted) septemberStarted.complete();
+        return _septemberResponse.future;
+      default:
+        throw StateError(
+          'Unexpected attendance request: ${options.queryParameters}',
+        );
+    }
   }
 
   @override

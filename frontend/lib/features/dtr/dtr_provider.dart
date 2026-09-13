@@ -334,9 +334,19 @@ class DtrProvider extends ChangeNotifier {
   DtrProvider();
 
   int _authGeneration = 0;
+  int _employeeAttendanceLoadGeneration = 0;
 
   bool _isCurrentAuthGeneration(int generation) =>
       !_disposed && generation == _authGeneration;
+
+  bool _isCurrentEmployeeAttendanceLoad({
+    required int authGeneration,
+    required int loadGeneration,
+    required String userId,
+  }) =>
+      _isCurrentAuthGeneration(authGeneration) &&
+      loadGeneration == _employeeAttendanceLoadGeneration &&
+      _userId == userId;
 
   Future<void> _initWebSocket() async {
     final authGeneration = _authGeneration;
@@ -579,6 +589,7 @@ class DtrProvider extends ChangeNotifier {
   void setUserFromApi(String? id) => onAuthUserChanged(id);
 
   void _resetSessionState() {
+    _employeeAttendanceLoadGeneration += 1;
     invalidateCachedDtrData(includeReferenceData: true);
     _timeRecords = [];
     _timeRecordTotal = 0;
@@ -1004,6 +1015,7 @@ class DtrProvider extends ChangeNotifier {
     final authGeneration = _authGeneration;
     final uid = _userId;
     if (uid == null) return;
+    final loadGeneration = ++_employeeAttendanceLoadGeneration;
     final cacheKey = _recordsKey(
       startDate: startDate,
       endDate: endDate,
@@ -1032,7 +1044,13 @@ class DtrProvider extends ChangeNotifier {
         startDate: startDate,
         endDate: endDate,
       );
-      if (!_isCurrentAuthGeneration(authGeneration) || _userId != uid) return;
+      if (!_isCurrentEmployeeAttendanceLoad(
+        authGeneration: authGeneration,
+        loadGeneration: loadGeneration,
+        userId: uid,
+      )) {
+        return;
+      }
       _writeRecordsCache(cacheKey, list);
       _filterStart = startDate;
       _filterEnd = endDate;
@@ -1042,7 +1060,13 @@ class DtrProvider extends ChangeNotifier {
       _loading = false;
       notifyListeners();
     } catch (e) {
-      if (!_isCurrentAuthGeneration(authGeneration) || _userId != uid) return;
+      if (!_isCurrentEmployeeAttendanceLoad(
+        authGeneration: authGeneration,
+        loadGeneration: loadGeneration,
+        userId: uid,
+      )) {
+        return;
+      }
       _error = e.toString();
       _loading = false;
       notifyListeners();
