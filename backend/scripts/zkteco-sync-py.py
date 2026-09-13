@@ -20,7 +20,7 @@ import os
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -55,6 +55,45 @@ STOP_EVENT           = threading.Event()
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+def timezone_from_offset(offset_text):
+    """Build a real fixed-offset timezone from values such as +08:00."""
+    value = str(offset_text or "").strip()
+    if len(value) != 6 or value[0] not in ("+", "-") or value[3] != ":":
+        raise ValueError("ZK_TIMEZONE_OFFSET must use the format +HH:MM or -HH:MM")
+    try:
+        hours = int(value[1:3])
+        minutes = int(value[4:6])
+    except ValueError as exc:
+        raise ValueError("ZK_TIMEZONE_OFFSET must use numeric hours and minutes") from exc
+    if hours > 23 or minutes > 59:
+        raise ValueError("ZK_TIMEZONE_OFFSET is outside the valid range")
+    sign = 1 if value[0] == "+" else -1
+    return timezone(sign * timedelta(hours=hours, minutes=minutes))
+
+
+DEVICE_TIMEZONE = timezone_from_offset(TZ_OFFSET)
+
+
+def hikvision_query_window(start_time_iso=None, now_utc=None):
+    """Return correctly converted device-local ISAPI search boundaries."""
+    current = now_utc or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current_local = current.astimezone(DEVICE_TIMEZONE)
+
+    if start_time_iso:
+        parsed = datetime.fromisoformat(str(start_time_iso).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=DEVICE_TIMEZONE)
+        begin_local = parsed.astimezone(DEVICE_TIMEZONE)
+    else:
+        begin_local = current_local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    return (
+        begin_local.isoformat(timespec="seconds"),
+        current_local.isoformat(timespec="seconds"),
+    )
 
 def device_port(dev, fallback=4370):
     try:
@@ -388,13 +427,7 @@ class HikvisionDriver:
         import requests
         from requests.auth import HTTPDigestAuth
 
-        # Default to last 24h if no prior sync time
-        if start_time_iso:
-            begin_time = start_time_iso.replace("+08:00", "+08:00")
-        else:
-            begin_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00+08:00")
-
-        end_time     = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        begin_time, end_time = hikvision_query_window(start_time_iso)
         search_id    = f"hrms-{int(time.time())}"
         search_result_position = 0
         max_results  = 50
