@@ -15,6 +15,7 @@ Run: python scripts/zkteco-sync-py.py
 Environment: HRMS_API_URL, BIO_SYNC_API_KEY, ZK_REALTIME, ZK_POLL_INTERVAL,
 ZK_FALLBACK_INTERVAL, ZK_TIMEZONE_OFFSET, etc.
 """
+import hashlib
 import json
 import os
 import sys
@@ -104,8 +105,25 @@ def device_port(dev, fallback=4370):
 
 
 def device_key(dev):
+    device_uuid = str(dev.get("id") or "").strip()
     ip = str(dev.get("ip_address") or "").strip()
-    return f"{ip}:{device_port(dev)}"
+    endpoint = f"{ip}:{device_port(dev)}"
+    return f"{device_uuid}@{endpoint}" if device_uuid else f"unregistered@{endpoint}"
+
+
+def device_state_identity(dev):
+    """Return a stable cursor key and hardware-identity fingerprint."""
+    device_uuid = str(dev.get("id") or "").strip()
+    if not device_uuid:
+        raise ValueError("Registered biometric device UUID is required for synchronization")
+
+    identity = {
+        "vendor": str(dev.get("vendor") or "zkteco").strip().lower(),
+        "device_id": str(dev.get("device_id") or "").strip(),
+    }
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    fingerprint = hashlib.sha256(encoded).hexdigest()
+    return f"device:{device_uuid}", fingerprint
 
 
 def device_source(dev, prefix):
@@ -148,18 +166,29 @@ def log_push_result(prefix, result):
     )
 
 
-def load_last_sync(key):
+def load_last_sync(key, identity_fingerprint):
     with STATE_LOCK:
         if STATE_FILE.exists():
             try:
                 d = json.loads(STATE_FILE.read_text())
-                return d.get(key, {}).get("lastRecordTime")
+                entry = d.get(key, {}) if isinstance(d, dict) else {}
+                if not isinstance(entry, dict):
+                    return None
+                stored_fingerprint = entry.get("identityFingerprint")
+                if stored_fingerprint != identity_fingerprint:
+                    if entry.get("lastRecordTime"):
+                        print(
+                            f"[bio-sync] Device identity changed for {key}; "
+                            "starting a retained-history backfill"
+                        )
+                    return None
+                return entry.get("lastRecordTime")
             except Exception:
                 pass
     return None
 
 
-def save_last_sync(key, iso_str):
+def save_last_sync(key, iso_str, identity_fingerprint):
     with STATE_LOCK:
         try:
             d = {}
@@ -171,6 +200,7 @@ def save_last_sync(key, iso_str):
             if key not in d:
                 d[key] = {}
             d[key]["lastRecordTime"] = iso_str
+            d[key]["identityFingerprint"] = identity_fingerprint
             d[key]["updatedAt"]      = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
             STATE_FILE.write_text(json.dumps(d, indent=2))
         except Exception as e:
@@ -194,6 +224,7 @@ def get_devices():
 
 def push_punches(
     state_key,
+    identity_fingerprint,
     punches,
     latest_ts=None,
     source_name=None,
@@ -230,7 +261,11 @@ def push_punches(
             with HEARTBEAT_LOCK:
                 LAST_HEARTBEAT_AT[device_uuid] = now_monotonic
         if latest_ts:
-            save_last_sync(state_key, ts_to_iso(latest_ts) if hasattr(latest_ts, "strftime") else str(latest_ts))
+            save_last_sync(
+                state_key,
+                ts_to_iso(latest_ts) if hasattr(latest_ts, "strftime") else str(latest_ts),
+                identity_fingerprint,
+            )
         return body
     except Exception as e:
         print(f"[bio-sync] Push error ({state_key}): {e}")
@@ -250,13 +285,13 @@ class ZKTecoDriver:
         self.dev  = dev
         self.ip   = str(dev.get("ip_address") or "").strip()
         self.port = device_port(dev, fallback=4370)
+        self.state_key, self.identity_fingerprint = device_state_identity(dev)
 
     # ------------------------------------------------------------------
     def sync_once(self, source_name=None):
         from zk import ZK
 
-        state_key = f"{self.ip}:{self.port}"
-        last      = load_last_sync(state_key)
+        last      = load_last_sync(self.state_key, self.identity_fingerprint)
         last_dt   = None
         if last:
             try:
@@ -302,7 +337,8 @@ class ZKTecoDriver:
                 latest_ts = ts
 
         return push_punches(
-            state_key,
+            self.state_key,
+            self.identity_fingerprint,
             punches,
             latest_ts=latest_ts,
             source_name=source_name,
@@ -322,8 +358,6 @@ class ZKTecoDriver:
 
         source_name     = device_source(self.dev, f"{self.PREFIX}-live")
         backfill_source = device_source(self.dev, f"{self.PREFIX}-backfill")
-        state_key       = f"{self.ip}:{self.port}"
-
         print(f"[bio-sync] ZKTeco live listener starting for {self.ip}:{self.port}")
 
         while not stop_event.is_set():
@@ -362,7 +396,8 @@ class ZKTecoDriver:
                         continue
                     punch  = {"biometric_user_id": uid, "logged_at": ts_to_iso(ts)}
                     result = push_punches(
-                        state_key,
+                        self.state_key,
+                        self.identity_fingerprint,
                         [punch],
                         latest_ts=ts,
                         source_name=source_name,
@@ -414,6 +449,7 @@ class HikvisionDriver:
         self.dev      = dev
         self.ip       = str(dev.get("ip_address") or "").strip()
         self.port     = device_port(dev, fallback=80)
+        self.state_key, self.identity_fingerprint = device_state_identity(dev)
         self.username = os.environ.get("HIK_USERNAME", "admin")
         self.password = os.environ.get("HIK_PASSWORD", "")
         scheme        = "https" if os.environ.get("HIK_USE_HTTPS", "0").strip() == "1" else "http"
@@ -480,8 +516,7 @@ class HikvisionDriver:
 
     # ------------------------------------------------------------------
     def sync_once(self, source_name=None):
-        state_key = f"{self.ip}:{self.port}"
-        last      = load_last_sync(state_key)
+        last      = load_last_sync(self.state_key, self.identity_fingerprint)
 
         raw_punches = self._fetch_events(start_time_iso=last)
         if raw_punches is None:
@@ -501,7 +536,8 @@ class HikvisionDriver:
                 pass
 
         return push_punches(
-            state_key,
+            self.state_key,
+            self.identity_fingerprint,
             punches,
             latest_ts=latest_ts,
             source_name=source_name or device_source(self.dev, self.PREFIX),
@@ -545,6 +581,7 @@ class AnvizDriver:
         self.ip   = str(dev.get("ip_address") or "").strip()
         self.port = device_port(dev, fallback=5010)
         self.record_format = ANVIZ_RECORD_FORMAT
+        self.state_key, self.identity_fingerprint = device_state_identity(dev)
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -663,8 +700,7 @@ class AnvizDriver:
 
     # ------------------------------------------------------------------
     def sync_once(self, source_name=None):
-        state_key = f"{self.ip}:{self.port}"
-        last      = load_last_sync(state_key)
+        last      = load_last_sync(self.state_key, self.identity_fingerprint)
         last_dt   = None
         if last:
             try:
@@ -691,7 +727,8 @@ class AnvizDriver:
                 latest_ts = ts
 
         return push_punches(
-            state_key,
+            self.state_key,
+            self.identity_fingerprint,
             punches,
             latest_ts=latest_ts,
             source_name=source_name or device_source(self.dev, self.PREFIX),

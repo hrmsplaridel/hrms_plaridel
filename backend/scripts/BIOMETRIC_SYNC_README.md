@@ -26,7 +26,7 @@ python scripts/zkteco-sync-py.py
 | `ZK_HEARTBEAT_INTERVAL` | 60                 | Minimum seconds between successful empty-device heartbeats         |
 | `ZK_TIMEZONE_OFFSET` | +08:00                | Device local offset used for punch timestamps and Hikvision query windows |
 | `ANVIZ_RECORD_FORMAT` | (disabled)           | Explicit verified Anviz format; only `bcd6-second-minute-hour-day-month-year2000` is accepted |
-| `ZK_SYNC_STATE_FILE` | (internal)            | State is stored in `backend/.zkteco-sync-state.json` per device IP |
+| `ZK_SYNC_STATE_FILE` | (internal)            | State is stored in `backend/.zkteco-sync-state.json` per registered device UUID and identity |
 
 Active device IPs are loaded from **`GET /api/biometric-attendance-logs/devices`** (rows in `biometric_devices`). You do not set a single `ZK_DEVICE_IP` in the Python sync unless you change the script.
 
@@ -91,8 +91,10 @@ Polling is now a fallback path. If realtime mode is unavailable for a device, **
 
 ## Duplicate Prevention
 
-1. **Client**: Persists `lastRecordTime` per device IP in `.zkteco-sync-state.json`. Only records _after_ that time are sent.
+1. **Client**: Persists `lastRecordTime` per registered device UUID and vendor/device-ID fingerprint in `.zkteco-sync-state.json`. Changing only the IP preserves the cursor; replacing the clock or changing its configured identity starts a retained-history backfill.
 2. **Server**: Uses `ON CONFLICT (biometric_user_id, logged_at) DO NOTHING` to ignore duplicates.
+
+After upgrading from the legacy IP-keyed state format, each device performs one safe retained-history backfill. Legacy IP entries are deliberately not assigned to registered devices because an IP may have been reused by replacement hardware. Keep the configured device ID stable when changing only the IP, and update it when replacing the physical clock.
 
 ## Error Handling
 
