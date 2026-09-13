@@ -46,6 +46,7 @@ FALLBACK_INTERVAL    = int(os.environ.get("ZK_FALLBACK_INTERVAL", "300"))
 HEARTBEAT_INTERVAL   = int(os.environ.get("ZK_HEARTBEAT_INTERVAL", "60"))
 LIVE_CAPTURE_TIMEOUT = int(os.environ.get("ZK_LIVE_CAPTURE_TIMEOUT", "10"))
 LIVE_RECONNECT_DELAY = int(os.environ.get("ZK_LIVE_RECONNECT_DELAY", "5"))
+ANVIZ_RECORD_FORMAT  = os.environ.get("ANVIZ_RECORD_FORMAT", "").strip().lower()
 STATE_LOCK           = threading.Lock()
 HEARTBEAT_LOCK       = threading.Lock()
 LAST_HEARTBEAT_AT    = {}
@@ -532,17 +533,18 @@ class AnvizDriver:
     Anviz uses a proprietary binary protocol on TCP port 5010.
     This driver uses polling (no live capture).
 
-    Note: Anviz SDK details vary by firmware. This implementation uses
-    the documented Anviz A300 / C2 series protocol (GetRecord command 0x30).
-    Test with your specific device and adjust if needed.
+    Record formats vary by model and firmware. Parsing remains disabled unless
+    a complete, verified record format is explicitly configured.
     """
 
     PREFIX = "anviz"
+    BCD6_RECORD_FORMAT = "bcd6-second-minute-hour-day-month-year2000"
 
     def __init__(self, dev):
         self.dev  = dev
         self.ip   = str(dev.get("ip_address") or "").strip()
         self.port = device_port(dev, fallback=5010)
+        self.record_format = ANVIZ_RECORD_FORMAT
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -560,18 +562,35 @@ class AnvizDriver:
         return bytes(packet)
 
     @staticmethod
-    def _parse_timestamp(raw):
-        """Parse Anviz 4-byte packed BCD timestamp to datetime."""
-        try:
-            b = raw if isinstance(raw, (bytes, bytearray)) else bytes([raw])
-            second = (b[0] & 0x0F) + ((b[0] >> 4) & 0x0F) * 10
-            minute = (b[1] & 0x0F) + ((b[1] >> 4) & 0x0F) * 10
-            hour   = (b[2] & 0x0F) + ((b[2] >> 4) & 0x0F) * 10
-            day    = (b[3] & 0x0F) + ((b[3] >> 4) & 0x0F) * 10
-            # Byte 4 and 5 for month/year may vary; fall back gracefully
-            return datetime(datetime.now().year, datetime.now().month, day, hour, minute, second)
-        except Exception:
+    def _decode_bcd(value):
+        high = (value >> 4) & 0x0F
+        low = value & 0x0F
+        if high > 9 or low > 9:
+            raise ValueError("Invalid BCD value")
+        return high * 10 + low
+
+    @classmethod
+    def _parse_timestamp(cls, raw, record_format=None):
+        """Parse a complete timestamp only for an explicitly selected format."""
+        if record_format != cls.BCD6_RECORD_FORMAT:
             return None
+        try:
+            b = bytes(raw)
+            if len(b) != 6:
+                return None
+            second, minute, hour, day, month, year = map(cls._decode_bcd, b)
+            return datetime(2000 + year, month, day, hour, minute, second)
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    @staticmethod
+    def _valid_response_packet(response):
+        if not isinstance(response, (bytes, bytearray)) or len(response) < 9:
+            return False
+        declared_length = int.from_bytes(response[5:7], "little")
+        if declared_length + 1 != len(response):
+            return False
+        return response[-1] == (sum(response[:-1]) & 0xFF)
 
     # ------------------------------------------------------------------
     def _fetch_records(self):
@@ -580,6 +599,13 @@ class AnvizDriver:
         Returns list of (user_id_str, datetime) or empty list on error.
         """
         import socket
+
+        if self.record_format != self.BCD6_RECORD_FORMAT:
+            print(
+                f"[bio-sync] Anviz sync disabled ({self.ip}): unsupported or missing "
+                "ANVIZ_RECORD_FORMAT; no attendance was uploaded"
+            )
+            return None
 
         results = []
         try:
@@ -600,33 +626,38 @@ class AnvizDriver:
                 except socket.timeout:
                     pass
 
-            # Parse records from response (each record is typically 14 bytes)
-            # Format: user_id (5 bytes BCD) + timestamp (4 bytes BCD) + punch_type (1 byte) + ...
-            if len(response) < 9:
-                return results
+            if not self._valid_response_packet(response):
+                print(f"[bio-sync] Rejected invalid Anviz response packet ({self.ip})")
+                return None
 
-            # Skip packet header (8 bytes)
-            i = 8
-            while i + 10 <= len(response) - 1:
+            payload = response[8:-1]
+            if len(payload) % 14 != 0:
+                print(f"[bio-sync] Rejected unsupported Anviz record length ({self.ip})")
+                return None
+
+            i = 0
+            while i < len(payload):
                 try:
-                    user_id_bytes = response[i:i+5]
-                    ts_bytes      = response[i+5:i+9]
+                    record = payload[i:i+14]
+                    user_id_bytes = record[0:5]
+                    ts_bytes = record[5:11]
 
                     user_id = ""
                     for b in user_id_bytes:
-                        user_id += str((b >> 4) & 0x0F)
-                        user_id += str(b & 0x0F)
+                        user_id += f"{self._decode_bcd(b):02d}"
                     user_id = user_id.lstrip("0") or "0"
 
-                    ts = self._parse_timestamp(ts_bytes)
+                    ts = self._parse_timestamp(ts_bytes, self.record_format)
                     if ts and user_id:
                         results.append((user_id, ts))
                     i += 14
-                except Exception:
-                    break
+                except (TypeError, ValueError, IndexError):
+                    print(f"[bio-sync] Rejected invalid Anviz attendance record ({self.ip})")
+                    return None
 
         except Exception as e:
             print(f"[bio-sync] Anviz device error ({self.ip}): {e}")
+            return None
 
         return results
 
@@ -642,6 +673,8 @@ class AnvizDriver:
                 pass
 
         raw = self._fetch_records()
+        if raw is None:
+            return None
         punches   = []
         latest_ts = None
 

@@ -25,6 +25,7 @@ python scripts/zkteco-sync-py.py
 | `ZK_FALLBACK_INTERVAL` | 300                 | Backfill interval in realtime mode, used to recover missed punches |
 | `ZK_HEARTBEAT_INTERVAL` | 60                 | Minimum seconds between successful empty-device heartbeats         |
 | `ZK_TIMEZONE_OFFSET` | +08:00                | Device local offset used for punch timestamps and Hikvision query windows |
+| `ANVIZ_RECORD_FORMAT` | (disabled)           | Explicit verified Anviz format; only `bcd6-second-minute-hour-day-month-year2000` is accepted |
 | `ZK_SYNC_STATE_FILE` | (internal)            | State is stored in `backend/.zkteco-sync-state.json` per device IP |
 
 Active device IPs are loaded from **`GET /api/biometric-attendance-logs/devices`** (rows in `biometric_devices`). You do not set a single `ZK_DEVICE_IP` in the Python sync unless you change the script.
@@ -117,3 +118,4 @@ See `scripts/ZK_DIAGNOSTIC_REPORT.md` for more.
 | **Multi-device**   | One process starts one realtime worker for each IP returned by `/devices`.                |
 | **TCP**            | Typical ZKTeco port 4370.                                                                 |
 | **Live capture**   | Depends on pyzk/device support for `live_capture`; unsupported devices fall back to polling. |
+| **Anviz records**  | Disabled by default; enable the documented six-byte format only after confirming it matches the exact device model and firmware. |
