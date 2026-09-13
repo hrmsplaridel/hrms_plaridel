@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/biometric_devices/widgets/biometric_attendance_logs_panel.dart';
+import 'package:hrms_plaridel/features/dtr/management/biometric_devices/widgets/biometric_device_lifecycle_button.dart';
 
 enum _BiometricManagementView { devices, attendanceLogs }
 
@@ -432,14 +433,19 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
     }
   }
 
-  Future<bool> _deactivateDevice() async {
+  Future<bool> _setDeviceActive(bool isActive) async {
     final d = _selectedDevice;
     if (d == null) return false;
+    final action = isActive ? 'Reactivate' : 'Deactivate';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Deactivate device?'),
-        content: Text('"${d.name}" will no longer appear in active lists.'),
+        title: Text('$action device?'),
+        content: Text(
+          isActive
+              ? '"${d.name}" will return to active lists and biometric synchronization.'
+              : '"${d.name}" will no longer appear in active lists or biometric synchronization.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -447,8 +453,10 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Deactivate'),
+            style: FilledButton.styleFrom(
+              backgroundColor: isActive ? Colors.green : Colors.red,
+            ),
+            child: Text(action),
           ),
         ],
       ),
@@ -457,12 +465,16 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
     try {
       await ApiClient.instance.put(
         '/api/biometric-devices/${d.id}',
-        data: {'is_active': false},
+        data: {'is_active': isActive},
       );
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Device deactivated.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isActive ? 'Device reactivated.' : 'Device deactivated.',
+            ),
+          ),
+        );
         _clearForm();
         _loadDevices();
       }
@@ -604,19 +616,20 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
             child: const Text('Cancel'),
           ),
           if (isEditing)
-            OutlinedButton.icon(
-              onPressed: () async {
-                final ok = await _deactivateDevice();
+            BiometricDeviceLifecycleButton(
+              isActive: _selectedDevice!.isActive,
+              onDeactivate: () async {
+                final ok = await _setDeviceActive(false);
                 if (ok && drawerContext.mounted) {
                   Navigator.of(drawerContext).pop();
                 }
               },
-              icon: const Icon(Icons.person_off_rounded, size: 18),
-              label: const Text('Deactivate'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red,
-                side: const BorderSide(color: Colors.red),
-              ),
+              onReactivate: () async {
+                final ok = await _setDeviceActive(true);
+                if (ok && drawerContext.mounted) {
+                  Navigator.of(drawerContext).pop();
+                }
+              },
             ),
           FilledButton.icon(
             onPressed: () async {
@@ -1138,17 +1151,12 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
                 icon: const Icon(Icons.edit_rounded, size: 18),
                 label: const Text('Update'),
               ),
-              FilledButton.icon(
-                onPressed: _selectedDevice != null
-                    ? () => _deactivateDevice()
-                    : null,
-                icon: const Icon(Icons.person_off_rounded, size: 18),
-                label: const Text('Deactivate'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
+              if (_selectedDevice case final device?)
+                BiometricDeviceLifecycleButton(
+                  isActive: device.isActive,
+                  onDeactivate: () => _setDeviceActive(false),
+                  onReactivate: () => _setDeviceActive(true),
                 ),
-              ),
             ],
           ),
         ],
