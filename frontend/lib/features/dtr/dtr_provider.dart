@@ -490,6 +490,15 @@ class DtrProvider extends ChangeNotifier {
   String? _error;
   String? get error => _error;
 
+  bool _employeeAttendanceLoading = false;
+  bool get employeeAttendanceLoading => _employeeAttendanceLoading;
+
+  String? _employeeAttendanceError;
+  String? get employeeAttendanceError => _employeeAttendanceError;
+
+  bool _employeeAttendanceHasResult = false;
+  bool get employeeAttendanceHasResult => _employeeAttendanceHasResult;
+
   /// True when Supabase returns PGRST205 (table not found) - time_records not created yet.
   bool _tableMissing = false;
   bool get tableMissing => _tableMissing;
@@ -604,6 +613,9 @@ class DtrProvider extends ChangeNotifier {
     _departments = [];
     _loading = false;
     _error = null;
+    _employeeAttendanceLoading = false;
+    _employeeAttendanceError = null;
+    _employeeAttendanceHasResult = false;
     _tableMissing = false;
     _filterStart = null;
     _filterEnd = null;
@@ -1026,6 +1038,9 @@ class DtrProvider extends ChangeNotifier {
     if (cached != null) {
       _tableMissing = false;
       _error = null;
+      _employeeAttendanceError = null;
+      _employeeAttendanceLoading = false;
+      _employeeAttendanceHasResult = true;
       _filterStart = startDate;
       _filterEnd = endDate;
       _filterUserId = uid;
@@ -1037,6 +1052,10 @@ class DtrProvider extends ChangeNotifier {
     }
     _loading = true;
     _error = null;
+    _employeeAttendanceLoading = true;
+    _employeeAttendanceError = null;
+    _employeeAttendanceHasResult = false;
+    _timeRecords = [];
     notifyListeners();
     try {
       final list = await TimeRecordRepo.instance.listForUser(
@@ -1058,6 +1077,8 @@ class DtrProvider extends ChangeNotifier {
       _filterDepartmentId = null;
       _timeRecords = List<TimeRecord>.from(list);
       _loading = false;
+      _employeeAttendanceLoading = false;
+      _employeeAttendanceHasResult = true;
       notifyListeners();
     } catch (e) {
       if (!_isCurrentEmployeeAttendanceLoad(
@@ -1067,8 +1088,13 @@ class DtrProvider extends ChangeNotifier {
       )) {
         return;
       }
-      _error = e.toString();
+      final message = userFacingApiError(e);
+      _error = message;
+      _employeeAttendanceError = message;
       _loading = false;
+      _employeeAttendanceLoading = false;
+      _employeeAttendanceHasResult = false;
+      _timeRecords = [];
       notifyListeners();
     }
   }

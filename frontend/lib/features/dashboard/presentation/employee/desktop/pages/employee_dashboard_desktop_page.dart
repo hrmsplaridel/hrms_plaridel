@@ -2488,7 +2488,7 @@ class _EmployeeAttendanceContentState
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool forceRefresh = false}) async {
     _clampSelectedDayIfNeeded();
     final dtr = context.read<DtrProvider>();
     final lastDay = _lastDayOfSelectedMonth;
@@ -2507,7 +2507,81 @@ class _EmployeeAttendanceContentState
       // For current month, don't fetch future days.
       end = monthEnd.isAfter(_todayDateOnly) ? _todayDateOnly : monthEnd;
     }
-    await dtr.loadTimeRecordsForUser(startDate: start, endDate: end);
+    await dtr.loadTimeRecordsForUser(
+      startDate: start,
+      endDate: end,
+      forceRefresh: forceRefresh,
+    );
+  }
+
+  Widget _buildAttendanceLoadError(String message) {
+    final errorColor = Theme.of(context).colorScheme.error;
+    return Container(
+      key: widget.recordsKey,
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: errorColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: errorColor.withValues(alpha: 0.65)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final details = Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.error_outline_rounded, color: errorColor, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Could not load attendance',
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      message,
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+          final retry = TextButton.icon(
+            onPressed: () => _load(forceRefresh: true),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+          );
+          if (constraints.maxWidth < 520) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                details,
+                const SizedBox(height: 12),
+                Align(alignment: Alignment.centerRight, child: retry),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: details),
+              const SizedBox(width: 16),
+              retry,
+            ],
+          );
+        },
+      ),
+    );
   }
 
   static String _formatTime(DateTime? dt) {
@@ -3052,8 +3126,15 @@ class _EmployeeAttendanceContentState
           },
         ),
         const SizedBox(height: 24),
-        if (dtr.loading) const EmployeeTimeRecordsLoadingSkeleton(),
-        if (!dtr.loading && visibleRecords.isEmpty)
+        if (dtr.employeeAttendanceLoading)
+          const EmployeeTimeRecordsLoadingSkeleton(),
+        if (!dtr.employeeAttendanceLoading &&
+            dtr.employeeAttendanceError != null)
+          _buildAttendanceLoadError(dtr.employeeAttendanceError!),
+        if (!dtr.employeeAttendanceLoading &&
+            dtr.employeeAttendanceError == null &&
+            dtr.employeeAttendanceHasResult &&
+            visibleRecords.isEmpty)
           Container(
             key: widget.recordsKey,
             padding: const EdgeInsets.all(24),
@@ -3077,7 +3158,10 @@ class _EmployeeAttendanceContentState
               ),
             ),
           ),
-        if (!dtr.loading && visibleRecords.isNotEmpty)
+        if (!dtr.employeeAttendanceLoading &&
+            dtr.employeeAttendanceError == null &&
+            dtr.employeeAttendanceHasResult &&
+            visibleRecords.isNotEmpty)
           LayoutBuilder(
             key: widget.recordsKey,
             builder: (context, constraints) {

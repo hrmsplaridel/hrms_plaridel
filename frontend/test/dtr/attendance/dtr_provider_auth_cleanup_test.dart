@@ -143,6 +143,56 @@ void main() {
       expect(provider.error, isNull);
     },
   );
+
+  test(
+    'failed and successful-empty attendance states remain distinct',
+    () async {
+      final adapter = _QueuedAttendanceAdapter([
+        _attendanceResponseFor('2026-08-03'),
+        ResponseBody.fromString(
+          jsonEncode({'error': 'September attendance is unavailable'}),
+          503,
+          headers: {
+            Headers.contentTypeHeader: [Headers.jsonContentType],
+          },
+        ),
+        _emptyAttendanceResponse(),
+      ]);
+      ApiClient.instance.dio.httpClientAdapter = adapter;
+      final provider = DtrProvider();
+      addTearDown(provider.dispose);
+
+      provider.onAuthUserChanged('employee-a');
+      await provider.loadTimeRecordsForUser(
+        startDate: DateTime(2026, 8),
+        endDate: DateTime(2026, 8, 31),
+      );
+      expect(provider.employeeAttendanceHasResult, isTrue);
+      expect(provider.employeeAttendanceError, isNull);
+      expect(provider.timeRecords, hasLength(1));
+
+      await provider.loadTimeRecordsForUser(
+        startDate: DateTime(2026, 9),
+        endDate: DateTime(2026, 9, 30),
+      );
+      expect(provider.employeeAttendanceHasResult, isFalse);
+      expect(
+        provider.employeeAttendanceError,
+        'September attendance is unavailable',
+      );
+      expect(provider.timeRecords, isEmpty);
+      expect(provider.employeeAttendanceLoading, isFalse);
+
+      await provider.loadTimeRecordsForUser(
+        startDate: DateTime(2026, 10),
+        endDate: DateTime(2026, 10, 31),
+      );
+      expect(provider.employeeAttendanceHasResult, isTrue);
+      expect(provider.employeeAttendanceError, isNull);
+      expect(provider.timeRecords, isEmpty);
+      expect(provider.employeeAttendanceLoading, isFalse);
+    },
+  );
 }
 
 const _attendancePayload = <Map<String, dynamic>>[
@@ -182,6 +232,17 @@ ResponseBody _attendanceResponseFor(String date) => ResponseBody.fromString(
   headers: {
     Headers.contentTypeHeader: [Headers.jsonContentType],
     'x-total-count': ['1'],
+    'x-limit': ['500'],
+    'x-offset': ['0'],
+  },
+);
+
+ResponseBody _emptyAttendanceResponse() => ResponseBody.fromString(
+  '[]',
+  200,
+  headers: {
+    Headers.contentTypeHeader: [Headers.jsonContentType],
+    'x-total-count': ['0'],
     'x-limit': ['500'],
     'x-offset': ['0'],
   },
@@ -259,6 +320,27 @@ class _OutOfOrderAttendanceAdapter implements HttpClientAdapter {
           'Unexpected attendance request: ${options.queryParameters}',
         );
     }
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _QueuedAttendanceAdapter implements HttpClientAdapter {
+  _QueuedAttendanceAdapter(this._responses);
+
+  final List<ResponseBody> _responses;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    if (_responses.isEmpty) {
+      throw StateError('No queued attendance response.');
+    }
+    return _responses.removeAt(0);
   }
 
   @override
