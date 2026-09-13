@@ -827,72 +827,75 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
           else
             Column(
               children: [
-                ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: paged.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final d = paged[i];
-                    final isSelected = _selectedDevice?.id == d.id;
-                    final now = DateTime.now();
-                    final health = _biometricSyncHealth(d.lastSyncAt, now);
-                    return ListTile(
-                      selected: isSelected,
-                      selectedTileColor: dark
-                          ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                          : AppTheme.primaryNavy.withValues(alpha: 0.08),
-                      leading: Icon(
-                        Icons.fingerprint_rounded,
-                        color: AppTheme.primaryNavy.withValues(alpha: 0.8),
-                      ),
-                      title: Text(
-                        d.name,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: _headingColor(context),
+                Material(
+                  type: MaterialType.transparency,
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: paged.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final d = paged[i];
+                      final isSelected = _selectedDevice?.id == d.id;
+                      final now = DateTime.now();
+                      final health = _biometricSyncHealth(d.lastSyncAt, now);
+                      return ListTile(
+                        selected: isSelected,
+                        selectedTileColor: dark
+                            ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+                            : AppTheme.primaryNavy.withValues(alpha: 0.08),
+                        leading: Icon(
+                          Icons.fingerprint_rounded,
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.8),
                         ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '${d.deviceId ?? '—'} · ${d.location ?? '—'}${d.ipAddress != null && d.ipAddress!.isNotEmpty ? ' · ${d.ipAddress}' : ''}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: _mutedColor(context),
+                        title: Text(
+                          d.name,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: _headingColor(context),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${d.deviceId ?? '—'} · ${d.location ?? '—'}${d.ipAddress != null && d.ipAddress!.isNotEmpty ? ' · ${d.ipAddress}' : ''}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _mutedColor(context),
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              _buildRegistrationBadge(d.isActive),
-                              _buildVendorBadge(d.vendor),
-                              _buildOnlineBadge(d.online, d.ipAddress),
-                              _buildSyncBadge(health),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            d.lastSyncAt != null
-                                ? 'Last sync · ${_formatRelativeSync(d.lastSyncAt!, now)}'
-                                : 'No sync recorded yet',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: _mutedColor(context),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                _buildRegistrationBadge(d.isActive),
+                                _buildVendorBadge(d.vendor),
+                                _buildOnlineBadge(d.online, d.ipAddress),
+                                _buildSyncBadge(health),
+                              ],
                             ),
-                          ),
-                        ],
-                      ),
-                      isThreeLine: true,
-                      onTap: () => _openDeviceDrawer(device: d),
-                    );
-                  },
+                            const SizedBox(height: 4),
+                            Text(
+                              d.lastSyncAt != null
+                                  ? 'Last sync · ${_formatRelativeSync(d.lastSyncAt!, now)}'
+                                  : 'No sync recorded yet',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: _mutedColor(context),
+                              ),
+                            ),
+                          ],
+                        ),
+                        isThreeLine: true,
+                        onTap: () => _openDeviceDrawer(device: d),
+                      );
+                    },
+                  ),
                 ),
                 _buildPaginationFooter(
                   total: total,
