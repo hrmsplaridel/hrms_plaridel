@@ -193,6 +193,39 @@ void main() {
       expect(provider.employeeAttendanceLoading, isFalse);
     },
   );
+
+  test('DTR events match both employee and selected attendance range', () {
+    final event = DtrUpdateEvent.fromJson({
+      'action': 'biometric_processed',
+      'user_id': 'employee-a',
+      'date': '2026-09-14',
+    });
+
+    expect(
+      event.affectsEmployeeRange(
+        employeeId: 'employee-a',
+        start: DateTime(2026, 9, 1),
+        end: DateTime(2026, 9, 30),
+      ),
+      isTrue,
+    );
+    expect(
+      event.affectsEmployeeRange(
+        employeeId: 'employee-b',
+        start: DateTime(2026, 9, 1),
+        end: DateTime(2026, 9, 30),
+      ),
+      isFalse,
+    );
+    expect(
+      event.affectsEmployeeRange(
+        employeeId: 'employee-a',
+        start: DateTime(2026, 8, 1),
+        end: DateTime(2026, 8, 31),
+      ),
+      isFalse,
+    );
+  });
 }
 
 const _attendancePayload = <Map<String, dynamic>>[

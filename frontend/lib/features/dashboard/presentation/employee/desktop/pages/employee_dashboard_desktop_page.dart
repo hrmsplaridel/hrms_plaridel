@@ -2431,8 +2431,10 @@ class _EmployeeAttendanceContent extends StatefulWidget {
       _EmployeeAttendanceContentState();
 }
 
-class _EmployeeAttendanceContentState
-    extends State<_EmployeeAttendanceContent> {
+class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent>
+    with WidgetsBindingObserver {
+  static const _dtrRefreshDebounceDuration = Duration(milliseconds: 250);
+
   int _selectedMonth = 1;
   int _selectedYear = 2000;
   int? _selectedDay;
@@ -2442,6 +2444,8 @@ class _EmployeeAttendanceContentState
   bool _officialDateLoading = true;
   String? _officialDateError;
   int _officialDateRequestGeneration = 0;
+  StreamSubscription<DtrUpdateEvent>? _dtrUpdateSub;
+  Timer? _dtrRefreshDebounce;
 
   int get _lastDayOfSelectedMonth {
     final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
@@ -2491,12 +2495,41 @@ class _EmployeeAttendanceContentState
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _initializeOfficialDate(resetSelection: true),
-    );
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _dtrUpdateSub = context.read<DtrProvider>().onDtrEvent.listen(
+        _handleDtrUpdateEvent,
+      );
+      unawaited(_initializeOfficialDate(resetSelection: true));
+    });
   }
 
-  Future<void> _initializeOfficialDate({required bool resetSelection}) async {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      unawaited(
+        _initializeOfficialDate(
+          resetSelection: false,
+          forceAttendanceRefresh: true,
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    ++_officialDateRequestGeneration;
+    WidgetsBinding.instance.removeObserver(this);
+    _dtrRefreshDebounce?.cancel();
+    _dtrUpdateSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initializeOfficialDate({
+    required bool resetSelection,
+    bool forceAttendanceRefresh = false,
+  }) async {
     final requestGeneration = ++_officialDateRequestGeneration;
     if (mounted) {
       setState(() {
@@ -2519,9 +2552,13 @@ class _EmployeeAttendanceContentState
           _selectedDay = isNarrow ? officialDate.day : null;
           _mobileAttendanceMode = isNarrow ? 'today' : 'monthly';
           _didApplyMobileDefault = isNarrow;
+        } else if (_selectedDay != null && _mobileAttendanceMode == 'today') {
+          _selectedMonth = officialDate.month;
+          _selectedYear = officialDate.year;
+          _selectedDay = officialDate.day;
         }
       });
-      await _load(forceRefresh: resetSelection);
+      await _load(forceRefresh: resetSelection || forceAttendanceRefresh);
     } catch (error) {
       if (!mounted || requestGeneration != _officialDateRequestGeneration) {
         return;
@@ -2539,9 +2576,8 @@ class _EmployeeAttendanceContentState
     }
   }
 
-  Future<void> _load({bool forceRefresh = false}) async {
-    _clampSelectedDayIfNeeded();
-    final dtr = context.read<DtrProvider>();
+  ({DateTime start, DateTime end})? _selectedAttendanceRange() {
+    if (_officialHrmsDate == null) return null;
     final lastDay = _lastDayOfSelectedMonth;
     final day =
         (_selectedDay != null && _selectedDay! >= 1 && _selectedDay! <= lastDay)
@@ -2555,7 +2591,6 @@ class _EmployeeAttendanceContentState
     } else {
       start = DateTime(_selectedYear, _selectedMonth, 1);
       final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
-      // For current month, don't fetch future days.
       end = monthEnd.isAfter(_todayDateOnly) ? _todayDateOnly : monthEnd;
     }
     if (!isValidEmployeeAttendanceRange(
@@ -2563,11 +2598,38 @@ class _EmployeeAttendanceContentState
       end: end,
       officialDate: _todayDateOnly,
     )) {
+      return null;
+    }
+    return (start: start, end: end);
+  }
+
+  void _handleDtrUpdateEvent(DtrUpdateEvent event) {
+    if (!mounted) return;
+    final range = _selectedAttendanceRange();
+    if (range == null) return;
+    final employeeId = context.read<AuthProvider>().user?.id;
+    if (!event.affectsEmployeeRange(
+      employeeId: employeeId,
+      start: range.start,
+      end: range.end,
+    )) {
       return;
     }
+    _dtrRefreshDebounce?.cancel();
+    _dtrRefreshDebounce = Timer(_dtrRefreshDebounceDuration, () {
+      if (!mounted) return;
+      unawaited(_load(forceRefresh: true));
+    });
+  }
+
+  Future<void> _load({bool forceRefresh = false}) async {
+    _clampSelectedDayIfNeeded();
+    final range = _selectedAttendanceRange();
+    if (range == null) return;
+    final dtr = context.read<DtrProvider>();
     await dtr.loadTimeRecordsForUser(
-      startDate: start,
-      endDate: end,
+      startDate: range.start,
+      endDate: range.end,
       forceRefresh: forceRefresh,
     );
   }

@@ -118,6 +118,14 @@ class DtrUpdateEvent {
     if (single != null) return overlaps(single, single);
     return true;
   }
+
+  bool affectsEmployeeRange({
+    required String? employeeId,
+    required DateTime start,
+    required DateTime end,
+  }) {
+    return affectsUser(employeeId) && affectsDateRange(start, end);
+  }
 }
 
 /// Summary counts for DTR dashboard.
