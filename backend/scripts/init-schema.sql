@@ -679,8 +679,10 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   leave_type_id UUID REFERENCES leave_types(id) ON DELETE SET NULL,
 
-  start_date DATE NOT NULL,
-  end_date DATE NOT NULL,
+  -- Drafts may be saved before the employee knows the complete date range.
+  -- Submission routes still require and validate both dates.
+  start_date DATE,
+  end_date DATE,
   total_days NUMERIC(5,2),
   number_of_days NUMERIC(5,2),
 
@@ -735,6 +737,9 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT chk_leave_dates CHECK (end_date >= start_date),
+  CONSTRAINT chk_leave_submission_dates CHECK (
+    status = 'draft' OR (start_date IS NOT NULL AND end_date IS NOT NULL)
+  ),
   CONSTRAINT chk_leave_total_days CHECK (
     (total_days IS NULL OR total_days >= 0)
     AND (number_of_days IS NULL OR number_of_days >= 0)

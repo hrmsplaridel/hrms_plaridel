@@ -11,6 +11,7 @@ import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
 
 const _leaveRequestFilterOptions = <RequestFilterOption<LeaveRequestStatus>>[
   RequestFilterOption(label: 'All'),
+  RequestFilterOption(value: LeaveRequestStatus.draft, label: 'Drafts'),
   RequestFilterOption(value: LeaveRequestStatus.pending, label: 'Pending'),
   RequestFilterOption(value: LeaveRequestStatus.approved, label: 'Approved'),
   RequestFilterOption(value: LeaveRequestStatus.rejected, label: 'Rejected'),

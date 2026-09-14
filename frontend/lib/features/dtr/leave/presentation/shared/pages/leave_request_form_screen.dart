@@ -238,11 +238,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return output;
   }
 
-  bool _validateCustomDetails() {
+  bool _validateCustomDetails({bool requireRequired = true}) {
     for (final field in _selectedCustomFields) {
       final value = _customDetailValues[field.key];
       final blank = value == null || (value is String && value.trim().isEmpty);
-      if (field.required && blank) {
+      if (requireRequired && field.required && blank) {
         _showMessage('${field.label} is required.');
         return false;
       }
@@ -539,20 +539,16 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Future<void> _saveDraft() async {
-    if (!_formKey.currentState!.validate()) return;
-    if (!_validateCustomDetails()) return;
+    if (!_validateCustomDetails(requireRequired: false)) return;
     final accountEligibilityMessage = _selectedAccountEligibilityMessage();
     if (accountEligibilityMessage != null) {
       _showMessage(accountEligibilityMessage);
       return;
     }
-    if (_startDate == null || _endDate == null) {
-      _showMessage('Please select date(s)');
-      return;
-    }
-    if (!_validateSelectedDates()) return;
-    if (_workingDaysLoading) {
-      _showMessage('Please wait while working days are computed.');
+    if (_startDate != null &&
+        _endDate != null &&
+        _endDate!.isBefore(_startDate!)) {
+      _showMessage('End date cannot be earlier than start date.');
       return;
     }
     await _submit(isDraft: true);
@@ -1019,15 +1015,16 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       String? officeDepartment,
       String? positionTitle,
       double? salary,
-      DateTime dateFiled,
+      DateTime? dateFiled,
     })
   >
   _loadEmployeeHeaderSnapshot({
     required String userId,
     required AuthProvider auth,
+    required bool requireOfficialDate,
   }) async {
     final officialDate = context.read<LeaveProvider>().officialDate;
-    if (officialDate == null) {
+    if (requireOfficialDate && officialDate == null) {
       throw Exception(
         'The official HRMS date is unavailable. Retry before continuing.',
       );
@@ -1082,7 +1079,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     final existingFiled = _savedRequest?.dateFiled ?? initial?.dateFiled;
     final dateFiled = existingFiled != null
         ? DateTime(existingFiled.year, existingFiled.month, existingFiled.day)
-        : officialDate;
+        : officialDate == null
+        ? null
+        : DateTime(officialDate.year, officialDate.month, officialDate.day);
 
     return (
       employeeName: employeeName,
@@ -1107,6 +1106,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       final header = await _loadEmployeeHeaderSnapshot(
         userId: userId,
         auth: auth,
+        requireOfficialDate: !isDraft,
       );
       final prior = _savedRequest ?? initial;
       String? coalesceStr(String? saved, String? incoming) {
