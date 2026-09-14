@@ -57,6 +57,8 @@ test('report years return the complete historical range', async () => {
     2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026,
   ]);
   assert.equal(queries[0].params[0], null);
+  assert.match(queries[0].params[1], /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(res.payload.official_date, queries[0].params[1]);
 
   restoreWs();
   restoreDb();
@@ -94,6 +96,8 @@ test('employee report years are scoped to the authenticated account', async () =
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.payload.years, [2024, 2025, 2026]);
   assert.equal(queryParams[0], EMPLOYEE_ID);
+  assert.match(queryParams[1], /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(res.payload.official_date, queryParams[1]);
 
   restoreWs();
   restoreDb();

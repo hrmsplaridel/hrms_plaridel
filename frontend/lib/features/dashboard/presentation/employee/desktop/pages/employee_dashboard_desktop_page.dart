@@ -3,6 +3,7 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
@@ -2438,11 +2439,15 @@ class _EmployeeAttendanceContent extends StatefulWidget {
 
 class _EmployeeAttendanceContentState
     extends State<_EmployeeAttendanceContent> {
-  int _selectedMonth = DateTime.now().month;
-  int _selectedYear = DateTime.now().year;
+  int _selectedMonth = 1;
+  int _selectedYear = 2000;
   int? _selectedDay;
   bool _didApplyMobileDefault = false;
   String _mobileAttendanceMode = 'today';
+  DateTime? _officialHrmsDate;
+  bool _officialDateLoading = true;
+  String? _officialDateError;
+  int _officialDateRequestGeneration = 0;
 
   int get _lastDayOfSelectedMonth {
     final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
@@ -2451,7 +2456,7 @@ class _EmployeeAttendanceContentState
 
   /// Latest day selectable in the current month/year (no future day picker values).
   int get _maxSelectableCalendarDay {
-    final now = DateTime.now();
+    final now = _todayDateOnly;
     final last = _lastDayOfSelectedMonth;
     if (_selectedYear < now.year ||
         (_selectedYear == now.year && _selectedMonth < now.month)) {
@@ -2465,8 +2470,11 @@ class _EmployeeAttendanceContentState
   }
 
   DateTime get _todayDateOnly {
-    final t = DateTime.now();
-    return DateTime(t.year, t.month, t.day);
+    final date = _officialHrmsDate;
+    if (date == null) {
+      throw StateError('Official HRMS date has not loaded.');
+    }
+    return DateTime(date.year, date.month, date.day);
   }
 
   void _clampSelectedDayIfNeeded() {
@@ -2485,7 +2493,52 @@ class _EmployeeAttendanceContentState
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _initializeOfficialDate(resetSelection: true),
+    );
+  }
+
+  Future<void> _initializeOfficialDate({required bool resetSelection}) async {
+    final requestGeneration = ++_officialDateRequestGeneration;
+    if (mounted) {
+      setState(() {
+        _officialDateLoading = true;
+        _officialDateError = null;
+      });
+    }
+    try {
+      final officialDate = await TimeRecordRepo.instance.getOfficialHrmsDate();
+      if (!mounted || requestGeneration != _officialDateRequestGeneration) {
+        return;
+      }
+      final isNarrow = MediaQuery.sizeOf(context).width < 520;
+      setState(() {
+        _officialHrmsDate = officialDate;
+        _officialDateLoading = false;
+        if (resetSelection) {
+          _selectedMonth = officialDate.month;
+          _selectedYear = officialDate.year;
+          _selectedDay = isNarrow ? officialDate.day : null;
+          _mobileAttendanceMode = isNarrow ? 'today' : 'monthly';
+          _didApplyMobileDefault = isNarrow;
+        }
+      });
+      await _load(forceRefresh: resetSelection);
+    } catch (error) {
+      if (!mounted || requestGeneration != _officialDateRequestGeneration) {
+        return;
+      }
+      final message = userFacingApiError(error);
+      setState(() {
+        _officialDateLoading = false;
+        _officialDateError = message;
+      });
+      if (_officialHrmsDate != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not refresh official date: $message')),
+        );
+      }
+    }
   }
 
   Future<void> _load({bool forceRefresh = false}) async {
@@ -2584,6 +2637,77 @@ class _EmployeeAttendanceContentState
     );
   }
 
+  Widget _buildOfficialDateBootstrap() {
+    final error = _officialDateError;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.showPageHeader) ...[
+          Text(
+            'My Attendance',
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'View your time-in/out records.',
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: AppTheme.dashPanelOf(context),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+          ),
+          child: error == null
+              ? const Center(child: CircularProgressIndicator())
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.error_outline_rounded,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Could not load the official HRMS date.',
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      error,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton.icon(
+                      onPressed: () =>
+                          _initializeOfficialDate(resetSelection: true),
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Retry'),
+                    ),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
   static String _formatTime(DateTime? dt) {
     if (dt == null) return '—';
     final local = dt.toLocal();
@@ -2636,14 +2760,7 @@ class _EmployeeAttendanceContentState
   }
 
   void _selectToday() {
-    final today = _todayDateOnly;
-    setState(() {
-      _mobileAttendanceMode = 'today';
-      _selectedMonth = today.month;
-      _selectedYear = today.year;
-      _selectedDay = today.day;
-    });
-    _load();
+    unawaited(_initializeOfficialDate(resetSelection: true));
   }
 
   void _applyMobileDefaultIfNeeded() {
@@ -2827,6 +2944,7 @@ class _EmployeeAttendanceContentState
   @override
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
+    if (_officialHrmsDate == null) return _buildOfficialDateBootstrap();
     final today = _todayDateOnly;
     final visibleRecords = List.of(dtr.timeRecords)
       ..removeWhere((r) {
@@ -2965,7 +3083,7 @@ class _EmployeeAttendanceContentState
                   (i) => Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      '${DateTime.now().year - 5 + i}',
+                      '${_todayDateOnly.year - 5 + i}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppTheme.dashFieldTextStyle(
@@ -2974,7 +3092,7 @@ class _EmployeeAttendanceContentState
                     ),
                   ),
                 ),
-                items: List.generate(11, (i) => DateTime.now().year - 5 + i)
+                items: List.generate(11, (i) => _todayDateOnly.year - 5 + i)
                     .map((y) => DropdownMenuItem(value: y, child: Text('$y')))
                     .toList(),
                 onChanged: (v) {
@@ -3065,16 +3183,9 @@ class _EmployeeAttendanceContentState
             );
 
             final refreshButton = IconButton(
-              onPressed: () {
-                final now = DateTime.now();
-                setState(() {
-                  _mobileAttendanceMode = isNarrow ? 'today' : 'monthly';
-                  _selectedMonth = now.month;
-                  _selectedYear = now.year;
-                  _selectedDay = isNarrow ? now.day : null;
-                });
-                _load();
-              },
+              onPressed: _officialDateLoading
+                  ? null
+                  : () => _initializeOfficialDate(resetSelection: true),
               icon: Icon(
                 Icons.refresh_rounded,
                 size: 22,

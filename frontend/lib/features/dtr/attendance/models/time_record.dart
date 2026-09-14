@@ -505,6 +505,21 @@ class TimeRecordRepo {
   TimeRecordRepo._();
   static final TimeRecordRepo instance = TimeRecordRepo._();
 
+  /// Official HRMS calendar date, resolved by the backend in HRMS_TIMEZONE.
+  Future<DateTime> getOfficialHrmsDate() async {
+    final response = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/dtr-daily-summary/report-years',
+    );
+    final rawDate = response.data?['official_date']?.toString();
+    final parsed = rawDate == null ? null : DateTime.tryParse(rawDate);
+    if (parsed == null) {
+      throw const FormatException(
+        'The server returned an invalid official HRMS date.',
+      );
+    }
+    return DateTime(parsed.year, parsed.month, parsed.day);
+  }
+
   /// List time records for admin (all users). Uses GET /api/dtr-daily-summary.
   ///
   /// Date-range responses are paginated by the backend. Use [listPageForAdmin]

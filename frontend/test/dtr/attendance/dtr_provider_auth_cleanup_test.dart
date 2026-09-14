@@ -11,7 +11,7 @@ import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(() {
+  setUpAll(() {
     FlutterSecureStorage.setMockInitialValues({});
     ApiClient.instance.init();
   });
