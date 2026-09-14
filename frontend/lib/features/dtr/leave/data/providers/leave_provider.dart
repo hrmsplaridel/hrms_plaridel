@@ -36,6 +36,11 @@ class LeaveProvider extends ChangeNotifier {
     : _repository = repository;
 
   final LeaveRepository _repository;
+  int _authGeneration = 0;
+  bool _disposed = false;
+
+  bool _isCurrentAuthGeneration(int generation) =>
+      !_disposed && generation == _authGeneration;
 
   /// Called after successful leave API actions so the UI can refresh in-app notifications (badge).
   final void Function()? onMutation;
@@ -220,15 +225,36 @@ class LeaveProvider extends ChangeNotifier {
   }
 
   /// Called by the proxy provider whenever [AuthProvider] changes.
-  /// Flushes all caches when the authenticated user switches so stale
-  /// department-head status (and balances/requests) from a previous session
-  /// can never bleed into the new user's view.
   String? _lastKnownUserId;
   void onAuthUserChanged(String? newUserId) {
-    if (_lastKnownUserId != null && _lastKnownUserId != newUserId) {
-      invalidateCachedLeaveData(notify: false);
-    }
-    _lastKnownUserId = newUserId;
+    if (_disposed) return;
+    final normalizedUserId = _normalize(newUserId);
+    if (_lastKnownUserId == normalizedUserId) return;
+
+    _authGeneration += 1;
+    _lastKnownUserId = normalizedUserId;
+    _resetSessionState();
+    notifyListeners();
+  }
+
+  void _resetSessionState() {
+    invalidateCachedLeaveData(notify: false);
+    _requests = [];
+    _balances = [];
+    _selectedRequest = null;
+    _loading = false;
+    _submitting = false;
+    _reviewing = false;
+    _error = null;
+    _filterStatus = null;
+    _filterLeaveType = null;
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _authGeneration += 1;
+    super.dispose();
   }
 
   Future<List<LeaveRequest>> _getMyRequestsCached(
@@ -236,12 +262,16 @@ class LeaveProvider extends ChangeNotifier {
     LeaveRequestStatus? status,
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     final key = _myRequestsKey(userId, status);
     final cached = forceRefresh
         ? null
         : _readListCache(_requestCache, key, _requestCacheTtl);
     if (cached != null) return cached;
     final fresh = await _repository.listMyRequests(userId, status: status);
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      return const <LeaveRequest>[];
+    }
     _writeListCache(_requestCache, key, fresh);
     return List<LeaveRequest>.from(fresh);
   }
@@ -250,6 +280,7 @@ class LeaveProvider extends ChangeNotifier {
     String userId, {
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     final key = _normalize(userId);
     if (key == null) return const <LeaveBalance>[];
     final cached = forceRefresh
@@ -257,6 +288,9 @@ class LeaveProvider extends ChangeNotifier {
         : _readListCache(_balanceCache, key, _balanceCacheTtl);
     if (cached != null) return cached;
     final fresh = await _repository.getBalancesForUser(key);
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      return const <LeaveBalance>[];
+    }
     _writeListCache(_balanceCache, key, fresh);
     return List<LeaveBalance>.from(fresh);
   }
@@ -266,11 +300,15 @@ class LeaveProvider extends ChangeNotifier {
     String userId, {
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     try {
-      return await _getBalancesForUserCached(
+      final balances = await _getBalancesForUserCached(
         userId,
         forceRefresh: forceRefresh,
       );
+      return _isCurrentAuthGeneration(authGeneration)
+          ? balances
+          : const <LeaveBalance>[];
     } catch (_) {
       return [];
     }
@@ -281,27 +319,35 @@ class LeaveProvider extends ChangeNotifier {
     LeaveRequestStatus? status,
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      _requests = await _getMyRequestsCached(
+      final requests = await _getMyRequestsCached(
         userId,
         status: status,
         forceRefresh: forceRefresh,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      _requests = requests;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _requests = [];
       _error = e.toString();
+    } finally {
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _loading = false;
+        notifyListeners();
+      }
     }
-    _loading = false;
-    notifyListeners();
   }
 
   Future<void> loadRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -316,19 +362,24 @@ class LeaveProvider extends ChangeNotifier {
         _requests = cached;
       } else {
         final fresh = await _repository.listRequests(query: query);
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
         _writeListCache(_requestCache, key, fresh);
         _requests = List<LeaveRequest>.from(fresh);
       }
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       // Keep the currently displayed queue if a background refresh fails.
       _error = e.toString();
     } finally {
-      _loading = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _loading = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> loadPendingRequests({bool forceRefresh = false}) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -342,18 +393,24 @@ class LeaveProvider extends ChangeNotifier {
         _requests = cached;
       } else {
         final fresh = await _repository.listPendingRequests();
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
         _writeListCache(_requestCache, key, fresh);
         _requests = List<LeaveRequest>.from(fresh);
       }
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _requests = [];
       _error = e.toString();
+    } finally {
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _loading = false;
+        notifyListeners();
+      }
     }
-    _loading = false;
-    notifyListeners();
   }
 
   Future<void> loadBalances(String userId, {bool forceRefresh = false}) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -362,19 +419,25 @@ class LeaveProvider extends ChangeNotifier {
         userId,
         forceRefresh: forceRefresh,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _balances = _filterDisplayBalances(raw);
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _balances = [];
       _error = e.toString();
+    } finally {
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _loading = false;
+        notifyListeners();
+      }
     }
-    _loading = false;
-    notifyListeners();
   }
 
   Future<void> loadMyLeaveData(
     String userId, {
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -389,39 +452,52 @@ class LeaveProvider extends ChangeNotifier {
         forceRefresh: forceRefresh,
       );
       final results = await Future.wait([requestsFuture, balancesFuture]);
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _requests = results[0] as List<LeaveRequest>;
       _balances = _filterDisplayBalances(results[1] as List<LeaveBalance>);
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _requests = [];
       _balances = [];
       _error = e.toString();
+    } finally {
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _loading = false;
+        notifyListeners();
+      }
     }
-    _loading = false;
-    notifyListeners();
   }
 
   Future<LeaveRequest?> loadRequestById(String requestId) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      _selectedRequest = await _repository.getRequestById(requestId);
+      final selected = await _repository.getRequestById(requestId);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
+      _selectedRequest = selected;
       return _selectedRequest;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = null;
       _error = e.toString();
       return null;
     } finally {
-      _loading = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _loading = false;
+        notifyListeners();
+      }
     }
   }
 
   /// Refetches a request by ID without setting loading state (e.g. for admin
   /// to get latest attachment). Updates _selectedRequest and upserts into list.
   Future<LeaveRequest?> refreshRequestById(String requestId) async {
+    final authGeneration = _authGeneration;
     try {
       final fresh = await _repository.getRequestById(requestId);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       if (fresh != null) {
         _selectedRequest = fresh;
         _upsertRequest(fresh);
@@ -434,35 +510,43 @@ class LeaveProvider extends ChangeNotifier {
   }
 
   Future<LeaveRequest?> saveDraft(LeaveRequest request) async {
+    final authGeneration = _authGeneration;
     _submitting = true;
     _error = null;
     notifyListeners();
     try {
       final saved = await _repository.saveDraft(request);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       invalidateCachedLeaveData();
       _selectedRequest = saved;
       _upsertRequest(saved);
       return saved;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e.toString();
       return null;
     } finally {
-      _submitting = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _submitting = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<LeaveRequest?> submitRequest(LeaveRequest request) async {
+    final authGeneration = _authGeneration;
     _submitting = true;
     _error = null;
     notifyListeners();
     try {
       final saved = await _repository.submitRequest(request);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = saved;
       _upsertRequest(saved);
       _notifyMutation();
       return saved;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error =
           e is Exception &&
               e.toString().replaceFirst('Exception: ', '').isNotEmpty
@@ -470,8 +554,10 @@ class LeaveProvider extends ChangeNotifier {
           : e.toString();
       return null;
     } finally {
-      _submitting = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _submitting = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -480,6 +566,7 @@ class LeaveProvider extends ChangeNotifier {
     required List<int> fileBytes,
     required String fileName,
   }) async {
+    final authGeneration = _authGeneration;
     _submitting = true;
     _error = null;
     notifyListeners();
@@ -489,11 +576,13 @@ class LeaveProvider extends ChangeNotifier {
         fileBytes: fileBytes,
         fileName: fileName,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = saved;
       _upsertRequest(saved);
       _notifyMutation();
       return saved;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error =
           e is Exception &&
               e.toString().replaceFirst('Exception: ', '').isNotEmpty
@@ -501,27 +590,34 @@ class LeaveProvider extends ChangeNotifier {
           : e.toString();
       return null;
     } finally {
-      _submitting = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _submitting = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<LeaveRequest?> updateRequest(LeaveRequest request) async {
+    final authGeneration = _authGeneration;
     _submitting = true;
     _error = null;
     notifyListeners();
     try {
       final saved = await _repository.updateRequest(request);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = saved;
       _upsertRequest(saved);
       _notifyMutation();
       return saved;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e.toString();
       return null;
     } finally {
-      _submitting = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _submitting = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -530,6 +626,7 @@ class LeaveProvider extends ChangeNotifier {
     required String userId,
     String? reason,
   }) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
@@ -539,27 +636,33 @@ class LeaveProvider extends ChangeNotifier {
         userId: userId,
         reason: reason,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
       _upsertRequest(updated);
       _notifyMutation();
       return updated;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<LeaveRequest?> approveRequest(LeaveApprovalInput input) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
       final updated = await _repository.approveRequest(input);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       final merged = updated.copyWith(
         reviewerName: updated.reviewerName ?? input.reviewerName,
         reviewerRole: updated.reviewerRole ?? input.reviewerRole,
@@ -570,23 +673,28 @@ class LeaveProvider extends ChangeNotifier {
       _notifyMutation();
       return merged;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
   /// #15: Revoke approval — reverses balance deduction + clears DTR entries.
   Future<LeaveRequest?> revokeApproval(LeaveReviewDecisionInput input) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
       final updated = await _repository.revokeApproval(input);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       final merged = updated.copyWith(
         reviewerName: updated.reviewerName ?? input.reviewerName,
         reviewerRole: updated.reviewerRole ?? input.reviewerRole,
@@ -597,22 +705,27 @@ class LeaveProvider extends ChangeNotifier {
       _notifyMutation();
       return merged;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<LeaveRequest?> returnRequest(LeaveReviewDecisionInput input) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
       final updated = await _repository.returnRequest(input);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       final merged = updated.copyWith(
         reviewerName: updated.reviewerName ?? input.reviewerName,
         reviewerRole: updated.reviewerRole ?? input.reviewerRole,
@@ -623,20 +736,25 @@ class LeaveProvider extends ChangeNotifier {
       _notifyMutation();
       return merged;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<LeaveRequest?> rejectRequest(LeaveReviewDecisionInput input) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
       final updated = await _repository.rejectRequest(input);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       final merged = updated.copyWith(
         reviewerName: updated.reviewerName ?? input.reviewerName,
         reviewerRole: updated.reviewerRole ?? input.reviewerRole,
@@ -647,93 +765,116 @@ class LeaveProvider extends ChangeNotifier {
       _notifyMutation();
       return merged;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<ForcedLeaveDeductionResult?> applyForcedLeaveDeduction(
     ForcedLeaveDeductionInput input,
   ) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
       final result = await _repository.applyForcedLeaveDeduction(input);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _notifyMutation();
       return result;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<MonthlyLeaveAccrualResult?> runMonthlyAccrual(
     MonthlyLeaveAccrualInput input,
   ) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
       final result = await _repository.runMonthlyAccrual(input);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       if (!input.dryRun) _notifyMutation();
       return result;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<YearEndForcedLeaveComplianceResult?> getYearEndForcedLeaveCompliance(
     int year,
   ) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
-      return await _repository.getYearEndForcedLeaveCompliance(year);
+      final result = await _repository.getYearEndForcedLeaveCompliance(year);
+      return _isCurrentAuthGeneration(authGeneration) ? result : null;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<YearEndForcedLeaveApplyResult?> applyYearEndForcedLeaveDeductions(
     YearEndForcedLeaveApplyInput input,
   ) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
       final result = await _repository.applyYearEndForcedLeaveDeductions(input);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       if (!input.dryRun) _notifyMutation();
       return result;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -745,6 +886,7 @@ class LeaveProvider extends ChangeNotifier {
     required String remarks,
     DateTime? asOfDate,
   }) async {
+    final authGeneration = _authGeneration;
     _submitting = true;
     _error = null;
     notifyListeners();
@@ -756,16 +898,20 @@ class LeaveProvider extends ChangeNotifier {
         remarks: remarks,
         asOfDate: asOfDate,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _notifyMutation();
       return saved;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _submitting = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _submitting = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -774,6 +920,7 @@ class LeaveProvider extends ChangeNotifier {
     required List<int> fileBytes,
     required String fileName,
   }) async {
+    final authGeneration = _authGeneration;
     _submitting = true;
     _error = null;
     notifyListeners();
@@ -783,41 +930,52 @@ class LeaveProvider extends ChangeNotifier {
         fileBytes: fileBytes,
         fileName: fileName,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       invalidateCachedLeaveData();
       _selectedRequest = updated;
       _upsertRequest(updated);
       return updated;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e.toString();
       return null;
     } finally {
-      _submitting = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _submitting = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<LeaveRequest?> removeAttachment(String requestId) async {
+    final authGeneration = _authGeneration;
     _submitting = true;
     _error = null;
     notifyListeners();
     try {
       final updated = await _repository.removeAttachment(requestId);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       invalidateCachedLeaveData();
       _selectedRequest = updated;
       _upsertRequest(updated);
       return updated;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e.toString();
       return null;
     } finally {
-      _submitting = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _submitting = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<List<int>?> getAttachmentBytes(String requestId) async {
+    final authGeneration = _authGeneration;
     try {
-      return await _repository.getAttachmentBytes(requestId);
+      final bytes = await _repository.getAttachmentBytes(requestId);
+      return _isCurrentAuthGeneration(authGeneration) ? bytes : null;
     } catch (_) {
       return null;
     }
@@ -841,6 +999,7 @@ class LeaveProvider extends ChangeNotifier {
 
   /// Check if the current user is a department head.
   Future<bool> checkIsDepartmentHead({bool forceRefresh = false}) async {
+    final authGeneration = _authGeneration;
     final cached = _deptHeadCheckCache;
     if (!forceRefresh && cached != null && cached.isFresh(_referenceCacheTtl)) {
       final cachedValue = Map<String, dynamic>.from(cached.value);
@@ -848,12 +1007,15 @@ class LeaveProvider extends ChangeNotifier {
       _deptHeadCheck = cachedValue;
       if (changed) {
         await Future<void>.delayed(Duration.zero);
+        if (!_isCurrentAuthGeneration(authGeneration)) return false;
         notifyListeners();
       }
       return isDeptHead;
     }
     try {
-      _deptHeadCheck = await _repository.checkIsDepartmentHead();
+      final check = await _repository.checkIsDepartmentHead();
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
+      _deptHeadCheck = check;
       _deptHeadCheckCache = _LeaveCacheEntry<Map<String, dynamic>>(
         Map<String, dynamic>.unmodifiable(_deptHeadCheck!),
         DateTime.now(),
@@ -861,6 +1023,7 @@ class LeaveProvider extends ChangeNotifier {
       notifyListeners();
       return isDeptHead;
     } catch (_) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _deptHeadCheck = null;
       notifyListeners();
       return false;
@@ -872,6 +1035,7 @@ class LeaveProvider extends ChangeNotifier {
     LeaveRequestQuery query = const LeaveRequestQuery(),
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -888,84 +1052,103 @@ class LeaveProvider extends ChangeNotifier {
         final fresh = await _repository.listDepartmentHeadRequests(
           query: query,
         );
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
         _writeListCache(_requestCache, key, fresh);
         _requests = List<LeaveRequest>.from(fresh);
       }
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       // Keep the currently displayed queue if a background refresh fails.
       _error = e.toString();
     } finally {
-      _loading = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _loading = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<LeaveRequest?> departmentHeadApprove(
     LeaveReviewDecisionInput input,
   ) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
       final updated = await _repository.departmentHeadApprove(input);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
       _upsertRequest(updated);
       _notifyMutation();
       return updated;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<LeaveRequest?> departmentHeadReject(
     LeaveReviewDecisionInput input,
   ) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
       final updated = await _repository.departmentHeadReject(input);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
       _upsertRequest(updated);
       _notifyMutation();
       return updated;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<LeaveRequest?> departmentHeadReturn(
     LeaveReviewDecisionInput input,
   ) async {
+    final authGeneration = _authGeneration;
     _reviewing = true;
     _error = null;
     notifyListeners();
     try {
       final updated = await _repository.departmentHeadReturn(input);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
       _upsertRequest(updated);
       _notifyMutation();
       return updated;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e is Exception && e.toString().startsWith('Exception: ')
           ? e.toString().replaceFirst('Exception: ', '')
           : e.toString();
       return null;
     } finally {
-      _reviewing = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _reviewing = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -974,6 +1157,7 @@ class LeaveProvider extends ChangeNotifier {
     LeaveLedgerQuery query, {
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     final key = _ledgerKey(query);
     final cached = _ledgerCache[key];
     if (!forceRefresh && cached != null && cached.isFresh(_ledgerCacheTtl)) {
@@ -990,6 +1174,18 @@ class LeaveProvider extends ChangeNotifier {
       );
     }
     final fresh = await _repository.getLeaveLedger(query);
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      return LeaveLedgerResult(
+        total: 0,
+        limit: query.limit,
+        offset: query.offset,
+        rows: const [],
+        summaryEarned: 0,
+        summaryUsed: 0,
+        summaryPending: 0,
+        summaryAdjusted: 0,
+      );
+    }
     _ledgerCache[key] = _LeaveCacheEntry<LeaveLedgerResult>(
       LeaveLedgerResult(
         total: fresh.total,
