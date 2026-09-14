@@ -13,6 +13,7 @@ import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_source_badge.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_main.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_dashboard_screen.dart';
@@ -1389,15 +1390,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
   }
 }
 
-String _formatTime(DateTime? dt) {
-  if (dt == null) return '—';
-  final local = dt.toLocal();
-  final h = local.hour;
-  final m = local.minute;
-  final ampm = h >= 12 ? 'PM' : 'AM';
-  final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-  return '$h12:${m.toString().padLeft(2, '0')} $ampm';
-}
+String _formatTime(DateTime? dt) => formatOfficialPhilippineTime(dt);
 
 class _BiometricAttendanceCard extends StatelessWidget {
   const _BiometricAttendanceCard({this.compact = false});
@@ -2708,15 +2701,7 @@ class _EmployeeAttendanceContentState
     );
   }
 
-  static String _formatTime(DateTime? dt) {
-    if (dt == null) return '—';
-    final local = dt.toLocal();
-    final h = local.hour;
-    final m = local.minute;
-    final ampm = h >= 12 ? 'PM' : 'AM';
-    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-    return '$h12:${m.toString().padLeft(2, '0')} $ampm';
-  }
+  static String _formatTime(DateTime? dt) => formatOfficialPhilippineTime(dt);
 
   static String _formatTimeWithLocator(
     TimeRecord r,
@@ -3381,10 +3366,10 @@ class _EmployeeAttendanceContentState
                           final i = entry.key;
                           final isLastRow = i == visibleRecords.length - 1;
                           final r = entry.value;
-                          final timeIn = r.timeIn?.toLocal();
-                          final breakOut = r.breakOut?.toLocal();
-                          final breakIn = r.breakIn?.toLocal();
-                          final timeOut = r.timeOut?.toLocal();
+                          final timeIn = r.timeIn;
+                          final breakOut = r.breakOut;
+                          final breakIn = r.breakIn;
+                          final timeOut = r.timeOut;
                           final remark = getAttendanceRemark(r);
                           final lateStr = formatLateMinutes(r);
                           final underStr = formatUndertimeMinutes(r);

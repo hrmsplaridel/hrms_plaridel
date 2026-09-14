@@ -28,22 +28,10 @@ class EmployeeAttendanceMobileList extends StatelessWidget {
         for (var i = 0; i < records.length; i++) ...[
           EmployeeAttendanceMobileCard(
             dateLabel: formatDate(records[i].recordDate),
-            amIn: formatTime(records[i], records[i].timeIn?.toLocal(), 'AM IN'),
-            amOut: formatTime(
-              records[i],
-              records[i].breakOut?.toLocal(),
-              'AM OUT',
-            ),
-            pmIn: formatTime(
-              records[i],
-              records[i].breakIn?.toLocal(),
-              'PM IN',
-            ),
-            pmOut: formatTime(
-              records[i],
-              records[i].timeOut?.toLocal(),
-              'PM OUT',
-            ),
+            amIn: formatTime(records[i], records[i].timeIn, 'AM IN'),
+            amOut: formatTime(records[i], records[i].breakOut, 'AM OUT'),
+            pmIn: formatTime(records[i], records[i].breakIn, 'PM IN'),
+            pmOut: formatTime(records[i], records[i].timeOut, 'PM OUT'),
             late: formatLateMinutes(records[i]),
             undertime: formatUndertimeMinutes(records[i]),
             remark: getAttendanceRemark(records[i]),
