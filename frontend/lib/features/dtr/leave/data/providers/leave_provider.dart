@@ -455,7 +455,6 @@ class LeaveProvider extends ChangeNotifier {
     try {
       final requestsFuture = _getMyRequestsCached(
         userId,
-        status: _filterStatus,
         forceRefresh: forceRefresh,
         shouldAcceptResult: isCurrentLoad,
       );
