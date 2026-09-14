@@ -5,14 +5,6 @@ void main() {
   final officialDate = DateTime(2026, 9, 14);
 
   test('attendance period options exclude future years and months', () {
-    expect(selectableEmployeeAttendanceYears(officialDate), [
-      2021,
-      2022,
-      2023,
-      2024,
-      2025,
-      2026,
-    ]);
     expect(selectableEmployeeAttendanceMonths(2026, officialDate), [
       1,
       2,

@@ -2441,6 +2441,7 @@ class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent>
   bool _didApplyMobileDefault = false;
   String _mobileAttendanceMode = 'today';
   DateTime? _officialHrmsDate;
+  List<int> _availableAttendanceYears = const [];
   bool _officialDateLoading = true;
   String? _officialDateError;
   int _officialDateRequestGeneration = 0;
@@ -2538,13 +2539,16 @@ class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent>
       });
     }
     try {
-      final officialDate = await TimeRecordRepo.instance.getOfficialHrmsDate();
+      final reportPeriod = await TimeRecordRepo.instance
+          .getAttendanceReportPeriod();
       if (!mounted || requestGeneration != _officialDateRequestGeneration) {
         return;
       }
+      final officialDate = reportPeriod.officialDate;
       final isNarrow = MediaQuery.sizeOf(context).width < 520;
       setState(() {
         _officialHrmsDate = officialDate;
+        _availableAttendanceYears = reportPeriod.years;
         _officialDateLoading = false;
         if (resetSelection) {
           _selectedMonth = officialDate.month;
@@ -2552,6 +2556,11 @@ class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent>
           _selectedDay = isNarrow ? officialDate.day : null;
           _mobileAttendanceMode = isNarrow ? 'today' : 'monthly';
           _didApplyMobileDefault = isNarrow;
+        } else if (!reportPeriod.years.contains(_selectedYear)) {
+          _selectedMonth = officialDate.month;
+          _selectedYear = officialDate.year;
+          _selectedDay = isNarrow ? officialDate.day : null;
+          _mobileAttendanceMode = isNarrow ? 'today' : 'monthly';
         } else if (_selectedDay != null && _mobileAttendanceMode == 'today') {
           _selectedMonth = officialDate.month;
           _selectedYear = officialDate.year;
@@ -2747,7 +2756,7 @@ class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent>
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'Could not load the official HRMS date.',
+                      'Could not load attendance dates.',
                       style: TextStyle(
                         color: AppTheme.dashTextPrimaryOf(context),
                         fontWeight: FontWeight.w700,
@@ -3060,9 +3069,7 @@ class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent>
               _selectedYear,
               _todayDateOnly,
             );
-            final selectableYears = selectableEmployeeAttendanceYears(
-              _todayDateOnly,
-            );
+            final selectableYears = _availableAttendanceYears;
             const fieldPadding = EdgeInsets.symmetric(
               horizontal: 12,
               vertical: 8,

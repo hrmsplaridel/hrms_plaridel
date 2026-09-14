@@ -15,22 +15,20 @@ void main() {
     ApiClient.instance.init();
   });
 
-  test(
-    'official HRMS date is parsed as a date without device conversion',
-    () async {
-      ApiClient.instance.dio.httpClientAdapter = _JsonAdapter({
-        'official_date': '2026-09-14',
-        'min_year': 2020,
-        'max_year': 2026,
-        'years': [2020, 2021, 2022, 2023, 2024, 2025, 2026],
-      });
+  test('report period includes historical years and official date', () async {
+    ApiClient.instance.dio.httpClientAdapter = _JsonAdapter({
+      'official_date': '2026-09-14',
+      'min_year': 2019,
+      'max_year': 2026,
+      'years': [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026],
+    });
 
-      final date = await TimeRecordRepo.instance.getOfficialHrmsDate();
+    final period = await TimeRecordRepo.instance.getAttendanceReportPeriod();
 
-      expect(date, DateTime(2026, 9, 14));
-      expect(date.isUtc, isFalse);
-    },
-  );
+    expect(period.officialDate, DateTime(2026, 9, 14));
+    expect(period.officialDate.isUtc, isFalse);
+    expect(period.years, [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]);
+  });
 
   test('invalid official HRMS date is rejected', () async {
     ApiClient.instance.dio.httpClientAdapter = _JsonAdapter({
@@ -39,6 +37,17 @@ void main() {
 
     expect(
       TimeRecordRepo.instance.getOfficialHrmsDate(),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('missing report years are rejected', () async {
+    ApiClient.instance.dio.httpClientAdapter = _JsonAdapter({
+      'official_date': '2026-09-14',
+    });
+
+    expect(
+      TimeRecordRepo.instance.getAttendanceReportPeriod(),
       throwsA(isA<FormatException>()),
     );
   });
