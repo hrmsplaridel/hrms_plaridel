@@ -213,6 +213,63 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
+  Future<LeaveRequestPage> listMyRequestPage(
+    String userId, {
+    required int limit,
+    required int offset,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/my',
+        queryParameters: {
+          'paginated': 'true',
+          'limit': limit,
+          'offset': offset,
+        },
+      );
+      final data = res.data ?? const <String, dynamic>{};
+      final rawItems = data['items'] as List<dynamic>? ?? const [];
+      return LeaveRequestPage(
+        items: rawItems
+            .map((item) => LeaveRequest.fromJson(_asMap(item)))
+            .toList(),
+        total: (data['total'] as num?)?.toInt() ?? 0,
+        limit: (data['limit'] as num?)?.toInt() ?? limit,
+        offset: (data['offset'] as num?)?.toInt() ?? offset,
+      );
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load leave requests. Please try again.',
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<DateTime> getOfficialDate() async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/my/context',
+      );
+      final raw = res.data?['official_date']?.toString();
+      final parsed = raw == null ? null : DateTime.tryParse(raw);
+      if (parsed == null) {
+        throw Exception('The leave service returned an invalid official date.');
+      }
+      return DateTime(parsed.year, parsed.month, parsed.day);
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load the official HRMS date. Please try again.',
+        ),
+      );
+    }
+  }
+
+  @override
   Future<List<LeaveRequest>> listRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
   }) async {

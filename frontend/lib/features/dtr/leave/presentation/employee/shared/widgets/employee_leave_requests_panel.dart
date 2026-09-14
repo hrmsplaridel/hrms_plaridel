@@ -24,6 +24,11 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
     required this.loading,
     required this.error,
     required this.onRetry,
+    required this.totalRequests,
+    required this.hasMore,
+    required this.loadingMore,
+    required this.loadMoreError,
+    required this.onLoadMore,
     required this.onEdit,
     required this.onCancel,
     required this.onPrint,
@@ -33,6 +38,11 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
   final bool loading;
   final String? error;
   final VoidCallback onRetry;
+  final int totalRequests;
+  final bool hasMore;
+  final bool loadingMore;
+  final String? loadMoreError;
+  final VoidCallback onLoadMore;
   final ValueChanged<LeaveRequest> onEdit;
   final ValueChanged<LeaveRequest> onCancel;
   final ValueChanged<LeaveRequest> onPrint;
@@ -146,20 +156,46 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
             onOpenRequest: (request) => _showDetails(context, request),
           );
 
-    if (widget.error != null) {
-      return Column(
-        children: [
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (widget.error != null) ...[
           _EmployeeSectionLoadError(
             message: widget.error!,
             onRetry: widget.onRetry,
           ),
           const SizedBox(height: 12),
-          content,
         ],
-      );
-    }
-
-    return content;
+        content,
+        if (widget.loadMoreError != null) ...[
+          const SizedBox(height: 12),
+          _EmployeeSectionLoadError(
+            message: widget.loadMoreError!,
+            onRetry: widget.onLoadMore,
+          ),
+        ],
+        if (widget.loadMoreError == null &&
+            (widget.hasMore || widget.loadingMore)) ...[
+          const SizedBox(height: 16),
+          Center(
+            child: OutlinedButton.icon(
+              onPressed: widget.loadingMore ? null : widget.onLoadMore,
+              icon: widget.loadingMore
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.expand_more_rounded, size: 18),
+              label: Text(
+                widget.loadingMore
+                    ? 'Loading...'
+                    : 'Load More (${widget.requests.length} of ${widget.totalRequests})',
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
   }
 
   List<LeaveRequest> get _filteredRequests {

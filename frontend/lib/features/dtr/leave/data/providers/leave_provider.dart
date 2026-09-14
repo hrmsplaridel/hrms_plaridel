@@ -40,6 +40,7 @@ class LeaveProvider extends ChangeNotifier {
   int _myLeaveLoadGeneration = 0;
   int _myRequestsLoadGeneration = 0;
   int _myBalancesLoadGeneration = 0;
+  int _officialDateLoadGeneration = 0;
   bool _disposed = false;
 
   bool _isCurrentAuthGeneration(int generation) =>
@@ -61,10 +62,13 @@ class LeaveProvider extends ChangeNotifier {
   List<LeaveBalance> _balances = [];
   LeaveRequest? _selectedRequest;
   static const Duration _requestCacheTtl = Duration(seconds: 30);
+  static const int _myRequestsPageSize = 50;
   static const Duration _balanceCacheTtl = Duration(seconds: 60);
   static const Duration _ledgerCacheTtl = Duration(seconds: 60);
   static const Duration _referenceCacheTtl = Duration(minutes: 5);
   final Map<String, _LeaveCacheEntry<List<LeaveRequest>>> _requestCache = {};
+  final Map<String, _LeaveCacheEntry<LeaveRequestPage>> _myRequestPageCache =
+      {};
   final Map<String, _LeaveCacheEntry<List<LeaveBalance>>> _balanceCache = {};
   final Map<String, _LeaveCacheEntry<LeaveLedgerResult>> _ledgerCache = {};
   _LeaveCacheEntry<Map<String, dynamic>>? _deptHeadCheckCache;
@@ -79,6 +83,14 @@ class LeaveProvider extends ChangeNotifier {
   bool _myBalancesLoaded = false;
   String? _myRequestsError;
   String? _myBalancesError;
+  bool _myRequestsLoadingMore = false;
+  String? _myRequestsLoadMoreError;
+  int _myRequestsTotal = 0;
+  int _myRequestsNextOffset = 0;
+  bool _myRequestsHasMore = false;
+  DateTime? _officialDate;
+  bool _officialDateLoading = false;
+  String? _officialDateError;
 
   LeaveRequestStatus? _filterStatus;
   LeaveType? _filterLeaveType;
@@ -97,6 +109,13 @@ class LeaveProvider extends ChangeNotifier {
   bool get myBalancesLoaded => _myBalancesLoaded;
   String? get myRequestsError => _myRequestsError;
   String? get myBalancesError => _myBalancesError;
+  bool get myRequestsLoadingMore => _myRequestsLoadingMore;
+  String? get myRequestsLoadMoreError => _myRequestsLoadMoreError;
+  int get myRequestsTotal => _myRequestsTotal;
+  bool get myRequestsHasMore => _myRequestsHasMore;
+  DateTime? get officialDate => _officialDate;
+  bool get officialDateLoading => _officialDateLoading;
+  String? get officialDateError => _officialDateError;
 
   LeaveRequestStatus? get filterStatus => _filterStatus;
   LeaveType? get filterLeaveType => _filterLeaveType;
@@ -108,8 +127,8 @@ class LeaveProvider extends ChangeNotifier {
       _requests.where((r) => r.status == LeaveRequestStatus.approved).toList();
 
   List<LeaveRequest> get upcomingApprovedRequests {
-    final today = DateTime.now();
-    final startOfToday = DateTime(today.year, today.month, today.day);
+    final startOfToday = _officialDate;
+    if (startOfToday == null) return const [];
     return approvedRequests.where((r) {
       final start = r.startDate;
       if (start == null) return false;
@@ -204,6 +223,10 @@ class LeaveProvider extends ChangeNotifier {
     return ['my', _normalize(userId) ?? '', status?.value ?? ''].join('|');
   }
 
+  static String _myRequestPageKey(String userId, int limit, int offset) {
+    return ['my-page', _normalize(userId) ?? '', limit, offset].join('|');
+  }
+
   static String _ledgerKey(LeaveLedgerQuery query) {
     return [
       _normalize(query.userId) ?? '',
@@ -241,6 +264,7 @@ class LeaveProvider extends ChangeNotifier {
 
   void invalidateCachedLeaveData({bool notify = false}) {
     _requestCache.clear();
+    _myRequestPageCache.clear();
     _balanceCache.clear();
     _ledgerCache.clear();
     _deptHeadCheckCache = null;
@@ -265,6 +289,7 @@ class LeaveProvider extends ChangeNotifier {
     _myLeaveLoadGeneration += 1;
     _myRequestsLoadGeneration += 1;
     _myBalancesLoadGeneration += 1;
+    _officialDateLoadGeneration += 1;
     invalidateCachedLeaveData(notify: false);
     _requests = [];
     _balances = [];
@@ -279,6 +304,14 @@ class LeaveProvider extends ChangeNotifier {
     _myBalancesLoaded = false;
     _myRequestsError = null;
     _myBalancesError = null;
+    _myRequestsLoadingMore = false;
+    _myRequestsLoadMoreError = null;
+    _myRequestsTotal = 0;
+    _myRequestsNextOffset = 0;
+    _myRequestsHasMore = false;
+    _officialDate = null;
+    _officialDateLoading = false;
+    _officialDateError = null;
     _filterStatus = null;
     _filterLeaveType = null;
   }
@@ -309,6 +342,41 @@ class LeaveProvider extends ChangeNotifier {
     }
     _writeListCache(_requestCache, key, fresh);
     return List<LeaveRequest>.from(fresh);
+  }
+
+  Future<LeaveRequestPage> _getMyRequestPageCached(
+    String userId, {
+    required int limit,
+    required int offset,
+    bool forceRefresh = false,
+    bool Function()? shouldAcceptResult,
+  }) async {
+    final authGeneration = _authGeneration;
+    final key = _myRequestPageKey(userId, limit, offset);
+    final cached = forceRefresh ? null : _myRequestPageCache[key];
+    if (cached != null && cached.isFresh(_requestCacheTtl)) {
+      return cached.value;
+    }
+    final fresh = await _repository.listMyRequestPage(
+      userId,
+      limit: limit,
+      offset: offset,
+    );
+    if (!_isCurrentAuthGeneration(authGeneration) ||
+        (shouldAcceptResult != null && !shouldAcceptResult())) {
+      return const LeaveRequestPage(items: [], total: 0, limit: 0, offset: 0);
+    }
+    final cachedPage = LeaveRequestPage(
+      items: List<LeaveRequest>.unmodifiable(fresh.items),
+      total: fresh.total,
+      limit: fresh.limit,
+      offset: fresh.offset,
+    );
+    _myRequestPageCache[key] = _LeaveCacheEntry<LeaveRequestPage>(
+      cachedPage,
+      DateTime.now(),
+    );
+    return cachedPage;
   }
 
   Future<List<LeaveBalance>> _getBalancesForUserCached(
@@ -487,10 +555,40 @@ class LeaveProvider extends ChangeNotifier {
       await Future.wait([
         loadMyLeaveRequests(userId, forceRefresh: forceRefresh),
         loadMyLeaveBalances(userId, forceRefresh: forceRefresh),
+        loadOfficialDate(forceRefresh: forceRefresh),
       ]);
     } finally {
       if (isCurrentLoad()) {
         _loading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> loadOfficialDate({bool forceRefresh = false}) async {
+    if (!forceRefresh && _officialDate != null) return;
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_officialDateLoadGeneration;
+    bool isCurrentLoad() =>
+        _isCurrentAuthGeneration(authGeneration) &&
+        loadGeneration == _officialDateLoadGeneration;
+
+    _officialDateLoading = true;
+    _officialDateError = null;
+    notifyListeners();
+    try {
+      final date = await _repository.getOfficialDate();
+      if (!isCurrentLoad()) return;
+      _officialDate = DateTime(date.year, date.month, date.day);
+    } catch (e) {
+      if (!isCurrentLoad()) return;
+      _officialDateError = _loadErrorMessage(
+        e,
+        'Unable to load the official HRMS date. Please try again.',
+      );
+    } finally {
+      if (isCurrentLoad()) {
+        _officialDateLoading = false;
         notifyListeners();
       }
     }
@@ -508,15 +606,21 @@ class LeaveProvider extends ChangeNotifier {
 
     _myRequestsLoading = true;
     _myRequestsError = null;
+    _myRequestsLoadMoreError = null;
     notifyListeners();
     try {
-      final requests = await _getMyRequestsCached(
+      final page = await _getMyRequestPageCached(
         userId,
+        limit: _myRequestsPageSize,
+        offset: 0,
         forceRefresh: forceRefresh,
         shouldAcceptResult: isCurrentLoad,
       );
       if (!isCurrentLoad()) return;
-      _requests = requests;
+      _requests = List<LeaveRequest>.from(page.items);
+      _myRequestsTotal = page.total;
+      _myRequestsNextOffset = page.offset + page.items.length;
+      _myRequestsHasMore = page.hasMore;
       _myRequestsLoaded = true;
     } catch (e) {
       if (!isCurrentLoad()) return;
@@ -527,6 +631,59 @@ class LeaveProvider extends ChangeNotifier {
     } finally {
       if (isCurrentLoad()) {
         _myRequestsLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> loadMoreMyLeaveRequests(String userId) async {
+    if (_myRequestsLoadingMore || !_myRequestsHasMore) return;
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_myRequestsLoadGeneration;
+    bool isCurrentLoad() =>
+        _isCurrentAuthGeneration(authGeneration) &&
+        loadGeneration == _myRequestsLoadGeneration;
+
+    _myRequestsLoadingMore = true;
+    _myRequestsLoadMoreError = null;
+    notifyListeners();
+    try {
+      final page = await _getMyRequestPageCached(
+        userId,
+        limit: _myRequestsPageSize,
+        offset: _myRequestsNextOffset,
+        shouldAcceptResult: isCurrentLoad,
+      );
+      if (!isCurrentLoad()) return;
+
+      final merged = List<LeaveRequest>.from(_requests);
+      final indexesById = <String, int>{
+        for (var index = 0; index < merged.length; index++)
+          if ((merged[index].id ?? '').isNotEmpty) merged[index].id!: index,
+      };
+      for (final request in page.items) {
+        final id = request.id;
+        final existingIndex = id == null ? null : indexesById[id];
+        if (existingIndex == null) {
+          merged.add(request);
+          if (id != null && id.isNotEmpty) indexesById[id] = merged.length - 1;
+        } else {
+          merged[existingIndex] = request;
+        }
+      }
+      _requests = merged;
+      _myRequestsTotal = page.total;
+      _myRequestsNextOffset = page.offset + page.items.length;
+      _myRequestsHasMore = page.hasMore;
+    } catch (e) {
+      if (!isCurrentLoad()) return;
+      _myRequestsLoadMoreError = _loadErrorMessage(
+        e,
+        'Unable to load more leave requests. Please try again.',
+      );
+    } finally {
+      if (isCurrentLoad()) {
+        _myRequestsLoadingMore = false;
         notifyListeners();
       }
     }

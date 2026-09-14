@@ -9,18 +9,18 @@ class EmployeeLeaveMobileSummaryStrip extends StatelessWidget {
     required this.pendingCount,
     required this.totalPendingDays,
     required this.nextApproved,
-    required this.requestsAvailable,
+    required this.nextApprovedAvailable,
   });
 
   final double? totalAvailable;
   final int? pendingCount;
   final double? totalPendingDays;
   final LeaveRequest? nextApproved;
-  final bool requestsAvailable;
+  final bool nextApprovedAvailable;
 
   @override
   Widget build(BuildContext context) {
-    final nextLabel = requestsAvailable
+    final nextLabel = nextApprovedAvailable
         ? nextApproved?.leaveTypeLabel ?? 'None'
         : 'Unavailable';
 

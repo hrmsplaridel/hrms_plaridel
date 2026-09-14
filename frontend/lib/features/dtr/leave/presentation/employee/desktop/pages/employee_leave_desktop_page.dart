@@ -113,6 +113,12 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
     );
   }
 
+  Future<void> _loadMoreRequests() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) return;
+    await context.read<LeaveProvider>().loadMoreMyLeaveRequests(userId);
+  }
+
   Future<void> _retryBalances() async {
     final userId = _currentUserId;
     if (userId == null || userId.isEmpty) return;
@@ -209,12 +215,16 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                     const SizedBox(height: 16),
                     _SummaryCard(
                       title: 'Next Approved Leave',
-                      value: provider.myRequestsLoaded
+                      value:
+                          provider.myRequestsLoaded &&
+                              provider.officialDate != null
                           ? nextApproved?.leaveTypeLabel ?? 'None'
                           : 'Unavailable',
-                      subtitle: provider.myRequestsLoaded
+                      subtitle:
+                          provider.myRequestsLoaded &&
+                              provider.officialDate != null
                           ? _approvedLeaveSubtitle(nextApproved)
-                          : 'Request information unavailable',
+                          : 'Official date unavailable',
                       icon: Icons.event_available_rounded,
                     ),
                   ],
@@ -246,12 +256,16 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                     Expanded(
                       child: _SummaryCard(
                         title: 'Next Approved Leave',
-                        value: provider.myRequestsLoaded
+                        value:
+                            provider.myRequestsLoaded &&
+                                provider.officialDate != null
                             ? nextApproved?.leaveTypeLabel ?? 'None'
                             : 'Unavailable',
-                        subtitle: provider.myRequestsLoaded
+                        subtitle:
+                            provider.myRequestsLoaded &&
+                                provider.officialDate != null
                             ? _approvedLeaveSubtitle(nextApproved)
-                            : 'Request information unavailable',
+                            : 'Official date unavailable',
                         icon: Icons.event_available_rounded,
                       ),
                     ),
@@ -291,6 +305,11 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                 loading: provider.myRequestsLoading,
                 error: provider.myRequestsError,
                 onRetry: _retryRequests,
+                totalRequests: provider.myRequestsTotal,
+                hasMore: provider.myRequestsHasMore,
+                loadingMore: provider.myRequestsLoadingMore,
+                loadMoreError: provider.myRequestsLoadMoreError,
+                onLoadMore: _loadMoreRequests,
                 onEdit: _leaveActions.editRequest,
                 onCancel: _leaveActions.cancelRequest,
                 onPrint: _leaveActions.printLeaveForm,
@@ -323,7 +342,8 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         pendingCount: provider.myRequestsLoaded ? provider.pendingCount : null,
         totalPendingDays: totalPendingDays,
         nextApproved: nextApproved,
-        requestsAvailable: provider.myRequestsLoaded,
+        nextApprovedAvailable:
+            provider.myRequestsLoaded && provider.officialDate != null,
       ),
       balancesPanel: EmployeeLeaveMobileBalancesPanel(
         balances: provider.balances,
@@ -343,6 +363,11 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         loading: provider.myRequestsLoading,
         error: provider.myRequestsError,
         onRetry: _retryRequests,
+        totalRequests: provider.myRequestsTotal,
+        hasMore: provider.myRequestsHasMore,
+        loadingMore: provider.myRequestsLoadingMore,
+        loadMoreError: provider.myRequestsLoadMoreError,
+        onLoadMore: _loadMoreRequests,
         onEdit: _leaveActions.editRequest,
         onCancel: _leaveActions.cancelRequest,
         onPrint: _leaveActions.printLeaveForm,

@@ -104,6 +104,12 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
     );
   }
 
+  Future<void> _loadMoreRequests() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) return;
+    await context.read<LeaveProvider>().loadMoreMyLeaveRequests(userId);
+  }
+
   Future<void> _retryBalances() async {
     final userId = _currentUserId;
     if (userId == null || userId.isEmpty) return;
@@ -155,7 +161,8 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
         pendingCount: provider.myRequestsLoaded ? provider.pendingCount : null,
         totalPendingDays: totalPendingDays,
         nextApproved: nextApproved,
-        requestsAvailable: provider.myRequestsLoaded,
+        nextApprovedAvailable:
+            provider.myRequestsLoaded && provider.officialDate != null,
       ),
       balancesPanel: EmployeeLeaveMobileBalancesPanel(
         balances: provider.balances,
@@ -169,6 +176,11 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
         loading: provider.myRequestsLoading,
         error: provider.myRequestsError,
         onRetry: _retryRequests,
+        totalRequests: provider.myRequestsTotal,
+        hasMore: provider.myRequestsHasMore,
+        loadingMore: provider.myRequestsLoadingMore,
+        loadMoreError: provider.myRequestsLoadMoreError,
+        onLoadMore: _loadMoreRequests,
         onEdit: _leaveActions.editRequest,
         onCancel: _leaveActions.cancelRequest,
         onPrint: _leaveActions.printLeaveForm,
