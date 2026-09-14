@@ -34,6 +34,7 @@ import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/wi
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dash_ui.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dashboard_layout_metrics.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dashboard_skeletons.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/utils/employee_attendance_period.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_attendance_mobile_list.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_shell.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_summary_mobile_layout.dart';
@@ -2457,7 +2458,7 @@ class _EmployeeAttendanceContentState
     }
     if (_selectedYear > now.year ||
         (_selectedYear == now.year && _selectedMonth > now.month)) {
-      return last;
+      return 0;
     }
     return now.day < last ? now.day : last;
   }
@@ -2474,6 +2475,10 @@ class _EmployeeAttendanceContentState
     if (_selectedDay == null) return;
     final last = _lastDayOfSelectedMonth;
     final maxD = _maxSelectableCalendarDay;
+    if (maxD < 1) {
+      _selectedDay = null;
+      return;
+    }
     if (_selectedDay! > last) {
       _selectedDay = null;
       return;
@@ -2552,6 +2557,13 @@ class _EmployeeAttendanceContentState
       final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
       // For current month, don't fetch future days.
       end = monthEnd.isAfter(_todayDateOnly) ? _todayDateOnly : monthEnd;
+    }
+    if (!isValidEmployeeAttendanceRange(
+      start: start,
+      end: end,
+      officialDate: _todayDateOnly,
+    )) {
+      return;
     }
     await dtr.loadTimeRecordsForUser(
       startDate: start,
@@ -2982,6 +2994,13 @@ class _EmployeeAttendanceContentState
             final monthWidth = isNarrow ? 150.0 : 172.0;
             final yearWidth = isNarrow ? 100.0 : 112.0;
             final dayWidth = isNarrow ? 115.0 : 144.0;
+            final selectableMonths = selectableEmployeeAttendanceMonths(
+              _selectedYear,
+              _todayDateOnly,
+            );
+            final selectableYears = selectableEmployeeAttendanceYears(
+              _todayDateOnly,
+            );
             const fieldPadding = EdgeInsets.symmetric(
               horizontal: 12,
               vertical: 8,
@@ -3003,21 +3022,22 @@ class _EmployeeAttendanceContentState
                   Icons.keyboard_arrow_down_rounded,
                   color: AppTheme.dashTextSecondaryOf(context),
                 ),
-                selectedItemBuilder: (context) => List.generate(
-                  12,
-                  (i) => Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      _attendanceMonths[i],
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTheme.dashFieldTextStyle(
-                        context,
-                      ).copyWith(fontSize: 14),
-                    ),
-                  ),
-                ),
-                items: List.generate(12, (i) => i + 1)
+                selectedItemBuilder: (context) => selectableMonths
+                    .map(
+                      (month) => Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _attendanceMonths[month - 1],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.dashFieldTextStyle(
+                            context,
+                          ).copyWith(fontSize: 14),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                items: selectableMonths
                     .map(
                       (m) => DropdownMenuItem(
                         value: m,
@@ -3063,27 +3083,32 @@ class _EmployeeAttendanceContentState
                   Icons.keyboard_arrow_down_rounded,
                   color: AppTheme.dashTextSecondaryOf(context),
                 ),
-                selectedItemBuilder: (context) => List.generate(
-                  11,
-                  (i) => Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '${_todayDateOnly.year - 5 + i}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTheme.dashFieldTextStyle(
-                        context,
-                      ).copyWith(fontSize: 14),
-                    ),
-                  ),
-                ),
-                items: List.generate(11, (i) => _todayDateOnly.year - 5 + i)
+                selectedItemBuilder: (context) => selectableYears
+                    .map(
+                      (year) => Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '$year',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.dashFieldTextStyle(
+                            context,
+                          ).copyWith(fontSize: 14),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                items: selectableYears
                     .map((y) => DropdownMenuItem(value: y, child: Text('$y')))
                     .toList(),
                 onChanged: (v) {
                   if (v != null) {
                     setState(() {
                       _selectedYear = v;
+                      if (_selectedYear == _todayDateOnly.year &&
+                          _selectedMonth > _todayDateOnly.month) {
+                        _selectedMonth = _todayDateOnly.month;
+                      }
                       if (isNarrow && _mobileAttendanceMode == 'today') {
                         _mobileAttendanceMode = 'day';
                       }
