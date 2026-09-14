@@ -4,6 +4,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart'
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
+import 'package:hrms_plaridel/features/docutracker/models/linked_source_document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
@@ -631,6 +632,24 @@ class DocuTrackerProvider extends ChangeNotifier {
       DocuTrackerSuccess<List<DocuTrackerSignatureAsset>>(:final value) =>
         value,
       DocuTrackerFailure<List<DocuTrackerSignatureAsset>>(:final message) =>
+        throw Exception(message),
+    };
+  }
+
+  Future<DocuTrackerLinkedSourceDocument> loadLinkedSourceDocument({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+  }) async {
+    final result = await _repo.getLinkedSourceDocument(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+    );
+    return switch (result) {
+      DocuTrackerSuccess<DocuTrackerLinkedSourceDocument>(:final value) =>
+        value,
+      DocuTrackerFailure<DocuTrackerLinkedSourceDocument>(:final message) =>
         throw Exception(message),
     };
   }

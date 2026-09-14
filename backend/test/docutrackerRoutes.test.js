@@ -181,6 +181,8 @@ test('POST /documents/:id/transition forwards idempotency key in body', async ()
 
 test('POST /permissions normalizes create to create_draft', async () => {
   const queries = [];
+  const userId = '00000000-0000-4000-8000-000000000002';
+  const adminId = '00000000-0000-4000-8000-000000000001';
   const restoreWorkflow = withMockedModule('../src/services/docutrackerWorkflowService', {
     DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
     hasPermission: async () => null,
@@ -194,30 +196,48 @@ test('POST /permissions normalizes create to create_draft', async () => {
     addDocumentRemark: async () => true,
     getEffectivePermissionExplanation: async () => ({}),
   });
+  const client = {
+    query: async (sql, params = []) => {
+      queries.push({ sql, params });
+      if (sql.includes('FROM users')) {
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              id: userId,
+              full_name: 'Test User',
+              role: 'employee',
+              is_active: true,
+            },
+          ],
+        };
+      }
+      if (sql.includes('SELECT * FROM docutracker_permissions')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('INSERT INTO docutracker_permissions')) {
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              id: '00000000-0000-4000-8000-000000000003',
+              user_id: userId,
+              role_id: null,
+              document_type: 'memo',
+              action: 'create_draft',
+              granted: true,
+            },
+          ],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+    release() {},
+  };
   const restoreDb = withMockedModule('../src/config/db', {
     pool: {
-      query: async (sql, params = []) => {
-        queries.push({ sql, params });
-        if (sql.includes('SELECT id FROM docutracker_permissions')) {
-          return { rowCount: 0, rows: [] };
-        }
-        if (sql.includes('INSERT INTO docutracker_permissions')) {
-          return {
-            rowCount: 1,
-            rows: [
-              {
-                id: 'perm-1',
-                user_id: 'user-1',
-                role_id: null,
-                document_type: 'memo',
-                action: 'create_draft',
-                granted: true,
-              },
-            ],
-          };
-        }
-        return { rowCount: 0, rows: [] };
-      },
+      query: client.query,
+      connect: async () => client,
     },
   });
   const restoreAuth = withMockedModule('../src/middleware/auth', {
@@ -234,13 +254,13 @@ test('POST /permissions normalizes create to create_draft', async () => {
 
   const req = {
     body: {
-      user_id: 'user-1',
+      user_id: userId,
       document_type: 'memo',
       action: 'create',
       granted: true,
     },
     headers: {},
-    user: { id: 'admin-1', role: 'admin' },
+    user: { id: adminId, role: 'admin' },
   };
   const res = createMockResponse();
   await handler(req, res);

@@ -10,6 +10,7 @@ class EmployeeDirectoryEntry {
     this.departmentName,
     this.departmentId,
     this.positionName,
+    this.roleId,
   });
 
   final String id;
@@ -17,6 +18,7 @@ class EmployeeDirectoryEntry {
   final String? departmentName;
   final String? departmentId;
   final String? positionName;
+  final String? roleId;
 
   /// "Full Name · Department" (department omitted if unknown).
   String get nameAndDepartment {
@@ -73,6 +75,7 @@ class EmployeeDirectoryLookup {
           departmentName: m['current_department_name']?.toString(),
           departmentId: m['current_department_id']?.toString(),
           positionName: m['current_position_name']?.toString(),
+          roleId: m['role']?.toString(),
         );
       }
       isLoaded = true;
@@ -103,6 +106,7 @@ class EmployeeDirectoryLookup {
           departmentName: m['current_department_name']?.toString(),
           departmentId: m['current_department_id']?.toString(),
           positionName: m['current_position_name']?.toString(),
+          roleId: m['role']?.toString(),
         );
       } catch (_) {}
     }

@@ -39,6 +39,18 @@ const {
   signLeaveSourceDepartmentHead,
   signLeaveSourceHrApprover,
 } = require('../services/docutrackerLeaveSignatureService');
+const {
+  getLinkedSourceDocument,
+} = require('../services/docutrackerSourceDocumentService');
+const {
+  PermissionAdminError,
+  getPermissionPolicy,
+  listPermissionRecords,
+  resetPermissionRules,
+  savePermissionChanges,
+  saveSinglePermission,
+  validateDocumentType,
+} = require('../services/docutrackerPermissionAdminService');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -219,6 +231,13 @@ function generalPermissionActionVariants(action) {
   if (!normalized) return [];
   if (normalized === 'create_draft') return ['create_draft', 'create'];
   return [normalized];
+}
+
+function permissionAdminErrorResponse(res, error, fallback) {
+  if (error instanceof PermissionAdminError || Number.isInteger(error?.status)) {
+    return res.status(error.status || 400).json({ error: error.message });
+  }
+  return res.status(500).json({ error: fallback });
 }
 
 /** Fields that must not be changed via PUT by non-admins (use transitions or admin tools). */
@@ -505,6 +524,30 @@ router.delete('/signature-assets/:assetId', protect, async (req, res) => {
     res.status(mapped.status).json({ error: mapped.error });
   }
 });
+
+/** Load a server-authorized view of an L&D or RSP source document. */
+router.get(
+  '/sources/:sourceModule/:sourceTable/:sourceRecordId',
+  protect,
+  async (req, res) => {
+    try {
+      const { sourceModule, sourceTable, sourceRecordId } = req.params;
+      res.json(
+        await getLinkedSourceDocument(
+          pool,
+          req.user,
+          sourceModule,
+          sourceTable,
+          sourceRecordId
+        )
+      );
+    } catch (err) {
+      console.error('[docutracker GET linked source document]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
 
 /** GET linked DTR leave-form signatures without copying the leave request. */
 router.get(
@@ -1009,31 +1052,52 @@ router.patch('/escalation-configs/:id', protect, requireAdmin, async (req, res) 
  */
 router.get('/permission-records', protect, requireAdmin, async (req, res) => {
   try {
-    const { role_id, user_id, document_type } = req.query;
-    const params = [];
-    const where = [];
-    let i = 1;
-    if (role_id) {
-      where.push(`role_id = $${i++}`);
-      params.push(role_id);
-    }
-    if (user_id) {
-      where.push(`user_id = $${i++}::uuid`);
-      params.push(user_id);
-    }
-    if (document_type != null && document_type !== '') {
-      where.push(`document_type = $${i++}`);
-      params.push(document_type);
-    }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const result = await pool.query(
-      `SELECT * FROM docutracker_permissions ${whereSql} ORDER BY document_type, action`,
-      params
-    );
-    res.json(result.rows);
+    const rows = await listPermissionRecords(pool, {
+      roleId: req.query.role_id,
+      userId: req.query.user_id,
+      documentType: req.query.document_type,
+    });
+    return res.json(rows);
   } catch (err) {
     console.error('[docutracker GET /permission-records]', err);
-    res.status(500).json({ error: 'Failed to list permission records' });
+    return permissionAdminErrorResponse(res, err, 'Failed to list permission records');
+  }
+});
+
+/**
+ * GET /api/docutracker/permission-policy
+ * Returns role defaults and, when user_id is supplied, employee exceptions and
+ * server-calculated effective decisions in one response.
+ */
+router.get('/permission-policy', protect, requireAdmin, async (req, res) => {
+  try {
+    const policy = await getPermissionPolicy(pool, {
+      documentType: req.query.document_type,
+      userId: req.query.user_id,
+    });
+    return res.json(policy);
+  } catch (err) {
+    console.error('[docutracker GET /permission-policy]', err);
+    return permissionAdminErrorResponse(res, err, 'Failed to load system access settings');
+  }
+});
+
+/**
+ * PUT /api/docutracker/permission-policy
+ * Atomically applies up to 100 role defaults and employee exceptions. A null
+ * granted value removes the explicit rule so the employee inherits again.
+ */
+router.put('/permission-policy', protect, requireAdmin, async (req, res) => {
+  try {
+    const result = await savePermissionChanges(pool, {
+      actorId: req.user.id,
+      documentType: req.body?.document_type,
+      changes: req.body?.changes,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[docutracker PUT /permission-policy]', err);
+    return permissionAdminErrorResponse(res, err, 'Failed to save system access settings');
   }
 });
 
@@ -1853,17 +1917,22 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
         ).join(', ')}`,
       });
     }
+    const validatedDocumentType = await validateDocumentType(pool, document_type);
+    const normalizedSearch = String(search || '').trim();
+    if (normalizedSearch.length > 100) {
+      return res.status(400).json({ error: 'Search text is too long.' });
+    }
 
-    const params = [document_type, actionVariants, normalizedAction];
+    const params = [validatedDocumentType, actionVariants, normalizedAction];
     const where = [];
     let i = 4;
 
     // only active employees by default
     where.push('(u.is_active IS NULL OR u.is_active = true)');
 
-    if (search) {
+    if (normalizedSearch) {
       where.push(`(u.full_name ILIKE $${i} OR u.email ILIKE $${i})`);
-      params.push(`%${search}%`);
+      params.push(`%${normalizedSearch}%`);
       i += 1;
     }
 
@@ -1911,7 +1980,7 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
     );
   } catch (err) {
     console.error('[docutracker GET /permissions]', err);
-    res.status(500).json({ error: 'Failed to fetch permissions' });
+    return permissionAdminErrorResponse(res, err, 'Failed to fetch permissions');
   }
 });
 
@@ -1931,83 +2000,22 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
  */
 router.post('/permissions', protect, requireAdmin, async (req, res) => {
   try {
-    const { user_id, role_id, document_type, action, granted } = req.body || {};
-
-    if ((!user_id && !role_id) || !document_type || !action) {
-      return res.status(400).json({
-        error: 'document_type and action are required, plus user_id or role_id',
-      });
-    }
-    const normalizedAction = normalizeGeneralPermissionAction(action);
-    const actionVariants = generalPermissionActionVariants(normalizedAction);
-    if (!GENERAL_PERMISSION_ACTIONS.has(String(normalizedAction))) {
-      return res.status(400).json({
-        error: `Invalid action '${action}'. Role-based permissions only support: ${Array.from(
-          GENERAL_PERMISSION_ACTIONS
-        ).join(', ')}`,
-      });
-    }
-
-    const grantedBool = !!granted;
-
-    const existing = await pool.query(
-      user_id
-        ? `SELECT id FROM docutracker_permissions
-           WHERE user_id = $1 AND document_type = $2 AND action = ANY($3::text[])`
-        : `SELECT id FROM docutracker_permissions
-           WHERE role_id = $1 AND user_id IS NULL AND document_type = $2 AND action = ANY($3::text[])`,
-      user_id ? [user_id, document_type, actionVariants] : [role_id, document_type, actionVariants]
-    );
-
-    let row;
-    if (existing.rowCount > 0) {
-      const permId = existing.rows[0].id;
-      const update = await pool.query(
-        `UPDATE docutracker_permissions
-         SET granted = $1,
-             action = $3,
-             updated_at = now()
-         WHERE id = $2
-         RETURNING *`,
-        [grantedBool, permId, normalizedAction]
-      );
-      row = update.rows[0];
-    } else {
-      const insert = await pool.query(
-        `INSERT INTO docutracker_permissions
-           (user_id, role_id, document_type, action, granted)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING *`,
-        [user_id || null, role_id || null, document_type, normalizedAction, grantedBool]
-      );
-      row = insert.rows[0];
-    }
-
-    await writeGovernanceAudit(pool, {
+    const row = await saveSinglePermission(pool, {
       actorId: req.user.id,
-      eventType: 'permission_saved',
-      entityType: 'permission',
-      entityId: row.id,
-      documentType: row.document_type,
-      targetUserId: row.user_id,
-      targetRoleId: row.role_id,
-      afterState: {
-        action: row.action,
-        granted: row.granted,
-      },
+      body: req.body || {},
     });
-
-    res.status(201).json({
+    return res.status(201).json({
       id: row.id,
       user_id: row.user_id,
       role_id: row.role_id,
       document_type: row.document_type,
       action: row.action,
       granted: row.granted,
+      updated_at: row.updated_at,
     });
   } catch (err) {
     console.error('[docutracker POST /permissions]', err);
-    res.status(500).json({ error: 'Failed to update permission' });
+    return permissionAdminErrorResponse(res, err, 'Failed to update permission');
   }
 });
 
@@ -2027,53 +2035,14 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
  */
 router.delete('/permissions', protect, requireAdmin, async (req, res) => {
   try {
-    const { user_id, role_id, document_type, action } = req.body || {};
-    if ((!user_id && !role_id) || !document_type) {
-      return res.status(400).json({
-        error: 'document_type is required, plus user_id or role_id',
-      });
-    }
-    if (user_id && role_id) {
-      return res.status(400).json({
-        error: 'Provide only one scope: user_id OR role_id',
-      });
-    }
-
-    const params = [];
-    const where = [];
-    let i = 1;
-
-    if (user_id) {
-      where.push(`user_id = $${i++}::uuid`);
-      params.push(user_id);
-    } else {
-      where.push(`role_id = $${i++}`);
-      params.push(role_id);
-      where.push(`user_id IS NULL`);
-    }
-
-    where.push(`document_type = $${i++}`);
-    params.push(document_type);
-
-    if (action) {
-      const normalizedAction = normalizeGeneralPermissionAction(action);
-      if (!GENERAL_PERMISSION_ACTIONS.has(String(normalizedAction))) {
-        return res.status(400).json({
-          error: `Invalid action '${action}'. Role-based permissions only support: ${Array.from(
-            GENERAL_PERMISSION_ACTIONS
-          ).join(', ')}`,
-        });
-      }
-      where.push(`action = $${i++}`);
-      params.push(normalizedAction);
-    }
-
-    const sql = `DELETE FROM docutracker_permissions WHERE ${where.join(' AND ')}`;
-    const result = await pool.query(sql, params);
-    res.json({ deleted: result.rowCount || 0 });
+    const result = await resetPermissionRules(pool, {
+      actorId: req.user.id,
+      body: req.body || {},
+    });
+    return res.json(result);
   } catch (err) {
     console.error('[docutracker DELETE /permissions]', err);
-    res.status(500).json({ error: 'Failed to reset permissions' });
+    return permissionAdminErrorResponse(res, err, 'Failed to reset permissions');
   }
 });
 

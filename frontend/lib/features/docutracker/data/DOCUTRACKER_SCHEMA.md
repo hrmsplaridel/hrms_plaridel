@@ -161,11 +161,24 @@ The leave request remains the source of truth for form data, status, reviewers,
 balances, and DTR effects. Signature creation or replacement also appends an
 entry to `leave_request_history`.
 
+L&D training reports and RSP recruitment applications are linked by their
+existing source table and record ID. They are not copied into DocuTracker
+tables; their source modules remain authoritative for content, attachments,
+and status.
+
 ## docutracker_permissions
 
 This table stays in place for system-level security and explicit user
 overrides. Primary/backup workflow routing and workflow action availability are
 configured on workflow steps instead of being duplicated here.
+
+Permission rows target exactly one active employee or one supported canonical
+role. System Access edits only `view`, `create_draft`, `submit`, and `download`.
+Employee-and-role scope constraints and partial unique indexes prevent
+ambiguous or duplicate rows. Permission saves and resets are transactionally
+paired with `docutracker_governance_audit` entries containing the previous and
+new values. Removing an employee override restores inheritance rather than
+creating another allow/deny rule.
 
 | Column | Type | Description |
 |--------|------|-------------|

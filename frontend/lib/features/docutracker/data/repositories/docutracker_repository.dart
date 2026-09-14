@@ -13,10 +13,12 @@ import 'package:hrms_plaridel/features/docutracker/models/document_notification.
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_governance_audit_entry.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_permission_policy.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_record.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/models/linked_source_document.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_permission_service.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_permissions_datasource.dart';
@@ -45,6 +47,28 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   static const _base = '/api/docutracker';
 
   late final DocuTrackerPermissionService _permissionService;
+
+  Future<DocuTrackerResult<DocuTrackerLinkedSourceDocument>>
+  getLinkedSourceDocument({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+  }) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/sources/${Uri.encodeComponent(sourceModule)}/'
+        '${Uri.encodeComponent(sourceTable)}/'
+        '${Uri.encodeComponent(sourceRecordId)}',
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The source document is unavailable');
+      }
+      return DocuTrackerSuccess(DocuTrackerLinkedSourceDocument.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
 
   Future<List<DocuTrackerGovernanceAuditEntry>> listGovernanceAudit({
     String? documentType,
@@ -798,6 +822,47 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       _permissionService.clearCache();
     } catch (e) {
       throw Exception(_apiErrorMessage(e));
+    }
+  }
+
+  Future<DocuTrackerPermissionPolicy> getPermissionPolicy({
+    required String documentType,
+    String? userId,
+  }) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/permission-policy',
+        queryParameters: {
+          'document_type': documentType,
+          if (userId != null && userId.isNotEmpty) 'user_id': userId,
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        throw Exception('System access settings are unavailable.');
+      }
+      return DocuTrackerPermissionPolicy.fromJson(data);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DateTime?> savePermissionPolicy({
+    required String documentType,
+    required List<DocuTrackerPermissionPolicyChange> changes,
+  }) async {
+    try {
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '$_base/permission-policy',
+        data: {
+          'document_type': documentType,
+          'changes': changes.map((change) => change.toJson()).toList(),
+        },
+      );
+      _permissionService.clearCache();
+      return DateTime.tryParse(response.data?['updated_at']?.toString() ?? '');
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
     }
   }
 

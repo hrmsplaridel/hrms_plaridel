@@ -28,6 +28,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_linked_source_document_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/employee_leave_actions.dart';
 
@@ -82,6 +83,45 @@ class _DocuTrackerDocumentDetailScreenState
       doc.sourceModule == 'dtr' &&
       doc.sourceTable == 'leave_requests' &&
       (doc.sourceRecordId ?? '').isNotEmpty;
+
+  bool _isSupportedLinkedSource(DocuTrackerDocument doc) {
+    final module = doc.sourceModule;
+    final table = doc.sourceTable;
+    return (module == 'ld' && table == 'training_daily_reports') ||
+        (module == 'rsp' && table == 'recruitment_applications');
+  }
+
+  Future<void> _openPrimaryDocument(DocuTrackerDocument doc) async {
+    if (_isLinkedLeave(doc)) {
+      await _openLinkedLeaveForm(doc);
+      return;
+    }
+    if (doc.sourceOnly) {
+      if (!_isSupportedLinkedSource(doc)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This source document cannot be opened here yet.'),
+          ),
+        );
+        return;
+      }
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => DocuTrackerLinkedSourceDocumentScreen(document: doc),
+        ),
+      );
+      return;
+    }
+    final provider = context.read<DocuTrackerProvider>();
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => DocuTrackerDocumentBuilderScreen(document: doc),
+      ),
+    );
+    if (mounted && doc.id != null) {
+      provider.refreshDocument(doc.id!);
+    }
+  }
 
   Future<void> _openLinkedLeaveForm(DocuTrackerDocument doc) async {
     final sourceRecordId = doc.sourceRecordId;
@@ -824,20 +864,11 @@ class _DocuTrackerDocumentDetailScreenState
         FilledButton.icon(
           onPressed: context.read<DocuTrackerProvider>().loading
               ? null
-              : () async {
-                  final provider = context.read<DocuTrackerProvider>();
-                  await Navigator.of(context).push<void>(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          DocuTrackerDocumentBuilderScreen(document: doc),
-                    ),
-                  );
-                  if (mounted && doc.id != null) {
-                    provider.refreshDocument(doc.id!);
-                  }
-                },
+              : () => _openPrimaryDocument(doc),
           icon: const Icon(Icons.article_outlined),
-          label: const Text('Open Document'),
+          label: Text(
+            doc.sourceOnly ? 'Open Source Document' : 'Open Document',
+          ),
           style: DocuTrackerStyles.primaryBrandButtonStyle(),
         ),
         if (doc.status == DocumentStatus.approved ||

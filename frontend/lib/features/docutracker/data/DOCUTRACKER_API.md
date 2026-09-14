@@ -30,6 +30,7 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | POST | `/api/docutracker/signature-assets` | Save a drawn or uploaded PNG/JPEG signature owned by the authenticated user |
 | PATCH | `/api/docutracker/signature-assets/{assetId}` | Rename a saved signature owned by the authenticated user |
 | DELETE | `/api/docutracker/signature-assets/{assetId}` | Remove a signature from the authenticated user's library without changing signed documents |
+| GET | `/api/docutracker/sources/{module}/{table}/{recordId}` | Load a server-authorized, read-only L&D training report or RSP recruitment application with short-lived attachment links |
 | POST | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/sign` | Sign or replace the signature image in one field assigned to the authenticated user |
 | PATCH | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/position` | Move an already-signed field assigned to the authenticated user without changing its size, signer, or image |
 | GET | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures` | Load fixed e-signature slots for an authorized linked DTR leave request |
@@ -95,6 +96,14 @@ signature responses expose a backend-calculated `can_sign` capability. Only the
 leave applicant can use the applicant signing operation. A replacement appends
 a new leave history event rather than overwriting the audit trail.
 
+Linked L&D training reports and RSP recruitment applications also remain
+authoritative in their source modules. DocuTracker returns only an allowlisted
+read-only view. Employees may load only their own L&D reports and must retain
+the L&D view permission; RSP application details remain admin-only. Attachment
+links are short-lived and are revalidated by the existing source file policy.
+Printing reuses the source module's existing official PDF builder with the
+allowlisted `print_data` payload; physical attachment paths are never returned.
+
 **Query params:**
 - `document_type=eq.memo` - Filter by type
 - `status=eq.pending` - Filter by status
@@ -142,11 +151,34 @@ These endpoints remain the system-security layer for administration, document
 creation/download, and explicit user overrides. Workflow action authorization
 comes from the active step assignment and its allowed actions.
 
+The System Access screen uses the transactional API endpoints below. Both are
+admin-only. `GET /api/docutracker/permission-policy` returns role defaults and,
+when `user_id` is supplied, the employee's explicit and effective access in one
+response. `PUT /api/docutracker/permission-policy` accepts `document_type` and
+up to 100 `changes`. Each change targets exactly one `role_id` or `user_id`,
+contains one of `view`, `create_draft`, `submit`, or `download`, and uses a
+boolean `granted` value. `granted: null` removes an explicit rule so the broader
+or role setting applies. The entire batch and its governance-audit entries are
+committed or rolled back together.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/docutracker/permission-policy | Load role defaults and optional employee exceptions/effective access |
+| PUT | /api/docutracker/permission-policy | Atomically save role defaults and employee exceptions |
+| GET | /api/docutracker/permission-records | Compatibility endpoint for raw permission rows |
+| POST | /api/docutracker/permissions | Compatibility endpoint for one validated permission change |
+| DELETE | /api/docutracker/permissions | Reset validated explicit rules and create audit entries |
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | /docutracker_permissions | List permissions (filter by role_id, user_id, document_type) |
 | POST | /docutracker_permissions | Add permission |
 | PATCH | /docutracker_permissions?id=eq.{id} | Update permission |
+
+Permission write endpoints reject ambiguous user-and-role targets, inactive or
+unknown employees, unsupported roles/actions, invalid identifiers, and
+unconfigured document types. Workflow actions (`approve`, `forward`, `return`,
+and `reject`) cannot be granted through these system-access endpoints.
 
 ## Routing Configs
 
