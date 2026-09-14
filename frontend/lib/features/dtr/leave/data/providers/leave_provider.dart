@@ -37,6 +37,7 @@ class LeaveProvider extends ChangeNotifier {
 
   final LeaveRepository _repository;
   int _authGeneration = 0;
+  int _myLeaveLoadGeneration = 0;
   bool _disposed = false;
 
   bool _isCurrentAuthGeneration(int generation) =>
@@ -238,6 +239,7 @@ class LeaveProvider extends ChangeNotifier {
   }
 
   void _resetSessionState() {
+    _myLeaveLoadGeneration += 1;
     invalidateCachedLeaveData(notify: false);
     _requests = [];
     _balances = [];
@@ -261,6 +263,7 @@ class LeaveProvider extends ChangeNotifier {
     String userId, {
     LeaveRequestStatus? status,
     bool forceRefresh = false,
+    bool Function()? shouldAcceptResult,
   }) async {
     final authGeneration = _authGeneration;
     final key = _myRequestsKey(userId, status);
@@ -269,7 +272,8 @@ class LeaveProvider extends ChangeNotifier {
         : _readListCache(_requestCache, key, _requestCacheTtl);
     if (cached != null) return cached;
     final fresh = await _repository.listMyRequests(userId, status: status);
-    if (!_isCurrentAuthGeneration(authGeneration)) {
+    if (!_isCurrentAuthGeneration(authGeneration) ||
+        (shouldAcceptResult != null && !shouldAcceptResult())) {
       return const <LeaveRequest>[];
     }
     _writeListCache(_requestCache, key, fresh);
@@ -279,6 +283,7 @@ class LeaveProvider extends ChangeNotifier {
   Future<List<LeaveBalance>> _getBalancesForUserCached(
     String userId, {
     bool forceRefresh = false,
+    bool Function()? shouldAcceptResult,
   }) async {
     final authGeneration = _authGeneration;
     final key = _normalize(userId);
@@ -288,7 +293,8 @@ class LeaveProvider extends ChangeNotifier {
         : _readListCache(_balanceCache, key, _balanceCacheTtl);
     if (cached != null) return cached;
     final fresh = await _repository.getBalancesForUser(key);
-    if (!_isCurrentAuthGeneration(authGeneration)) {
+    if (!_isCurrentAuthGeneration(authGeneration) ||
+        (shouldAcceptResult != null && !shouldAcceptResult())) {
       return const <LeaveBalance>[];
     }
     _writeListCache(_balanceCache, key, fresh);
@@ -438,6 +444,11 @@ class LeaveProvider extends ChangeNotifier {
     bool forceRefresh = false,
   }) async {
     final authGeneration = _authGeneration;
+    final loadGeneration = ++_myLeaveLoadGeneration;
+    bool isCurrentLoad() =>
+        _isCurrentAuthGeneration(authGeneration) &&
+        loadGeneration == _myLeaveLoadGeneration;
+
     _loading = true;
     _error = null;
     notifyListeners();
@@ -446,22 +457,24 @@ class LeaveProvider extends ChangeNotifier {
         userId,
         status: _filterStatus,
         forceRefresh: forceRefresh,
+        shouldAcceptResult: isCurrentLoad,
       );
       final balancesFuture = _getBalancesForUserCached(
         userId,
         forceRefresh: forceRefresh,
+        shouldAcceptResult: isCurrentLoad,
       );
       final results = await Future.wait([requestsFuture, balancesFuture]);
-      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      if (!isCurrentLoad()) return;
       _requests = results[0] as List<LeaveRequest>;
       _balances = _filterDisplayBalances(results[1] as List<LeaveBalance>);
     } catch (e) {
-      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      if (!isCurrentLoad()) return;
       _requests = [];
       _balances = [];
       _error = e.toString();
     } finally {
-      if (_isCurrentAuthGeneration(authGeneration)) {
+      if (isCurrentLoad()) {
         _loading = false;
         notifyListeners();
       }
