@@ -9,11 +9,15 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
     super.key,
     required this.balances,
     required this.loading,
+    required this.error,
+    required this.onRetry,
     required this.onBalanceHistory,
   });
 
   final List<LeaveBalance> balances;
   final bool loading;
+  final String? error;
+  final VoidCallback onRetry;
   final VoidCallback onBalanceHistory;
 
   static const _creditTypes = {'vacationLeave', 'sickLeave'};
@@ -59,11 +63,15 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
+        if (error != null) ...[
+          _MobileBalanceLoadError(message: error!, onRetry: onRetry),
+          if (balances.isNotEmpty) const SizedBox(height: 12),
+        ],
         if (loading && creditBalances.isEmpty)
           const _MobileCenteredState(message: 'Loading leave credits...')
-        else if (creditBalances.isEmpty)
+        else if (error == null && creditBalances.isEmpty)
           const _MobileCenteredState(message: 'No leave credits available yet.')
-        else
+        else if (creditBalances.isNotEmpty)
           Column(
             children: List.generate(creditBalances.length, (index) {
               final balance = creditBalances[index];
@@ -113,6 +121,46 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
             ),
         ],
       ],
+    );
+  }
+}
+
+class _MobileBalanceLoadError extends StatelessWidget {
+  const _MobileBalanceLoadError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Colors.redAccent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 12,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Retry',
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
     );
   }
 }

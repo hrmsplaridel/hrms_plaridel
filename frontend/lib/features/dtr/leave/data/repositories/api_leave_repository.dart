@@ -55,6 +55,26 @@ class ApiLeaveRepository implements LeaveRepository {
     return e.message ?? 'Request failed';
   }
 
+  static String _employeeReadMessageFromDio(
+    DioException error,
+    String fallback,
+  ) {
+    final data = error.response?.data;
+    if (data is Map && data['error'] != null) {
+      return data['error'].toString();
+    }
+    final statusCode = error.response?.statusCode;
+    if (statusCode != null && statusCode >= 500) {
+      return 'The leave service is temporarily unavailable. Please try again.';
+    }
+    return switch (statusCode) {
+      401 => 'Your session has expired. Please sign in again.',
+      403 => 'You do not have permission to view this information.',
+      429 => 'Too many requests. Please wait a moment and try again.',
+      _ => fallback,
+    };
+  }
+
   static Map<String, dynamic> _toApiPayload(LeaveRequest request) {
     final json = request.toJson();
     json['leave_type'] = request.effectiveLeaveTypeName;
@@ -172,15 +192,24 @@ class ApiLeaveRepository implements LeaveRepository {
     int? limit, // #13: pagination
   }) async {
     // userId is inferred from JWT on backend; we keep signature for compatibility.
-    final res = await ApiClient.instance.get<List<dynamic>>(
-      '/api/leave/my',
-      queryParameters: {
-        if (status != null) 'status': status.value,
-        if (limit != null) 'limit': limit,
-      },
-    );
-    final data = res.data ?? const [];
-    return data.map((e) => LeaveRequest.fromJson(_asMap(e))).toList();
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/my',
+        queryParameters: {
+          if (status != null) 'status': status.value,
+          if (limit != null) 'limit': limit,
+        },
+      );
+      final data = res.data ?? const [];
+      return data.map((e) => LeaveRequest.fromJson(_asMap(e))).toList();
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load leave requests. Please try again.',
+        ),
+      );
+    }
   }
 
   @override
@@ -207,11 +236,20 @@ class ApiLeaveRepository implements LeaveRepository {
 
   @override
   Future<List<LeaveBalance>> getBalancesForUser(String userId) async {
-    final res = await ApiClient.instance.get<List<dynamic>>(
-      '/api/leave/balances/$userId',
-    );
-    final data = res.data ?? const [];
-    return data.map((e) => LeaveBalance.fromJson(_asMap(e))).toList();
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/balances/$userId',
+      );
+      final data = res.data ?? const [];
+      return data.map((e) => LeaveBalance.fromJson(_asMap(e))).toList();
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load leave credits. Please try again.',
+        ),
+      );
+    }
   }
 
   @override

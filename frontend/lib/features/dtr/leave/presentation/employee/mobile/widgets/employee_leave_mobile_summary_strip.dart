@@ -9,16 +9,20 @@ class EmployeeLeaveMobileSummaryStrip extends StatelessWidget {
     required this.pendingCount,
     required this.totalPendingDays,
     required this.nextApproved,
+    required this.requestsAvailable,
   });
 
-  final double totalAvailable;
-  final int pendingCount;
-  final double totalPendingDays;
+  final double? totalAvailable;
+  final int? pendingCount;
+  final double? totalPendingDays;
   final LeaveRequest? nextApproved;
+  final bool requestsAvailable;
 
   @override
   Widget build(BuildContext context) {
-    final nextLabel = nextApproved?.leaveTypeLabel ?? 'None';
+    final nextLabel = requestsAvailable
+        ? nextApproved?.leaveTypeLabel ?? 'None'
+        : 'Unavailable';
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -27,18 +31,18 @@ class EmployeeLeaveMobileSummaryStrip extends StatelessWidget {
         children: [
           _MobileSummaryCard(
             title: 'Available Credits',
-            value: totalAvailable.toStringAsFixed(1),
+            value: totalAvailable?.toStringAsFixed(1) ?? '--',
             icon: Icons.account_balance_wallet_outlined,
             accent: AppTheme.primaryNavy,
           ),
           const SizedBox(width: 12),
           _MobileSummaryCard(
             title: 'Pending Requests',
-            value: '$pendingCount',
+            value: pendingCount?.toString() ?? '--',
             icon: Icons.pending_actions_outlined,
             accent: const Color(0xFF795548),
-            footer: totalPendingDays > 0
-                ? '${totalPendingDays.toStringAsFixed(1)} day(s)'
+            footer: (totalPendingDays ?? 0) > 0
+                ? '${totalPendingDays!.toStringAsFixed(1)} day(s)'
                 : null,
           ),
           const SizedBox(width: 12),

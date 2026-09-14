@@ -38,6 +38,8 @@ class LeaveProvider extends ChangeNotifier {
   final LeaveRepository _repository;
   int _authGeneration = 0;
   int _myLeaveLoadGeneration = 0;
+  int _myRequestsLoadGeneration = 0;
+  int _myBalancesLoadGeneration = 0;
   bool _disposed = false;
 
   bool _isCurrentAuthGeneration(int generation) =>
@@ -71,6 +73,12 @@ class LeaveProvider extends ChangeNotifier {
   bool _submitting = false;
   bool _reviewing = false;
   String? _error;
+  bool _myRequestsLoading = false;
+  bool _myBalancesLoading = false;
+  bool _myRequestsLoaded = false;
+  bool _myBalancesLoaded = false;
+  String? _myRequestsError;
+  String? _myBalancesError;
 
   LeaveRequestStatus? _filterStatus;
   LeaveType? _filterLeaveType;
@@ -83,6 +91,12 @@ class LeaveProvider extends ChangeNotifier {
   bool get submitting => _submitting;
   bool get reviewing => _reviewing;
   String? get error => _error;
+  bool get myRequestsLoading => _myRequestsLoading;
+  bool get myBalancesLoading => _myBalancesLoading;
+  bool get myRequestsLoaded => _myRequestsLoaded;
+  bool get myBalancesLoaded => _myBalancesLoaded;
+  String? get myRequestsError => _myRequestsError;
+  String? get myBalancesError => _myBalancesError;
 
   LeaveRequestStatus? get filterStatus => _filterStatus;
   LeaveType? get filterLeaveType => _filterLeaveType;
@@ -151,6 +165,15 @@ class LeaveProvider extends ChangeNotifier {
   static String? _normalize(String? value) {
     final text = value?.trim();
     return text == null || text.isEmpty ? null : text;
+  }
+
+  static String _loadErrorMessage(Object error, String fallback) {
+    final message = error.toString().replaceFirst(
+      RegExp(r'^Exception:\s*'),
+      '',
+    );
+    if (message.isEmpty || message.contains('DioException')) return fallback;
+    return message;
   }
 
   static String _dateOnlyKey(DateTime? date) {
@@ -240,6 +263,8 @@ class LeaveProvider extends ChangeNotifier {
 
   void _resetSessionState() {
     _myLeaveLoadGeneration += 1;
+    _myRequestsLoadGeneration += 1;
+    _myBalancesLoadGeneration += 1;
     invalidateCachedLeaveData(notify: false);
     _requests = [];
     _balances = [];
@@ -248,6 +273,12 @@ class LeaveProvider extends ChangeNotifier {
     _submitting = false;
     _reviewing = false;
     _error = null;
+    _myRequestsLoading = false;
+    _myBalancesLoading = false;
+    _myRequestsLoaded = false;
+    _myBalancesLoaded = false;
+    _myRequestsError = null;
+    _myBalancesError = null;
     _filterStatus = null;
     _filterLeaveType = null;
   }
@@ -453,28 +484,85 @@ class LeaveProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
-      final requestsFuture = _getMyRequestsCached(
-        userId,
-        forceRefresh: forceRefresh,
-        shouldAcceptResult: isCurrentLoad,
-      );
-      final balancesFuture = _getBalancesForUserCached(
-        userId,
-        forceRefresh: forceRefresh,
-        shouldAcceptResult: isCurrentLoad,
-      );
-      final results = await Future.wait([requestsFuture, balancesFuture]);
-      if (!isCurrentLoad()) return;
-      _requests = results[0] as List<LeaveRequest>;
-      _balances = _filterDisplayBalances(results[1] as List<LeaveBalance>);
-    } catch (e) {
-      if (!isCurrentLoad()) return;
-      _requests = [];
-      _balances = [];
-      _error = e.toString();
+      await Future.wait([
+        loadMyLeaveRequests(userId, forceRefresh: forceRefresh),
+        loadMyLeaveBalances(userId, forceRefresh: forceRefresh),
+      ]);
     } finally {
       if (isCurrentLoad()) {
         _loading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> loadMyLeaveRequests(
+    String userId, {
+    bool forceRefresh = false,
+  }) async {
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_myRequestsLoadGeneration;
+    bool isCurrentLoad() =>
+        _isCurrentAuthGeneration(authGeneration) &&
+        loadGeneration == _myRequestsLoadGeneration;
+
+    _myRequestsLoading = true;
+    _myRequestsError = null;
+    notifyListeners();
+    try {
+      final requests = await _getMyRequestsCached(
+        userId,
+        forceRefresh: forceRefresh,
+        shouldAcceptResult: isCurrentLoad,
+      );
+      if (!isCurrentLoad()) return;
+      _requests = requests;
+      _myRequestsLoaded = true;
+    } catch (e) {
+      if (!isCurrentLoad()) return;
+      _myRequestsError = _loadErrorMessage(
+        e,
+        'Unable to load leave requests. Please try again.',
+      );
+    } finally {
+      if (isCurrentLoad()) {
+        _myRequestsLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> loadMyLeaveBalances(
+    String userId, {
+    bool forceRefresh = false,
+  }) async {
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_myBalancesLoadGeneration;
+    bool isCurrentLoad() =>
+        _isCurrentAuthGeneration(authGeneration) &&
+        loadGeneration == _myBalancesLoadGeneration;
+
+    _myBalancesLoading = true;
+    _myBalancesError = null;
+    notifyListeners();
+    try {
+      final balances = await _getBalancesForUserCached(
+        userId,
+        forceRefresh: forceRefresh,
+        shouldAcceptResult: isCurrentLoad,
+      );
+      if (!isCurrentLoad()) return;
+      _balances = _filterDisplayBalances(balances);
+      _myBalancesLoaded = true;
+    } catch (e) {
+      if (!isCurrentLoad()) return;
+      _myBalancesError = _loadErrorMessage(
+        e,
+        'Unable to load leave credits. Please try again.',
+      );
+    } finally {
+      if (isCurrentLoad()) {
+        _myBalancesLoading = false;
         notifyListeners();
       }
     }
