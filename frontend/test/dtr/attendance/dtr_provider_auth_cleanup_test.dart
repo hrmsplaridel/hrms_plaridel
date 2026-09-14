@@ -194,6 +194,36 @@ void main() {
     },
   );
 
+  test('a failed first attendance load exposes only the error state', () async {
+    ApiClient.instance.dio.httpClientAdapter = _QueuedAttendanceAdapter([
+      ResponseBody.fromString(
+        jsonEncode({'error': 'Attendance is temporarily unavailable'}),
+        503,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      ),
+    ]);
+    final provider = DtrProvider();
+    addTearDown(provider.dispose);
+
+    provider.onAuthUserChanged('employee-a');
+    await provider.loadTimeRecordsForUser(
+      startDate: DateTime(2026, 9, 14),
+      endDate: DateTime(2026, 9, 14),
+    );
+
+    expect(provider.employeeAttendanceLoading, isFalse);
+    expect(provider.employeeAttendanceHasResult, isFalse);
+    expect(
+      provider.employeeAttendanceError,
+      'Attendance is temporarily unavailable',
+    );
+    expect(provider.timeRecords, isEmpty);
+    expect(provider.filterStart, isNull);
+    expect(provider.filterEnd, isNull);
+  });
+
   test('DTR events match both employee and selected attendance range', () {
     final event = DtrUpdateEvent.fromJson({
       'action': 'biometric_processed',

@@ -388,9 +388,7 @@ class DtrProvider extends ChangeNotifier {
               final event = DtrUpdateEvent.fromJson(
                 Map<String, dynamic>.from(data),
               );
-              invalidateCachedDtrData();
-              _dtrEventController.add(event);
-              _dtrUpdateController.add(null);
+              _publishDtrUpdate(event);
             }
           } catch (_) {}
         },
@@ -418,6 +416,18 @@ class DtrProvider extends ChangeNotifier {
     }
     _wsReconnectTimer?.cancel();
     _wsReconnectTimer = Timer(const Duration(seconds: 5), _initWebSocket);
+  }
+
+  void _publishDtrUpdate(DtrUpdateEvent event) {
+    if (_disposed) return;
+    invalidateCachedDtrData();
+    _dtrEventController.add(event);
+    _dtrUpdateController.add(null);
+  }
+
+  @visibleForTesting
+  void debugPublishDtrUpdate(DtrUpdateEvent event) {
+    _publishDtrUpdate(event);
   }
 
   @override

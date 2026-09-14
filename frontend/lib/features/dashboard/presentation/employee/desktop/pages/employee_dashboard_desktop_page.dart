@@ -530,7 +530,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
           documentsKey: _dashboardDocumentsKey,
         );
       case 1:
-        return _EmployeeAttendanceContent(
+        return EmployeeAttendanceContent(
           headerKey: _attendanceHeaderKey,
           filtersKey: _attendanceFiltersKey,
           recordsKey: _attendanceRecordsKey,
@@ -875,7 +875,7 @@ class EmployeeAttendanceDetailsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _EmployeeAttendanceContent(showPageHeader: showPageHeader);
+    return EmployeeAttendanceContent(showPageHeader: showPageHeader);
   }
 }
 
@@ -2412,8 +2412,9 @@ const List<String> _attendanceMonths = [
 ];
 
 /// My Attendance: employee's own time records.
-class _EmployeeAttendanceContent extends StatefulWidget {
-  const _EmployeeAttendanceContent({
+class EmployeeAttendanceContent extends StatefulWidget {
+  const EmployeeAttendanceContent({
+    super.key,
     this.showPageHeader = true,
     this.headerKey,
     this.filtersKey,
@@ -2427,11 +2428,11 @@ class _EmployeeAttendanceContent extends StatefulWidget {
   final GlobalKey? recordsKey;
 
   @override
-  State<_EmployeeAttendanceContent> createState() =>
+  State<EmployeeAttendanceContent> createState() =>
       _EmployeeAttendanceContentState();
 }
 
-class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent>
+class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
     with WidgetsBindingObserver {
   static const _dtrRefreshDebounceDuration = Duration(milliseconds: 250);
 
@@ -2616,9 +2617,9 @@ class _EmployeeAttendanceContentState extends State<_EmployeeAttendanceContent>
     if (!mounted) return;
     final range = _selectedAttendanceRange();
     if (range == null) return;
-    final employeeId = context.read<AuthProvider>().user?.id;
+    final dtr = context.read<DtrProvider>();
     if (!event.affectsEmployeeRange(
-      employeeId: employeeId,
+      employeeId: dtr.userId,
       start: range.start,
       end: range.end,
     )) {
