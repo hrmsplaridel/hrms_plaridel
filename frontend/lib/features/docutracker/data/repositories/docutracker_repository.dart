@@ -411,6 +411,39 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  Future<DocuTrackerResult<DocuTrackerSignatureAsset>>
+  renameSavedSignatureAsset({
+    required String assetId,
+    required String displayName,
+  }) async {
+    try {
+      final response = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '$_base/signature-assets/${Uri.encodeComponent(assetId)}',
+        data: <String, dynamic>{'display_name': displayName},
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The signature was not renamed');
+      }
+      return DocuTrackerSuccess(DocuTrackerSignatureAsset.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<void>> removeSavedSignatureAsset(
+    String assetId,
+  ) async {
+    try {
+      await ApiClient.instance.delete(
+        '$_base/signature-assets/${Uri.encodeComponent(assetId)}',
+      );
+      return const DocuTrackerSuccess<void>(null);
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
   String _sourceSignaturePath({
     required String sourceModule,
     required String sourceTable,

@@ -6,6 +6,8 @@ const {
   saveDocumentBuilder,
   createSignatureAsset,
   listSavedSignatureAssets,
+  renameSavedSignatureAsset,
+  removeSavedSignatureAsset,
   signDocumentField,
   moveSignedDocumentField,
 } = require('../src/services/docutrackerDocumentBuilderService');
@@ -178,6 +180,89 @@ test('saved signature lookup is scoped to the authenticated owner', async () => 
 
   await listSavedSignatureAssets(pool, { id: 'owner-7' });
   assert.deepEqual(params, ['owner-7']);
+});
+
+test('saved signature rename is scoped to its authenticated owner', async () => {
+  let queryArgs;
+  const pool = {
+    async query(sql, params) {
+      queryArgs = { sql, params };
+      return {
+        rowCount: 1,
+        rows: [{
+          id: params[0],
+          owner_user_id: params[1],
+          display_name: params[2],
+          is_saved: true,
+        }],
+      };
+    },
+  };
+
+  const result = await renameSavedSignatureAsset(
+    pool,
+    { id: '33333333-3333-4333-8333-333333333333' },
+    '44444444-4444-4444-8444-444444444444',
+    '  Approval signature  '
+  );
+
+  assert.equal(result.display_name, 'Approval signature');
+  assert.deepEqual(queryArgs.params, [
+    '44444444-4444-4444-8444-444444444444',
+    '33333333-3333-4333-8333-333333333333',
+    'Approval signature',
+  ]);
+  assert.match(queryArgs.sql, /owner_user_id = \$2::uuid/);
+  assert.match(queryArgs.sql, /is_saved = true/);
+});
+
+test('saved signature removal hides it without deleting historical data', async () => {
+  let queryArgs;
+  const pool = {
+    async query(sql, params) {
+      queryArgs = { sql, params };
+      return { rowCount: 1, rows: [{ id: params[0] }] };
+    },
+  };
+
+  await removeSavedSignatureAsset(
+    pool,
+    { id: '33333333-3333-4333-8333-333333333333' },
+    '44444444-4444-4444-8444-444444444444'
+  );
+
+  assert.deepEqual(queryArgs.params, [
+    '44444444-4444-4444-8444-444444444444',
+    '33333333-3333-4333-8333-333333333333',
+  ]);
+  assert.match(queryArgs.sql, /SET is_saved = false/);
+  assert.doesNotMatch(queryArgs.sql, /DELETE FROM/i);
+});
+
+test('saved signature changes do not reveal another user signature', async () => {
+  const pool = {
+    async query() {
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  await assert.rejects(
+    renameSavedSignatureAsset(
+      pool,
+      { id: '33333333-3333-4333-8333-333333333333' },
+      '44444444-4444-4444-8444-444444444444',
+      'Not mine'
+    ),
+    (error) => error.code === 'NOT_FOUND'
+  );
+  await assert.rejects(
+    removeSavedSignatureAsset(
+      pool,
+      { id: '33333333-3333-4333-8333-333333333333' },
+      '44444444-4444-4444-8444-444444444444'
+    ),
+    (error) => error.code === 'NOT_FOUND'
+  );
 });
 
 test('assigned signer can replace a locked signature with a new audit entry', async () => {

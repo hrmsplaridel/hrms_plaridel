@@ -635,6 +635,51 @@ class DocuTrackerProvider extends ChangeNotifier {
     };
   }
 
+  Future<DocuTrackerSignatureAsset> createSavedSignature({
+    required Uint8List imageBytes,
+    required String mimeType,
+    required String sourceType,
+    required String displayName,
+  }) async {
+    final result = await _repo.createSignatureAsset(
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      displayName: displayName,
+      saveForReuse: true,
+    );
+    return switch (result) {
+      DocuTrackerSuccess<DocuTrackerSignatureAsset>(:final value) => value,
+      DocuTrackerFailure<DocuTrackerSignatureAsset>(:final message) =>
+        throw Exception(message),
+    };
+  }
+
+  Future<DocuTrackerSignatureAsset> renameSavedSignature({
+    required String assetId,
+    required String displayName,
+  }) async {
+    final result = await _repo.renameSavedSignatureAsset(
+      assetId: assetId,
+      displayName: displayName,
+    );
+    return switch (result) {
+      DocuTrackerSuccess<DocuTrackerSignatureAsset>(:final value) => value,
+      DocuTrackerFailure<DocuTrackerSignatureAsset>(:final message) =>
+        throw Exception(message),
+    };
+  }
+
+  Future<void> removeSavedSignature(String assetId) async {
+    final result = await _repo.removeSavedSignatureAsset(assetId);
+    switch (result) {
+      case DocuTrackerSuccess<void>():
+        return;
+      case DocuTrackerFailure<void>(:final message):
+        throw Exception(message);
+    }
+  }
+
   bool get sourceSignatureLoading => _sourceSignatureLoading;
   String? get sourceSignatureError => _sourceSignatureError;
 

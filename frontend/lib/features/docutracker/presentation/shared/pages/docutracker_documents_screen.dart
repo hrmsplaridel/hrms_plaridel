@@ -11,6 +11,7 @@ import 'package:hrms_plaridel/features/docutracker/services/docutracker_document
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_create_document_dialog.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_library_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
@@ -252,6 +253,17 @@ class _DocuTrackerDocumentsScreenState
       onPressed: provider.loading ? null : _load,
       icon: const Icon(Icons.refresh_rounded),
     );
+    final signaturesButton = OutlinedButton.icon(
+      key: const ValueKey('docutracker-my-signatures'),
+      onPressed: provider.loading
+          ? null
+          : () => showDocuTrackerSignatureLibraryDialog(
+              context,
+              provider: provider,
+            ),
+      icon: const Icon(Icons.draw_outlined, size: 18),
+      label: const Text('My Signatures'),
+    );
 
     return Container(
       width: double.infinity,
@@ -299,6 +311,7 @@ class _DocuTrackerDocumentsScreenState
                       label: Text(hasFilters ? 'Filters active' : 'Filters'),
                     ),
                     refreshButton,
+                    signaturesButton,
                     if (createButton != null) createButton,
                   ],
                 ),
@@ -348,6 +361,8 @@ class _DocuTrackerDocumentsScreenState
                 (control) => [control, const SizedBox(width: 8)],
               ),
               refreshButton,
+              const SizedBox(width: 8),
+              signaturesButton,
               if (createButton != null) ...[
                 const SizedBox(width: 8),
                 createButton,

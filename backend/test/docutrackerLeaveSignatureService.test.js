@@ -4,9 +4,11 @@ const assert = require('node:assert/strict');
 const {
   canApplicantSignStatus,
   canDepartmentHeadSignStatus,
+  canHrApproverSignStatus,
   getLeaveSourceSignatures,
   signLeaveSourceApplicant,
   requireDepartmentHeadApprovalSignature,
+  requireHrApprovalSignature,
 } = require('../src/services/docutrackerLeaveSignatureService');
 
 const leaveId = '11111111-1111-4111-8111-111111111111';
@@ -28,6 +30,13 @@ test('department head can sign only while their review is pending', () => {
   assert.equal(canDepartmentHeadSignStatus('pending_department_head'), true);
   assert.equal(canDepartmentHeadSignStatus('pending_hr'), false);
   assert.equal(canDepartmentHeadSignStatus('approved'), false);
+});
+
+test('HR approver can sign only while final review is pending', () => {
+  assert.equal(canHrApproverSignStatus('pending_hr'), true);
+  assert.equal(canHrApproverSignStatus('pending'), true);
+  assert.equal(canHrApproverSignStatus('pending_department_head'), false);
+  assert.equal(canHrApproverSignStatus('approved'), false);
 });
 
 test('owner sees an unsigned applicant slot with server signing capability', async () => {
@@ -62,7 +71,7 @@ test('owner sees an unsigned applicant slot with server signing capability', asy
     leaveId
   );
 
-  assert.equal(result.signatures.length, 2);
+  assert.equal(result.signatures.length, 3);
   assert.equal(result.signatures[0].slot_key, 'applicant');
   assert.equal(result.signatures[0].can_sign, true);
   assert.equal(result.signatures[0].signature_asset_id, null);
@@ -120,6 +129,23 @@ test('department head approval requires that same reviewer signature', async () 
   );
 
   await requireDepartmentHeadApprovalSignature(
+    { query: async () => ({ rowCount: 1, rows: [{ '?column?': 1 }] }) },
+    leaveId,
+    departmentHeadId
+  );
+});
+
+test('HR approval requires that same reviewer signature', async () => {
+  await assert.rejects(
+    requireHrApprovalSignature(
+      { query: async () => ({ rowCount: 0, rows: [] }) },
+      leaveId,
+      departmentHeadId
+    ),
+    (error) => error.code === 'CONFLICT' && error.statusCode === 409
+  );
+
+  await requireHrApprovalSignature(
     { query: async () => ({ rowCount: 1, rows: [{ '?column?': 1 }] }) },
     leaveId,
     departmentHeadId

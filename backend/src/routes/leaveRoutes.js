@@ -93,6 +93,10 @@ const {
 } = require('../services/leaveEntitlementPolicy');
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
+const {
+  requireDepartmentHeadApprovalSignature,
+  requireHrApprovalSignature,
+} = require('../services/docutrackerLeaveSignatureService');
 
 const router = express.Router();
 
@@ -3643,6 +3647,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       endStr: toIsoDateStr(r.end_date),
       excludeId: id,
     });
+    await requireDepartmentHeadApprovalSignature(client, id, reviewerId);
     await client.query(
       `UPDATE leave_requests
        SET status = $2, reviewer_id = $3, reviewer_remarks = $4, reviewed_at = now(), updated_at = now()
@@ -3985,6 +3990,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         currentStatus: r.status,
         desiredStatus: 'approved',
       });
+      await requireHrApprovalSignature(client, id, reviewerId);
 
       const updated = await client.query(
         `UPDATE leave_requests

@@ -33,20 +33,36 @@ class DocuTrackerSignatureChoice {
 Future<DocuTrackerSignatureChoice?> showDocuTrackerSignatureDialog(
   BuildContext context, {
   required DocuTrackerProvider provider,
+  String title = 'Insert E-Signature',
+  bool allowSavedSelection = true,
+  bool forceSaveForReuse = false,
 }) {
   return showDialog<DocuTrackerSignatureChoice>(
     context: context,
     barrierDismissible: false,
-    builder: (context) => _SignatureDialog(provider: provider),
+    builder: (context) => _SignatureDialog(
+      provider: provider,
+      title: title,
+      allowSavedSelection: allowSavedSelection,
+      forceSaveForReuse: forceSaveForReuse,
+    ),
   );
 }
 
 enum _SignatureMode { draw, upload, saved }
 
 class _SignatureDialog extends StatefulWidget {
-  const _SignatureDialog({required this.provider});
+  const _SignatureDialog({
+    required this.provider,
+    required this.title,
+    required this.allowSavedSelection,
+    required this.forceSaveForReuse,
+  });
 
   final DocuTrackerProvider provider;
+  final String title;
+  final bool allowSavedSelection;
+  final bool forceSaveForReuse;
 
   @override
   State<_SignatureDialog> createState() => _SignatureDialogState();
@@ -69,7 +85,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
   @override
   void initState() {
     super.initState();
-    _loadSaved();
+    if (widget.allowSavedSelection) _loadSaved();
   }
 
   Future<void> _loadSaved() async {
@@ -156,7 +172,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
             imageBytes: bytes,
             mimeType: _uploadedMimeType,
             sourceType: 'uploaded',
-            saveForReuse: _saveForReuse,
+            saveForReuse: widget.forceSaveForReuse || _saveForReuse,
           ),
         );
         return;
@@ -175,7 +191,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
             imageBytes: bytes,
             mimeType: 'image/png',
             sourceType: 'drawn',
-            saveForReuse: _saveForReuse,
+            saveForReuse: widget.forceSaveForReuse || _saveForReuse,
           ),
         );
         return;
@@ -185,7 +201,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Insert E-Signature'),
+      title: Text(widget.title),
       content: SizedBox(
         width: 620,
         child: Column(
@@ -193,22 +209,23 @@ class _SignatureDialogState extends State<_SignatureDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SegmentedButton<_SignatureMode>(
-              segments: const <ButtonSegment<_SignatureMode>>[
-                ButtonSegment(
+              segments: <ButtonSegment<_SignatureMode>>[
+                const ButtonSegment(
                   value: _SignatureMode.draw,
                   icon: Icon(Icons.draw_outlined),
                   label: Text('Draw'),
                 ),
-                ButtonSegment(
+                const ButtonSegment(
                   value: _SignatureMode.upload,
                   icon: Icon(Icons.upload_file_outlined),
                   label: Text('Upload'),
                 ),
-                ButtonSegment(
-                  value: _SignatureMode.saved,
-                  icon: Icon(Icons.bookmark_outline),
-                  label: Text('Saved'),
-                ),
+                if (widget.allowSavedSelection)
+                  const ButtonSegment(
+                    value: _SignatureMode.saved,
+                    icon: Icon(Icons.bookmark_outline),
+                    label: Text('Saved'),
+                  ),
               ],
               selected: <_SignatureMode>{_mode},
               onSelectionChanged: (selection) {
@@ -222,7 +239,8 @@ class _SignatureDialogState extends State<_SignatureDialog> {
             if (_mode == _SignatureMode.draw) _buildDrawing(),
             if (_mode == _SignatureMode.upload) _buildUpload(),
             if (_mode == _SignatureMode.saved) _buildSaved(),
-            if (_mode != _SignatureMode.saved) ...[
+            if (_mode != _SignatureMode.saved &&
+                !widget.forceSaveForReuse) ...[
               const SizedBox(height: 12),
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
@@ -234,6 +252,11 @@ class _SignatureDialogState extends State<_SignatureDialog> {
                   'Only your authenticated account can reuse it.',
                 ),
                 controlAffinity: ListTileControlAffinity.leading,
+              ),
+            ] else if (widget.forceSaveForReuse) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'This signature will be saved in My Signatures for future use.',
               ),
             ],
             if (_error != null) ...[

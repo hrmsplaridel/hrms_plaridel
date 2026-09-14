@@ -114,6 +114,11 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | created_at | TIMESTAMPTZ | Creation time |
 | updated_at | TIMESTAMPTZ | Last update |
 
+Setting `is_saved` to false removes an asset from the owner's reusable library.
+The asset row remains available to existing signed document and leave-form
+records, so historical signatures never disappear when a user removes a
+library entry.
+
 ## docutracker_signature_fields
 
 | Column | Type | Description |
@@ -142,7 +147,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 |--------|------|-------------|
 | id | UUID | Primary key |
 | leave_request_id | UUID | DTR leave request; one signature per slot |
-| slot_key | TEXT | applicant or department_head |
+| slot_key | TEXT | applicant, department_head, or hr_approver |
 | assigned_signer_id | UUID | Existing active user assigned to the fixed form slot |
 | signature_asset_id | UUID | Private DocuTracker signature asset selected by the signer |
 | signed_by | UUID | Authenticated signer; must equal assigned_signer_id |

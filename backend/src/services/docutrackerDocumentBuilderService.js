@@ -358,6 +358,40 @@ async function listSavedSignatureAssets(pool, user) {
   return result.rows;
 }
 
+async function renameSavedSignatureAsset(pool, user, assetId, displayName) {
+  if (!isUuid(assetId)) throw notFoundError('Saved signature not found');
+  const normalizedName = String(displayName || '').trim();
+  if (!normalizedName || normalizedName.length > 120) {
+    throw validationError('Signature name must contain 1 to 120 characters');
+  }
+  const result = await pool.query(
+    `UPDATE docutracker_signature_assets
+     SET display_name = $3
+     WHERE id = $1::uuid
+       AND owner_user_id = $2::uuid
+       AND is_saved = true
+     RETURNING id, owner_user_id, mime_type, source_type, display_name, is_saved,
+               created_at, encode(image_bytes, 'base64') AS image_base64`,
+    [assetId, user.id, normalizedName]
+  );
+  if (!result.rowCount) throw notFoundError('Saved signature not found');
+  return result.rows[0];
+}
+
+async function removeSavedSignatureAsset(pool, user, assetId) {
+  if (!isUuid(assetId)) throw notFoundError('Saved signature not found');
+  const result = await pool.query(
+    `UPDATE docutracker_signature_assets
+     SET is_saved = false
+     WHERE id = $1::uuid
+       AND owner_user_id = $2::uuid
+       AND is_saved = true
+     RETURNING id`,
+    [assetId, user.id]
+  );
+  if (!result.rowCount) throw notFoundError('Saved signature not found');
+}
+
 async function signDocumentField(pool, user, documentId, fieldId, input) {
   if (!isUuid(fieldId)) throw notFoundError('Signature field not found');
   const client = await pool.connect();
@@ -504,6 +538,8 @@ module.exports = {
   saveDocumentBuilder,
   createSignatureAsset,
   listSavedSignatureAssets,
+  renameSavedSignatureAsset,
+  removeSavedSignatureAsset,
   signDocumentField,
   moveSignedDocumentField,
 };

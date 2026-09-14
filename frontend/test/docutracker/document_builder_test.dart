@@ -208,7 +208,7 @@ void main() {
     );
   });
 
-  test('linked leave signatures parse applicant and department head slots', () {
+  test('linked leave signatures parse applicant, department, and HR slots', () {
     final bundle = DocuTrackerSourceSignatureBundle.fromJson(<String, dynamic>{
       'source_module': 'dtr',
       'source_table': 'leave_requests',
@@ -228,6 +228,13 @@ void main() {
           'assigned_signer_name': 'Department Head One',
           'can_sign': true,
         },
+        <String, dynamic>{
+          'slot_key': 'hr_approver',
+          'label': 'Final Approver Signature',
+          'assigned_signer_id': 'hr-1',
+          'assigned_signer_name': 'HR Officer One',
+          'can_sign': false,
+        },
       ],
     });
 
@@ -236,6 +243,10 @@ void main() {
     expect(
       bundle.signatureFor('department_head')?.assignedSignerName,
       'Department Head One',
+    );
+    expect(
+      bundle.signatureFor('hr_approver')?.assignedSignerName,
+      'HR Officer One',
     );
   });
 }

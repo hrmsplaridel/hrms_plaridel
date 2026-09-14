@@ -280,6 +280,8 @@ class LeaveRequestPdf {
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
     Uint8List? applicantSignatureBytes,
+    Uint8List? departmentHeadSignatureBytes,
+    Uint8List? hrApproverSignatureBytes,
   }) async {
     return _LeaveRequestPdfFixedEngine.buildPdf(
       request: request,
@@ -289,6 +291,8 @@ class LeaveRequestPdf {
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
       applicantSignatureBytes: applicantSignatureBytes,
+      departmentHeadSignatureBytes: departmentHeadSignatureBytes,
+      hrApproverSignatureBytes: hrApproverSignatureBytes,
     );
   }
 
@@ -303,6 +307,8 @@ class LeaveRequestPdf {
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
     Uint8List? applicantSignatureBytes,
+    Uint8List? departmentHeadSignatureBytes,
+    Uint8List? hrApproverSignatureBytes,
   }) async {
     return _LeaveRequestPdfFixedEngine.printLeaveRequest(
       request: request,
@@ -313,6 +319,8 @@ class LeaveRequestPdf {
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
       applicantSignatureBytes: applicantSignatureBytes,
+      departmentHeadSignatureBytes: departmentHeadSignatureBytes,
+      hrApproverSignatureBytes: hrApproverSignatureBytes,
     );
   }
 
@@ -1652,6 +1660,8 @@ class _LeaveRequestPdfFixedEngine {
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
     Uint8List? applicantSignatureBytes,
+    Uint8List? departmentHeadSignatureBytes,
+    Uint8List? hrApproverSignatureBytes,
   }) async {
     final b = balances ?? const <LeaveBalance>[];
     final vl = b
@@ -1680,6 +1690,15 @@ class _LeaveRequestPdfFixedEngine {
         applicantSignatureBytes == null || applicantSignatureBytes.isEmpty
         ? null
         : pw.MemoryImage(applicantSignatureBytes);
+    final departmentHeadSignatureImage =
+        departmentHeadSignatureBytes == null ||
+            departmentHeadSignatureBytes.isEmpty
+        ? null
+        : pw.MemoryImage(departmentHeadSignatureBytes);
+    final hrApproverSignatureImage =
+        hrApproverSignatureBytes == null || hrApproverSignatureBytes.isEmpty
+        ? null
+        : pw.MemoryImage(hrApproverSignatureBytes);
     final hasDepartmentHeadRecommendation =
         request.departmentHeadAction == 'department_head_approved';
     final hasDepartmentHeadDisapproval =
@@ -2654,7 +2673,16 @@ class _LeaveRequestPdfFixedEngine {
                                         ),
                                       ),
                                     ),
-                                    pw.SizedBox(height: 35),
+                                    if (departmentHeadSignatureImage != null)
+                                      pw.SizedBox(
+                                        height: 30,
+                                        child: pw.Image(
+                                          departmentHeadSignatureImage,
+                                          fit: pw.BoxFit.contain,
+                                        ),
+                                      )
+                                    else
+                                      pw.SizedBox(height: 30),
                                     pw.Container(
                                       height: 1,
                                       color: _borderColor,
@@ -2805,7 +2833,16 @@ class _LeaveRequestPdfFixedEngine {
                               padding: const pw.EdgeInsets.fromLTRB(8, 6, 8, 8),
                               child: pw.Column(
                                 children: [
-                                  pw.SizedBox(height: 20),
+                                  if (hrApproverSignatureImage != null)
+                                    pw.SizedBox(
+                                      height: 30,
+                                      child: pw.Image(
+                                        hrApproverSignatureImage,
+                                        fit: pw.BoxFit.contain,
+                                      ),
+                                    )
+                                  else
+                                    pw.SizedBox(height: 20),
                                   pw.Container(
                                     height: 1,
                                     color: _borderColor,
@@ -2902,6 +2939,8 @@ class _LeaveRequestPdfFixedEngine {
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
     Uint8List? applicantSignatureBytes,
+    Uint8List? departmentHeadSignatureBytes,
+    Uint8List? hrApproverSignatureBytes,
   }) async {
     final doc = await buildPdf(
       request: request,
@@ -2911,6 +2950,8 @@ class _LeaveRequestPdfFixedEngine {
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
       applicantSignatureBytes: applicantSignatureBytes,
+      departmentHeadSignatureBytes: departmentHeadSignatureBytes,
+      hrApproverSignatureBytes: hrApproverSignatureBytes,
     );
     await Printing.layoutPdf(
       onLayout: (format) async => doc.save(),

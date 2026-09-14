@@ -28,6 +28,8 @@ const {
   saveDocumentBuilder,
   createSignatureAsset,
   listSavedSignatureAssets,
+  renameSavedSignatureAsset,
+  removeSavedSignatureAsset,
   signDocumentField,
   moveSignedDocumentField,
 } = require('../services/docutrackerDocumentBuilderService');
@@ -35,6 +37,7 @@ const {
   getLeaveSourceSignatures,
   signLeaveSourceApplicant,
   signLeaveSourceDepartmentHead,
+  signLeaveSourceHrApprover,
 } = require('../services/docutrackerLeaveSignatureService');
 
 const router = express.Router();
@@ -473,6 +476,36 @@ router.post('/signature-assets', protect, async (req, res) => {
   }
 });
 
+/** Rename a saved signature owned by the current user. */
+router.patch('/signature-assets/:assetId', protect, async (req, res) => {
+  try {
+    res.json(
+      await renameSavedSignatureAsset(
+        pool,
+        req.user,
+        req.params.assetId,
+        req.body?.display_name
+      )
+    );
+  } catch (err) {
+    console.error('[docutracker PATCH /signature-assets/:assetId]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** Remove a signature from the current user's library without altering signed documents. */
+router.delete('/signature-assets/:assetId', protect, async (req, res) => {
+  try {
+    await removeSavedSignatureAsset(pool, req.user, req.params.assetId);
+    res.status(204).send();
+  } catch (err) {
+    console.error('[docutracker DELETE /signature-assets/:assetId]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
 /** GET linked DTR leave-form signatures without copying the leave request. */
 router.get(
   '/sources/:sourceModule/:sourceTable/:sourceRecordId/signatures',
@@ -538,6 +571,30 @@ router.post(
       );
     } catch (err) {
       console.error('[docutracker POST /sources/:source/signatures/department_head/sign]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+/** Sign or replace the authenticated HR reviewer's final approval signature. */
+router.post(
+  '/sources/:sourceModule/:sourceTable/:sourceRecordId/signatures/hr_approver/sign',
+  protect,
+  async (req, res) => {
+    try {
+      res.json(
+        await signLeaveSourceHrApprover(
+          pool,
+          req.user,
+          req.params.sourceModule,
+          req.params.sourceTable,
+          req.params.sourceRecordId,
+          req.body || {}
+        )
+      );
+    } catch (err) {
+      console.error('[docutracker POST /sources/:source/signatures/hr_approver/sign]', err);
       const mapped = mapWorkflowServiceError(err);
       res.status(mapped.status).json({ error: mapped.error });
     }

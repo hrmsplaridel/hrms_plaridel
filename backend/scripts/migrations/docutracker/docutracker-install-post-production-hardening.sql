@@ -22,6 +22,7 @@
 --   17 - E-SIGNATURE HISTORY ACTION
 --   18 - LINKED DTR LEAVE E-SIGNATURES
 --   19 - DEPARTMENT HEAD LEAVE E-SIGNATURE
+--   20 - HR APPROVER LEAVE E-SIGNATURE
 --
 -- =============================================================================
 
@@ -831,5 +832,22 @@ ALTER TABLE docutracker_leave_signatures
 ALTER TABLE docutracker_leave_signatures
   ADD CONSTRAINT docutracker_leave_signatures_slot_check
   CHECK (slot_key IN ('applicant', 'department_head'));
+
+COMMIT;
+
+
+-- #############################################################################
+-- 20 - HR APPROVER LEAVE E-SIGNATURE
+-- Source file: migrate-docutracker-leave-signatures-v3.sql
+-- #############################################################################
+
+BEGIN;
+
+ALTER TABLE docutracker_leave_signatures
+  DROP CONSTRAINT IF EXISTS docutracker_leave_signatures_slot_check;
+
+ALTER TABLE docutracker_leave_signatures
+  ADD CONSTRAINT docutracker_leave_signatures_slot_check
+  CHECK (slot_key IN ('applicant', 'department_head', 'hr_approver'));
 
 COMMIT;

@@ -1802,6 +1802,10 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
             formSignatories.recommendationOfficer?.title,
         applicantSignatureBytes:
             formSignatories.applicantSignature?.signatureImageBytes,
+        departmentHeadSignatureBytes:
+            formSignatories.departmentHeadSignature?.signatureImageBytes,
+        hrApproverSignatureBytes:
+            formSignatories.hrApproverSignature?.signatureImageBytes,
         name: 'Leave_Application_${request.id ?? request.userId}.pdf',
       );
     } catch (e) {

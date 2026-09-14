@@ -28,16 +28,24 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | PUT | `/api/docutracker/documents/{id}/builder` | Save page Delta content and the complete unsigned signature-field layout using optimistic revision checking |
 | GET | `/api/docutracker/signature-assets` | List saved signatures owned by the authenticated user |
 | POST | `/api/docutracker/signature-assets` | Save a drawn or uploaded PNG/JPEG signature owned by the authenticated user |
+| PATCH | `/api/docutracker/signature-assets/{assetId}` | Rename a saved signature owned by the authenticated user |
+| DELETE | `/api/docutracker/signature-assets/{assetId}` | Remove a signature from the authenticated user's library without changing signed documents |
 | POST | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/sign` | Sign or replace the signature image in one field assigned to the authenticated user |
 | PATCH | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/position` | Move an already-signed field assigned to the authenticated user without changing its size, signer, or image |
 | GET | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures` | Load fixed e-signature slots for an authorized linked DTR leave request |
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/applicant/sign` | Add or replace the authenticated applicant's signature while the leave request remains active |
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/department_head/sign` | Add or replace the assigned department head signature before endorsement |
+| POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/hr_approver/sign` | Add or replace the authenticated HR/admin signature before final approval |
 
 Builder responses include `current_user_id` and a per-field `can_sign`
 capability calculated from the authenticated backend user. The Flutter client
 uses these server-authoritative values instead of deciding signer identity from
 locally passed navigation data.
+
+Drawn or uploaded signatures can be marked `is_saved` and reused through an
+owned `signature_asset_id`. The backend verifies asset ownership and requires
+the same authenticated department reviewer or HR/admin reviewer to sign the
+corresponding fixed slot before approval.
 
 Builder responses also include `format_version`. New builder content uses
 version `2`, which renders the official `assets/forms/a4_letter.pdf` full-page

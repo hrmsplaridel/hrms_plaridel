@@ -31,11 +31,15 @@ class LeaveFormSignatories {
     this.certificationOfficer,
     this.recommendationOfficer,
     this.applicantSignature,
+    this.departmentHeadSignature,
+    this.hrApproverSignature,
   });
 
   final LeaveFormSignatoryInfo? certificationOfficer;
   final LeaveFormSignatoryInfo? recommendationOfficer;
   final DocuTrackerSourceSignature? applicantSignature;
+  final DocuTrackerSourceSignature? departmentHeadSignature;
+  final DocuTrackerSourceSignature? hrApproverSignature;
 }
 
 Future<LeaveFormSignatories> loadLeaveFormSignatories({
@@ -44,6 +48,8 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
   LeaveFormSignatoryInfo? certification;
   LeaveFormSignatoryInfo? recommendation;
   DocuTrackerSourceSignature? applicantSignature;
+  DocuTrackerSourceSignature? departmentHeadSignature;
+  DocuTrackerSourceSignature? hrApproverSignature;
 
   try {
     final res = await ApiClient.instance.get<Map<String, dynamic>>(
@@ -74,14 +80,18 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
     );
     if (result is DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>) {
       applicantSignature = result.value.signatureFor('applicant');
+      departmentHeadSignature = result.value.signatureFor('department_head');
+      hrApproverSignature = result.value.signatureFor('hr_approver');
     }
   }
 
-  final departmentHeadName = _nonBlank(request.departmentHeadReviewerName);
-  if (recommendation == null && departmentHeadName != null) {
+  final departmentHeadName =
+      _nonBlank(departmentHeadSignature?.signerName) ??
+      _nonBlank(request.departmentHeadReviewerName);
+  if (departmentHeadName != null) {
     recommendation = LeaveFormSignatoryInfo(
       name: departmentHeadName,
-      title: 'Department Head',
+      title: recommendation?.title ?? 'Department Head',
     );
   }
 
@@ -89,6 +99,8 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
     certificationOfficer: certification?.hasName == true ? certification : null,
     recommendationOfficer: recommendation,
     applicantSignature: applicantSignature,
+    departmentHeadSignature: departmentHeadSignature,
+    hrApproverSignature: hrApproverSignature,
   );
 }
 
