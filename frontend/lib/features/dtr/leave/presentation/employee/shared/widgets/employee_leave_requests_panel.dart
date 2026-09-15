@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
@@ -275,16 +276,19 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     });
   }
 
-  void _showDetails(BuildContext context, LeaveRequest request) {
+  Future<void> _showDetails(BuildContext context, LeaveRequest request) async {
     final canEdit =
         request.status == LeaveRequestStatus.draft ||
         request.status == LeaveRequestStatus.returned ||
         request.status == LeaveRequestStatus.rejectedByDepartmentHead ||
         request.status == LeaveRequestStatus.rejectedByHr;
 
-    showDialog<void>(
+    await openResponsiveRightSidePanel<void>(
       context: context,
-      builder: (_) => _EmployeeLeaveDetailsDialog(
+      barrierLabel: 'Close leave details',
+      minWidth: 400,
+      initialWidthFraction: 0.34,
+      builder: (_) => _EmployeeLeaveDetailsPanel(
         request: request,
         canEdit: canEdit,
         canCancel: _canEmployeeCancel(request),
@@ -555,9 +559,9 @@ class _EmployeeSectionLoadError extends StatelessWidget {
   }
 }
 
-/// Employee “view details” dialog — compact width, status chip, scrollable body.
-class _EmployeeLeaveDetailsDialog extends StatelessWidget {
-  const _EmployeeLeaveDetailsDialog({
+/// Employee request details shown as a right sheet or a full-screen route.
+class _EmployeeLeaveDetailsPanel extends StatelessWidget {
+  const _EmployeeLeaveDetailsPanel({
     required this.request,
     required this.canEdit,
     required this.canCancel,
@@ -591,22 +595,14 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screen = MediaQuery.sizeOf(context);
-    final maxW = (screen.width - 40).clamp(300.0, 420.0);
-    final bodyMaxH = (screen.height * 0.52).clamp(220.0, 420.0);
-
-    return Dialog(
+    return Scaffold(
+      key: const Key('employee-leave-details-panel'),
       backgroundColor: AppTheme.dashPanelOf(context),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
-      clipBehavior: Clip.antiAlias,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxW),
+      body: SafeArea(
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+              padding: const EdgeInsets.fromLTRB(24, 20, 14, 16),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -631,9 +627,8 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                           'Leave details',
                           style: TextStyle(
                             color: AppTheme.dashTextPrimaryOf(context),
-                            fontSize: 18,
+                            fontSize: 20,
                             fontWeight: FontWeight.w800,
-                            letterSpacing: -0.2,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -650,10 +645,9 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
               ),
             ),
             Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-            ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: bodyMaxH),
+            Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -813,7 +807,7 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
             ),
             Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
               child: Wrap(
                 alignment: WrapAlignment.end,
                 spacing: 8,

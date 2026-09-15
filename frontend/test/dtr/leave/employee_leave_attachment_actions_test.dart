@@ -15,6 +15,11 @@ void main() {
     await tester.tap(find.text('Sick Leave'));
     await tester.pumpAndSettle();
 
+    expect(
+      find.byKey(const Key('employee-leave-details-panel')),
+      findsOneWidget,
+    );
+    expect(find.byType(Dialog), findsNothing);
     expect(find.text('medical-certificate.pdf'), findsOneWidget);
     expect(
       find.byKey(const Key('employee-leave-attachment-preview')),
