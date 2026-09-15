@@ -7,6 +7,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/desktop/widgets/employee_leave_desktop_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/mobile/widgets/employee_leave_mobile_requests_content.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/leave_request_date_filter.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/history_timeline.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_status_chip.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
@@ -221,20 +222,17 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
           return false;
         }
       }
-      if (_fromDate != null && request.startDate != null) {
-        final d = _dateOnly(request.startDate!);
-        if (d.isBefore(_dateOnly(_fromDate!))) return false;
-      }
-      if (_toDate != null && request.endDate != null) {
-        final d = _dateOnly(request.endDate!);
-        if (d.isAfter(_dateOnly(_toDate!))) return false;
+      if (!leaveRequestOverlapsDateFilter(
+        requestStart: request.startDate,
+        requestEnd: request.endDate,
+        filterStart: _fromDate,
+        filterEnd: _toDate,
+      )) {
+        return false;
       }
       return true;
     }).toList();
   }
-
-  DateTime _dateOnly(DateTime value) =>
-      DateTime(value.year, value.month, value.day);
 
   Future<void> _pickFilterDate({required bool isFrom}) async {
     final initial = isFrom
