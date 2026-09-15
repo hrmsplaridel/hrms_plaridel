@@ -15,3 +15,18 @@ double leaveCertificationBalanceAfterApplication({
       ? balance.availableDays
       : balance.availableDays - applicationDays;
 }
+
+/// Returns the balance immediately before the application shown in section
+/// 7.A, so its three rows reconcile as before - application = after.
+double leaveCertificationBalanceBeforeApplication({
+  required LeaveBalance balance,
+  required LeaveRequestStatus requestStatus,
+  required double applicationDays,
+}) {
+  return leaveCertificationBalanceAfterApplication(
+        balance: balance,
+        requestStatus: requestStatus,
+        applicationDays: applicationDays,
+      ) +
+      applicationDays;
+}

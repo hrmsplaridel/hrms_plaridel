@@ -952,7 +952,11 @@ class LeaveRequestPdf {
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
                                         formatDays(
-                                          vlBal.earnedDays + vlBal.adjustedDays,
+                                          leaveCertificationBalanceBeforeApplication(
+                                            balance: vlBal,
+                                            requestStatus: request.status,
+                                            applicationDays: vlDeduction,
+                                          ),
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
                                       ),
@@ -961,7 +965,11 @@ class LeaveRequestPdf {
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
                                         formatDays(
-                                          slBal.earnedDays + slBal.adjustedDays,
+                                          leaveCertificationBalanceBeforeApplication(
+                                            balance: slBal,
+                                            requestStatus: request.status,
+                                            applicationDays: slDeduction,
+                                          ),
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
                                       ),
@@ -1691,6 +1699,11 @@ class _LeaveRequestPdfFixedEngine {
         .where((e) => e.leaveType == LeaveType.sickLeave)
         .cast<LeaveBalance?>()
         .firstWhere((e) => e != null, orElse: () => null);
+    final vlBalance =
+        vl ??
+        const LeaveBalance(userId: '', leaveType: LeaveType.vacationLeave);
+    final slBalance =
+        sl ?? const LeaveBalance(userId: '', leaveType: LeaveType.sickLeave);
     final wd = _workDays(request);
     final daysText = wd == null ? '' : '${wd.toStringAsFixed(1)} day/s';
     final fullName = _s(request.employeeName).isNotEmpty
@@ -2492,9 +2505,12 @@ class _LeaveRequestPdfFixedEngine {
                                                       ),
                                                   child: pw.Text(
                                                     d3(
-                                                      (vl?.earnedDays ?? 0) +
-                                                          (vl?.adjustedDays ??
-                                                              0),
+                                                      leaveCertificationBalanceBeforeApplication(
+                                                        balance: vlBalance,
+                                                        requestStatus:
+                                                            request.status,
+                                                        applicationDays: vlDed,
+                                                      ),
                                                     ),
                                                     style: const pw.TextStyle(
                                                       fontSize: _small,
@@ -2508,9 +2524,12 @@ class _LeaveRequestPdfFixedEngine {
                                                       ),
                                                   child: pw.Text(
                                                     d3(
-                                                      (sl?.earnedDays ?? 0) +
-                                                          (sl?.adjustedDays ??
-                                                              0),
+                                                      leaveCertificationBalanceBeforeApplication(
+                                                        balance: slBalance,
+                                                        requestStatus:
+                                                            request.status,
+                                                        applicationDays: slDed,
+                                                      ),
                                                     ),
                                                     style: const pw.TextStyle(
                                                       fontSize: _small,
@@ -2580,8 +2599,12 @@ class _LeaveRequestPdfFixedEngine {
                                                       ),
                                                   child: pw.Text(
                                                     balanceD3(
-                                                      (vl?.remainingDays ?? 0) -
-                                                          vlDed,
+                                                      leaveCertificationBalanceAfterApplication(
+                                                        balance: vlBalance,
+                                                        requestStatus:
+                                                            request.status,
+                                                        applicationDays: vlDed,
+                                                      ),
                                                     ),
                                                     style: const pw.TextStyle(
                                                       fontSize: _small,
@@ -2595,8 +2618,12 @@ class _LeaveRequestPdfFixedEngine {
                                                       ),
                                                   child: pw.Text(
                                                     balanceD3(
-                                                      (sl?.remainingDays ?? 0) -
-                                                          slDed,
+                                                      leaveCertificationBalanceAfterApplication(
+                                                        balance: slBalance,
+                                                        requestStatus:
+                                                            request.status,
+                                                        applicationDays: slDed,
+                                                      ),
                                                     ),
                                                     style: const pw.TextStyle(
                                                       fontSize: _small,

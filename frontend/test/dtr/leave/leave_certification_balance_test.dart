@@ -23,6 +23,23 @@ void main() {
     );
   });
 
+  test('approved certification rows reconcile around the application', () {
+    final before = leaveCertificationBalanceBeforeApplication(
+      balance: approvedBalance,
+      requestStatus: LeaveRequestStatus.approved,
+      applicationDays: 2,
+    );
+    final after = leaveCertificationBalanceAfterApplication(
+      balance: approvedBalance,
+      requestStatus: LeaveRequestStatus.approved,
+      applicationDays: 2,
+    );
+
+    expect(before, closeTo(5.29, 0.000001));
+    expect(after, closeTo(3.29, 0.000001));
+    expect(before - 2, closeTo(after, 0.000001));
+  });
+
   test('pending application is not deducted from reserved days twice', () {
     const pendingBalance = LeaveBalance(
       userId: 'employee-a',
@@ -57,6 +74,14 @@ void main() {
         applicationDays: 2,
       ),
       closeTo(3.29, 0.000001),
+    );
+    expect(
+      leaveCertificationBalanceBeforeApplication(
+        balance: draftBalance,
+        requestStatus: LeaveRequestStatus.draft,
+        applicationDays: 2,
+      ),
+      closeTo(5.29, 0.000001),
     );
   });
 }

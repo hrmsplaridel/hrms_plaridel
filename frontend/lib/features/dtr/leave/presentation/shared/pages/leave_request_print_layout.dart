@@ -1266,10 +1266,24 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                 children: [
                   const _TableCell(text: 'Total Earned'),
                   _TableCell(
-                    text: formatDays(vlBal.earnedDays + vlBal.adjustedDays),
+                    text: formatDays(
+                      leaveCertificationBalanceBeforeApplication(
+                        balance: vlBal,
+                        requestStatus:
+                            currentRequest?.status ?? LeaveRequestStatus.draft,
+                        applicationDays: vlDeduction,
+                      ),
+                    ),
                   ),
                   _TableCell(
-                    text: formatDays(slBal.earnedDays + slBal.adjustedDays),
+                    text: formatDays(
+                      leaveCertificationBalanceBeforeApplication(
+                        balance: slBal,
+                        requestStatus:
+                            currentRequest?.status ?? LeaveRequestStatus.draft,
+                        applicationDays: slDeduction,
+                      ),
+                    ),
                   ),
                 ],
               ),
