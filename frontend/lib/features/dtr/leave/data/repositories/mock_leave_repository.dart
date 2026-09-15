@@ -3,6 +3,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
 /// Temporary in-memory repository for local UI integration.
@@ -18,6 +19,29 @@ class MockLeaveRepository implements LeaveRepository {
   Future<DateTime> getOfficialDate() async {
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day);
+  }
+
+  @override
+  Future<List<LeaveRequestHistoryEntry>> listMyRequestHistory(
+    String requestId,
+  ) async {
+    final request = _getRequestByIdInternal(requestId);
+    if (request == null) return const [];
+    final actedAt = request.updatedAt ?? request.createdAt ?? DateTime.now();
+    return [
+      LeaveRequestHistoryEntry(
+        id: 'history_$requestId',
+        requestId: requestId,
+        action: request.status == LeaveRequestStatus.draft
+            ? 'saved_draft'
+            : 'submitted',
+        toStatus: request.status.value,
+        actorId: request.userId,
+        actorName: request.employeeName,
+        actedAt: actedAt,
+        remarks: request.reason,
+      ),
+    ];
   }
 
   @override

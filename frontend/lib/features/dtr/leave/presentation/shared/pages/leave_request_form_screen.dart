@@ -675,7 +675,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     setState(() => _submitFlowInFlight = true);
     try {
       if (!await _refreshSavedStatus() || !mounted) return;
-      if (!_formKey.currentState!.validate()) return;
+      final formState = _formKey.currentState;
+      if (formState == null) {
+        _showMessage('The leave form is not ready. Please try again.');
+        return;
+      }
+      if (!formState.validate()) return;
       final accountEligibilityMessage = _selectedAccountEligibilityMessage();
       if (accountEligibilityMessage != null) {
         _showMessage(accountEligibilityMessage);
@@ -1402,7 +1407,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     final formMaxWidth = 800.0; // Clean, narrow column for digital entry
     final leaveProvider = context.watch<LeaveProvider>();
 
-    if (_checkingStatus || _statusError != null || !_canEditRequest) {
+    if (_statusError != null || (!_checkingStatus && !_canEditRequest)) {
       final status = (_savedRequest ?? widget.initialRequest)?.status;
       return Scaffold(
         backgroundColor: AppTheme.dashCanvasOf(context),
@@ -1412,9 +1417,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_checkingStatus)
-                const Center(child: CircularProgressIndicator())
-              else if (_statusError != null) ...[
+              if (_statusError != null) ...[
                 Text(_statusError!),
                 TextButton(
                   onPressed: _refreshSavedStatus,
@@ -1718,7 +1721,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                         children: [
                           if (widget.onSaveDraft != null)
                             OutlinedButton(
-                              onPressed: _busy || _submitFlowInFlight
+                              onPressed:
+                                  _busy ||
+                                      _submitFlowInFlight ||
+                                      _checkingStatus
                                   ? null
                                   : _saveDraft,
                               style: OutlinedButton.styleFrom(
@@ -1732,7 +1738,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                           const SizedBox(width: 16),
                           if (widget.onSubmitRequest != null)
                             FilledButton(
-                              onPressed: _busy || _submitFlowInFlight
+                              onPressed:
+                                  _busy ||
+                                      _submitFlowInFlight ||
+                                      _checkingStatus
                                   ? null
                                   : _submitRequest,
                               style: FilledButton.styleFrom(

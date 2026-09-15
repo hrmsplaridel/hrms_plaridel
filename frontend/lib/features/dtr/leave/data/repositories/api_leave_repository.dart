@@ -7,6 +7,7 @@ import 'leave_repository.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
 class ApiLeaveRepository implements LeaveRepository {
@@ -182,6 +183,28 @@ class ApiLeaveRepository implements LeaveRepository {
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) return null;
       rethrow;
+    }
+  }
+
+  @override
+  Future<List<LeaveRequestHistoryEntry>> listMyRequestHistory(
+    String requestId,
+  ) async {
+    try {
+      final safeId = Uri.encodeComponent(requestId.trim());
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/my/$safeId/history',
+      );
+      return (res.data ?? const [])
+          .map((item) => LeaveRequestHistoryEntry.fromJson(_asMap(item)))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load leave request history. Please try again.',
+        ),
+      );
     }
   }
 

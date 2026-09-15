@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/desktop/widgets/employee_leave_desktop_requests_content.dart';
@@ -8,6 +10,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/mobile/wi
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/history_timeline.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_status_chip.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
+import 'package:provider/provider.dart';
 
 const _leaveRequestFilterOptions = <RequestFilterOption<LeaveRequestStatus>>[
   RequestFilterOption(label: 'All'),
@@ -291,93 +294,146 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
   }
 
   void _showHistory(BuildContext context, LeaveRequest request) {
-    final reviewed = request.reviewedAt;
-    final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
-        ? request.reviewerName!.trim()
-        : 'HR/Admin';
-    final departmentHeadReviewer =
-        (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
-        ? request.departmentHeadReviewerName!.trim()
-        : 'Department Head';
-    final departmentHeadReviewedAt =
-        request.departmentHeadReviewedAt ?? reviewed;
-
-    final events = [
-      LeaveHistoryEvent(
-        label: 'Submitted',
-        dateTime: request.dateFiled ?? request.createdAt,
-        actor: request.employeeName ?? 'Employee',
-        remarks: request.reason,
-      ),
-      LeaveHistoryEvent(
-        label: 'Approved by Department Head',
-        dateTime:
-            request.status == LeaveRequestStatus.pendingHr ||
-                request.status == LeaveRequestStatus.approved
-            ? departmentHeadReviewedAt
-            : null,
-        actor: departmentHeadReviewer,
-        completed:
-            request.status == LeaveRequestStatus.pendingHr ||
-            request.status == LeaveRequestStatus.approved,
-      ),
-      LeaveHistoryEvent(
-        label: 'Forwarded to HR',
-        dateTime:
-            request.status == LeaveRequestStatus.pendingHr ||
-                request.status == LeaveRequestStatus.approved
-            ? departmentHeadReviewedAt
-            : null,
-        actor: departmentHeadReviewer,
-        completed:
-            request.status == LeaveRequestStatus.pendingHr ||
-            request.status == LeaveRequestStatus.approved,
-      ),
-      LeaveHistoryEvent(
-        label: 'Approved by HR',
-        dateTime: request.status == LeaveRequestStatus.approved
-            ? reviewed
-            : null,
-        actor: reviewer,
-        remarks: request.hrRemarks,
-        completed: request.status == LeaveRequestStatus.approved,
-      ),
-    ];
+    final requestId = request.id;
+    if (requestId == null || requestId.isEmpty) return;
 
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        backgroundColor: AppTheme.dashPanelOf(dialogContext),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Leave Request History',
-                  style: TextStyle(
-                    color: AppTheme.dashTextPrimaryOf(dialogContext),
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
+      builder: (_) => _EmployeeLeaveHistoryDialog(requestId: requestId),
+    );
+  }
+}
+
+class _EmployeeLeaveHistoryDialog extends StatefulWidget {
+  const _EmployeeLeaveHistoryDialog({required this.requestId});
+
+  final String requestId;
+
+  @override
+  State<_EmployeeLeaveHistoryDialog> createState() =>
+      _EmployeeLeaveHistoryDialogState();
+}
+
+class _EmployeeLeaveHistoryDialogState
+    extends State<_EmployeeLeaveHistoryDialog> {
+  late Future<List<LeaveRequestHistoryEntry>> _historyFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _historyFuture = _loadHistory();
+  }
+
+  Future<List<LeaveRequestHistoryEntry>> _loadHistory() {
+    return context.read<LeaveProvider>().loadMyRequestHistory(widget.requestId);
+  }
+
+  void _retry() {
+    setState(() => _historyFuture = _loadHistory());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppTheme.dashPanelOf(context),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 640),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Leave Request History',
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                HistoryTimeline(events: events),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Close'),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Flexible(
+              child: FutureBuilder<List<LeaveRequestHistoryEntry>>(
+                future: _historyFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const SizedBox(
+                      height: 180,
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  if (snapshot.hasError) {
+                    final message = snapshot.error.toString().replaceFirst(
+                      'Exception: ',
+                      '',
+                    );
+                    return Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: _EmployeeSectionLoadError(
+                        message: message,
+                        onRetry: _retry,
+                      ),
+                    );
+                  }
+
+                  final history = snapshot.data ?? const [];
+                  if (history.isEmpty) {
+                    return SizedBox(
+                      height: 180,
+                      child: Center(
+                        child: Text(
+                          'No workflow history has been recorded.',
+                          style: TextStyle(
+                            color: AppTheme.dashTextSecondaryOf(context),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  final events = history
+                      .map(
+                        (entry) => LeaveHistoryEvent(
+                          label: entry.actionLabel,
+                          dateTime: entry.actedAt,
+                          actor: entry.actorLabel,
+                          remarks: entry.remarks,
+                        ),
+                      )
+                      .toList();
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                    child: HistoryTimeline(events: events),
+                  );
+                },
+              ),
+            ),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

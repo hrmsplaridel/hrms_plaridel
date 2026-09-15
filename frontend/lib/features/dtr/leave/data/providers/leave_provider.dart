@@ -4,6 +4,7 @@ import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_reposit
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
 /// Credit balances and explicitly marked annual-entitlement summaries are shown.
@@ -156,6 +157,17 @@ class LeaveProvider extends ChangeNotifier {
   void clearSelection() {
     _selectedRequest = null;
     notifyListeners();
+  }
+
+  Future<List<LeaveRequestHistoryEntry>> loadMyRequestHistory(
+    String requestId,
+  ) async {
+    final authGeneration = _authGeneration;
+    final history = await _repository.listMyRequestHistory(requestId);
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      throw StateError('The authenticated session changed.');
+    }
+    return history;
   }
 
   void setFilters({LeaveRequestStatus? status, LeaveType? leaveType}) {
