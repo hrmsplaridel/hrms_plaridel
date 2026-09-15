@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_certification_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
@@ -1005,7 +1006,11 @@ class LeaveRequestPdf {
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
                                         formatBalance(
-                                          vlBal.remainingDays - vlDeduction,
+                                          leaveCertificationBalanceAfterApplication(
+                                            balance: vlBal,
+                                            requestStatus: request.status,
+                                            applicationDays: vlDeduction,
+                                          ),
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
                                       ),
@@ -1014,7 +1019,11 @@ class LeaveRequestPdf {
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
                                         formatBalance(
-                                          slBal.remainingDays - slDeduction,
+                                          leaveCertificationBalanceAfterApplication(
+                                            balance: slBal,
+                                            requestStatus: request.status,
+                                            applicationDays: slDeduction,
+                                          ),
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
                                       ),
