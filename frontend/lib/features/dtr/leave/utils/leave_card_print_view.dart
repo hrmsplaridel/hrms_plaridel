@@ -5,6 +5,7 @@ import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
+import 'leave_card_deduction_consolidator.dart';
 
 /// Builds and prints a formal Employee Leave Card PDF.
 class LeaveCardPrintView {
@@ -418,13 +419,13 @@ class LeaveCardPrintView {
               _isSickLedgerRequest(request, balanceLedgerTypes),
         )
         .toList();
-    final deductions = forcedLeaveDeductions
-        .where(
-          (entry) =>
-              _isLeaveCardDeduction(entry) &&
-              entry.leaveType == LeaveType.vacationLeave.value,
-        )
-        .toList();
+    final deductions = consolidateLeaveCardDeductions(
+      forcedLeaveDeductions.where(
+        (entry) =>
+            _isLeaveCardDeduction(entry) &&
+            entry.leaveType == LeaveType.vacationLeave.value,
+      ),
+    );
     final monthlyVacationEarned = _monthlyVacationEarnedByPeriod(
       forcedLeaveDeductions,
     );
