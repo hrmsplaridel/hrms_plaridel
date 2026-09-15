@@ -49,7 +49,12 @@ class ApiLeaveRepository implements LeaveRepository {
 
   /// Extract backend error message from DioException for user-facing feedback.
   static String _messageFromDio(DioException e) {
-    final data = e.response?.data;
+    var data = e.response?.data;
+    if (data is List<int>) {
+      try {
+        data = jsonDecode(utf8.decode(data));
+      } catch (_) {}
+    }
     if (data is Map && data['error'] != null) {
       return data['error'].toString();
     }
@@ -505,8 +510,7 @@ class ApiLeaveRepository implements LeaveRepository {
       );
       return res.data;
     } on DioException catch (e) {
-      if (e.response?.statusCode == 404) return null;
-      rethrow;
+      throw Exception(_messageFromDio(e));
     }
   }
 

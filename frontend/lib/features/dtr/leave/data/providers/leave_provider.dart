@@ -1245,8 +1245,9 @@ class LeaveProvider extends ChangeNotifier {
     try {
       final bytes = await _repository.getAttachmentBytes(requestId);
       return _isCurrentAuthGeneration(authGeneration) ? bytes : null;
-    } catch (_) {
-      return null;
+    } catch (error) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
+      rethrow;
     }
   }
 

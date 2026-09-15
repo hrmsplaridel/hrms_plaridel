@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
@@ -8,6 +11,9 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.da
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/desktop/widgets/employee_leave_desktop_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/mobile/widgets/employee_leave_mobile_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/leave_request_date_filter.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_io.dart'
+    if (dart.library.html) 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_web.dart'
+    as open_attachment;
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/history_timeline.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_status_chip.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
@@ -287,8 +293,78 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
         onHistory: () => _showHistory(context, request),
         onCancel: () => widget.onCancel(request),
         onPrint: () => widget.onPrint(request),
+        onPreviewAttachment: () => _previewAttachment(request),
+        onDownloadAttachment: () => _downloadAttachment(request),
       ),
     );
+  }
+
+  Future<List<int>?> _loadAttachment(LeaveRequest request) async {
+    final requestId = request.id?.trim() ?? '';
+    if (requestId.isEmpty) return null;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Loading attachment...')),
+    );
+    try {
+      final bytes = await context.read<LeaveProvider>().getAttachmentBytes(
+        requestId,
+      );
+      if (!mounted) return null;
+      messenger.clearSnackBars();
+      if (bytes == null || bytes.isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Attachment file is unavailable.')),
+        );
+        return null;
+      }
+      return bytes;
+    } catch (error) {
+      if (!mounted) return null;
+      messenger.clearSnackBars();
+      final message = error.toString().replaceFirst('Exception: ', '').trim();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            message.isEmpty ? 'Could not load attachment.' : message,
+          ),
+        ),
+      );
+      return null;
+    }
+  }
+
+  Future<void> _previewAttachment(LeaveRequest request) async {
+    final bytes = await _loadAttachment(request);
+    if (!mounted || bytes == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _EmployeeAttachmentPreviewDialog(
+        bytes: Uint8List.fromList(bytes),
+        filename: _attachmentFilename(request),
+      ),
+    );
+  }
+
+  Future<void> _downloadAttachment(LeaveRequest request) async {
+    final bytes = await _loadAttachment(request);
+    if (!mounted || bytes == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final destination = await open_attachment.downloadAttachmentBytes(
+        bytes,
+        _attachmentFilename(request),
+      );
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Attachment downloaded: $destination')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not download attachment: $error')),
+      );
+    }
   }
 
   void _showHistory(BuildContext context, LeaveRequest request) {
@@ -490,6 +566,8 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
     required this.onHistory,
     required this.onCancel,
     required this.onPrint,
+    required this.onPreviewAttachment,
+    required this.onDownloadAttachment,
   });
 
   final LeaveRequest request;
@@ -500,6 +578,12 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
   final VoidCallback onHistory;
   final VoidCallback onCancel;
   final VoidCallback onPrint;
+  final VoidCallback onPreviewAttachment;
+  final VoidCallback onDownloadAttachment;
+
+  bool get _hasAttachment =>
+      (request.attachmentName ?? '').trim().isNotEmpty ||
+      (request.attachmentPath ?? '').trim().isNotEmpty;
 
   String get _leaveTypeText {
     return request.leaveTypeLabel;
@@ -702,6 +786,12 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                     ),
                     if ((request.reason ?? '').trim().isNotEmpty)
                       _LeaveDetailReasonCard(text: request.reason!.trim()),
+                    if (_hasAttachment)
+                      _EmployeeAttachmentCard(
+                        filename: _attachmentFilename(request),
+                        onPreview: onPreviewAttachment,
+                        onDownload: onDownloadAttachment,
+                      ),
                     if ((request.disapprovalReason ?? '').trim().isNotEmpty)
                       _LeaveDetailNotice(
                         icon: Icons.info_outline_rounded,
@@ -772,6 +862,175 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+String _attachmentFilename(LeaveRequest request) {
+  final name = request.attachmentName?.trim() ?? '';
+  return name.isEmpty ? 'Supporting attachment' : name;
+}
+
+class _EmployeeAttachmentCard extends StatelessWidget {
+  const _EmployeeAttachmentCard({
+    required this.filename,
+    required this.onPreview,
+    required this.onDownload,
+  });
+
+  final String filename;
+  final VoidCallback onPreview;
+  final VoidCallback onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('employee-leave-attachment'),
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.attach_file_rounded, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  filename,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                key: const Key('employee-leave-attachment-preview'),
+                onPressed: onPreview,
+                icon: const Icon(Icons.visibility_outlined, size: 18),
+                label: const Text('Preview'),
+              ),
+              OutlinedButton.icon(
+                key: const Key('employee-leave-attachment-download'),
+                onPressed: onDownload,
+                icon: const Icon(Icons.download_rounded, size: 18),
+                label: const Text('Download'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmployeeAttachmentPreviewDialog extends StatelessWidget {
+  const _EmployeeAttachmentPreviewDialog({
+    required this.bytes,
+    required this.filename,
+  });
+
+  final Uint8List bytes;
+  final String filename;
+
+  bool get _isPdf => filename.toLowerCase().endsWith('.pdf');
+  bool get _isImage {
+    final lower = filename.toLowerCase();
+    return lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.png');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return Dialog(
+      insetPadding: const EdgeInsets.all(20),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: size.width.clamp(320, 1000).toDouble(),
+        height: size.height.clamp(420, 760).toDouble(),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 10, 8, 10),
+              child: Row(
+                children: [
+                  const Icon(Icons.description_outlined, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      filename,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close preview',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Expanded(child: _buildPreview(context)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreview(BuildContext context) {
+    if (_isPdf) {
+      return PdfPreview(
+        build: (_) async => bytes,
+        pdfFileName: filename,
+        allowPrinting: false,
+        allowSharing: false,
+        canChangeOrientation: false,
+        canChangePageFormat: false,
+        canDebug: false,
+      );
+    }
+    if (_isImage) {
+      return InteractiveViewer(
+        minScale: 0.5,
+        maxScale: 5,
+        child: Center(
+          child: Image.memory(
+            bytes,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) =>
+                const Center(child: Text('This image could not be displayed.')),
+          ),
+        ),
+      );
+    }
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Text(
+          'Preview is unavailable for this file type. Use Download instead.',
+          textAlign: TextAlign.center,
         ),
       ),
     );
