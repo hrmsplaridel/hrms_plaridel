@@ -110,6 +110,8 @@ class EmployeeLeaveActions {
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,
         recommendationOfficerTitle:
             formSignatories.recommendationOfficer?.title,
+        approvingAuthorityName: formSignatories.approvingAuthority?.name,
+        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
         applicantSignatureBytes:
             formSignatories.applicantSignature?.signatureImageBytes,
         name: 'Leave_Application_${target.id ?? target.userId}.pdf',

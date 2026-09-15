@@ -168,6 +168,9 @@ committed or rolled back together.
 | GET | /api/docutracker/permission-records | Compatibility endpoint for raw permission rows |
 | POST | /api/docutracker/permissions | Compatibility endpoint for one validated permission change |
 | DELETE | /api/docutracker/permissions | Reset validated explicit rules and create audit entries |
+| GET | /api/docutracker/official-signatories | List effective-dated Leave Credit Certifiers (admin only) |
+| GET | /api/docutracker/official-signatories/automatic-mayor | Resolve the active Mayor used in leave forms (admin only) |
+| PUT | /api/docutracker/official-signatories/:roleKey | Configure a Leave Credit Certifier period (admin only) |
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

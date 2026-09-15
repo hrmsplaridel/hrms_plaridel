@@ -279,6 +279,8 @@ class LeaveRequestPdf {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    String? approvingAuthorityName,
+    String? approvingAuthorityTitle,
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
@@ -290,6 +292,8 @@ class LeaveRequestPdf {
       certificationOfficerTitle: certificationOfficerTitle,
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
+      approvingAuthorityName: approvingAuthorityName,
+      approvingAuthorityTitle: approvingAuthorityTitle,
       applicantSignatureBytes: applicantSignatureBytes,
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,
@@ -306,6 +310,8 @@ class LeaveRequestPdf {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    String? approvingAuthorityName,
+    String? approvingAuthorityTitle,
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
@@ -318,6 +324,8 @@ class LeaveRequestPdf {
       certificationOfficerTitle: certificationOfficerTitle,
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
+      approvingAuthorityName: approvingAuthorityName,
+      approvingAuthorityTitle: approvingAuthorityTitle,
       applicantSignatureBytes: applicantSignatureBytes,
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,
@@ -1659,6 +1667,8 @@ class _LeaveRequestPdfFixedEngine {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    String? approvingAuthorityName,
+    String? approvingAuthorityTitle,
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
@@ -1678,8 +1688,12 @@ class _LeaveRequestPdfFixedEngine {
         ? _s(request.employeeName)
         : request.userId;
     final n = _nameParts(fullName);
-    final reviewerName = _s(request.reviewerName);
-    final reviewerTitle = _s(request.reviewerTitle).isNotEmpty
+    final reviewerName = _s(approvingAuthorityName).isNotEmpty
+        ? _s(approvingAuthorityName)
+        : _s(request.reviewerName);
+    final reviewerTitle = _s(approvingAuthorityTitle).isNotEmpty
+        ? _s(approvingAuthorityTitle)
+        : _s(request.reviewerTitle).isNotEmpty
         ? _s(request.reviewerTitle)
         : _s(request.reviewerRole);
     final certifierName = _s(certificationOfficerName);
@@ -1695,8 +1709,11 @@ class _LeaveRequestPdfFixedEngine {
             departmentHeadSignatureBytes.isEmpty
         ? null
         : pw.MemoryImage(departmentHeadSignatureBytes);
+    final hasAutomaticMayor = _s(approvingAuthorityName).isNotEmpty;
     final hrApproverSignatureImage =
-        hrApproverSignatureBytes == null || hrApproverSignatureBytes.isEmpty
+        hasAutomaticMayor ||
+            hrApproverSignatureBytes == null ||
+            hrApproverSignatureBytes.isEmpty
         ? null
         : pw.MemoryImage(hrApproverSignatureBytes);
     final hasDepartmentHeadRecommendation =
@@ -2938,6 +2955,8 @@ class _LeaveRequestPdfFixedEngine {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    String? approvingAuthorityName,
+    String? approvingAuthorityTitle,
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
@@ -2949,6 +2968,8 @@ class _LeaveRequestPdfFixedEngine {
       certificationOfficerTitle: certificationOfficerTitle,
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
+      approvingAuthorityName: approvingAuthorityName,
+      approvingAuthorityTitle: approvingAuthorityTitle,
       applicantSignatureBytes: applicantSignatureBytes,
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,

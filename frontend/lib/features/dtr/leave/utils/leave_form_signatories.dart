@@ -30,6 +30,7 @@ class LeaveFormSignatories {
   const LeaveFormSignatories({
     this.certificationOfficer,
     this.recommendationOfficer,
+    this.approvingAuthority,
     this.applicantSignature,
     this.departmentHeadSignature,
     this.hrApproverSignature,
@@ -37,6 +38,7 @@ class LeaveFormSignatories {
 
   final LeaveFormSignatoryInfo? certificationOfficer;
   final LeaveFormSignatoryInfo? recommendationOfficer;
+  final LeaveFormSignatoryInfo? approvingAuthority;
   final DocuTrackerSourceSignature? applicantSignature;
   final DocuTrackerSourceSignature? departmentHeadSignature;
   final DocuTrackerSourceSignature? hrApproverSignature;
@@ -47,6 +49,7 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
 }) async {
   LeaveFormSignatoryInfo? certification;
   LeaveFormSignatoryInfo? recommendation;
+  LeaveFormSignatoryInfo? approvingAuthority;
   DocuTrackerSourceSignature? applicantSignature;
   DocuTrackerSourceSignature? departmentHeadSignature;
   DocuTrackerSourceSignature? hrApproverSignature;
@@ -66,6 +69,9 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
     );
     recommendation = LeaveFormSignatoryInfo.fromJson(
       data['recommendation_officer'],
+    );
+    approvingAuthority = LeaveFormSignatoryInfo.fromJson(
+      data['approving_authority'],
     );
   } catch (_) {
     // Printing should still work even if the optional signatory lookup fails.
@@ -98,6 +104,7 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
   return LeaveFormSignatories(
     certificationOfficer: certification?.hasName == true ? certification : null,
     recommendationOfficer: recommendation,
+    approvingAuthority: approvingAuthority,
     applicantSignature: applicantSignature,
     departmentHeadSignature: departmentHeadSignature,
     hrApproverSignature: hrApproverSignature,
