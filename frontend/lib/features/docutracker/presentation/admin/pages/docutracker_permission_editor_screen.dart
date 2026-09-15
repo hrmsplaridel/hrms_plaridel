@@ -80,6 +80,7 @@ class _DocuTrackerPermissionEditorScreenState
   final _employeeSearchController = TextEditingController();
 
   _AccessView _view = _AccessView.roleDefaults;
+  String _selectedRole = DocuTrackerRoles.hr;
   String _documentType = '*';
   String? _selectedUserId;
   List<String> _documentTypes = const ['*'];
@@ -575,12 +576,12 @@ class _DocuTrackerPermissionEditorScreenState
             ButtonSegment(
               value: _AccessView.roleDefaults,
               icon: Icon(Icons.groups_outlined),
-              label: Text('Role Defaults'),
+              label: Text('Role access'),
             ),
             ButtonSegment(
               value: _AccessView.employeeExceptions,
               icon: Icon(Icons.person_outline_rounded),
-              label: Text('Employee Exceptions'),
+              label: Text('Employee exceptions'),
             ),
           ],
           selected: {_view},
@@ -639,34 +640,38 @@ class _DocuTrackerPermissionEditorScreenState
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Role Defaults',
+          'Access by role',
           style: Theme.of(
             context,
           ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 4),
         Text(
-          'These settings apply unless an employee exception overrides them.',
+          'Applies to everyone with this role, unless they have an employee exception.',
           style: DocuTrackerTokens.subtitleStyle(context),
         ),
         const SizedBox(height: 16),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final cardWidth = constraints.maxWidth >= 900
-                ? (constraints.maxWidth - 16) / 2
-                : constraints.maxWidth;
-            return Wrap(
-              spacing: 16,
-              runSpacing: 16,
-              children: _roleOrder
-                  .map(
-                    (role) =>
-                        SizedBox(width: cardWidth, child: _buildRoleCard(role)),
-                  )
-                  .toList(),
-            );
-          },
+        DropdownButtonFormField<String>(
+          key: const ValueKey('permission-role-selector'),
+          initialValue: _selectedRole,
+          isExpanded: true,
+          decoration: DocuTrackerStyles.dropdownDecoration(context, 'Role'),
+          items: _roleOrder
+              .map(
+                (role) => DropdownMenuItem(
+                  value: role,
+                  child: Text(_roleLabel(role)),
+                ),
+              )
+              .toList(),
+          onChanged: _saving
+              ? null
+              : (role) {
+                  if (role != null) setState(() => _selectedRole = role);
+                },
         ),
+        const SizedBox(height: 12),
+        _buildRoleCard(_selectedRole),
       ],
     );
   }
@@ -680,56 +685,76 @@ class _DocuTrackerPermissionEditorScreenState
       key: ValueKey('permission-role-$roleId'),
       decoration: DocuTrackerTokens.cardDecoration(context: context),
       clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        initiallyExpanded: roleId != DocuTrackerRoles.admin,
-        title: Text(
-          _roleLabel(roleId),
-          style: const TextStyle(fontWeight: FontWeight.w800),
-        ),
-        subtitle: Text(
-          isAdmin ? 'Full system access' : _documentTypeLabel(_documentType),
-        ),
-        children: [
-          if (isAdmin)
-            const ListTile(
-              leading: Icon(Icons.verified_user_outlined),
-              title: Text('Administrator access is always enabled.'),
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ListTile(
+              title: Text(
+                '${_roleLabel(roleId)} access',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
               subtitle: Text(
-                'Workflow approvals still require assignment to the current step.',
+                _documentType == '*'
+                    ? 'Default for all document types'
+                    : 'Applies to ${_documentTypeLabel(_documentType)} only',
               ),
-            )
-          else
-            for (final action in _accessActions)
-              SwitchListTile(
-                key: ValueKey('permission-role-$roleId-${action.key}'),
-                secondary: Icon(action.icon),
-                title: Text(action.label),
+            ),
+            if (isAdmin)
+              const ListTile(
+                leading: Icon(Icons.verified_user_outlined),
+                title: Text('Administrator access is always enabled.'),
                 subtitle: Text(
-                  _roleSettingSubtitle(
-                    rolePolicy?.permissions[action.key]?.source,
-                    action.description,
-                  ),
+                  'Workflow approvals still require assignment to the current step.',
                 ),
-                value: _roleDraft[roleId]?[action.key] ?? false,
-                onChanged: _saving
-                    ? null
-                    : (value) => setState(() {
-                        _roleDraft[roleId]?[action.key] = value;
-                      }),
-              ),
-        ],
+              )
+            else
+              for (final action in _accessActions)
+                SwitchListTile(
+                  key: ValueKey('permission-role-$roleId-${action.key}'),
+                  secondary: Icon(action.icon),
+                  title: Text(action.label),
+                  subtitle: Text(
+                    _roleSettingSubtitle(
+                      rolePolicy?.permissions[action.key]?.source,
+                      action.description,
+                      roleId,
+                      action.key,
+                    ),
+                  ),
+                  value: _roleDraft[roleId]?[action.key] ?? false,
+                  onChanged: _saving
+                      ? null
+                      : (value) => setState(() {
+                          _roleDraft[roleId]?[action.key] = value;
+                        }),
+                ),
+          ],
+        ),
       ),
     );
   }
 
-  String _roleSettingSubtitle(String? source, String description) {
+  String _roleSettingSubtitle(
+    String? source,
+    String description,
+    String roleId,
+    String action,
+  ) {
+    final allowed = _roleDraft[roleId]?[action] ?? false;
+    final changed = allowed != (_roleBaseline[roleId]?[action] ?? false);
+    final status = allowed ? 'Allowed' : 'Blocked';
+    if (changed) return '$status (unsaved). $description';
     final sourceLabel = switch (source) {
       'all_document_types' when _documentType != '*' =>
-        'Using All document types',
-      'not_configured' => 'Not configured',
+        'From All document types',
+      'not_configured' => 'No access granted',
       _ => null,
     };
-    return sourceLabel == null ? description : '$sourceLabel · $description';
+    return sourceLabel == null
+        ? '$status. $description'
+        : '$status · $sourceLabel. $description';
   }
 
   List<EmployeeDirectoryEntry> _filteredEmployees() {
@@ -785,17 +810,20 @@ class _DocuTrackerPermissionEditorScreenState
                     padding: EdgeInsets.all(16),
                     child: Text('No matching active employees.'),
                   )
-                : ListView(
-                    shrinkWrap: true,
-                    children: _filteredEmployees()
-                        .map(
-                          (employee) => ListTile(
-                            title: Text(employee.fullName),
-                            subtitle: Text(_employeeDetails(employee)),
-                            onTap: () => _selectEmployee(employee.id),
-                          ),
-                        )
-                        .toList(),
+                : Material(
+                    type: MaterialType.transparency,
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: _filteredEmployees()
+                          .map(
+                            (employee) => ListTile(
+                              title: Text(employee.fullName),
+                              subtitle: Text(_employeeDetails(employee)),
+                              onTap: () => _selectEmployee(employee.id),
+                            ),
+                          )
+                          .toList(),
+                    ),
                   ),
           ),
         ],
@@ -1027,7 +1055,7 @@ class _DocuTrackerPermissionEditorScreenState
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.check_rounded),
-              label: Text(_saving ? 'Saving…' : 'Save'),
+              label: Text(_saving ? 'Saving…' : 'Save changes'),
               style: DocuTrackerTokens.brandFilledStyle(),
             ),
           ],

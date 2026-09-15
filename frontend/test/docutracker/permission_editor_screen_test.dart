@@ -181,8 +181,8 @@ void main() {
     await pumpEditor(tester);
 
     expect(find.text('System Access'), findsOneWidget);
-    expect(find.text('Role Defaults'), findsWidgets);
-    expect(find.text('Employee Exceptions'), findsOneWidget);
+    expect(find.text('Role access'), findsOneWidget);
+    expect(find.text('Employee exceptions'), findsOneWidget);
     expect(find.text('Effective Preview'), findsNothing);
     expect(find.text('Security Insight'), findsNothing);
     expect(find.textContaining('Add custom role'), findsNothing);
@@ -224,6 +224,17 @@ void main() {
     await tester.tap(find.descendant(of: tile, matching: find.byType(Switch)));
     await tester.pump();
 
+    expect(find.text('1 unsaved change'), findsOneWidget);
+    // Switching roles must retain edits until the shared Save is pressed.
+    await tester.tap(find.byKey(const ValueKey('permission-role-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Employee').last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('permission-role-hr-view')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('permission-role-employee-view')),
+      findsOneWidget,
+    );
     expect(find.text('1 unsaved change'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('permission-save')));
     await tester.pumpAndSettle();
