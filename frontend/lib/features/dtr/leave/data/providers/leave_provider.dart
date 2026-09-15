@@ -764,6 +764,7 @@ class LeaveProvider extends ChangeNotifier {
   /// to get latest attachment). Updates _selectedRequest and upserts into list.
   Future<LeaveRequest?> refreshRequestById(String requestId) async {
     final authGeneration = _authGeneration;
+    _error = null;
     try {
       final fresh = await _repository.getRequestById(requestId);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
@@ -773,7 +774,14 @@ class LeaveProvider extends ChangeNotifier {
         notifyListeners();
       }
       return fresh;
-    } catch (_) {
+    } catch (e) {
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _error = _loadErrorMessage(
+          e,
+          'Could not check the latest request. Please try again.',
+        );
+        notifyListeners();
+      }
       return null;
     }
   }

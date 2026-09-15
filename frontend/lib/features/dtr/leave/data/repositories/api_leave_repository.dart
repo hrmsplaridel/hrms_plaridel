@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'leave_repository.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
@@ -48,7 +49,10 @@ class ApiLeaveRepository implements LeaveRepository {
       Map<String, dynamic>.from(v as Map);
 
   /// Extract backend error message from DioException for user-facing feedback.
-  static String _messageFromDio(DioException e) {
+  static String _messageFromDio(
+    DioException e, {
+    bool submissionMayHaveCompleted = false,
+  }) {
     var data = e.response?.data;
     if (data is List<int>) {
       try {
@@ -58,7 +62,10 @@ class ApiLeaveRepository implements LeaveRepository {
     if (data is Map && data['error'] != null) {
       return data['error'].toString();
     }
-    return e.message ?? 'Request failed';
+    return userFacingApiError(
+      e,
+      operationMayHaveCompleted: submissionMayHaveCompleted,
+    );
   }
 
   static String _employeeReadMessageFromDio(
@@ -130,7 +137,7 @@ class ApiLeaveRepository implements LeaveRepository {
       if (data == null) throw Exception('No data returned');
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
-      throw Exception(_messageFromDio(e));
+      throw Exception(_messageFromDio(e, submissionMayHaveCompleted: true));
     }
   }
 
@@ -152,7 +159,7 @@ class ApiLeaveRepository implements LeaveRepository {
       if (data == null) throw Exception('No data returned');
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
-      throw Exception(_messageFromDio(e));
+      throw Exception(_messageFromDio(e, submissionMayHaveCompleted: true));
     }
   }
 
@@ -171,7 +178,13 @@ class ApiLeaveRepository implements LeaveRepository {
       if (data == null) throw Exception('No data returned');
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
-      throw Exception(_messageFromDio(e));
+      throw Exception(
+        _messageFromDio(
+          e,
+          submissionMayHaveCompleted:
+              request.status == LeaveRequestStatus.pending,
+        ),
+      );
     }
   }
 
@@ -187,7 +200,7 @@ class ApiLeaveRepository implements LeaveRepository {
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) return null;
-      rethrow;
+      throw Exception(_messageFromDio(e));
     }
   }
 
