@@ -95,6 +95,30 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
     );
   }
 
+  Future<void> _retryRequests() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) return;
+    await context.read<LeaveProvider>().loadMyLeaveRequests(
+      userId,
+      forceRefresh: true,
+    );
+  }
+
+  Future<void> _loadMoreRequests() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) return;
+    await context.read<LeaveProvider>().loadMoreMyLeaveRequests(userId);
+  }
+
+  Future<void> _retryBalances() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) return;
+    await context.read<LeaveProvider>().loadMyLeaveBalances(
+      userId,
+      forceRefresh: true,
+    );
+  }
+
   EmployeeLeaveActions get _leaveActions {
     return EmployeeLeaveActions(context: context, isMounted: () => mounted);
   }
@@ -103,17 +127,22 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
   Widget build(BuildContext context) {
     final provider = context.watch<LeaveProvider>();
     final showLeaveSkeleton =
-        provider.loading &&
-        provider.balances.isEmpty &&
-        provider.requests.isEmpty;
+        provider.myRequestsLoading &&
+        provider.myBalancesLoading &&
+        !provider.myRequestsLoaded &&
+        !provider.myBalancesLoaded;
     const creditTypes = {'vacationLeave', 'sickLeave'};
-    final totalAvailable = provider.balances
-        .where((b) => creditTypes.contains(b.effectiveLeaveTypeName))
-        .fold<double>(0, (sum, item) => sum + item.availableDays);
-    final totalPendingDays = provider.pendingRequests.fold<double>(
-      0,
-      (sum, item) => sum + (item.workingDaysApplied ?? 0),
-    );
+    final totalAvailable = provider.myBalancesLoaded
+        ? provider.balances
+              .where((b) => creditTypes.contains(b.effectiveLeaveTypeName))
+              .fold<double>(0, (sum, item) => sum + item.availableDays)
+        : null;
+    final totalPendingDays = provider.myRequestsLoaded
+        ? provider.pendingRequests.fold<double>(
+            0,
+            (sum, item) => sum + (item.workingDaysApplied ?? 0),
+          )
+        : null;
     final nextApproved = provider.upcomingApprovedRequests.isNotEmpty
         ? provider.upcomingApprovedRequests.first
         : null;
@@ -129,18 +158,29 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
       loadingSkeleton: const MyLeaveLoadingSkeleton(compact: true),
       summaryStrip: EmployeeLeaveMobileSummaryStrip(
         totalAvailable: totalAvailable,
-        pendingCount: provider.pendingCount,
+        pendingCount: provider.myRequestsLoaded ? provider.pendingCount : null,
         totalPendingDays: totalPendingDays,
         nextApproved: nextApproved,
+        nextApprovedAvailable:
+            provider.myRequestsLoaded && provider.officialDate != null,
       ),
       balancesPanel: EmployeeLeaveMobileBalancesPanel(
         balances: provider.balances,
-        loading: provider.loading,
+        loading: provider.myBalancesLoading,
+        error: provider.myBalancesError,
+        onRetry: _retryBalances,
         onBalanceHistory: _openBalanceHistory,
       ),
       requestsPanel: EmployeeLeaveRequestsPanel(
         requests: provider.requests,
-        loading: provider.loading,
+        loading: provider.myRequestsLoading,
+        error: provider.myRequestsError,
+        onRetry: _retryRequests,
+        totalRequests: provider.myRequestsTotal,
+        hasMore: provider.myRequestsHasMore,
+        loadingMore: provider.myRequestsLoadingMore,
+        loadMoreError: provider.myRequestsLoadMoreError,
+        onLoadMore: _loadMoreRequests,
         onEdit: _leaveActions.editRequest,
         onCancel: _leaveActions.cancelRequest,
         onPrint: _leaveActions.printLeaveForm,

@@ -11,6 +11,7 @@ import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
 
 const _leaveRequestFilterOptions = <RequestFilterOption<LeaveRequestStatus>>[
   RequestFilterOption(label: 'All'),
+  RequestFilterOption(value: LeaveRequestStatus.draft, label: 'Drafts'),
   RequestFilterOption(value: LeaveRequestStatus.pending, label: 'Pending'),
   RequestFilterOption(value: LeaveRequestStatus.approved, label: 'Approved'),
   RequestFilterOption(value: LeaveRequestStatus.rejected, label: 'Rejected'),
@@ -22,6 +23,13 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
     super.key,
     required this.requests,
     required this.loading,
+    required this.error,
+    required this.onRetry,
+    required this.totalRequests,
+    required this.hasMore,
+    required this.loadingMore,
+    required this.loadMoreError,
+    required this.onLoadMore,
     required this.onEdit,
     required this.onCancel,
     required this.onPrint,
@@ -29,6 +37,13 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
 
   final List<LeaveRequest> requests;
   final bool loading;
+  final String? error;
+  final VoidCallback onRetry;
+  final int totalRequests;
+  final bool hasMore;
+  final bool loadingMore;
+  final String? loadMoreError;
+  final VoidCallback onLoadMore;
   final ValueChanged<LeaveRequest> onEdit;
   final ValueChanged<LeaveRequest> onCancel;
   final ValueChanged<LeaveRequest> onPrint;
@@ -113,27 +128,74 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     required double maxListHeight,
     required bool isMobile,
   }) {
-    final filters = _buildRequestFiltersBar(filteredRequests.length);
-    if (!isMobile) {
-      return EmployeeLeaveDesktopRequestsContent(
-        filters: filters,
-        requests: filteredRequests,
-        allRequests: widget.requests,
-        loading: widget.loading,
-        maxListHeight: maxListHeight,
-        scrollController: _requestsScrollController,
-        onOpenRequest: (request) => _showDetails(context, request),
+    if (widget.error != null && widget.requests.isEmpty) {
+      return _EmployeeSectionLoadError(
+        message: widget.error!,
+        onRetry: widget.onRetry,
       );
     }
-    return EmployeeLeaveMobileRequestsContent(
-      filters: filters,
-      requests: filteredRequests,
-      allRequests: widget.requests,
-      loading: widget.loading,
-      useScrollableList: useScrollableList,
-      maxListHeight: maxListHeight,
-      scrollController: _requestsScrollController,
-      onOpenRequest: (request) => _showDetails(context, request),
+
+    final filters = _buildRequestFiltersBar(filteredRequests.length);
+    final content = !isMobile
+        ? EmployeeLeaveDesktopRequestsContent(
+            filters: filters,
+            requests: filteredRequests,
+            allRequests: widget.requests,
+            loading: widget.loading,
+            maxListHeight: maxListHeight,
+            scrollController: _requestsScrollController,
+            onOpenRequest: (request) => _showDetails(context, request),
+          )
+        : EmployeeLeaveMobileRequestsContent(
+            filters: filters,
+            requests: filteredRequests,
+            allRequests: widget.requests,
+            loading: widget.loading,
+            useScrollableList: useScrollableList,
+            maxListHeight: maxListHeight,
+            scrollController: _requestsScrollController,
+            onOpenRequest: (request) => _showDetails(context, request),
+          );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (widget.error != null) ...[
+          _EmployeeSectionLoadError(
+            message: widget.error!,
+            onRetry: widget.onRetry,
+          ),
+          const SizedBox(height: 12),
+        ],
+        content,
+        if (widget.loadMoreError != null) ...[
+          const SizedBox(height: 12),
+          _EmployeeSectionLoadError(
+            message: widget.loadMoreError!,
+            onRetry: widget.onLoadMore,
+          ),
+        ],
+        if (widget.loadMoreError == null &&
+            (widget.hasMore || widget.loadingMore)) ...[
+          const SizedBox(height: 16),
+          Center(
+            child: OutlinedButton.icon(
+              onPressed: widget.loadingMore ? null : widget.onLoadMore,
+              icon: widget.loadingMore
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.expand_more_rounded, size: 18),
+              label: Text(
+                widget.loadingMore
+                    ? 'Loading...'
+                    : 'Load More (${widget.requests.length} of ${widget.totalRequests})',
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -317,6 +379,47 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _EmployeeSectionLoadError extends StatelessWidget {
+  const _EmployeeSectionLoadError({
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Colors.redAccent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: AppTheme.dashTextPrimaryOf(context)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+          ),
+        ],
       ),
     );
   }

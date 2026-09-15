@@ -349,11 +349,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return output;
   }
 
-  bool _validateCustomDetails() {
+  bool _validateCustomDetails({bool requireRequired = true}) {
     for (final field in _selectedCustomFields) {
       final value = _customDetailValues[field.key];
       final blank = value == null || (value is String && value.trim().isEmpty);
-      if (field.required && blank) {
+      if (requireRequired && field.required && blank) {
         _showMessage('${field.label} is required.');
         return false;
       }
@@ -545,8 +545,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   Future<void> _loadCreditContext() async {
     final userId = context.read<AuthProvider>().user?.id;
     if (userId == null || userId.isEmpty) return;
+    final provider = context.read<LeaveProvider>();
+    await provider.loadOfficialDate();
+    if (!mounted) return;
+    setState(() {});
     try {
-      final repository = context.read<LeaveProvider>().repository;
+      final repository = provider.repository;
       final balances = await repository.getBalancesForUser(userId);
       if (!mounted) return;
       setState(() {
@@ -649,20 +653,16 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     if (_busy || _submitFlowInFlight || _checkingStatus || !_canEditRequest) {
       return;
     }
-    if (!_formKey.currentState!.validate()) return;
-    if (!_validateCustomDetails()) return;
+    if (!_validateCustomDetails(requireRequired: false)) return;
     final accountEligibilityMessage = _selectedAccountEligibilityMessage();
     if (accountEligibilityMessage != null) {
       _showMessage(accountEligibilityMessage);
       return;
     }
-    if (_startDate == null || _endDate == null) {
-      _showMessage('Please select date(s)');
-      return;
-    }
-    if (!_validateSelectedDates()) return;
-    if (_workingDaysLoading) {
-      _showMessage('Please wait while working days are computed.');
+    if (_startDate != null &&
+        _endDate != null &&
+        _endDate!.isBefore(_startDate!)) {
+      _showMessage('End date cannot be earlier than start date.');
       return;
     }
     await _submit(isDraft: true);
@@ -674,6 +674,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     }
     setState(() => _submitFlowInFlight = true);
     try {
+      if (!await _refreshSavedStatus() || !mounted) return;
       if (!_formKey.currentState!.validate()) return;
       final accountEligibilityMessage = _selectedAccountEligibilityMessage();
       if (accountEligibilityMessage != null) {
@@ -714,7 +715,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         return;
       }
 
-      if (!await _refreshSavedStatus() || !mounted) return;
       if (!await _ensureApplicantSignature()) return;
       await _submit(isDraft: false);
     } finally {
@@ -864,9 +864,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _showMessage('End date cannot be earlier than start date.');
       return false;
     }
+    final today = _officialDateForValidation();
+    if (today == null) return false;
     if (!_selectedAllowsPastDates) {
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
       final startOnly = DateTime(start.year, start.month, start.day);
       if (startOnly.isBefore(today)) {
         _showMessage(
@@ -877,8 +877,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     }
     final minimumAdvanceDays = _selectedMinimumAdvanceDays;
     if (minimumAdvanceDays != null) {
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
       final startOnly = DateTime(start.year, start.month, start.day);
       final calendarDaysBeforeStart = startOnly.difference(today).inDays;
       if (calendarDaysBeforeStart < minimumAdvanceDays) {
@@ -956,6 +954,16 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   DateTime _onlyDate(DateTime value) =>
       DateTime(value.year, value.month, value.day);
 
+  DateTime? _officialDateForValidation() {
+    final date = context.read<LeaveProvider>().officialDate;
+    if (date == null) {
+      _showMessage(
+        'The official HRMS date is unavailable. Retry before continuing.',
+      );
+    }
+    return date;
+  }
+
   int _calendarDaysFrom(DateTime from, DateTime to) =>
       _onlyDate(to).difference(_onlyDate(from)).inDays;
 
@@ -963,6 +971,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     final start = _startDate;
     final end = _endDate;
     if (start == null || end == null) return false;
+    final today = _officialDateForValidation();
+    if (today == null) return false;
 
     if (_leaveType == LeaveType.maternityLeave) {
       final expected = _expectedDeliveryDate;
@@ -970,7 +980,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _showMessage('Please enter the expected delivery date.');
         return false;
       }
-      final noticeDays = _calendarDaysFrom(DateTime.now(), expected);
+      final noticeDays = _calendarDaysFrom(today, expected);
       if (noticeDays < _maternityMinimumNoticeDays) {
         _showMessage(
           'Maternity Leave must be filed at least $_maternityMinimumNoticeDays days before the expected delivery date.',
@@ -1025,7 +1035,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _showMessage('Please enter the accident date.');
         return false;
       }
-      final today = _onlyDate(DateTime.now());
       final filingDiff = _calendarDaysFrom(accident, today);
       if (filingDiff < 0) {
         _showMessage('Accident date cannot be in the future.');
@@ -1069,7 +1078,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _showMessage('Please enter the Solo Parent ID expiry date.');
         return false;
       }
-      final today = _onlyDate(DateTime.now());
       if (_onlyDate(expiry).isBefore(today)) {
         _showMessage('Solo Parent ID is already expired.');
         return false;
@@ -1113,7 +1121,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     if (expected == null) {
       return 'Submission requires at least 30 days before the expected delivery date.';
     }
-    final diff = _calendarDaysFrom(DateTime.now(), expected);
+    final today = context.read<LeaveProvider>().officialDate;
+    if (today == null) return 'Official HRMS date unavailable.';
+    final diff = _calendarDaysFrom(today, expected);
     if (diff >= _maternityMinimumNoticeDays) {
       return 'Meets the 30-day HR notice window.';
     }
@@ -1129,13 +1139,20 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       String? officeDepartment,
       String? positionTitle,
       double? salary,
-      DateTime dateFiled,
+      DateTime? dateFiled,
     })
   >
   _loadEmployeeHeaderSnapshot({
     required String userId,
     required AuthProvider auth,
+    required bool requireOfficialDate,
   }) async {
+    final officialDate = context.read<LeaveProvider>().officialDate;
+    if (requireOfficialDate && officialDate == null) {
+      throw Exception(
+        'The official HRMS date is unavailable. Retry before continuing.',
+      );
+    }
     final authName = auth.user?.fullName?.trim();
     final display = auth.displayName.trim();
     var employeeName = (authName != null && authName.isNotEmpty)
@@ -1184,10 +1201,11 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
     final initial = widget.initialRequest;
     final existingFiled = _savedRequest?.dateFiled ?? initial?.dateFiled;
-    final today = DateTime.now();
     final dateFiled = existingFiled != null
         ? DateTime(existingFiled.year, existingFiled.month, existingFiled.day)
-        : DateTime(today.year, today.month, today.day);
+        : officialDate == null
+        ? null
+        : DateTime(officialDate.year, officialDate.month, officialDate.day);
 
     return (
       employeeName: employeeName,
@@ -1213,6 +1231,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       final header = await _loadEmployeeHeaderSnapshot(
         userId: userId,
         auth: auth,
+        requireOfficialDate: !isDraft,
       );
       final prior = _savedRequest ?? initial;
       String? coalesceStr(String? saved, String? incoming) {
@@ -1381,6 +1400,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   @override
   Widget build(BuildContext context) {
     final formMaxWidth = 800.0; // Clean, narrow column for digital entry
+    final leaveProvider = context.watch<LeaveProvider>();
 
     if (_checkingStatus || _statusError != null || !_canEditRequest) {
       final status = (_savedRequest ?? widget.initialRequest)?.status;
@@ -1463,6 +1483,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
+
+                      if (leaveProvider.officialDateLoading)
+                        const LinearProgressIndicator(minHeight: 2),
+                      if (leaveProvider.officialDateError != null) ...[
+                        _buildOfficialDateError(
+                          leaveProvider.officialDateError!,
+                        ),
+                        const SizedBox(height: 16),
+                      ],
 
                       // A. General instruction panel
                       const LeaveGeneralInstructionsPanel(),
@@ -1953,6 +1982,31 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     );
   }
 
+  Widget _buildOfficialDateError(String message) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Colors.redAccent),
+          const SizedBox(width: 10),
+          Expanded(child: Text(message)),
+          OutlinedButton.icon(
+            onPressed: () => context.read<LeaveProvider>().loadOfficialDate(
+              forceRefresh: true,
+            ),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDatePicker({
     required String label,
     required DateTime? value,
@@ -1960,9 +2014,16 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }) {
     return InkWell(
       onTap: () async {
+        final officialDate = context.read<LeaveProvider>().officialDate;
+        if (officialDate == null) {
+          _showMessage(
+            'The official HRMS date is unavailable. Retry before selecting dates.',
+          );
+          return;
+        }
         final d = await showDatePicker(
           context: context,
-          initialDate: value ?? DateTime.now(),
+          initialDate: value ?? officialDate,
           firstDate: DateTime(2000),
           lastDate: DateTime(2100),
         );

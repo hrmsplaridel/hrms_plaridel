@@ -35,7 +35,13 @@ class AppProviders extends StatelessWidget {
               (realtime ?? AppRealtimeProvider())
                 ..setCurrentUser(auth.user?.id),
         ),
-        ChangeNotifierProvider(create: (_) => DtrProvider()),
+        ChangeNotifierProxyProvider<AuthProvider, DtrProvider>(
+          create: (_) => DtrProvider(),
+          update: (_, auth, dtr) {
+            dtr!.onAuthUserChanged(auth.user?.id);
+            return dtr;
+          },
+        ),
         ChangeNotifierProvider(create: (_) => DocuTrackerProvider()),
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ChangeNotifierProxyProvider<AuthProvider, LeaveProvider>(

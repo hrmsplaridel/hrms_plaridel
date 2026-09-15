@@ -23,10 +23,14 @@ python scripts/zkteco-sync-py.py
 | `ZK_LIVE_CAPTURE_TIMEOUT` | 10              | Socket timeout for live capture; also controls stop responsiveness |
 | `ZK_LIVE_RECONNECT_DELAY` | 5               | Delay before reconnecting after a live listener error              |
 | `ZK_FALLBACK_INTERVAL` | 300                 | Backfill interval in realtime mode, used to recover missed punches |
-| `ZK_TIMEZONE_OFFSET` | +08:00                | Device local time offset (Philippines: +08:00)                     |
-| `ZK_SYNC_STATE_FILE` | (internal)            | State is stored in `backend/.zkteco-sync-state.json` per device IP |
+| `ZK_HEARTBEAT_INTERVAL` | 60                 | Minimum seconds between successful empty-device heartbeats         |
+| `ZK_TIMEZONE_OFFSET` | +08:00                | Device local offset used for punch timestamps and Hikvision query windows |
+| `ANVIZ_RECORD_FORMAT` | (disabled)           | Explicit verified Anviz format; only `bcd6-second-minute-hour-day-month-year2000` is accepted |
+| `ZK_SYNC_STATE_FILE` | (internal)            | State is stored in `backend/.zkteco-sync-state.json` per registered device UUID and identity |
 
 Active device IPs are loaded from **`GET /api/biometric-attendance-logs/devices`** (rows in `biometric_devices`). You do not set a single `ZK_DEVICE_IP` in the Python sync unless you change the script.
+
+Each successful device read reports the registered device UUID to HRMS. Successful punch batches and throttled empty-device heartbeats update `biometric_devices.last_sync_at`; failed reads, uploads, or DTR processing do not advance it.
 
 ## Setup
 
@@ -67,6 +71,8 @@ nohup python scripts/zkteco-sync-py.py > zkteco-sync.log 2>&1 &
 
 Realtime mode is enabled by default (`ZK_REALTIME=1`). The service starts one live listener per active device. When the device reports a new attendance event, the listener immediately pushes it to the backend; the backend then processes the log and broadcasts a WebSocket refresh to the Flutter UI.
 
+Active workers are reconciled by registered device UUID and a signature of the vendor, configured device ID, IP address, and port. Updating any of those settings safely stops the old listener before starting one with the new configuration. An IP-only change restarts the connection while preserving the UUID-based attendance cursor.
+
 Expected display time in Time Logs is usually **1-3 seconds** after a successful face/fingerprint punch, depending on network/device response time.
 
 The service still runs a periodic backfill every `ZK_FALLBACK_INTERVAL` seconds. This protects against missed live events during reconnects, device restarts, or short network drops. Duplicate rows remain safe because the backend ignores repeated `(biometric_user_id, logged_at)` pairs.
@@ -87,8 +93,10 @@ Polling is now a fallback path. If realtime mode is unavailable for a device, **
 
 ## Duplicate Prevention
 
-1. **Client**: Persists `lastRecordTime` per device IP in `.zkteco-sync-state.json`. Only records _after_ that time are sent.
+1. **Client**: Persists `lastRecordTime` per registered device UUID and vendor/device-ID fingerprint in `.zkteco-sync-state.json`. Changing only the IP preserves the cursor; replacing the clock or changing its configured identity starts a retained-history backfill.
 2. **Server**: Uses `ON CONFLICT (biometric_user_id, logged_at) DO NOTHING` to ignore duplicates.
+
+After upgrading from the legacy IP-keyed state format, each device performs one safe retained-history backfill. Legacy IP entries are deliberately not assigned to registered devices because an IP may have been reused by replacement hardware. Keep the configured device ID stable when changing only the IP, and update it when replacing the physical clock.
 
 ## Error Handling
 
@@ -114,3 +122,4 @@ See `scripts/ZK_DIAGNOSTIC_REPORT.md` for more.
 | **Multi-device**   | One process starts one realtime worker for each IP returned by `/devices`.                |
 | **TCP**            | Typical ZKTeco port 4370.                                                                 |
 | **Live capture**   | Depends on pyzk/device support for `live_capture`; unsupported devices fall back to polling. |
+| **Anviz records**  | Disabled by default; enable the documented six-byte format only after confirming it matches the exact device model and firmware. |

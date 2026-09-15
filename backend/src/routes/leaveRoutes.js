@@ -97,6 +97,7 @@ const {
   requireDepartmentHeadApprovalSignature,
   requireHrApprovalSignature,
 } = require('../services/docutrackerLeaveSignatureService');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
 
@@ -438,6 +439,22 @@ function toIsoDateStr(val) {
   const s = String(val);
   const match = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return match ? match[0] : null;
+}
+
+function isValidIsoCalendarDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+function invalidProvidedDate(rawValue, normalizedValue) {
+  if (rawValue == null || String(rawValue).trim() === '') return false;
+  return !isValidIsoCalendarDate(normalizedValue);
 }
 
 function isWeekday(dateObj) {
@@ -1931,14 +1948,23 @@ router.post('/draft', protect, async (req, res) => {
 
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
-    // #12: holiday-aware count — client connected below inside try.
-    // We'll compute properly inside the transaction using the client.
+    if (invalidProvidedDate(start_date, startStr)) {
+      return res.status(400).json({ error: 'start_date must be a valid date' });
+    }
+    if (invalidProvidedDate(end_date, endStr)) {
+      return res.status(400).json({ error: 'end_date must be a valid date' });
+    }
+    if (startStr && endStr && endStr < startStr) {
+      return res.status(400).json({ error: 'end_date cannot be earlier than start_date' });
+    }
     const days = computeNumberOfDaysSync(startStr, endStr);
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
+      const workingDayResult = startStr && endStr
+        ? await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr)
+        : { days: null };
       const effectiveDaysDraft = workingDayResult.days ?? days;
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
@@ -1953,6 +1979,7 @@ router.post('/draft', protect, async (req, res) => {
         details,
         rest,
         customFieldSchema,
+        requireCustomFields: false,
       });
       const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const otherPurpose = (payloadDetails.other_purpose || payloadDetails.otherPurpose || '').toString();
@@ -1964,9 +1991,9 @@ router.post('/draft', protect, async (req, res) => {
         rule: leaveRule,
         leaveType: leave_type,
         otherPurpose: otherPurpose || null,
-        startDateStr: startStr,
-        endDateStr: endStr,
-        numberOfDays: effectiveDaysDraft,
+        startDateStr: null,
+        endDateStr: null,
+        numberOfDays: null,
         hasAttachment: false,
         userSex,
         maternityDeliveryType,
@@ -1978,13 +2005,6 @@ router.post('/draft', protect, async (req, res) => {
       if (!validation.valid) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: validation.error });
-      }
-      if (startStr && endStr) {
-        const hasOverlap = await hasOverlappingLeaveRequest(client, userId, startStr, endStr, null);
-        if (hasOverlap) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({ error: 'Overlapping leave request exists' });
-        }
       }
       const q = await client.query(
         `INSERT INTO leave_requests (
@@ -2575,6 +2595,15 @@ router.put('/:id', protect, async (req, res) => {
     }
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
+    if (invalidProvidedDate(start_date, startStr)) {
+      return res.status(400).json({ error: 'start_date must be a valid date' });
+    }
+    if (invalidProvidedDate(end_date, endStr)) {
+      return res.status(400).json({ error: 'end_date must be a valid date' });
+    }
+    if (startStr && endStr && endStr < startStr) {
+      return res.status(400).json({ error: 'end_date cannot be earlier than start_date' });
+    }
     const days = computeNumberOfDaysSync(startStr, endStr);
     let effectiveDays = days;
     let refreshReviewSnapshot = false;
@@ -2583,6 +2612,14 @@ router.put('/:id', protect, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const savingDraft = nextStatus === 'draft';
+      const submitting = ['pending', 'pending_department_head', 'pending_hr'].includes(nextStatus);
+      if (submitting && (!leave_type || !startStr || !endStr)) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: 'Leave type, start date, and end date are required before submission.',
+        });
+      }
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       // FIX #1: isNotEmpty is Dart/Swift, not JS. Use .length > 0 instead.
       if (leave_type != null && String(leave_type).trim().length > 0 && !leaveTypeId) {
@@ -2599,6 +2636,7 @@ router.put('/:id', protect, async (req, res) => {
         details,
         rest,
         customFieldSchema,
+        requireCustomFields: !savingDraft,
       });
       const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
       const existingOfficialSnapshot = normalizeEmployeeOfficialSnapshot(
@@ -2616,22 +2654,22 @@ router.put('/:id', protect, async (req, res) => {
         effectiveDays = workingDayResult.days ?? days;
 
         // Validate the server-computed, holiday-aware working day count.
-        if (effectiveDays == null || effectiveDays <= 0) {
+        if (!savingDraft && (effectiveDays == null || effectiveDays <= 0)) {
           await client.query('ROLLBACK');
           return res.status(400).json({ error: 'Number of working days must be greater than 0.' });
         }
       }
 
-      if (leave_type && startStr && endStr) {
+      if (leave_type) {
 
         const userSex = await getUserSexForLeaveValidation(client, userId);
         const validation = validateEmployeeLeaveRequestWithRule({
           rule: leaveRule,
           leaveType: leave_type,
           otherPurpose: otherPurpose || null,
-          startDateStr: startStr,
-          endDateStr: endStr,
-          numberOfDays: effectiveDays,
+          startDateStr: savingDraft ? null : startStr,
+          endDateStr: savingDraft ? null : endStr,
+          numberOfDays: savingDraft ? null : effectiveDays,
           hasAttachment: false,
           userSex,
           maternityDeliveryType,
@@ -2671,7 +2709,7 @@ router.put('/:id', protect, async (req, res) => {
         }
       }
       // Prevent overlapping ranges when dates are being set/changed.
-      if (startStr && endStr) {
+      if (!savingDraft && startStr && endStr) {
         const hasOverlap = await hasOverlappingLeaveRequest(client, userId, startStr, endStr, id);
         if (hasOverlap) {
           await client.query('ROLLBACK');
@@ -2697,10 +2735,10 @@ router.put('/:id', protect, async (req, res) => {
       const q = await client.query(
         `UPDATE leave_requests
          SET leave_type_id = COALESCE($1::uuid, leave_type_id),
-             start_date = COALESCE($2::date, start_date),
-             end_date = COALESCE($3::date, end_date),
-             total_days = COALESCE($4::numeric, total_days),
-             number_of_days = COALESCE($4::numeric, number_of_days),
+             start_date = CASE WHEN $15::boolean THEN $2::date ELSE COALESCE($2::date, start_date) END,
+             end_date = CASE WHEN $15::boolean THEN $3::date ELSE COALESCE($3::date, end_date) END,
+             total_days = CASE WHEN $15::boolean THEN $4::numeric ELSE COALESCE($4::numeric, total_days) END,
+             number_of_days = CASE WHEN $15::boolean THEN $4::numeric ELSE COALESCE($4::numeric, number_of_days) END,
              reason = $5::text,
               details = COALESCE($6::jsonb, details),
               status = $9::text,
@@ -2732,6 +2770,7 @@ router.put('/:id', protect, async (req, res) => {
           reviewSnapshot?.departmentHeadUserId || null,
           officialSnapshot,
           serializeEmployeeDetailSchema(customFieldSchema),
+          savingDraft,
         ]
       );
       const row = q.rows[0];
@@ -2945,18 +2984,25 @@ router.patch('/:id/cancel', protect, async (req, res) => {
   }
 });
 
-// GET /api/leave/my
+// GET /api/leave/my/context
+router.get('/my/context', protect, (_req, res) => {
+  res.json({ official_date: todayInHrmsTimezone() });
+});
+
 // GET /api/leave/my
 router.get('/my', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const status = (req.query?.status || '').toString().trim() || null;
-    // FIX #14 (Phase 4 preview): Pagination on /my with a safe default cap.
+    const paginated = String(req.query?.paginated || '').toLowerCase() === 'true';
     const limitRaw = req.query?.limit ? parseInt(req.query.limit, 10) : 100;
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 100;
+    const offsetRaw = req.query?.offset ? parseInt(req.query.offset, 10) : 0;
+    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
     const rows = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
+      `SELECT lr.*, COUNT(*) OVER()::int AS total_count,
+              lt.name AS leave_type_name, u.full_name AS employee_full_name,
               rv.full_name AS reviewer_name,
               rv.role AS reviewer_role,
               dhh.department_head_action,
@@ -2987,11 +3033,24 @@ router.get('/my', protect, async (req, res) => {
        ) dhh ON true
        WHERE (lr.user_id = $1 OR lr.employee_id = $1)
          AND ($2::text IS NULL OR lr.status = $2)
-       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
-       LIMIT $3`,
-      [userId, status, limit]
+       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC, lr.id DESC
+       LIMIT $3 OFFSET $4`,
+      [userId, status, limit, offset]
     );
-    res.json(rows.rows.map(mapLeaveRowToApi));
+    const items = rows.rows.map(mapLeaveRowToApi);
+    if (!paginated) return res.json(items);
+    let total = rows.rows.length > 0 ? Number(rows.rows[0].total_count) : 0;
+    if (rows.rows.length === 0 && offset > 0) {
+      const countRows = await pool.query(
+        `SELECT COUNT(*)::int AS total
+         FROM leave_requests lr
+         WHERE (lr.user_id = $1 OR lr.employee_id = $1)
+           AND ($2::text IS NULL OR lr.status = $2)`,
+        [userId, status]
+      );
+      total = Number(countRows.rows[0]?.total || 0);
+    }
+    res.json({ items, total, limit, offset, has_more: offset + items.length < total });
   } catch (err) {
     console.error('[leave GET /my]', err);
     res.status(500).json({ error: 'Failed to fetch my leave requests' });
@@ -4745,7 +4804,8 @@ router.get('/balances/:userId', protect, async (req, res) => {
     // Annual entitlements are not credit wallets. They are returned as clearly
     // marked, read-only summary rows so the employee UI can show yearly usage
     // separately from VL/SL credits.
-    const currentYear = new Date().getFullYear();
+    const officialDate = todayInHrmsTimezone();
+    const currentYear = Number(officialDate.slice(0, 4));
     const startOfYear = `${currentYear}-01-01`;
     const endOfYear = `${currentYear}-12-31`;
 
@@ -4827,7 +4887,7 @@ router.get('/balances/:userId', protect, async (req, res) => {
       }
 
       const employeeName = mappedBalances.length > 0 ? mappedBalances[0].employee_name : null;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = officialDate;
       for (const t of synthTypes) {
         mappedBalances.push({
           id: `synth-${t.name}-${currentYear}`,

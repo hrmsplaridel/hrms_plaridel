@@ -53,6 +53,14 @@ const protect = [authMiddleware];
 
 const ZK_SCRIPT_OPTS = { maxBuffer: 10 * 1024 * 1024, timeout: 120000, windowsHide: true };
 const PUSH_USER_SCRIPT_OPTS = { maxBuffer: 1024 * 1024, timeout: 120000, windowsHide: true };
+const ZK_USER_MANAGEMENT_UNSUPPORTED = {
+  error: 'Employee management is currently supported only for ZKTeco devices.',
+  code: 'BIOMETRIC_VENDOR_USER_MANAGEMENT_UNSUPPORTED',
+};
+
+function isZktecoDevice(device) {
+  return String(device?.vendor || 'zkteco').trim().toLowerCase() === 'zkteco';
+}
 
 /** Parse stdout JSON from zk_actions.py; fall back to stderr / generic hint. */
 function pushUserScriptFailure(res, err, stdout, stderr) {
@@ -92,7 +100,7 @@ function pushUserScriptFailure(res, err, stdout, stderr) {
 
 // GET /api/biometric-devices - list (?status=Active|Inactive|All)
 // Optional: ?probe_online=0 — skip TCP probe (faster; no `online` field)
-router.get('/', protect, async (req, res) => {
+router.get('/', protect, requireAdmin, async (req, res) => {
   try {
     const status = req.query.status || 'Active';
     let where = '';
@@ -144,18 +152,83 @@ router.get('/', protect, async (req, res) => {
 
 const VALID_VENDORS = new Set(['zkteco', 'hikvision', 'anviz', 'other']);
 
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function isValidDeviceHost(value) {
+  if (net.isIP(value)) return true;
+  if (value.length > 253 || /^[0-9.]+$/.test(value)) return false;
+
+  const hostname = value.endsWith('.') ? value.slice(0, -1) : value;
+  if (!hostname) return false;
+  return hostname.split('.').every(
+    (label) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label)
+  );
+}
+
+function validateDevicePayload(body, { partial = false } = {}) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { error: 'Request body must be a JSON object.' };
+  }
+
+  const values = {};
+  if (!partial || hasOwn(body, 'name')) {
+    if (typeof body.name !== 'string') {
+      return { error: 'Name must be a string.' };
+    }
+    values.name = body.name.trim();
+    if (!values.name) return { error: 'Name is required.' };
+  }
+
+  for (const field of ['device_id', 'location', 'ip_address']) {
+    if (!partial || hasOwn(body, field)) {
+      const rawValue = body[field];
+      if (rawValue !== undefined && rawValue !== null && typeof rawValue !== 'string') {
+        return { error: `${field} must be a string or null.` };
+      }
+      values[field] = typeof rawValue === 'string' ? rawValue.trim() || null : null;
+    }
+  }
+
+  if (values.ip_address && !isValidDeviceHost(values.ip_address)) {
+    return { error: 'ip_address must be a valid IP address or hostname.' };
+  }
+
+  if (!partial || hasOwn(body, 'vendor')) {
+    const rawVendor = hasOwn(body, 'vendor') ? body.vendor : 'zkteco';
+    if (typeof rawVendor !== 'string') {
+      return { error: 'vendor must be a string.' };
+    }
+    values.vendor = rawVendor.trim().toLowerCase();
+    if (!VALID_VENDORS.has(values.vendor)) {
+      return { error: 'vendor must be one of: zkteco, hikvision, anviz, other.' };
+    }
+  }
+
+  if (!partial || hasOwn(body, 'is_active')) {
+    const rawIsActive = hasOwn(body, 'is_active') ? body.is_active : true;
+    if (typeof rawIsActive !== 'boolean') {
+      return { error: 'is_active must be a boolean.' };
+    }
+    values.is_active = rawIsActive;
+  }
+
+  return { values };
+}
+
 // POST /api/biometric-devices - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
-    const { name, device_id, location, ip_address, vendor = 'zkteco', is_active = true } = req.body;
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
-    const safeVendor = VALID_VENDORS.has((vendor || '').toLowerCase()) ? vendor.toLowerCase() : 'zkteco';
+    const validation = validateDevicePayload(req.body);
+    if (validation.error) return res.status(400).json({ error: validation.error });
+    const { name, device_id, location, ip_address, vendor, is_active } = validation.values;
 
     const result = await pool.query(
       `INSERT INTO biometric_devices (name, device_id, location, ip_address, vendor, is_active)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, name, device_id, location, ip_address, vendor, last_sync_at, is_active, created_at`,
-      [name.trim(), device_id?.trim() || null, location?.trim() || null, ip_address?.trim() || null, safeVendor, !!is_active]
+      [name, device_id, location, ip_address, vendor, is_active]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -169,21 +242,16 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, device_id, location, ip_address, vendor, is_active } = req.body;
+    const validation = validateDevicePayload(req.body, { partial: true });
+    if (validation.error) return res.status(400).json({ error: validation.error });
 
     const updates = [];
     const values = [];
     let i = 1;
-    if (name !== undefined) { updates.push(`name = $${i++}`); values.push(name.trim()); }
-    if (device_id !== undefined) { updates.push(`device_id = $${i++}`); values.push(device_id?.trim() || null); }
-    if (location !== undefined) { updates.push(`location = $${i++}`); values.push(location?.trim() || null); }
-    if (ip_address !== undefined) { updates.push(`ip_address = $${i++}`); values.push(ip_address?.trim() || null); }
-    if (vendor !== undefined) {
-      const safeVendor = VALID_VENDORS.has((vendor || '').toLowerCase()) ? vendor.toLowerCase() : 'zkteco';
-      updates.push(`vendor = $${i++}`);
-      values.push(safeVendor);
+    for (const [field, value] of Object.entries(validation.values)) {
+      updates.push(`${field} = $${i++}`);
+      values.push(value);
     }
-    if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(!!is_active); }
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
     updates.push('updated_at = now()');
     values.push(id);
@@ -209,6 +277,13 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
     if (result.rowCount === 0) return res.status(404).json({ error: 'Biometric device not found' });
     res.status(204).send();
   } catch (err) {
+    if (err.code === '23503') {
+      return res.status(409).json({
+        error:
+          'This device cannot be deleted because it has biometric attendance history. Deactivate it instead.',
+        code: 'BIOMETRIC_DEVICE_HAS_ATTENDANCE_HISTORY',
+      });
+    }
     console.error('[biometric-devices DELETE]', err);
     res.status(500).json({ error: 'Failed to delete biometric device' });
   }
@@ -218,10 +293,17 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
 router.get('/:id/users', protect, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT ip_address FROM biometric_devices WHERE id = $1', [id]);
+    const result = await pool.query(
+      'SELECT ip_address, vendor FROM biometric_devices WHERE id = $1',
+      [id]
+    );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Device not found' });
-    
-    const ip = result.rows[0].ip_address;
+
+    const device = result.rows[0];
+    if (!isZktecoDevice(device)) {
+      return res.status(422).json(ZK_USER_MANAGEMENT_UNSUPPORTED);
+    }
+    const ip = device.ip_address;
     if (!ip) return res.status(400).json({ error: 'Device has no IP address configured' });
 
     const pyScript = path.join(__dirname, '../../scripts/zk_actions.py');
@@ -268,11 +350,15 @@ router.post('/:id/push-user', protect, requireAdmin, async (req, res) => {
     }
 
     const devRes = await pool.query(
-      'SELECT ip_address FROM biometric_devices WHERE id = $1',
+      'SELECT ip_address, vendor FROM biometric_devices WHERE id = $1',
       [id]
     );
     if (devRes.rowCount === 0) return res.status(404).json({ error: 'Device not found' });
-    const ip = devRes.rows[0].ip_address;
+    const device = devRes.rows[0];
+    if (!isZktecoDevice(device)) {
+      return res.status(422).json(ZK_USER_MANAGEMENT_UNSUPPORTED);
+    }
+    const ip = device.ip_address;
     if (!ip) return res.status(400).json({ error: 'Device has no IP address configured' });
 
     const userRes = await pool.query(

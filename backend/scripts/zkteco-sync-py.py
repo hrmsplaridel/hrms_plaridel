@@ -15,12 +15,13 @@ Run: python scripts/zkteco-sync-py.py
 Environment: HRMS_API_URL, BIO_SYNC_API_KEY, ZK_REALTIME, ZK_POLL_INTERVAL,
 ZK_FALLBACK_INTERVAL, ZK_TIMEZONE_OFFSET, etc.
 """
+import hashlib
 import json
 import os
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -43,15 +44,58 @@ TZ_OFFSET            = os.environ.get("ZK_TIMEZONE_OFFSET", "+08:00")
 REALTIME_ENABLED     = os.environ.get("ZK_REALTIME", "1").strip().lower() not in ("0", "false", "no", "off")
 DISCOVERY_INTERVAL   = int(os.environ.get("ZK_DISCOVERY_INTERVAL", "30"))
 FALLBACK_INTERVAL    = int(os.environ.get("ZK_FALLBACK_INTERVAL", "300"))
+HEARTBEAT_INTERVAL   = int(os.environ.get("ZK_HEARTBEAT_INTERVAL", "60"))
 LIVE_CAPTURE_TIMEOUT = int(os.environ.get("ZK_LIVE_CAPTURE_TIMEOUT", "10"))
 LIVE_RECONNECT_DELAY = int(os.environ.get("ZK_LIVE_RECONNECT_DELAY", "5"))
+ANVIZ_RECORD_FORMAT  = os.environ.get("ANVIZ_RECORD_FORMAT", "").strip().lower()
 STATE_LOCK           = threading.Lock()
+HEARTBEAT_LOCK       = threading.Lock()
+LAST_HEARTBEAT_AT    = {}
 STOP_EVENT           = threading.Event()
 
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+def timezone_from_offset(offset_text):
+    """Build a real fixed-offset timezone from values such as +08:00."""
+    value = str(offset_text or "").strip()
+    if len(value) != 6 or value[0] not in ("+", "-") or value[3] != ":":
+        raise ValueError("ZK_TIMEZONE_OFFSET must use the format +HH:MM or -HH:MM")
+    try:
+        hours = int(value[1:3])
+        minutes = int(value[4:6])
+    except ValueError as exc:
+        raise ValueError("ZK_TIMEZONE_OFFSET must use numeric hours and minutes") from exc
+    if hours > 23 or minutes > 59:
+        raise ValueError("ZK_TIMEZONE_OFFSET is outside the valid range")
+    sign = 1 if value[0] == "+" else -1
+    return timezone(sign * timedelta(hours=hours, minutes=minutes))
+
+
+DEVICE_TIMEZONE = timezone_from_offset(TZ_OFFSET)
+
+
+def hikvision_query_window(start_time_iso=None, now_utc=None):
+    """Return correctly converted device-local ISAPI search boundaries."""
+    current = now_utc or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current_local = current.astimezone(DEVICE_TIMEZONE)
+
+    if start_time_iso:
+        parsed = datetime.fromisoformat(str(start_time_iso).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=DEVICE_TIMEZONE)
+        begin_local = parsed.astimezone(DEVICE_TIMEZONE)
+    else:
+        begin_local = current_local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    return (
+        begin_local.isoformat(timespec="seconds"),
+        current_local.isoformat(timespec="seconds"),
+    )
 
 def device_port(dev, fallback=4370):
     try:
@@ -61,8 +105,44 @@ def device_port(dev, fallback=4370):
 
 
 def device_key(dev):
+    device_uuid = str(dev.get("id") or "").strip()
+    if device_uuid:
+        return device_uuid
     ip = str(dev.get("ip_address") or "").strip()
-    return f"{ip}:{device_port(dev)}"
+    return f"unregistered@{ip}:{device_port(dev)}"
+
+
+def device_worker_signature(dev):
+    """Return all discovered settings captured by a realtime worker."""
+    vendor = str(dev.get("vendor") or "zkteco").strip().lower()
+    fallback_port = {
+        "zkteco": 4370,
+        "hikvision": 80,
+        "anviz": 5010,
+        "other": 4370,
+    }.get(vendor, 4370)
+    return (
+        str(dev.get("id") or "").strip(),
+        vendor,
+        str(dev.get("device_id") or "").strip(),
+        str(dev.get("ip_address") or "").strip(),
+        device_port(dev, fallback=fallback_port),
+    )
+
+
+def device_state_identity(dev):
+    """Return a stable cursor key and hardware-identity fingerprint."""
+    device_uuid = str(dev.get("id") or "").strip()
+    if not device_uuid:
+        raise ValueError("Registered biometric device UUID is required for synchronization")
+
+    identity = {
+        "vendor": str(dev.get("vendor") or "zkteco").strip().lower(),
+        "device_id": str(dev.get("device_id") or "").strip(),
+    }
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    fingerprint = hashlib.sha256(encoded).hexdigest()
+    return f"device:{device_uuid}", fingerprint
 
 
 def device_source(dev, prefix):
@@ -105,18 +185,29 @@ def log_push_result(prefix, result):
     )
 
 
-def load_last_sync(key):
+def load_last_sync(key, identity_fingerprint):
     with STATE_LOCK:
         if STATE_FILE.exists():
             try:
                 d = json.loads(STATE_FILE.read_text())
-                return d.get(key, {}).get("lastRecordTime")
+                entry = d.get(key, {}) if isinstance(d, dict) else {}
+                if not isinstance(entry, dict):
+                    return None
+                stored_fingerprint = entry.get("identityFingerprint")
+                if stored_fingerprint != identity_fingerprint:
+                    if entry.get("lastRecordTime"):
+                        print(
+                            f"[bio-sync] Device identity changed for {key}; "
+                            "starting a retained-history backfill"
+                        )
+                    return None
+                return entry.get("lastRecordTime")
             except Exception:
                 pass
     return None
 
 
-def save_last_sync(key, iso_str):
+def save_last_sync(key, iso_str, identity_fingerprint):
     with STATE_LOCK:
         try:
             d = {}
@@ -128,6 +219,7 @@ def save_last_sync(key, iso_str):
             if key not in d:
                 d[key] = {}
             d[key]["lastRecordTime"] = iso_str
+            d[key]["identityFingerprint"] = identity_fingerprint
             d[key]["updatedAt"]      = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
             STATE_FILE.write_text(json.dumps(d, indent=2))
         except Exception as e:
@@ -149,11 +241,32 @@ def get_devices():
         return []
 
 
-def push_punches(state_key, punches, latest_ts=None, source_name=None):
+def push_punches(
+    state_key,
+    identity_fingerprint,
+    punches,
+    latest_ts=None,
+    source_name=None,
+    biometric_device_id=None,
+):
     import requests
-    if not punches:
+    device_uuid = str(biometric_device_id or "").strip()
+    now_monotonic = time.monotonic()
+    if not punches and not device_uuid:
         return {"pushed": 0}
-    payload = {"punches": punches, "source_name": source_name or f"bio-sync-{state_key}"}
+    if not punches:
+        with HEARTBEAT_LOCK:
+            last_heartbeat = LAST_HEARTBEAT_AT.get(device_uuid, 0)
+        if now_monotonic - last_heartbeat < HEARTBEAT_INTERVAL:
+            return {"pushed": 0, "heartbeat_throttled": True}
+
+    payload = {
+        "punches": punches,
+        "source_name": source_name or f"bio-sync-{state_key}",
+        "sync_heartbeat": not punches,
+    }
+    if device_uuid:
+        payload["biometric_device_id"] = device_uuid
     try:
         r = requests.post(
             f"{API_URL}/api/biometric-attendance-logs/push",
@@ -163,8 +276,15 @@ def push_punches(state_key, punches, latest_ts=None, source_name=None):
         )
         r.raise_for_status()
         body = r.json()
+        if device_uuid:
+            with HEARTBEAT_LOCK:
+                LAST_HEARTBEAT_AT[device_uuid] = now_monotonic
         if latest_ts:
-            save_last_sync(state_key, ts_to_iso(latest_ts) if hasattr(latest_ts, "strftime") else str(latest_ts))
+            save_last_sync(
+                state_key,
+                ts_to_iso(latest_ts) if hasattr(latest_ts, "strftime") else str(latest_ts),
+                identity_fingerprint,
+            )
         return body
     except Exception as e:
         print(f"[bio-sync] Push error ({state_key}): {e}")
@@ -184,13 +304,13 @@ class ZKTecoDriver:
         self.dev  = dev
         self.ip   = str(dev.get("ip_address") or "").strip()
         self.port = device_port(dev, fallback=4370)
+        self.state_key, self.identity_fingerprint = device_state_identity(dev)
 
     # ------------------------------------------------------------------
     def sync_once(self, source_name=None):
         from zk import ZK
 
-        state_key = f"{self.ip}:{self.port}"
-        last      = load_last_sync(state_key)
+        last      = load_last_sync(self.state_key, self.identity_fingerprint)
         last_dt   = None
         if last:
             try:
@@ -235,7 +355,14 @@ class ZKTecoDriver:
             if latest_ts is None or (hasattr(ts, "__gt__") and ts > latest_ts):
                 latest_ts = ts
 
-        return push_punches(state_key, punches, latest_ts=latest_ts, source_name=source_name)
+        return push_punches(
+            self.state_key,
+            self.identity_fingerprint,
+            punches,
+            latest_ts=latest_ts,
+            source_name=source_name,
+            biometric_device_id=self.dev.get("id"),
+        )
 
     # ------------------------------------------------------------------
     def poll_until_stopped(self, stop_event, label_prefix="Poll"):
@@ -250,8 +377,6 @@ class ZKTecoDriver:
 
         source_name     = device_source(self.dev, f"{self.PREFIX}-live")
         backfill_source = device_source(self.dev, f"{self.PREFIX}-backfill")
-        state_key       = f"{self.ip}:{self.port}"
-
         print(f"[bio-sync] ZKTeco live listener starting for {self.ip}:{self.port}")
 
         while not stop_event.is_set():
@@ -289,7 +414,14 @@ class ZKTecoDriver:
                     if not uid or not ts:
                         continue
                     punch  = {"biometric_user_id": uid, "logged_at": ts_to_iso(ts)}
-                    result = push_punches(state_key, [punch], latest_ts=ts, source_name=source_name)
+                    result = push_punches(
+                        self.state_key,
+                        self.identity_fingerprint,
+                        [punch],
+                        latest_ts=ts,
+                        source_name=source_name,
+                        biometric_device_id=self.dev.get("id"),
+                    )
                     log_push_result(f"Live {self.ip}", result)
 
             except Exception as e:
@@ -336,6 +468,7 @@ class HikvisionDriver:
         self.dev      = dev
         self.ip       = str(dev.get("ip_address") or "").strip()
         self.port     = device_port(dev, fallback=80)
+        self.state_key, self.identity_fingerprint = device_state_identity(dev)
         self.username = os.environ.get("HIK_USERNAME", "admin")
         self.password = os.environ.get("HIK_PASSWORD", "")
         scheme        = "https" if os.environ.get("HIK_USE_HTTPS", "0").strip() == "1" else "http"
@@ -350,13 +483,7 @@ class HikvisionDriver:
         import requests
         from requests.auth import HTTPDigestAuth
 
-        # Default to last 24h if no prior sync time
-        if start_time_iso:
-            begin_time = start_time_iso.replace("+08:00", "+08:00")
-        else:
-            begin_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00+08:00")
-
-        end_time     = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        begin_time, end_time = hikvision_query_window(start_time_iso)
         search_id    = f"hrms-{int(time.time())}"
         search_result_position = 0
         max_results  = 50
@@ -408,8 +535,7 @@ class HikvisionDriver:
 
     # ------------------------------------------------------------------
     def sync_once(self, source_name=None):
-        state_key = f"{self.ip}:{self.port}"
-        last      = load_last_sync(state_key)
+        last      = load_last_sync(self.state_key, self.identity_fingerprint)
 
         raw_punches = self._fetch_events(start_time_iso=last)
         if raw_punches is None:
@@ -428,14 +554,13 @@ class HikvisionDriver:
             except Exception:
                 pass
 
-        if not punches:
-            return {"pushed": 0}
-
         return push_punches(
-            state_key,
+            self.state_key,
+            self.identity_fingerprint,
             punches,
             latest_ts=latest_ts,
             source_name=source_name or device_source(self.dev, self.PREFIX),
+            biometric_device_id=self.dev.get("id"),
         )
 
     # ------------------------------------------------------------------
@@ -463,17 +588,19 @@ class AnvizDriver:
     Anviz uses a proprietary binary protocol on TCP port 5010.
     This driver uses polling (no live capture).
 
-    Note: Anviz SDK details vary by firmware. This implementation uses
-    the documented Anviz A300 / C2 series protocol (GetRecord command 0x30).
-    Test with your specific device and adjust if needed.
+    Record formats vary by model and firmware. Parsing remains disabled unless
+    a complete, verified record format is explicitly configured.
     """
 
     PREFIX = "anviz"
+    BCD6_RECORD_FORMAT = "bcd6-second-minute-hour-day-month-year2000"
 
     def __init__(self, dev):
         self.dev  = dev
         self.ip   = str(dev.get("ip_address") or "").strip()
         self.port = device_port(dev, fallback=5010)
+        self.record_format = ANVIZ_RECORD_FORMAT
+        self.state_key, self.identity_fingerprint = device_state_identity(dev)
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -491,18 +618,35 @@ class AnvizDriver:
         return bytes(packet)
 
     @staticmethod
-    def _parse_timestamp(raw):
-        """Parse Anviz 4-byte packed BCD timestamp to datetime."""
-        try:
-            b = raw if isinstance(raw, (bytes, bytearray)) else bytes([raw])
-            second = (b[0] & 0x0F) + ((b[0] >> 4) & 0x0F) * 10
-            minute = (b[1] & 0x0F) + ((b[1] >> 4) & 0x0F) * 10
-            hour   = (b[2] & 0x0F) + ((b[2] >> 4) & 0x0F) * 10
-            day    = (b[3] & 0x0F) + ((b[3] >> 4) & 0x0F) * 10
-            # Byte 4 and 5 for month/year may vary; fall back gracefully
-            return datetime(datetime.now().year, datetime.now().month, day, hour, minute, second)
-        except Exception:
+    def _decode_bcd(value):
+        high = (value >> 4) & 0x0F
+        low = value & 0x0F
+        if high > 9 or low > 9:
+            raise ValueError("Invalid BCD value")
+        return high * 10 + low
+
+    @classmethod
+    def _parse_timestamp(cls, raw, record_format=None):
+        """Parse a complete timestamp only for an explicitly selected format."""
+        if record_format != cls.BCD6_RECORD_FORMAT:
             return None
+        try:
+            b = bytes(raw)
+            if len(b) != 6:
+                return None
+            second, minute, hour, day, month, year = map(cls._decode_bcd, b)
+            return datetime(2000 + year, month, day, hour, minute, second)
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    @staticmethod
+    def _valid_response_packet(response):
+        if not isinstance(response, (bytes, bytearray)) or len(response) < 9:
+            return False
+        declared_length = int.from_bytes(response[5:7], "little")
+        if declared_length + 1 != len(response):
+            return False
+        return response[-1] == (sum(response[:-1]) & 0xFF)
 
     # ------------------------------------------------------------------
     def _fetch_records(self):
@@ -511,6 +655,13 @@ class AnvizDriver:
         Returns list of (user_id_str, datetime) or empty list on error.
         """
         import socket
+
+        if self.record_format != self.BCD6_RECORD_FORMAT:
+            print(
+                f"[bio-sync] Anviz sync disabled ({self.ip}): unsupported or missing "
+                "ANVIZ_RECORD_FORMAT; no attendance was uploaded"
+            )
+            return None
 
         results = []
         try:
@@ -531,40 +682,44 @@ class AnvizDriver:
                 except socket.timeout:
                     pass
 
-            # Parse records from response (each record is typically 14 bytes)
-            # Format: user_id (5 bytes BCD) + timestamp (4 bytes BCD) + punch_type (1 byte) + ...
-            if len(response) < 9:
-                return results
+            if not self._valid_response_packet(response):
+                print(f"[bio-sync] Rejected invalid Anviz response packet ({self.ip})")
+                return None
 
-            # Skip packet header (8 bytes)
-            i = 8
-            while i + 10 <= len(response) - 1:
+            payload = response[8:-1]
+            if len(payload) % 14 != 0:
+                print(f"[bio-sync] Rejected unsupported Anviz record length ({self.ip})")
+                return None
+
+            i = 0
+            while i < len(payload):
                 try:
-                    user_id_bytes = response[i:i+5]
-                    ts_bytes      = response[i+5:i+9]
+                    record = payload[i:i+14]
+                    user_id_bytes = record[0:5]
+                    ts_bytes = record[5:11]
 
                     user_id = ""
                     for b in user_id_bytes:
-                        user_id += str((b >> 4) & 0x0F)
-                        user_id += str(b & 0x0F)
+                        user_id += f"{self._decode_bcd(b):02d}"
                     user_id = user_id.lstrip("0") or "0"
 
-                    ts = self._parse_timestamp(ts_bytes)
+                    ts = self._parse_timestamp(ts_bytes, self.record_format)
                     if ts and user_id:
                         results.append((user_id, ts))
                     i += 14
-                except Exception:
-                    break
+                except (TypeError, ValueError, IndexError):
+                    print(f"[bio-sync] Rejected invalid Anviz attendance record ({self.ip})")
+                    return None
 
         except Exception as e:
             print(f"[bio-sync] Anviz device error ({self.ip}): {e}")
+            return None
 
         return results
 
     # ------------------------------------------------------------------
     def sync_once(self, source_name=None):
-        state_key = f"{self.ip}:{self.port}"
-        last      = load_last_sync(state_key)
+        last      = load_last_sync(self.state_key, self.identity_fingerprint)
         last_dt   = None
         if last:
             try:
@@ -573,6 +728,8 @@ class AnvizDriver:
                 pass
 
         raw = self._fetch_records()
+        if raw is None:
+            return None
         punches   = []
         latest_ts = None
 
@@ -589,10 +746,12 @@ class AnvizDriver:
                 latest_ts = ts
 
         return push_punches(
-            state_key,
+            self.state_key,
+            self.identity_fingerprint,
             punches,
             latest_ts=latest_ts,
             source_name=source_name or device_source(self.dev, self.PREFIX),
+            biometric_device_id=self.dev.get("id"),
         )
 
     # ------------------------------------------------------------------
@@ -649,42 +808,67 @@ def _live_worker_wrapper(dev, stop_event):
     driver.live_worker(stop_event)
 
 
+def _stop_realtime_worker(key, worker, reason):
+    print(f"[bio-sync] Stopping listener for {reason} {key}")
+    worker["stop"].set()
+    worker["thread"].join(timeout=LIVE_CAPTURE_TIMEOUT + 2)
+    if worker["thread"].is_alive():
+        print(f"[bio-sync] Listener {key} has not stopped yet; replacement deferred")
+        return False
+    return True
+
+
+def reconcile_realtime_workers(workers, devices, thread_factory=threading.Thread):
+    active_keys = set()
+
+    for dev in devices:
+        ip = str(dev.get("ip_address") or "").strip()
+        if not ip:
+            continue
+
+        key = device_key(dev)
+        signature = device_worker_signature(dev)
+        active_keys.add(key)
+        worker = workers.get(key)
+
+        if worker and worker["thread"].is_alive():
+            if worker.get("signature") == signature:
+                continue
+            if not _stop_realtime_worker(key, worker, "changed device"):
+                continue
+
+        stop_event = threading.Event()
+        thread = thread_factory(
+            target=_live_worker_wrapper,
+            args=(dev, stop_event),
+            name=f"bio-live-{key}",
+            daemon=True,
+        )
+        workers[key] = {
+            "thread": thread,
+            "stop": stop_event,
+            "signature": signature,
+        }
+        thread.start()
+
+    for key in list(workers.keys()):
+        if key in active_keys:
+            continue
+        if _stop_realtime_worker(key, workers[key], "inactive device"):
+            del workers[key]
+
+
 def run_realtime_service():
     workers = {}
 
     try:
         while not STOP_EVENT.is_set():
-            devices    = get_devices()
-            active_keys = set()
+            devices = get_devices()
 
             if not devices:
                 print("[bio-sync] No active devices found. Waiting...")
 
-            for dev in devices:
-                ip = str(dev.get("ip_address") or "").strip()
-                if not ip:
-                    continue
-                key = device_key(dev)
-                active_keys.add(key)
-                worker = workers.get(key)
-                if not worker or not worker["thread"].is_alive():
-                    stop_event = threading.Event()
-                    thread     = threading.Thread(
-                        target=_live_worker_wrapper,
-                        args=(dev, stop_event),
-                        name=f"bio-live-{key}",
-                        daemon=True,
-                    )
-                    workers[key] = {"thread": thread, "stop": stop_event}
-                    thread.start()
-
-            for key in list(workers.keys()):
-                if key in active_keys:
-                    continue
-                print(f"[bio-sync] Stopping listener for inactive device {key}")
-                workers[key]["stop"].set()
-                workers[key]["thread"].join(timeout=LIVE_CAPTURE_TIMEOUT + 2)
-                del workers[key]
+            reconcile_realtime_workers(workers, devices)
 
             STOP_EVENT.wait(DISCOVERY_INTERVAL)
     finally:
@@ -713,6 +897,7 @@ def main():
     print(f"[bio-sync] API: {API_URL}")
     print(f"[bio-sync] Mode: {'real-time live capture' if REALTIME_ENABLED else 'polling'}")
     print(f"[bio-sync] Poll interval: {POLL_INTERVAL}s")
+    print(f"[bio-sync] Empty heartbeat interval: {HEARTBEAT_INTERVAL}s")
     if REALTIME_ENABLED:
         print(f"[bio-sync] Device discovery interval: {DISCOVERY_INTERVAL}s")
         print(f"[bio-sync] Live capture timeout: {LIVE_CAPTURE_TIMEOUT}s")

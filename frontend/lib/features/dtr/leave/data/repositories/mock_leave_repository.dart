@@ -15,6 +15,12 @@ class MockLeaveRepository implements LeaveRepository {
   int _requestCounter = 0;
 
   @override
+  Future<DateTime> getOfficialDate() async {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  @override
   Future<LeaveRequest> saveDraft(LeaveRequest request) async {
     final now = DateTime.now();
     final old = _getRequestByIdInternal(request.id);
@@ -94,6 +100,23 @@ class MockLeaveRepository implements LeaveRepository {
       results = results.take(limit).toList();
     }
     return results;
+  }
+
+  @override
+  Future<LeaveRequestPage> listMyRequestPage(
+    String userId, {
+    required int limit,
+    required int offset,
+  }) async {
+    final all = await listMyRequests(userId);
+    final safeOffset = offset.clamp(0, all.length);
+    final end = (safeOffset + limit).clamp(safeOffset, all.length);
+    return LeaveRequestPage(
+      items: all.sublist(safeOffset, end),
+      total: all.length,
+      limit: limit,
+      offset: safeOffset,
+    );
   }
 
   @override

@@ -190,7 +190,7 @@ async function employeeHasBlockingApprovedLeave(employeeId, dateStr) {
 }
 
 /**
- * Gate biometric storage/processing: shift required; whole-day holidays block; approved full-day (or multi-day) leave blocks.
+ * Gate biometric summary processing: shift required; whole-day holidays block; approved full-day (or multi-day) leave blocks.
  * Partial-day holidays (am_only/pm_only) do not block — late/undertime logic still applies.
  * @returns {{ allowed: boolean, reason: null|'no_schedule'|'holiday'|'leave', shiftInfo: object|null }}
  */

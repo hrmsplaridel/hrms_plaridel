@@ -1819,9 +1819,10 @@ router.get('/report-years', protect, async (req, res) => {
       req.user,
       req.query
     );
+    const officialDate = todayInHrmsTimezone();
     const result = await pool.query(
       `WITH official_clock AS (
-         SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date AS today
+         SELECT $2::date AS today
        ),
        report_dates AS (
          SELECT employee_id, attendance_date AS report_date
@@ -1888,10 +1889,11 @@ router.get('/report-years', protect, async (req, res) => {
         AND rd.report_date <= c.today
         AND ($1::uuid IS NULL OR rd.employee_id = $1::uuid)
        GROUP BY c.today`,
-      [scopedEmployeeId]
+      [scopedEmployeeId, officialDate]
     );
     const row = result.rows[0] || {};
-    const currentYear = Number(row.current_year) || new Date().getUTCFullYear();
+    const currentYear =
+      Number(row.current_year) || Number(officialDate.slice(0, 4));
     const minYear = Math.max(
       1900,
       Math.min(Number(row.min_year) || currentYear, currentYear)
@@ -1905,7 +1907,12 @@ router.get('/report-years', protect, async (req, res) => {
       (_, index) => minYear + index
     );
 
-    res.json({ min_year: minYear, max_year: maxYear, years });
+    res.json({
+      min_year: minYear,
+      max_year: maxYear,
+      years,
+      official_date: officialDate,
+    });
   } catch (err) {
     console.error('[dtr-daily-summary GET /report-years]', err);
     res.status(500).json({ error: 'Failed to load available DTR report years' });
