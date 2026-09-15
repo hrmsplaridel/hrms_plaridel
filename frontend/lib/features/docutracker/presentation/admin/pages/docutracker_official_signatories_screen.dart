@@ -70,7 +70,24 @@ class _DocuTrackerOfficialSignatoriesScreenState
         current: current,
       ),
     );
-    if (saved == true && mounted) await _load();
+    if (saved == true && mounted) {
+      await _load();
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: const Row(
+            children: [
+              Icon(Icons.check_circle_outline_rounded, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(child: Text('Leave Credit Certifier saved.')),
+            ],
+          ),
+        ),
+      );
+    }
   }
 
   List<OfficialSignatoryPeriod> _forRole(String roleKey) => _periods

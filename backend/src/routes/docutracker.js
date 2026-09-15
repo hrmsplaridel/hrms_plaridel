@@ -1113,8 +1113,9 @@ function officialSignatoryErrorResponse(res, error, fallback) {
     return res.status(error.status).json({ error: error.message });
   }
   if (error?.code === '42P01') {
+    console.error(`[docutracker official signatories] ${fallback}`, error);
     return res.status(503).json({
-      error: 'Official signatories are not initialized. Apply the DocuTracker migration.',
+      error: 'A required DocuTracker table is not initialized. Apply all DocuTracker migrations.',
     });
   }
   console.error(`[docutracker official signatories] ${fallback}`, error);

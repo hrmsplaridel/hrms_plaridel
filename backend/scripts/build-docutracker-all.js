@@ -29,8 +29,9 @@ const postSections = [
   ["18 - LINKED DTR LEAVE E-SIGNATURES", "migrate-docutracker-leave-signatures-v1.sql"],
   ["19 - DEPARTMENT HEAD LEAVE E-SIGNATURE", "migrate-docutracker-leave-signatures-v2.sql"],
   ["20 - HR APPROVER LEAVE E-SIGNATURE", "migrate-docutracker-leave-signatures-v3.sql"],
-  ["21 - EFFECTIVE-DATED OFFICIAL SIGNATORIES", "migrate-docutracker-official-signatories-v1.sql"],
-  ["22 - AUTOMATIC MAYOR LEAVE SIGNATORY", "migrate-docutracker-automatic-mayor-signatory-v2.sql"],
+  ["21 - GOVERNANCE AUDIT TRAIL", "migrate-docutracker-governance-audit-v1.sql"],
+  ["22 - EFFECTIVE-DATED OFFICIAL SIGNATORIES", "migrate-docutracker-official-signatories-v1.sql"],
+  ["23 - AUTOMATIC MAYOR LEAVE SIGNATORY", "migrate-docutracker-automatic-mayor-signatory-v2.sql"],
 ];
 
 function readBody(file) {

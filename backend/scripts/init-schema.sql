@@ -2280,6 +2280,29 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_documents_deadline_active
 CREATE INDEX IF NOT EXISTS idx_docutracker_signature_assets_owner_saved
   ON docutracker_signature_assets(owner_user_id, is_saved, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS docutracker_governance_audit (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  actor_id UUID NOT NULL REFERENCES users(id),
+  event_type TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  document_type TEXT,
+  workflow_version INT,
+  target_user_id UUID REFERENCES users(id),
+  target_role_id TEXT,
+  before_state JSONB,
+  after_state JSONB,
+  reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_created_at
+  ON docutracker_governance_audit(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_document_type
+  ON docutracker_governance_audit(document_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_event_type
+  ON docutracker_governance_audit(event_type, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS docutracker_official_signatories (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   role_key TEXT NOT NULL,
