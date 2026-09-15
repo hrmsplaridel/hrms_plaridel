@@ -58,6 +58,25 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   String _assignmentStatusFilter = 'Current';
   String? _selectedEmployeeId;
   String? _selectedEmployeeName;
+  bool _selectedEmployeeCanAddAssignments = false;
+
+  static bool _employeeCanAddAssignments(Map<String, dynamic> employee) =>
+      employee['is_active'] == true &&
+      (employee['employment_status'] as String? ?? 'active')
+              .trim()
+              .toLowerCase() ==
+          'active';
+
+  bool _checkEmployeeCanAddAssignments() {
+    if (_selectedEmployeeCanAddAssignments) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Reactivate this employee before adding assignments.'),
+      ),
+    );
+    return false;
+  }
+
   DateTime? _officialHrmsDate;
   DateTime? _assignmentPickerFirstDate;
   DateTime? _assignmentPickerLastDate;
@@ -242,6 +261,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           return _EmployeeSummary(
             id: m['id'] as String,
             fullName: m['full_name'] as String? ?? 'Unknown',
+            canAddAssignments: _employeeCanAddAssignments(m),
             employeeNumber: empNum is int
                 ? empNum
                 : (empNum != null ? int.tryParse(empNum.toString()) : null),
@@ -254,6 +274,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           return _EmployeeSummary(
             id: m['id'] as String,
             fullName: m['full_name'] as String? ?? 'Unknown',
+            canAddAssignments: _employeeCanAddAssignments(m),
             employeeNumber: empNum is int
                 ? empNum
                 : (empNum != null ? int.tryParse(empNum.toString()) : null),
@@ -291,6 +312,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           final match = next.where((e) => e.id == selectedId);
           if (match.isNotEmpty) {
             _selectedEmployeeName = match.first.fullName;
+            _selectedEmployeeCanAddAssignments = match.first.canAddAssignments;
           }
         }
       });
@@ -391,6 +413,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           _EmployeeSummary(
             id: id,
             fullName: data['full_name'] as String? ?? 'Unknown',
+            canAddAssignments: _employeeCanAddAssignments(data),
             employeeNumber: employeeNumber is int
                 ? employeeNumber
                 : (employeeNumber != null
@@ -784,6 +807,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     _updateAssignmentFormState(() {
       _selectedEmployeeId = employee.id;
       _selectedEmployeeName = employee.fullName;
+      _selectedEmployeeCanAddAssignments = employee.canAddAssignments;
       _officialHrmsDate = null;
       _assignmentPickerFirstDate = null;
       _assignmentPickerLastDate = null;
@@ -812,6 +836,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     _designationRequestGuard.invalidate();
     _selectedEmployeeId = null;
     _selectedEmployeeName = null;
+    _selectedEmployeeCanAddAssignments = false;
     _officialHrmsDate = null;
     _assignmentPickerFirstDate = null;
     _assignmentPickerLastDate = null;
@@ -925,6 +950,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   Future<bool> _addAssignment() async {
     if (_selectedEmployeeId == null) return false;
+    if (!_checkEmployeeCanAddAssignments()) return false;
     if (_selectedDeptId == null ||
         _selectedPositionId == null ||
         _selectedShiftId == null ||
@@ -1257,6 +1283,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   Future<bool> _addDesignation() async {
+    if (!_checkEmployeeCanAddAssignments()) return false;
     final data = _designationPayload();
     if (data == null) return false;
     try {
@@ -1406,6 +1433,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
 
     if (assignment == null) {
+      if (!_checkEmployeeCanAddAssignments()) return;
       _clearForm();
     } else {
       _selectAssignment(assignment);
@@ -1478,6 +1506,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
 
     if (designation == null) {
+      if (!_checkEmployeeCanAddAssignments()) return;
       _clearDesignationForm();
     } else {
       _selectDesignation(designation);
