@@ -1084,12 +1084,12 @@ bool _canEmployeeCancel(LeaveRequest request) {
     LeaveRequestStatus.draft ||
     LeaveRequestStatus.pending ||
     LeaveRequestStatus.pendingDepartmentHead ||
-    LeaveRequestStatus.pendingHr => true,
+    LeaveRequestStatus.pendingHr ||
+    LeaveRequestStatus.returned => true,
     LeaveRequestStatus.approved ||
     LeaveRequestStatus.rejected ||
     LeaveRequestStatus.rejectedByDepartmentHead ||
     LeaveRequestStatus.rejectedByHr ||
-    LeaveRequestStatus.returned ||
     LeaveRequestStatus.cancelled => false,
   };
 }
