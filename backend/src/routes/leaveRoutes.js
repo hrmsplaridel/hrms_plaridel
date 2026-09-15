@@ -3072,6 +3072,55 @@ router.get('/my', protect, async (req, res) => {
   }
 });
 
+// GET /api/leave/my/:id/history
+// Employees may read only the persisted workflow history of their own request.
+router.get('/my/:id/history', protect, async (req, res) => {
+  const userId = req.user?.id;
+  const requestId = (req.params?.id || '').toString().trim();
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  if (!requestId) return res.status(400).json({ error: 'Leave request id is required' });
+
+  try {
+    const ownedRequest = await pool.query(
+      `SELECT 1
+       FROM leave_requests lr
+       WHERE lr.id = $1::uuid
+         AND (lr.user_id = $2::uuid OR lr.employee_id = $2::uuid)
+       LIMIT 1`,
+      [requestId, userId]
+    );
+    if (ownedRequest.rowCount === 0) {
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
+
+    const history = await pool.query(
+      `SELECT h.id,
+              h.leave_request_id,
+              h.action,
+              h.from_status,
+              h.to_status,
+              h.acted_by,
+              h.acted_at,
+              h.remarks,
+              h.metadata_json,
+              actor.full_name AS actor_name,
+              actor.role AS actor_role
+       FROM leave_request_history h
+       LEFT JOIN users actor ON actor.id = h.acted_by
+       WHERE h.leave_request_id = $1::uuid
+       ORDER BY h.acted_at ASC, h.id ASC`,
+      [requestId]
+    );
+    res.json(history.rows);
+  } catch (err) {
+    if (err?.code === '22P02') {
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
+    console.error('[leave GET /my/:id/history]', err);
+    res.status(500).json({ error: 'Failed to fetch leave request history' });
+  }
+});
+
 // GET /api/leave/signatories?employee_id=uuid&leave_request_id=uuid
 // Printable leave form signatories:
 // 7.A = configured certifier, with Administrative Officer V as legacy fallback.
