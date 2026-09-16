@@ -231,6 +231,23 @@ test('completed source signature requests are omitted', async () => {
   assert.deepEqual(result, []);
 });
 
+test('missing source form tables fail instead of appearing as no required actions', async () => {
+  const missingTable = new Error('relation does not exist');
+  missingTable.code = '42P01';
+  const pool = {
+    async query() {
+      throw missingTable;
+    },
+  };
+
+  await assert.rejects(
+    listRspSignatureRequests(pool, { id: adminId, role: 'admin' }),
+    (error) =>
+      error.code === 'UNAVAILABLE' &&
+      error.message === 'Source form e-signatures are not initialized'
+  );
+});
+
 test('L&D admins can discover unassigned signature-bearing forms for setup', async () => {
   const pool = {
     async query(sql) {

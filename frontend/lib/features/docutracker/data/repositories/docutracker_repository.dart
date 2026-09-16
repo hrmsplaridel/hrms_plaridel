@@ -37,6 +37,19 @@ String _apiErrorMessage(Object e) {
   return e.toString();
 }
 
+class _DocuTrackerRequestException implements Exception {
+  const _DocuTrackerRequestException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+Never _throwRequestError(Object error) {
+  throw _DocuTrackerRequestException(_apiErrorMessage(error));
+}
+
 /// DocuTracker data via HRMS PostgreSQL API (replaces Supabase client).
 class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   DocuTrackerRepository._() {
@@ -118,8 +131,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
             ),
           )
           .toList();
-    } catch (_) {
-      return DocumentRoutingConfig.defaults;
+    } catch (error) {
+      _throwRequestError(error);
     }
   }
 
@@ -690,8 +703,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
             ),
           )
           .toList();
-    } catch (_) {
-      return [];
+    } catch (error) {
+      _throwRequestError(error);
     }
   }
 
@@ -752,8 +765,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
             ),
           )
           .toList();
-    } catch (_) {
-      return [];
+    } catch (error) {
+      _throwRequestError(error);
     }
   }
 
@@ -819,8 +832,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
         return perms.where((p) => p.userId != null).toList();
       }
       return perms;
-    } catch (_) {
-      return [];
+    } catch (error) {
+      _throwRequestError(error);
     }
   }
 
@@ -838,8 +851,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       );
       final list = res.data ?? const [];
       return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    } catch (_) {
-      return const [];
+    } catch (error) {
+      _throwRequestError(error);
     }
   }
 

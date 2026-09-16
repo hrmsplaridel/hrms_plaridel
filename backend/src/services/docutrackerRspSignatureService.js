@@ -245,7 +245,12 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
     }
     return requests;
   } catch (error) {
-    if (error?.code === '42P01') return [];
+    if (error?.code === '42P01') {
+      throw serviceError(
+        'UNAVAILABLE',
+        'Source form e-signatures are not initialized'
+      );
+    }
     throw error;
   }
 }

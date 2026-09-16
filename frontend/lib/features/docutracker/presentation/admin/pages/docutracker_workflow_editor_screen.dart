@@ -216,8 +216,15 @@ class _DocuTrackerWorkflowEditorScreenState
           ..clear()
           ..addAll(snapshots);
       });
-    } catch (_) {
-      // Non-blocking: the builder can still display draft workflow data.
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = docuTrackerDisplayError(
+          error.toString().trim().isEmpty
+              ? 'Step assignees could not be loaded.'
+              : error.toString(),
+        );
+      });
     }
   }
 

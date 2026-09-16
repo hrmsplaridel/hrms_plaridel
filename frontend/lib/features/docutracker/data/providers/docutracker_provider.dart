@@ -38,6 +38,8 @@ class DocuTrackerProvider extends ChangeNotifier {
   List<DocumentPermission> _permissions = [];
   List<DocumentHistoryEntry> _documentHistory = [];
   List<DocumentNotification> _notifications = [];
+  String? _permissionsLoadKey;
+  String? _documentHistoryLoadDocumentId;
   bool _loading = false;
   String? _error;
   DocuTrackerDocumentBuilderData? _builderData;
@@ -299,7 +301,6 @@ class DocuTrackerProvider extends ChangeNotifier {
         _routingConfigs = DocumentRoutingConfig.defaults;
       }
     } catch (e) {
-      _routingConfigs = DocumentRoutingConfig.defaults;
       _error = e.toString();
     }
     _loading = false;
@@ -332,6 +333,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     bool mobileRestricted = false,
     bool showLoading = true,
   }) async {
+    final preservePreviousDocuments = _documentsLoadUserId == userId;
     _documentsLoadUserId = userId;
     _documentsLoadIsAdmin = isAdmin;
     _documentsLoadRoleId = roleId;
@@ -352,12 +354,13 @@ class DocuTrackerProvider extends ChangeNotifier {
           limit: 100,
         );
         if (r is DocuTrackerFailure<List<DocuTrackerDocument>>) {
-          _documents = [];
+          if (!preservePreviousDocuments) _documents = [];
           _error = r.message;
         } else if (r is DocuTrackerSuccess<List<DocuTrackerDocument>>) {
           _documents = r.value;
         } else {
-          _documents = [];
+          if (!preservePreviousDocuments) _documents = [];
+          _error = 'Could not load documents.';
         }
       } else {
         final r = await _repo.listDocumentsForUser(
@@ -371,7 +374,7 @@ class DocuTrackerProvider extends ChangeNotifier {
           limit: 100,
         );
         if (r is DocuTrackerFailure<List<DocuTrackerDocument>>) {
-          _documents = [];
+          if (!preservePreviousDocuments) _documents = [];
           _error = r.message;
         } else if (r is DocuTrackerSuccess<List<DocuTrackerDocument>>) {
           _documents = DocuTrackerDocumentVisibility.filterForUser(
@@ -379,7 +382,8 @@ class DocuTrackerProvider extends ChangeNotifier {
             userId: userId,
           );
         } else {
-          _documents = [];
+          if (!preservePreviousDocuments) _documents = [];
+          _error = 'Could not load documents.';
         }
       }
       if (mobileRestricted) {
@@ -389,7 +393,7 @@ class DocuTrackerProvider extends ChangeNotifier {
         );
       }
     } catch (e) {
-      _documents = [];
+      if (!preservePreviousDocuments) _documents = [];
       _error = e.toString();
     }
     _loading = false;
@@ -403,6 +407,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     String? documentType,
     bool userOnly = false,
   }) async {
+    final loadKey = [roleId, userId, documentType, userOnly].join('|');
     _loading = true;
     _error = null;
     notifyListeners();
@@ -413,8 +418,9 @@ class DocuTrackerProvider extends ChangeNotifier {
         documentType: documentType,
         userOnly: userOnly,
       );
+      _permissionsLoadKey = loadKey;
     } catch (e) {
-      _permissions = [];
+      if (_permissionsLoadKey != loadKey) _permissions = [];
       _error = e.toString();
     }
     _loading = false;
@@ -457,10 +463,16 @@ class DocuTrackerProvider extends ChangeNotifier {
   Future<void> loadDocumentHistory(String documentId) async {
     try {
       _documentHistory = await _repo.listDocumentHistory(documentId);
+      _documentHistoryLoadDocumentId = documentId;
+      _error = null;
       notifyListeners();
     } catch (e) {
-      _documentHistory = [];
-      _error = 'Could not load document history.';
+      if (_documentHistoryLoadDocumentId != documentId) {
+        _documentHistory = [];
+      }
+      _error = e.toString().trim().isEmpty
+          ? 'Could not load document activity.'
+          : e.toString();
       notifyListeners();
     }
   }
@@ -471,10 +483,12 @@ class DocuTrackerProvider extends ChangeNotifier {
       _notifications = await _notificationService.fetchMyNotifications(
         forceRefresh: forceRefresh,
       );
+      _error = null;
       notifyListeners();
     } catch (e) {
-      _notifications = [];
-      _error = 'Could not load notifications.';
+      _error = e.toString().trim().isEmpty
+          ? 'Could not load notifications.'
+          : e.toString();
       notifyListeners();
     }
   }

@@ -46,6 +46,10 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | PUT | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an L&D signature field |
 | POST | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/sign` | Add or replace the authenticated assigned user's L&D form signature |
 
+The RSP and L&D signature-request feeds return `503` when their required source
+form or signature tables are not initialized. They do not convert a missing
+schema into an empty Required Actions list.
+
 Builder responses include `current_user_id` and a per-field `can_sign`
 capability calculated from the authenticated backend user. The Flutter client
 uses these server-authoritative values instead of deciding signer identity from

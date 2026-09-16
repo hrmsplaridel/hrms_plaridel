@@ -7,6 +7,7 @@ import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_style
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
@@ -66,6 +67,7 @@ class _DocuTrackerSetupPermissionsScreenState
   String _selectedDocumentType = '*';
 
   bool _loading = true;
+  String? _error;
 
   // Explicit user rows, used to update/insert only `user_id` permissions.
   Map<String, DocumentPermission> _existingUserPermByActionName = const {};
@@ -83,12 +85,12 @@ class _DocuTrackerSetupPermissionsScreenState
   }
 
   Future<void> _init() async {
-    await _loadEmployees();
+    if (!await _loadEmployees()) return;
     await _pickUserIfMissing();
     await _loadPermissions();
   }
 
-  Future<void> _loadEmployees() async {
+  Future<bool> _loadEmployees() async {
     setState(() => _employeesLoading = true);
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
@@ -115,17 +117,34 @@ class _DocuTrackerSetupPermissionsScreenState
               })
               .where((e) => e.id.isNotEmpty),
         );
-    } catch (_) {
-      _employees.clear();
+    } catch (error) {
+      if (!mounted) return false;
+      setState(() {
+        _employeesLoading = false;
+        _error = error.toString().trim().isEmpty
+            ? 'Employees could not be loaded.'
+            : error.toString();
+      });
+      return false;
     }
 
-    if (!mounted) return;
+    if (!mounted) return false;
     setState(() => _employeesLoading = false);
+    return true;
   }
 
   Future<void> _pickUserIfMissing() async {
-    if (_selectedUserId != null) return;
     if (_employees.isEmpty) return;
+
+    if (_selectedUserId != null) {
+      final selected = _employees
+          .where((employee) => employee.id == _selectedUserId)
+          .firstOrNull;
+      if (selected != null) {
+        setState(() => _selectedUserRoleId = selected.roleId);
+        return;
+      }
+    }
 
     final first = _employees.first;
     setState(() {
@@ -136,7 +155,10 @@ class _DocuTrackerSetupPermissionsScreenState
 
   Future<void> _loadPermissions() async {
     // Avoid reading maps before they're initialized.
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     if (_selectedUserId == null || _selectedUserRoleId == null) {
       setState(() {
@@ -147,29 +169,40 @@ class _DocuTrackerSetupPermissionsScreenState
       return;
     }
 
-    // 1) Explicit user rows (so Save updates the correct row, if present).
-    final explicit = await _repo.listPermissions(
-      userId: _selectedUserId,
-      documentType: _selectedDocumentType,
-    );
-    _existingUserPermByActionName = {
-      for (final p in explicit) p.action.name: p,
-    };
-
-    // 2) Effective grants (for toggle initial state).
-    final grantedByAction = <String, bool>{};
-    for (final item in _restrictionItems) {
-      grantedByAction[item.action.name] = await _repo.hasPermission(
-        userId: _selectedUserId!,
-        roleId: _selectedUserRoleId,
+    try {
+      // 1) Explicit user rows (so Save updates the correct row, if present).
+      final explicit = await _repo.listPermissions(
+        userId: _selectedUserId,
         documentType: _selectedDocumentType,
-        action: item.action.name,
       );
-    }
-    _grantedByActionName = grantedByAction;
+      final existing = {for (final p in explicit) p.action.name: p};
 
-    if (!mounted) return;
-    setState(() => _loading = false);
+      // 2) Effective grants (for toggle initial state).
+      final grantedByAction = <String, bool>{};
+      for (final item in _restrictionItems) {
+        grantedByAction[item.action.name] = await _repo.hasPermission(
+          userId: _selectedUserId!,
+          roleId: _selectedUserRoleId,
+          documentType: _selectedDocumentType,
+          action: item.action.name,
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _existingUserPermByActionName = existing;
+        _grantedByActionName = grantedByAction;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = error.toString().trim().isEmpty
+            ? 'Permissions could not be loaded.'
+            : error.toString();
+      });
+    }
   }
 
   Future<void> _save() async {
@@ -238,6 +271,11 @@ class _DocuTrackerSetupPermissionsScreenState
                     subtitle: 'Edit explicit permissions for a single employee',
                   ),
                   const SizedBox(height: 12),
+
+                  if (_error != null) ...[
+                    DocuTrackerErrorBanner(message: _error!),
+                    const SizedBox(height: 12),
+                  ],
 
                   Text(
                     'Employee',
@@ -338,7 +376,16 @@ class _DocuTrackerSetupPermissionsScreenState
 
                   const SizedBox(height: 18),
 
-                  if (_loading)
+                  if (_error != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: _init,
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('Retry'),
+                      ),
+                    )
+                  else if (_loading)
                     const Padding(
                       padding: EdgeInsets.all(24),
                       child: Center(child: CircularProgressIndicator()),
