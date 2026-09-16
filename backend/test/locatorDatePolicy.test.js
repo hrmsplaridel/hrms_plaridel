@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const {
   currentHrmsDate,
   evaluateEmployeeLocatorDateWindow,
+  evaluateLocatorEmployeeCorrectionWindow,
+  evaluateLocatorReturnWindow,
   normalizeCorrectionReason,
 } = require('../src/services/locatorDatePolicy');
 
@@ -30,6 +32,34 @@ test('official locator date follows Manila across the UTC date boundary', () => 
   assert.equal(
     currentHrmsDate(new Date('2026-08-10T16:30:00.000Z')),
     '2026-08-11'
+  );
+});
+
+test('past locator requests cannot enter the employee correction workflow', () => {
+  assert.equal(
+    evaluateLocatorReturnWindow({ slipDate: '2026-08-10', now: NOW }).code,
+    'locator_past_date_return_not_allowed'
+  );
+  assert.equal(
+    evaluateLocatorReturnWindow({ slipDate: '2026-08-11', now: NOW }).ok,
+    true
+  );
+});
+
+test('legacy returned requests cannot move a past locator date forward', () => {
+  assert.equal(
+    evaluateLocatorEmployeeCorrectionWindow({
+      slipDate: '2026-08-10',
+      now: NOW,
+    }).code,
+    'locator_past_date_correction_not_allowed'
+  );
+  assert.equal(
+    evaluateLocatorEmployeeCorrectionWindow({
+      slipDate: '2026-08-11',
+      now: NOW,
+    }).ok,
+    true
   );
 });
 

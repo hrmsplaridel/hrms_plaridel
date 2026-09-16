@@ -76,6 +76,7 @@ class _AdminLocatorManagementScreenState
   int _serverPageCount = 1;
   int _loadVersion = 0;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
+  DateTime? _officialHrmsDate;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -89,6 +90,7 @@ class _AdminLocatorManagementScreenState
   void initState() {
     super.initState();
     _loadLocatorTypes();
+    _loadOfficialDate();
     _load();
   }
 
@@ -791,6 +793,19 @@ class _AdminLocatorManagementScreenState
 
   void _showDetailsDialog(_LocatorAdminRecord item) {
     final canReview = item.canHrReview;
+    final slipDate = item.slipDateValue;
+    final returnBlockedByPastDate =
+        canReview &&
+        slipDate != null &&
+        _officialHrmsDate != null &&
+        slipDate.isBefore(_officialHrmsDate!);
+    final canReturnForCorrection =
+        canReview &&
+        slipDate != null &&
+        _officialHrmsDate != null &&
+        !returnBlockedByPastDate;
+    final returnDateUnavailable =
+        canReview && (slipDate == null || _officialHrmsDate == null);
     final normalizedStatus = item.status.toLowerCase();
     final isPending =
         normalizedStatus == 'pending' ||
@@ -885,6 +900,38 @@ class _AdminLocatorManagementScreenState
                           MapEntry(item.requestType.locationLabel, item.office),
                         ]),
                       ),
+                      if (returnBlockedByPastDate) ...[
+                        const SizedBox(height: 16),
+                        _locatorDetailsSection(
+                          dialogContext,
+                          title: 'Correction unavailable',
+                          icon: Icons.event_busy_rounded,
+                          child: Text(
+                            'This past-dated request cannot be returned to the employee. Approve or reject it, or use Record Correction for an audited historical correction.',
+                            style: TextStyle(
+                              color: _mutedColor(dialogContext),
+                              fontSize: 13,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (returnDateUnavailable) ...[
+                        const SizedBox(height: 16),
+                        _locatorDetailsSection(
+                          dialogContext,
+                          title: 'Return temporarily unavailable',
+                          icon: Icons.sync_problem_rounded,
+                          child: Text(
+                            'The official HRMS date could not be verified. Reload this page before returning the request.',
+                            style: TextStyle(
+                              color: _mutedColor(dialogContext),
+                              fontSize: 13,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       _locatorDetailsSection(
                         dialogContext,
@@ -1076,7 +1123,7 @@ class _AdminLocatorManagementScreenState
                             icon: const Icon(Icons.history_rounded, size: 18),
                             label: const Text('History'),
                           ),
-                        if (canReview)
+                        if (canReturnForCorrection)
                           OutlinedButton.icon(
                             onPressed: () {
                               Navigator.of(dialogContext).pop();
@@ -1964,6 +2011,19 @@ class _AdminLocatorManagementScreenState
   }
 
   Future<void> _returnForCorrection(_LocatorAdminRecord item) async {
+    final slipDate = item.slipDateValue;
+    if (slipDate == null || _officialHrmsDate == null) {
+      _showLocatorSnack(
+        'The official HRMS date is unavailable. Reload the page and try again.',
+      );
+      return;
+    }
+    if (slipDate.isBefore(_officialHrmsDate!)) {
+      _showLocatorSnack(
+        'Past-dated requests cannot be returned. Use Record Correction for an audited historical correction.',
+      );
+      return;
+    }
     final remarks = await _promptCorrectionRemarks();
     if (remarks == null || !mounted) return;
     try {
@@ -1977,7 +2037,28 @@ class _AdminLocatorManagementScreenState
       _showLocatorSnack('Request returned to the employee for correction.');
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Return failed: $e');
+      setState(
+        () => _error = _locatorAdminApiErrorMessage(
+          e,
+          fallback: 'Failed to return the request.',
+        ),
+      );
+    }
+  }
+
+  Future<void> _loadOfficialDate() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/locator-slips/context',
+      );
+      final text = _trimOrNull(response.data?['official_date']);
+      final parsed = text == null ? null : DateTime.tryParse(text);
+      if (!mounted || parsed == null) return;
+      setState(() {
+        _officialHrmsDate = DateTime(parsed.year, parsed.month, parsed.day);
+      });
+    } catch (_) {
+      // Returning requests stays disabled until the official date is known.
     }
   }
 
@@ -2313,6 +2394,17 @@ DateTime? _parseDateTime(dynamic value) {
   final text = _trimOrNull(value);
   if (text == null) return null;
   return DateTime.tryParse(text);
+}
+
+String _locatorAdminApiErrorMessage(Object error, {required String fallback}) {
+  if (error is DioException) {
+    final data = error.response?.data;
+    if (data is Map) {
+      final message = data['error']?.toString().trim();
+      if (message != null && message.isNotEmpty) return message;
+    }
+  }
+  return fallback;
 }
 
 String _formatDate(DateTime value) {

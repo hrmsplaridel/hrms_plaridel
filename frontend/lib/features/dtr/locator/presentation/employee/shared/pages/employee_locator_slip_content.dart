@@ -480,8 +480,23 @@ class EmployeeLocatorSlipContentState
         : 'Current workflow status';
     final canReview =
         reviewMode && item.status == _LocatorSlipStatus.pendingDepartmentHead;
-    final canCorrect =
+    final officialDate = _officialHrmsDate;
+    final requestIsPast =
+        officialDate != null &&
+        _dateOnly(item.date).isBefore(_dateOnly(officialDate));
+    final returnBlockedByPastDate = canReview && requestIsPast;
+    final canReturnForCorrection =
+        canReview && officialDate != null && !returnBlockedByPastDate;
+    final isReturnedForCorrection =
         !reviewMode && item.status == _LocatorSlipStatus.returnedForCorrection;
+    final correctionBlockedByPastDate =
+        isReturnedForCorrection && requestIsPast;
+    final canCorrect =
+        isReturnedForCorrection &&
+        officialDate != null &&
+        !correctionBlockedByPastDate;
+    final datePolicyUnavailable =
+        (canReview || isReturnedForCorrection) && officialDate == null;
     final correctionRemarks = item.hrReviewedAt != null
         ? item.hrRemarks
         : item.departmentHeadRemarks;
@@ -568,6 +583,51 @@ class EmployeeLocatorSlipContentState
                   ? 'No reason provided.'
                   : item.remarks.trim(),
             ),
+            if (returnBlockedByPastDate) ...[
+              const SizedBox(height: 12),
+              const EmployeeLocatorMobileDetailSection(
+                title: 'Correction unavailable',
+                icon: Icons.event_busy_rounded,
+                children: [
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.info_outline_rounded,
+                    label: 'Past-dated request',
+                    value:
+                        'This request can no longer be returned to the employee. Approve or reject it, or ask HR to use Record Correction.',
+                  ),
+                ],
+              ),
+            ],
+            if (correctionBlockedByPastDate) ...[
+              const SizedBox(height: 12),
+              const EmployeeLocatorMobileDetailSection(
+                title: 'Correction unavailable',
+                icon: Icons.event_busy_rounded,
+                children: [
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.info_outline_rounded,
+                    label: 'Past-dated request',
+                    value:
+                        'This returned request can no longer be corrected or moved to another date. Cancel it or contact HR for Record Correction.',
+                  ),
+                ],
+              ),
+            ],
+            if (datePolicyUnavailable) ...[
+              const SizedBox(height: 12),
+              const EmployeeLocatorMobileDetailSection(
+                title: 'Return temporarily unavailable',
+                icon: Icons.sync_problem_rounded,
+                children: [
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.info_outline_rounded,
+                    label: 'Official date unavailable',
+                    value:
+                        'Reload the page before returning this request for correction.',
+                  ),
+                ],
+              ),
+            ],
             if (canCorrect) ...[
               const SizedBox(height: 12),
               EmployeeLocatorMobileDetailSection(
@@ -631,7 +691,7 @@ class EmployeeLocatorSlipContentState
               item.attachmentName?.trim().isNotEmpty == true,
           canReject: canReview,
           canApprove: canReview,
-          canReturn: canReview,
+          canReturn: canReturnForCorrection,
           canCorrect: canCorrect,
           onHistory: () {
             Navigator.of(dialogContext).pop();

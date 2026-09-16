@@ -40,6 +40,8 @@ const {
 const {
   currentHrmsDate,
   evaluateEmployeeLocatorDateWindow,
+  evaluateLocatorEmployeeCorrectionWindow,
+  evaluateLocatorReturnWindow,
   normalizeCorrectionReason,
 } = require('../services/locatorDatePolicy');
 const {
@@ -1387,6 +1389,16 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         error: `Cannot resubmit locator slip with status '${row.status}'`,
       });
     }
+    const correctionWindow = evaluateLocatorEmployeeCorrectionWindow({
+      slipDate: row.slip_date_text,
+    });
+    if (!correctionWindow.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: correctionWindow.error,
+        code: correctionWindow.code,
+      });
+    }
 
     const correction = normalizeLocatorCorrection(row, req.body || {});
     const fieldValidation = validateLocatorRequiredFields({
@@ -2100,7 +2112,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
     await client.query('BEGIN');
     const deptInfo = await isDepartmentHead(client, reviewerId);
     const current = await client.query(
-      `SELECT id, status, employee_id
+      `SELECT id, status, employee_id, slip_date::text AS slip_date_text
        FROM locator_slips
        WHERE id = $1::uuid
          AND (
@@ -2127,6 +2139,16 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json({
         error: `Cannot return locator slip with status '${row.status}'`,
+      });
+    }
+    const returnWindow = evaluateLocatorReturnWindow({
+      slipDate: row.slip_date_text,
+    });
+    if (!returnWindow.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: returnWindow.error,
+        code: returnWindow.code,
       });
     }
 
@@ -2330,7 +2352,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
   try {
     await client.query('BEGIN');
     const current = await client.query(
-      `SELECT id, status, employee_id
+      `SELECT id, status, employee_id, slip_date::text AS slip_date_text
        FROM locator_slips
        WHERE id = $1::uuid
        FOR UPDATE`,
@@ -2345,6 +2367,16 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
       await client.query('ROLLBACK');
       return res.status(409).json({
         error: `Cannot return locator slip with status '${row.status}'`,
+      });
+    }
+    const returnWindow = evaluateLocatorReturnWindow({
+      slipDate: row.slip_date_text,
+    });
+    if (!returnWindow.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: returnWindow.error,
+        code: returnWindow.code,
       });
     }
 
