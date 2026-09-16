@@ -72,6 +72,7 @@ class EmployeeLocatorSlipContent extends StatefulWidget {
 
 class EmployeeLocatorSlipContentState
     extends State<EmployeeLocatorSlipContent> {
+  static const int _historyPageSize = 50;
   final List<_LocatorSlipDraft> _slips = [];
   final List<_LocatorSlipDraft> _deptHeadQueue = [];
   final ScrollController _myRequestsScrollController = ScrollController();
@@ -85,12 +86,29 @@ class EmployeeLocatorSlipContentState
   bool _appliedDeptHeadDefaultSection = false;
   bool _loadingMy = false;
   bool _loadingApprovals = false;
+  bool _myHistoryLoaded = false;
+  bool _approvalHistoryLoaded = false;
+  bool _loadingMoreMy = false;
+  bool _loadingMoreApprovals = false;
   String? _error;
+  String? _myLoadMoreError;
+  String? _approvalLoadMoreError;
   String? _selectedStatusFilter;
   String? _selectedApprovalStatusFilter;
   DateTime? _fromDate;
   DateTime? _toDate;
   String _searchQuery = '';
+  DateTime? _approvalFromDate;
+  DateTime? _approvalToDate;
+  String _approvalSearchQuery = '';
+  int _myPage = 1;
+  int _myPageCount = 1;
+  int _myTotal = 0;
+  int _approvalPage = 1;
+  int _approvalPageCount = 1;
+  int _approvalTotal = 0;
+  Timer? _myFilterDebounce;
+  Timer? _approvalFilterDebounce;
   String? _selectedSlipId;
   String? _selectedApprovalSlipId;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
@@ -110,6 +128,16 @@ class EmployeeLocatorSlipContentState
       !_loadingLocatorTypes &&
       _locatorTypesError == null &&
       _locatorTypes.isNotEmpty;
+  bool get _hasMyFilters =>
+      _selectedStatusFilter != null ||
+      _fromDate != null ||
+      _toDate != null ||
+      _searchQuery.trim().isNotEmpty;
+  bool get _hasApprovalFilters =>
+      _selectedApprovalStatusFilter != null ||
+      _approvalFromDate != null ||
+      _approvalToDate != null ||
+      _approvalSearchQuery.trim().isNotEmpty;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -140,7 +168,10 @@ class EmployeeLocatorSlipContentState
         _locatorTypesError == null) {
       unawaited(_loadLocatorTypes(forceRefresh: true));
     }
-    if (_authenticatedUserId != null && !_loadingMy && _slips.isEmpty) {
+    if (_authenticatedUserId != null &&
+        !_loadingMy &&
+        !_myHistoryLoaded &&
+        _error == null) {
       unawaited(_loadMyRequests());
     }
     if (_authenticatedUserId != null &&
@@ -184,6 +215,12 @@ class EmployeeLocatorSlipContentState
     _appliedDeptHeadDefaultSection = false;
     _loadingMy = false;
     _loadingApprovals = false;
+    _myHistoryLoaded = false;
+    _approvalHistoryLoaded = false;
+    _loadingMoreMy = false;
+    _loadingMoreApprovals = false;
+    _myLoadMoreError = null;
+    _approvalLoadMoreError = null;
     _officialHrmsDate = null;
     _loadingOfficialDate = false;
     _officialDateError = null;
@@ -197,6 +234,17 @@ class EmployeeLocatorSlipContentState
     _fromDate = null;
     _toDate = null;
     _searchQuery = '';
+    _approvalFromDate = null;
+    _approvalToDate = null;
+    _approvalSearchQuery = '';
+    _myPage = 1;
+    _myPageCount = 1;
+    _myTotal = 0;
+    _approvalPage = 1;
+    _approvalPageCount = 1;
+    _approvalTotal = 0;
+    _myFilterDebounce?.cancel();
+    _approvalFilterDebounce?.cancel();
     _selectedSlipId = null;
     _selectedApprovalSlipId = null;
 
@@ -261,6 +309,8 @@ class EmployeeLocatorSlipContentState
   @override
   void dispose() {
     _locatorRealtimeSub?.cancel();
+    _myFilterDebounce?.cancel();
+    _approvalFilterDebounce?.cancel();
     _myRequestsScrollController.dispose();
     _approvalItemsScrollController.dispose();
     super.dispose();
@@ -309,21 +359,31 @@ class EmployeeLocatorSlipContentState
 
   List<_LocatorSlipDraft> get _filteredDeptHeadQueue {
     return _deptHeadQueue.where((item) {
-      switch (_selectedApprovalStatusFilter) {
-        case 'pending':
-          return item.status == _LocatorSlipStatus.pendingDepartmentHead;
-        case 'forwarded':
-          return item.status == _LocatorSlipStatus.pendingHr;
-        case 'returned':
-          return item.status == _LocatorSlipStatus.returnedForCorrection;
-        case 'approved':
-          return item.status == _LocatorSlipStatus.approved;
-        case 'revoked':
-          return item.status == _LocatorSlipStatus.revoked;
-        case 'rejected':
-          return item.status == _LocatorSlipStatus.rejected;
-        case 'cancelled':
-          return item.status == _LocatorSlipStatus.cancelled;
+      if (_approvalSearchQuery.trim().isNotEmpty) {
+        final query = _approvalSearchQuery.trim().toLowerCase();
+        final searchable =
+            '${item.employeeName} ${item.requestType.label} ${item.office} ${item.remarks} ${item.status.label}'
+                .toLowerCase();
+        if (!searchable.contains(query)) return false;
+      }
+      final matchesStatus = switch (_selectedApprovalStatusFilter) {
+        'pending' => item.status == _LocatorSlipStatus.pendingDepartmentHead,
+        'forwarded' => item.status == _LocatorSlipStatus.pendingHr,
+        'returned' => item.status == _LocatorSlipStatus.returnedForCorrection,
+        'approved' => item.status == _LocatorSlipStatus.approved,
+        'revoked' => item.status == _LocatorSlipStatus.revoked,
+        'rejected' => item.status == _LocatorSlipStatus.rejected,
+        'cancelled' => item.status == _LocatorSlipStatus.cancelled,
+        _ => true,
+      };
+      if (!matchesStatus) return false;
+      if (_approvalFromDate != null &&
+          _dateOnly(item.date).isBefore(_dateOnly(_approvalFromDate!))) {
+        return false;
+      }
+      if (_approvalToDate != null &&
+          _dateOnly(item.date).isAfter(_dateOnly(_approvalToDate!))) {
+        return false;
       }
       return true;
     }).toList();
@@ -393,7 +453,8 @@ class EmployeeLocatorSlipContentState
                 current: _currentSection,
                 onChanged: (section) {
                   setState(() => _currentSection = section);
-                  if (section == _LocatorSection.approvals) {
+                  if (section == _LocatorSection.approvals &&
+                      !_approvalHistoryLoaded) {
                     _loadDepartmentHeadRequests();
                   }
                 },
@@ -440,11 +501,10 @@ class EmployeeLocatorSlipContentState
             fromDate: _fromDate,
             toDate: _toDate,
             searchQuery: _searchQuery,
-            visibleCount: _filteredSlips.length,
-            totalCount: _slips.length,
-            onStatusChanged: (status) =>
-                setState(() => _selectedStatusFilter = status),
-            onSearchChanged: (value) => setState(() => _searchQuery = value),
+            visibleCount: visibleSlips.length,
+            totalCount: _myTotal,
+            onStatusChanged: _onMyStatusChanged,
+            onSearchChanged: _onMySearchChanged,
             onPickFromDate: () => _pickFilterDate(isFrom: true),
             onPickToDate: () => _pickFilterDate(isFrom: false),
             onClearFilters: _clearFilters,
@@ -456,22 +516,33 @@ class EmployeeLocatorSlipContentState
               padding: const EdgeInsets.only(bottom: 12),
               child: _ErrorState(message: _error!),
             ),
-          _loadingMy
-              ? const _CenteredLoading(message: 'Loading locator requests...')
-              : _slips.isEmpty
-              ? const _EmptyState(
-                  message:
-                      'No locator requests yet. Click "File Request" to create one.',
-                )
-              : _filteredSlips.isEmpty
-              ? const _EmptyState(
-                  message: 'No locator requests match the current filters.',
-                )
-              : _myRequestsTable(
-                  items: visibleSlips,
-                  maxHeight: maxListHeight,
-                  useScrollableList: useScrollableList,
-                ),
+          if (_loadingMy)
+            const _CenteredLoading(message: 'Loading locator requests...')
+          else if (_slips.isEmpty)
+            _EmptyState(
+              message: _hasMyFilters
+                  ? 'No locator requests match the current filters.'
+                  : 'No locator requests yet. Click "File Request" to create one.',
+            )
+          else ...[
+            _myRequestsTable(
+              items: visibleSlips,
+              maxHeight: maxListHeight,
+              useScrollableList: useScrollableList,
+            ),
+            if (_myPage < _myPageCount ||
+                _loadingMoreMy ||
+                _myLoadMoreError != null) ...[
+              const SizedBox(height: 14),
+              _LoadMoreHistoryControl(
+                loaded: _slips.length,
+                total: _myTotal,
+                loading: _loadingMoreMy,
+                error: _myLoadMoreError,
+                onPressed: () => _loadMyRequests(loadMore: true),
+              ),
+            ],
+          ],
         ],
       ),
     );
@@ -1111,16 +1182,19 @@ class EmployeeLocatorSlipContentState
                 RequestFiltersBar<String>(
                   options: _locatorApprovalFilterOptions,
                   selectedValue: _selectedApprovalStatusFilter,
+                  fromDate: _approvalFromDate,
+                  toDate: _approvalToDate,
+                  searchQuery: _approvalSearchQuery,
                   visibleCount: visibleItems.length,
-                  totalCount: _deptHeadQueue.length,
-                  showSearch: false,
-                  showDateRange: false,
-                  onStatusChanged: (value) {
-                    setState(() {
-                      _selectedApprovalStatusFilter = value;
-                      _selectedApprovalSlipId = null;
-                    });
-                  },
+                  totalCount: _approvalTotal,
+                  onStatusChanged: _onApprovalStatusChanged,
+                  onSearchChanged: _onApprovalSearchChanged,
+                  onPickFromDate: () =>
+                      _pickFilterDate(isFrom: true, approval: true),
+                  onPickToDate: () =>
+                      _pickFilterDate(isFrom: false, approval: true),
+                  onClearFilters: _clearApprovalFilters,
+                  formatDate: _formatDate,
                 ),
                 const SizedBox(height: 16),
                 if (_error != null)
@@ -1129,19 +1203,35 @@ class EmployeeLocatorSlipContentState
                     child: _ErrorState(message: _error!),
                   ),
                 if (_deptHeadQueue.isEmpty)
-                  const _EmptyState(
-                    message: 'No locator requests or history yet.',
+                  _EmptyState(
+                    message: _hasApprovalFilters
+                        ? 'No locator requests match the current filters.'
+                        : 'No locator requests or history yet.',
                   )
                 else if (visibleItems.isEmpty)
                   const _EmptyState(
                     message: 'No locator requests match the current filter.',
                   )
-                else
+                else ...[
                   _approvalItemsTable(
                     items: visibleItems,
                     maxHeight: maxListHeight,
                     useScrollableList: useScrollableList,
                   ),
+                  if (_approvalPage < _approvalPageCount ||
+                      _loadingMoreApprovals ||
+                      _approvalLoadMoreError != null) ...[
+                    const SizedBox(height: 14),
+                    _LoadMoreHistoryControl(
+                      loaded: _deptHeadQueue.length,
+                      total: _approvalTotal,
+                      loading: _loadingMoreApprovals,
+                      error: _approvalLoadMoreError,
+                      onPressed: () =>
+                          _loadDepartmentHeadRequests(loadMore: true),
+                    ),
+                  ],
+                ],
               ],
             ),
     );
@@ -1944,85 +2034,240 @@ class EmployeeLocatorSlipContentState
     return false;
   }
 
-  Future<void> _loadMyRequests({bool forceRefresh = false}) async {
+  Map<String, String> _myHistoryQuery(int page) => {
+    'page': '$page',
+    'page_size': '$_historyPageSize',
+    if (_selectedStatusFilter != null) 'status': _selectedStatusFilter!,
+    if (_fromDate != null) 'from': _toIsoDate(_fromDate!),
+    if (_toDate != null) 'to': _toIsoDate(_toDate!),
+    if (_searchQuery.trim().isNotEmpty) 'search': _searchQuery.trim(),
+  };
+
+  Map<String, String> _approvalHistoryQuery(int page) => {
+    'page': '$page',
+    'page_size': '$_historyPageSize',
+    if (_selectedApprovalStatusFilter != null)
+      'status': _selectedApprovalStatusFilter!,
+    if (_approvalFromDate != null) 'from': _toIsoDate(_approvalFromDate!),
+    if (_approvalToDate != null) 'to': _toIsoDate(_approvalToDate!),
+    if (_approvalSearchQuery.trim().isNotEmpty)
+      'search': _approvalSearchQuery.trim(),
+  };
+
+  void _mergeLocatorPage(
+    List<_LocatorSlipDraft> target,
+    List<_LocatorSlipDraft> incoming, {
+    required bool append,
+  }) {
+    if (!append) {
+      target
+        ..clear()
+        ..addAll(incoming);
+      return;
+    }
+    final existingIds = target
+        .map((item) => item.id?.trim())
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    for (final item in incoming) {
+      final id = item.id?.trim();
+      if (id == null || id.isEmpty || existingIds.add(id)) {
+        target.add(item);
+      }
+    }
+  }
+
+  void _onMyStatusChanged(String? value) {
+    setState(() {
+      _selectedStatusFilter = value;
+      _selectedSlipId = null;
+    });
+    unawaited(_loadMyRequests(forceRefresh: true));
+  }
+
+  void _onMySearchChanged(String value) {
+    final normalized = value.length > 100 ? value.substring(0, 100) : value;
+    setState(() => _searchQuery = normalized);
+    _myFilterDebounce?.cancel();
+    _myFilterDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) unawaited(_loadMyRequests(forceRefresh: true));
+    });
+  }
+
+  void _onApprovalStatusChanged(String? value) {
+    setState(() {
+      _selectedApprovalStatusFilter = value;
+      _selectedApprovalSlipId = null;
+    });
+    unawaited(_loadDepartmentHeadRequests(forceRefresh: true));
+  }
+
+  void _onApprovalSearchChanged(String value) {
+    final normalized = value.length > 100 ? value.substring(0, 100) : value;
+    setState(() => _approvalSearchQuery = normalized);
+    _approvalFilterDebounce?.cancel();
+    _approvalFilterDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) {
+        unawaited(_loadDepartmentHeadRequests(forceRefresh: true));
+      }
+    });
+  }
+
+  Future<void> _loadMyRequests({
+    bool forceRefresh = false,
+    bool loadMore = false,
+  }) async {
     final userId = _authenticatedUserId;
     if (userId == null) return;
+    if (loadMore && (_loadingMoreMy || _loadingMy || _myPage >= _myPageCount)) {
+      return;
+    }
     final role = _authenticatedUserRole;
     final authGeneration = _authGeneration;
     final loadGeneration = ++_myRequestsLoadGeneration;
+    final requestedPage = loadMore ? _myPage + 1 : 1;
     setState(() {
-      _loadingMy = true;
-      _error = null;
+      if (loadMore) {
+        _loadingMoreMy = true;
+        _myLoadMoreError = null;
+      } else {
+        _loadingMy = true;
+        _loadingMoreMy = false;
+        _myLoadMoreError = null;
+        _error = null;
+      }
     });
     try {
-      final items = (await LocatorSlipDataCache.instance.listMyRequests(
+      final page = await LocatorSlipDataCache.instance.listMyRequests(
         userId: userId,
         role: role,
+        query: _myHistoryQuery(requestedPage),
         forceRefresh: forceRefresh,
-      )).map((e) => _LocatorSlipDraft.fromApi(e)).toList();
+      );
+      final items = page.items
+          .map((item) => _LocatorSlipDraft.fromApi(item))
+          .toList();
       if (!_isCurrentAuthSession(userId, authGeneration) ||
           loadGeneration != _myRequestsLoadGeneration) {
         return;
       }
       setState(() {
-        _slips
-          ..clear()
-          ..addAll(items);
+        _mergeLocatorPage(_slips, items, append: loadMore);
+        _myPage = page.page;
+        _myPageCount = page.pageCount;
+        _myTotal = page.total;
+        _myHistoryLoaded = true;
       });
     } catch (e) {
       if (!_isCurrentAuthSession(userId, authGeneration) ||
           loadGeneration != _myRequestsLoadGeneration) {
         return;
       }
-      setState(
-        () => _error = _apiErrorMessage(
-          e,
-          fallback: 'Failed to load locator requests.',
-        ),
+      final message = _apiErrorMessage(
+        e,
+        fallback: loadMore
+            ? 'Failed to load more locator requests.'
+            : 'Failed to load locator requests.',
       );
+      setState(() {
+        if (loadMore) {
+          _myLoadMoreError = message;
+        } else {
+          _error = message;
+        }
+      });
     } finally {
       if (_isCurrentAuthSession(userId, authGeneration) &&
           loadGeneration == _myRequestsLoadGeneration) {
-        setState(() => _loadingMy = false);
+        setState(() {
+          if (loadMore) {
+            _loadingMoreMy = false;
+          } else {
+            _loadingMy = false;
+          }
+        });
       }
     }
   }
 
-  Future<void> _loadDepartmentHeadRequests({bool forceRefresh = false}) async {
+  Future<void> _loadDepartmentHeadRequests({
+    bool forceRefresh = false,
+    bool loadMore = false,
+  }) async {
     final userId = _authenticatedUserId;
     if (userId == null) return;
+    if (loadMore &&
+        (_loadingMoreApprovals ||
+            _loadingApprovals ||
+            _approvalPage >= _approvalPageCount)) {
+      return;
+    }
     final role = _authenticatedUserRole;
     final authGeneration = _authGeneration;
     final loadGeneration = ++_approvalsLoadGeneration;
-    setState(() => _loadingApprovals = true);
+    final requestedPage = loadMore ? _approvalPage + 1 : 1;
+    setState(() {
+      if (loadMore) {
+        _loadingMoreApprovals = true;
+        _approvalLoadMoreError = null;
+      } else {
+        _loadingApprovals = true;
+        _loadingMoreApprovals = false;
+        _approvalLoadMoreError = null;
+        _error = null;
+      }
+    });
     try {
-      final items =
-          (await LocatorSlipDataCache.instance.listDepartmentHeadRequests(
+      final page = await LocatorSlipDataCache.instance
+          .listDepartmentHeadRequests(
             userId: userId,
             role: role,
+            query: _approvalHistoryQuery(requestedPage),
             forceRefresh: forceRefresh,
-          )).map((e) => _LocatorSlipDraft.fromApi(e)).toList();
+          );
+      final items = page.items
+          .map((item) => _LocatorSlipDraft.fromApi(item))
+          .toList();
       if (!_isCurrentAuthSession(userId, authGeneration) ||
           loadGeneration != _approvalsLoadGeneration) {
         return;
       }
       setState(() {
-        _deptHeadQueue
-          ..clear()
-          ..addAll(items);
+        _mergeLocatorPage(_deptHeadQueue, items, append: loadMore);
+        _approvalPage = page.page;
+        _approvalPageCount = page.pageCount;
+        _approvalTotal = page.total;
+        _approvalHistoryLoaded = true;
       });
-    } catch (_) {
+    } catch (error) {
       if (!_isCurrentAuthSession(userId, authGeneration) ||
           loadGeneration != _approvalsLoadGeneration) {
         return;
       }
+      final message = _apiErrorMessage(
+        error,
+        fallback: loadMore
+            ? 'Failed to load more approval history.'
+            : 'Failed to load approval history.',
+      );
       setState(() {
-        _deptHeadQueue.clear();
+        if (loadMore) {
+          _approvalLoadMoreError = message;
+        } else {
+          _error = message;
+        }
       });
     } finally {
       if (_isCurrentAuthSession(userId, authGeneration) &&
           loadGeneration == _approvalsLoadGeneration) {
-        setState(() => _loadingApprovals = false);
+        setState(() {
+          if (loadMore) {
+            _loadingMoreApprovals = false;
+          } else {
+            _loadingApprovals = false;
+          }
+        });
       }
     }
   }
@@ -2343,10 +2588,15 @@ class EmployeeLocatorSlipContentState
     }
   }
 
-  Future<void> _pickFilterDate({required bool isFrom}) async {
+  Future<void> _pickFilterDate({
+    required bool isFrom,
+    bool approval = false,
+  }) async {
+    final currentFrom = approval ? _approvalFromDate : _fromDate;
+    final currentTo = approval ? _approvalToDate : _toDate;
     final initial = isFrom
-        ? (_fromDate ?? DateTime.now())
-        : (_toDate ?? _fromDate ?? DateTime.now());
+        ? (currentFrom ?? DateTime.now())
+        : (currentTo ?? currentFrom ?? DateTime.now());
     final picked = await showHrmsDatePicker(
       context: context,
       initialDate: initial,
@@ -2356,27 +2606,62 @@ class EmployeeLocatorSlipContentState
     );
     if (picked == null) return;
     setState(() {
-      if (isFrom) {
-        _fromDate = picked;
-        if (_toDate != null && _toDate!.isBefore(_fromDate!)) {
-          _toDate = _fromDate;
+      if (approval) {
+        if (isFrom) {
+          _approvalFromDate = picked;
+          if (_approvalToDate != null &&
+              _approvalToDate!.isBefore(_approvalFromDate!)) {
+            _approvalToDate = _approvalFromDate;
+          }
+        } else {
+          _approvalToDate = picked;
+          if (_approvalFromDate != null &&
+              _approvalFromDate!.isAfter(_approvalToDate!)) {
+            _approvalFromDate = _approvalToDate;
+          }
         }
       } else {
-        _toDate = picked;
-        if (_fromDate != null && _fromDate!.isAfter(_toDate!)) {
-          _fromDate = _toDate;
+        if (isFrom) {
+          _fromDate = picked;
+          if (_toDate != null && _toDate!.isBefore(_fromDate!)) {
+            _toDate = _fromDate;
+          }
+        } else {
+          _toDate = picked;
+          if (_fromDate != null && _fromDate!.isAfter(_toDate!)) {
+            _fromDate = _toDate;
+          }
         }
       }
     });
+    if (approval) {
+      await _loadDepartmentHeadRequests(forceRefresh: true);
+    } else {
+      await _loadMyRequests(forceRefresh: true);
+    }
   }
 
   void _clearFilters() {
+    _myFilterDebounce?.cancel();
     setState(() {
       _searchQuery = '';
       _selectedStatusFilter = null;
       _fromDate = null;
       _toDate = null;
     });
+    unawaited(_loadMyRequests(forceRefresh: true));
+  }
+
+  void _clearApprovalFilters() {
+    _approvalFilterDebounce?.cancel();
+    setState(() {
+      _approvalSearchQuery = '';
+      _selectedApprovalStatusFilter = null;
+      _approvalFromDate = null;
+      _approvalToDate = null;
+      _selectedApprovalSlipId = null;
+    });
+    unawaited(_loadDepartmentHeadRequests(forceRefresh: true));
   }
 
   DateTime _dateOnly(DateTime value) =>
@@ -3499,6 +3784,59 @@ class _CenteredLoading extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LoadMoreHistoryControl extends StatelessWidget {
+  const _LoadMoreHistoryControl({
+    required this.loaded,
+    required this.total,
+    required this.loading,
+    required this.error,
+    required this.onPressed,
+  });
+
+  final int loaded;
+  final int total;
+  final bool loading;
+  final String? error;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          'Showing $loaded of $total requests',
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        if (error != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            error!,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.red.shade700, fontSize: 12),
+          ),
+        ],
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: loading ? null : onPressed,
+          icon: loading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.expand_more_rounded, size: 18),
+          label: Text(loading ? 'Loading...' : 'Load More'),
+        ),
+      ],
     );
   }
 }
