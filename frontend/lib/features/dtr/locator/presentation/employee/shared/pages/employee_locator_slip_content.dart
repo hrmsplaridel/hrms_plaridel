@@ -76,7 +76,10 @@ class EmployeeLocatorSlipContentState
   final List<_LocatorSlipDraft> _deptHeadQueue = [];
   final ScrollController _myRequestsScrollController = ScrollController();
   final ScrollController _approvalItemsScrollController = ScrollController();
-  List<LocatorRequestType> _locatorTypes = LocatorRequestType.values;
+  List<LocatorRequestType> _locatorTypes = const [];
+  bool _loadingLocatorTypes = false;
+  bool _locatorTypesLoaded = false;
+  String? _locatorTypesError;
   Future<bool>? _isDeptHeadFuture;
   _LocatorSection _currentSection = _LocatorSection.requests;
   bool _appliedDeptHeadDefaultSection = false;
@@ -100,6 +103,13 @@ class EmployeeLocatorSlipContentState
   int _myRequestsLoadGeneration = 0;
   int _approvalsLoadGeneration = 0;
   int _officialDateLoadGeneration = 0;
+  int _locatorTypesLoadGeneration = 0;
+
+  bool get _locatorTypesReady =>
+      _locatorTypesLoaded &&
+      !_loadingLocatorTypes &&
+      _locatorTypesError == null &&
+      _locatorTypes.isNotEmpty;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -124,8 +134,11 @@ class EmployeeLocatorSlipContentState
     super.didChangeDependencies();
     final authProvider = context.watch<AuthProvider>();
     _synchronizeAuthenticatedUser(authProvider);
-    if (_locatorTypes.length == LocatorRequestType.values.length) {
-      unawaited(_loadLocatorTypes());
+    if (_authenticatedUserId != null &&
+        !_locatorTypesLoaded &&
+        !_loadingLocatorTypes &&
+        _locatorTypesError == null) {
+      unawaited(_loadLocatorTypes(forceRefresh: true));
     }
     if (_authenticatedUserId != null && !_loadingMy && _slips.isEmpty) {
       unawaited(_loadMyRequests());
@@ -164,6 +177,7 @@ class EmployeeLocatorSlipContentState
     _myRequestsLoadGeneration += 1;
     _approvalsLoadGeneration += 1;
     _officialDateLoadGeneration += 1;
+    _locatorTypesLoadGeneration += 1;
     _slips.clear();
     _deptHeadQueue.clear();
     _currentSection = _LocatorSection.requests;
@@ -173,6 +187,10 @@ class EmployeeLocatorSlipContentState
     _officialHrmsDate = null;
     _loadingOfficialDate = false;
     _officialDateError = null;
+    _locatorTypes = const [];
+    _loadingLocatorTypes = false;
+    _locatorTypesLoaded = false;
+    _locatorTypesError = null;
     _error = null;
     _selectedStatusFilter = null;
     _selectedApprovalStatusFilter = null;
@@ -343,9 +361,24 @@ class EmployeeLocatorSlipContentState
                 onCreatePressed: () => _openCreateForm(context, displayName),
                 showCreateAction: width >= 1024,
                 createEnabled:
-                    _officialHrmsDate != null && !_loadingOfficialDate,
+                    _officialHrmsDate != null &&
+                    !_loadingOfficialDate &&
+                    _locatorTypesReady,
               ),
             ),
+            if (_loadingLocatorTypes && !_locatorTypesLoaded) ...[
+              const SizedBox(height: 12),
+              const _ReferenceDataLoadingState(
+                message: 'Loading locator request types...',
+              ),
+            ],
+            if (_locatorTypesError != null) ...[
+              const SizedBox(height: 12),
+              _ErrorState(
+                message: _locatorTypesError!,
+                onRetry: () => _loadLocatorTypes(forceRefresh: true),
+              ),
+            ],
             if (_officialDateError != null) ...[
               const SizedBox(height: 12),
               _ErrorState(
@@ -494,9 +527,12 @@ class EmployeeLocatorSlipContentState
     final canCorrect =
         isReturnedForCorrection &&
         officialDate != null &&
+        _locatorTypesReady &&
         !correctionBlockedByPastDate;
     final datePolicyUnavailable =
         (canReview || isReturnedForCorrection) && officialDate == null;
+    final typeConfigurationUnavailable =
+        isReturnedForCorrection && !_locatorTypesReady;
     final correctionRemarks = item.hrReviewedAt != null
         ? item.hrRemarks
         : item.departmentHeadRemarks;
@@ -624,6 +660,21 @@ class EmployeeLocatorSlipContentState
                     label: 'Official date unavailable',
                     value:
                         'Reload the page before returning this request for correction.',
+                  ),
+                ],
+              ),
+            ],
+            if (typeConfigurationUnavailable) ...[
+              const SizedBox(height: 12),
+              const EmployeeLocatorMobileDetailSection(
+                title: 'Correction temporarily unavailable',
+                icon: Icons.sync_problem_rounded,
+                children: [
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.info_outline_rounded,
+                    label: 'Request types unavailable',
+                    value:
+                        'Reload the page and retry loading locator request types before correcting this request.',
                   ),
                 ],
               ),
@@ -1614,6 +1665,15 @@ class EmployeeLocatorSlipContentState
   }) async {
     final userId = _authenticatedUserId;
     if (userId == null) return;
+    final authGeneration = _authGeneration;
+    final typesReady = await _refreshLocatorTypesForForm(
+      context,
+      userId: userId,
+      authGeneration: authGeneration,
+    );
+    if (!typesReady || !context.mounted) {
+      return;
+    }
     final officialDate = _officialHrmsDate;
     if (officialDate == null) {
       if (!_loadingOfficialDate) {
@@ -1626,7 +1686,6 @@ class EmployeeLocatorSlipContentState
       );
       return;
     }
-    final authGeneration = _authGeneration;
     final form = _LocatorSlipFormDialog(
       employeeName: employeeName,
       requestTypes: _locatorTypes,
@@ -1812,15 +1871,77 @@ class EmployeeLocatorSlipContentState
   }
 
   Future<void> _loadLocatorTypes({bool forceRefresh = false}) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    if (_loadingLocatorTypes && !forceRefresh) return;
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_locatorTypesLoadGeneration;
+    setState(() {
+      _loadingLocatorTypes = true;
+      _locatorTypesError = null;
+    });
     try {
       final items = (await LocatorSlipDataCache.instance.listTypes(
         forceRefresh: forceRefresh,
       )).where((type) => type.isActive).toList();
-      if (!mounted || items.isEmpty) return;
-      setState(() => _locatorTypes = items);
-    } catch (_) {
-      // Keep built-in fallback types when configuration cannot be loaded.
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _locatorTypesLoadGeneration) {
+        return;
+      }
+      setState(() {
+        _locatorTypes = items;
+        _locatorTypesLoaded = true;
+        if (items.isEmpty) {
+          _locatorTypesError =
+              'No active locator request types are configured. Contact HR before filing.';
+        }
+      });
+    } catch (error) {
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _locatorTypesLoadGeneration) {
+        return;
+      }
+      setState(() {
+        _locatorTypes = const [];
+        _locatorTypesLoaded = false;
+        _locatorTypesError = _apiErrorMessage(
+          error,
+          fallback: 'Could not load locator request types.',
+        );
+      });
+    } finally {
+      if (_isCurrentAuthSession(userId, authGeneration) &&
+          loadGeneration == _locatorTypesLoadGeneration) {
+        setState(() => _loadingLocatorTypes = false);
+      }
     }
+  }
+
+  Future<bool> _refreshLocatorTypesForForm(
+    BuildContext context, {
+    required String userId,
+    required int authGeneration,
+  }) async {
+    if (_loadingLocatorTypes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wait for locator request types, then try again.'),
+        ),
+      );
+      return false;
+    }
+    await _loadLocatorTypes(forceRefresh: true);
+    if (!_isCurrentAuthSession(userId, authGeneration)) return false;
+    if (_locatorTypesReady) return true;
+    if (!context.mounted) return false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _locatorTypesError ?? 'Locator request types are unavailable.',
+        ),
+      ),
+    );
+    return false;
   }
 
   Future<void> _loadMyRequests({bool forceRefresh = false}) async {
@@ -2076,6 +2197,15 @@ class EmployeeLocatorSlipContentState
     if (id == null || id.isEmpty) return;
     final userId = _authenticatedUserId;
     if (userId == null) return;
+    final authGeneration = _authGeneration;
+    final typesReady = await _refreshLocatorTypesForForm(
+      context,
+      userId: userId,
+      authGeneration: authGeneration,
+    );
+    if (!typesReady || !mounted) {
+      return;
+    }
     final officialDate = _officialHrmsDate;
     if (officialDate == null) {
       if (!_loadingOfficialDate) {
@@ -2088,7 +2218,6 @@ class EmployeeLocatorSlipContentState
       );
       return;
     }
-    final authGeneration = _authGeneration;
     final corrected = await openResponsiveRightSidePanel<_LocatorSlipDraft>(
       context: context,
       barrierLabel: 'Close locator request correction form',
@@ -3408,6 +3537,34 @@ class _ErrorState extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _ReferenceDataLoadingState extends StatelessWidget {
+  const _ReferenceDataLoadingState({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          message,
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }
