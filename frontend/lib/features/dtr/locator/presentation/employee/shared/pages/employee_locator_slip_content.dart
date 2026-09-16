@@ -456,7 +456,9 @@ class EmployeeLocatorSlipContentState
                 onChanged: (section) {
                   setState(() => _currentSection = section);
                   if (section == _LocatorSection.approvals &&
-                      !_approvalHistoryLoaded) {
+                      !_approvalHistoryLoaded &&
+                      !_loadingApprovals &&
+                      _approvalsError == null) {
                     _loadDepartmentHeadRequests();
                   }
                 },

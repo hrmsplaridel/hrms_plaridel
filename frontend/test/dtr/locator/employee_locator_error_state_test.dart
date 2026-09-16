@@ -7,6 +7,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/client_device_header.dart';
+import 'package:hrms_plaridel/core/api/token_storage.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/shared/pages/employee_locator_slip_content.dart';
@@ -16,9 +18,11 @@ import 'package:provider/provider.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUpAll(() {
+  setUpAll(() async {
     FlutterSecureStorage.setMockInitialValues({});
     ApiClient.instance.init();
+    await TokenStorage.instance.getToken();
+    await ClientDeviceHeader.build();
   });
 
   setUp(() {
@@ -31,7 +35,17 @@ void main() {
       final adapter = _LocatorErrorStateAdapter();
       ApiClient.instance.dio.httpClientAdapter = adapter;
       final realtime = AppRealtimeProvider();
+      final auth = AuthProvider()
+        ..replaceUser(
+          const AppUser(
+            id: 'department-head-1',
+            email: 'head@example.com',
+            role: 'employee',
+            fullName: 'Department Head',
+          ),
+        );
       addTearDown(realtime.dispose);
+      addTearDown(auth.dispose);
 
       await tester.binding.setSurfaceSize(const Size(1400, 1200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -39,9 +53,7 @@ void main() {
       await tester.pumpWidget(
         MultiProvider(
           providers: [
-            ChangeNotifierProvider<AuthProvider>.value(
-              value: _DepartmentHeadAuthProvider(),
-            ),
+            ChangeNotifierProvider<AuthProvider>.value(value: auth),
             ChangeNotifierProvider<AppRealtimeProvider>.value(value: realtime),
           ],
           child: const MaterialApp(
@@ -52,6 +64,14 @@ void main() {
         ),
       );
 
+      await _pumpUntil(
+        tester,
+        () =>
+            adapter.myRequestCount == 1 &&
+            adapter.approvalRequestCount == 1 &&
+            find.text('Approvals / History').evaluate().isNotEmpty,
+      );
+      await tester.tap(find.text('Approvals / History'));
       await _pumpUntil(
         tester,
         () => find.text('Approval queue unavailable').evaluate().isNotEmpty,
@@ -123,16 +143,15 @@ Future<void> _pumpUntil(
     await tester.pump(const Duration(milliseconds: 20));
     if (condition()) return;
   }
-  fail('Timed out waiting for the expected locator state.');
-}
-
-class _DepartmentHeadAuthProvider extends AuthProvider {
-  @override
-  AppUser? get user => const AppUser(
-    id: 'department-head-1',
-    email: 'head@example.com',
-    role: 'employee',
-    fullName: 'Department Head',
+  final visibleText = find
+      .byType(Text)
+      .evaluate()
+      .map((element) => (element.widget as Text).data)
+      .whereType<String>()
+      .join(' | ');
+  fail(
+    'Timed out waiting for the expected locator state. '
+    'Visible text: $visibleText',
   );
 }
 
