@@ -1938,60 +1938,53 @@ class EmployeeLocatorSlipContentState
     final userId = _authenticatedUserId;
     if (userId == null) return;
     final authGeneration = _authGeneration;
-    final hasCurrentAttachment = (item.attachmentName ?? '').trim().isNotEmpty;
-    final action = await showDialog<String>(
+    final corrected = await openResponsiveRightSidePanel<_LocatorSlipDraft>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Correct locator request'),
-        content: Text(
-          hasCurrentAttachment
-              ? 'Replace the supporting document if needed, then resubmit the request for review.'
-              : 'Add the required supporting document before resubmitting the request.',
+      barrierLabel: 'Close locator request correction form',
+      minWidth: 520,
+      initialWidthFraction: 0.38,
+      builder: (_) => EmployeeHrmsAssistantOverlay(
+        initialBottom: 92,
+        child: _LocatorSlipFormDialog(
+          employeeName: item.employeeName,
+          requestTypes: _locatorTypes,
+          title: 'Correct Locator Request',
+          submitLabel: 'Save & Resubmit',
+          initialValues: LocatorSlipFormInitialValues(
+            slipDate: item.date,
+            requestTypeCode: item.requestType.code,
+            office: item.office,
+            reason: item.remarks,
+            amIn: item.amIn,
+            amOut: item.amOut,
+            pmIn: item.pmIn,
+            pmOut: item.pmOut,
+            existingAttachmentName: item.attachmentName,
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          if (hasCurrentAttachment || !item.requestType.requiresAttachment)
-            OutlinedButton(
-              onPressed: () => Navigator.of(dialogContext).pop('resubmit'),
-              child: const Text('Resubmit Current'),
-            ),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(dialogContext).pop('replace'),
-            icon: const Icon(Icons.upload_file_rounded, size: 18),
-            label: const Text('Replace & Resubmit'),
-          ),
-        ],
       ),
     );
-    if (action == null || !_isCurrentAuthSession(userId, authGeneration)) {
+    if (corrected == null || !_isCurrentAuthSession(userId, authGeneration)) {
       return;
     }
 
+    setState(() {
+      _error = null;
+      _loadingMy = true;
+    });
     try {
-      if (action == 'replace') {
-        final result = await FilePicker.platform.pickFiles(
-          type: FileType.custom,
-          allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
-          withData: true,
-        );
-        if (result == null ||
-            result.files.isEmpty ||
-            !_isCurrentAuthSession(userId, authGeneration)) {
-          return;
-        }
-        final file = result.files.single;
-        final bytes = file.bytes;
-        if (bytes == null) {
-          await _showLocatorErrorDialog('The selected file could not be read.');
-          return;
-        }
+      final attachmentBytes = corrected.pendingAttachmentBytes;
+      final attachmentName = corrected.pendingAttachmentName?.trim();
+      if (attachmentBytes != null &&
+          attachmentName != null &&
+          attachmentName.isNotEmpty) {
         await ApiClient.instance.dio.post<Map<String, dynamic>>(
           '/api/locator-slips/$id/attachment',
           data: FormData.fromMap({
-            'file': MultipartFile.fromBytes(bytes, filename: file.name),
+            'file': MultipartFile.fromBytes(
+              attachmentBytes,
+              filename: attachmentName,
+            ),
           }),
         );
         if (!_isCurrentAuthSession(userId, authGeneration)) return;
@@ -1999,20 +1992,31 @@ class EmployeeLocatorSlipContentState
 
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/$id/resubmit',
-        data: const {},
+        data: {
+          'slip_date': _toIsoDate(corrected.date),
+          'request_type': corrected.requestType.code,
+          'office': corrected.office,
+          'reason': corrected.remarks,
+          'am_in': corrected.amIn,
+          'am_out': corrected.amOut,
+          'pm_in': corrected.pmIn,
+          'pm_out': corrected.pmOut,
+        },
       );
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       await _loadMyRequests(forceRefresh: true);
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
-      _showLocatorSnack(
-        'Corrections submitted. The attachment is locked again.',
-      );
+      _showLocatorSnack('Corrected request resubmitted for approval.');
     } catch (e) {
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
       await _showLocatorErrorDialog(
         _apiErrorMessage(e, fallback: 'Failed to resubmit the request.'),
       );
+    } finally {
+      if (_isCurrentAuthSession(userId, authGeneration)) {
+        setState(() => _loadingMy = false);
+      }
     }
   }
 
@@ -2204,11 +2208,15 @@ class _LocatorSlipFormDialog extends StatefulWidget {
     required this.employeeName,
     required this.requestTypes,
     this.initialValues,
+    this.title = 'File Request',
+    this.submitLabel = 'Submit',
   });
 
   final String employeeName;
   final List<LocatorRequestType> requestTypes;
   final LocatorSlipFormInitialValues? initialValues;
+  final String title;
+  final String submitLabel;
 
   @override
   State<_LocatorSlipFormDialog> createState() => _LocatorSlipFormDialogState();
@@ -2237,6 +2245,15 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
 
   bool get _isWfhRequest => _requestType.usesWfhCoverage;
   bool get _requiresAttachment => _requestType.requiresAttachment;
+  String? get _existingAttachmentName {
+    final value = widget.initialValues?.existingAttachmentName?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  String? get _effectiveAttachmentName =>
+      (_pendingAttachmentName ?? '').trim().isNotEmpty
+      ? _pendingAttachmentName!.trim()
+      : _existingAttachmentName;
 
   void _applyWfhCoverage(_WfhCoverage coverage) {
     _amIn =
@@ -2373,7 +2390,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         title: Text(
-          'File Request',
+          widget.title,
           style: TextStyle(
             color: AppTheme.dashTextPrimaryOf(context),
             fontSize: 18,
@@ -2403,6 +2420,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
             accent: accent,
             onCancel: () => Navigator.of(context).pop(),
             onSubmit: _save,
+            submitLabel: widget.submitLabel,
           ),
         ),
       ),
@@ -2558,7 +2576,9 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   }
 
   Widget _attachmentPicker() {
-    final hasAttachment = (_pendingAttachmentName ?? '').trim().isNotEmpty;
+    final attachmentName = _effectiveAttachmentName;
+    final hasAttachment = attachmentName != null;
+    final hasReplacement = (_pendingAttachmentName ?? '').trim().isNotEmpty;
     final showError = _showAttachmentError && !hasAttachment;
     final borderColor = showError
         ? Colors.redAccent
@@ -2589,9 +2609,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  hasAttachment
-                      ? _pendingAttachmentName!
-                      : 'PDF, JPG, or PNG required',
+                  hasAttachment ? attachmentName : 'PDF, JPG, or PNG required',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -2610,9 +2628,9 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
                 icon: const Icon(Icons.upload_file_rounded, size: 18),
                 label: Text(hasAttachment ? 'Change' : 'Upload'),
               ),
-              if (hasAttachment)
+              if (hasReplacement)
                 IconButton(
-                  tooltip: 'Remove attachment',
+                  tooltip: 'Keep current attachment',
                   onPressed: () {
                     setState(() {
                       _pendingAttachmentBytes = null;
@@ -2734,7 +2752,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       );
       return;
     }
-    if (_requiresAttachment && _pendingAttachmentBytes == null) {
+    if (_requiresAttachment && _effectiveAttachmentName == null) {
       setState(() => _showAttachmentError = true);
       return;
     }

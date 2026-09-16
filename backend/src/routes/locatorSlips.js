@@ -52,6 +52,10 @@ const {
   resolveLocatorTypeMetadata,
 } = require('../services/locatorTypeSnapshot');
 const {
+  locatorCorrectionChanges,
+  normalizeLocatorCorrection,
+} = require('../services/locatorCorrection');
+const {
   listLocatorWorkflowEvents,
   normalizeLocatorRejectionReason,
   recordLocatorWorkflowEvent,
@@ -1377,13 +1381,39 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         error: `Cannot resubmit locator slip with status '${row.status}'`,
       });
     }
-    const attachmentError = locatorReviewAttachmentError(row);
+
+    const correction = normalizeLocatorCorrection(row, req.body || {});
+    const fieldValidation = validateLocatorRequiredFields({
+      slipDate: correction.slipDate,
+      requestType: correction.requestType,
+      office: correction.office,
+      reason: correction.reason,
+      slots: correction,
+    });
+    if (!fieldValidation.valid) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: fieldValidation.error });
+    }
+    const locatorType = await getLocatorTypeByCode(
+      client,
+      correction.requestType,
+      { activeOnly: true }
+    );
+    if (!locatorType) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Invalid request_type' });
+    }
+    const attachmentError = validateLocatorAttachmentForReview({
+      locatorType,
+      attachmentPath: row.attachment_path,
+      attachmentFileExists: locatorAttachmentFileExists(row.attachment_path),
+    });
     if (attachmentError) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: attachmentError });
     }
     const resubmitWindow = evaluateEmployeeLocatorDateWindow({
-      slipDate: row.slip_date_text,
+      slipDate: correction.slipDate,
     });
     if (!resubmitWindow.ok) {
       await client.query('ROLLBACK');
@@ -1395,7 +1425,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
     const workingDayCheck = await validateLocatorWorkingDayForEmployee(
       client,
       userId,
-      parseLocatorDateOnly(row.slip_date_text)
+      parseLocatorDateOnly(correction.slipDate)
     );
     if (!workingDayCheck.ok) {
       await client.query('ROLLBACK');
@@ -1403,8 +1433,8 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
     }
     const conflictCheck = await findLocatorRequestConflicts(client, {
       employeeId: userId,
-      slipDate: row.slip_date_text,
-      slots: row,
+      slipDate: correction.slipDate,
+      slots: correction,
       excludeSlipId: id,
       phase: 'submission',
     });
@@ -1416,23 +1446,64 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
     const reviewSnapshot = await getDepartmentReviewSnapshotForDate(
       client,
       userId,
-      row.slip_date_text
+      correction.slipDate
     );
     const departmentHeadUserId =
       reviewSnapshot?.departmentHeadUserId || null;
     const submitStatus = departmentHeadUserId
       ? 'pending_department_head'
       : 'pending_hr';
+    const typeSnapshot = captureLocatorTypeSnapshot(locatorType);
+    const changes = locatorCorrectionChanges(row, correction);
 
     await client.query(
       `UPDATE locator_slips
-       SET status = $2::text,
-           department_id = $3::uuid,
-           assigned_department_head_id = $4::uuid,
+       SET slip_date = $2::date,
+           request_type = $3::text,
+           office = $4::text,
+           reason = $5::text,
+           am_in = $6::boolean,
+           am_out = $7::boolean,
+           pm_in = $8::boolean,
+           pm_out = $9::boolean,
+           request_type_label_snapshot = $10::text,
+           request_type_short_label_snapshot = $11::text,
+           request_type_location_label_snapshot = $12::text,
+           request_type_location_hint_snapshot = $13::text,
+           request_type_dtr_slot_label_snapshot = $14::text,
+           request_type_dtr_print_label_snapshot = $15::text,
+           request_type_requires_attachment_snapshot = $16::boolean,
+           request_type_coverage_mode_snapshot = $17::text,
+           request_type_snapshot_at = now(),
+           status = $18::text,
+           department_id = $19::uuid,
+           assigned_department_head_id = $20::uuid,
+           dept_head_reviewer_id = NULL,
+           dept_head_reviewed_at = NULL,
+           dept_head_remarks = NULL,
+           hr_reviewer_id = NULL,
+           hr_reviewed_at = NULL,
+           hr_remarks = NULL,
            updated_at = now()
        WHERE id = $1::uuid`,
       [
         id,
+        correction.slipDate,
+        correction.requestType,
+        correction.office,
+        correction.reason,
+        correction.amIn,
+        correction.amOut,
+        correction.pmIn,
+        correction.pmOut,
+        typeSnapshot.label,
+        typeSnapshot.shortLabel,
+        typeSnapshot.locationLabel,
+        typeSnapshot.locationHint,
+        typeSnapshot.dtrSlotLabel,
+        typeSnapshot.dtrPrintLabel,
+        typeSnapshot.requiresAttachment,
+        typeSnapshot.coverageMode,
         submitStatus,
         reviewSnapshot?.departmentId || null,
         departmentHeadUserId,
@@ -1451,6 +1522,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       toStatus: submitStatus,
       actorId: userId,
       actorRole: 'employee',
+      metadata: { changes },
     });
     await client.query('COMMIT');
 
@@ -1460,12 +1532,12 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         status: submitStatus,
         employeeUserId: userId,
         employeeName: row.employee_name,
-        slipDate: row.slip_date_text,
-        amIn: row.am_in,
-        amOut: row.am_out,
-        pmIn: row.pm_in,
-        pmOut: row.pm_out,
-        requestType: row.request_type,
+        slipDate: correction.slipDate,
+        amIn: correction.amIn,
+        amOut: correction.amOut,
+        pmIn: correction.pmIn,
+        pmOut: correction.pmOut,
+        requestType: correction.requestType,
         departmentHeadUserId,
         departmentReviewerUserIds: reviewSnapshot?.reviewerUserIds || [],
       })
