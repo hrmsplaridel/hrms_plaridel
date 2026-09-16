@@ -91,6 +91,11 @@ class EmployeeLocatorSlipContentState
   String? _selectedSlipId;
   String? _selectedApprovalSlipId;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
+  String? _authenticatedUserId;
+  String? _authenticatedUserRole;
+  int _authGeneration = 0;
+  int _myRequestsLoadGeneration = 0;
+  int _approvalsLoadGeneration = 0;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -113,18 +118,18 @@ class EmployeeLocatorSlipContentState
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _isDeptHeadFuture ??= _checkIsDepartmentHead();
+    final authProvider = context.watch<AuthProvider>();
+    _synchronizeAuthenticatedUser(authProvider);
     if (_locatorTypes.length == LocatorRequestType.values.length) {
       unawaited(_loadLocatorTypes());
     }
-    if (!_loadingMy && _slips.isEmpty) {
-      _loadMyRequests();
+    if (_authenticatedUserId != null && !_loadingMy && _slips.isEmpty) {
+      unawaited(_loadMyRequests());
     }
     final realtimeProvider = context.read<AppRealtimeProvider>();
-    final authProvider = context.read<AuthProvider>();
     _locatorRealtimeSub ??= realtimeProvider.events.listen((event) {
       if (event.name != 'locator_updated') return;
-      final userId = authProvider.user?.id;
+      final userId = _authenticatedUserId;
       if (event.affectsUser(userId)) {
         unawaited(_loadMyRequests(forceRefresh: true));
       }
@@ -132,6 +137,51 @@ class EmployeeLocatorSlipContentState
         unawaited(_loadDepartmentHeadRequests(forceRefresh: true));
       }
     });
+  }
+
+  void _synchronizeAuthenticatedUser(AuthProvider authProvider) {
+    final normalizedUserId = (authProvider.user?.id ?? '').trim();
+    final userId = normalizedUserId.isEmpty ? null : normalizedUserId;
+    final normalizedRole = (authProvider.user?.role ?? '').trim().toLowerCase();
+    final role = normalizedRole.isEmpty ? null : normalizedRole;
+    if (_authenticatedUserId == userId && _authenticatedUserRole == role) {
+      return;
+    }
+
+    _authenticatedUserId = userId;
+    _authenticatedUserRole = role;
+    _authGeneration += 1;
+    _myRequestsLoadGeneration += 1;
+    _approvalsLoadGeneration += 1;
+    _slips.clear();
+    _deptHeadQueue.clear();
+    _currentSection = _LocatorSection.requests;
+    _appliedDeptHeadDefaultSection = false;
+    _loadingMy = false;
+    _loadingApprovals = false;
+    _error = null;
+    _selectedStatusFilter = null;
+    _selectedApprovalStatusFilter = null;
+    _fromDate = null;
+    _toDate = null;
+    _searchQuery = '';
+    _selectedSlipId = null;
+    _selectedApprovalSlipId = null;
+
+    final generation = _authGeneration;
+    _isDeptHeadFuture = userId == null
+        ? Future<bool>.value(false)
+        : _checkIsDepartmentHead(
+            userId: userId,
+            role: role,
+            authGeneration: generation,
+          );
+  }
+
+  bool _isCurrentAuthSession(String userId, int authGeneration) {
+    return mounted &&
+        _authenticatedUserId == userId &&
+        _authGeneration == authGeneration;
   }
 
   @override
@@ -552,6 +602,9 @@ class EmployeeLocatorSlipContentState
     BuildContext context,
     _LocatorSlipDraft item,
   ) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final rawStatus = item.rawStatus;
     final history = <_LocatorWorkflowStep>[
       (
@@ -688,7 +741,9 @@ class EmployeeLocatorSlipContentState
         // Legacy reconstruction remains available if history cannot be loaded.
       }
     }
-    if (!context.mounted) return;
+    if (!context.mounted || !_isCurrentAuthSession(userId, authGeneration)) {
+      return;
+    }
     final accent = AppTheme.primaryNavy;
 
     showDialog<void>(
@@ -1431,6 +1486,9 @@ class EmployeeLocatorSlipContentState
     String employeeName, {
     LocatorSlipFormInitialValues? initialValues,
   }) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final form = _LocatorSlipFormDialog(
       employeeName: employeeName,
       requestTypes: _locatorTypes,
@@ -1444,7 +1502,9 @@ class EmployeeLocatorSlipContentState
       builder: (_) =>
           EmployeeHrmsAssistantOverlay(initialBottom: 92, child: form),
     );
-    if (!mounted || created == null) return;
+    if (created == null || !_isCurrentAuthSession(userId, authGeneration)) {
+      return;
+    }
     setState(() {
       _error = null;
       _loadingMy = true;
@@ -1491,7 +1551,7 @@ class EmployeeLocatorSlipContentState
         );
       }
       if ((res.statusCode ?? 500) >= 400) {
-        if (!mounted) return;
+        if (!_isCurrentAuthSession(userId, authGeneration)) return;
         final message = _apiResponseMessage(
           res.data,
           fallback: 'Failed to submit request.',
@@ -1500,6 +1560,7 @@ class EmployeeLocatorSlipContentState
         await _showLocatorErrorDialog(message);
         return;
       }
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       final data = res.data;
       LocatorSlipDataCache.instance.invalidateRequests();
       _LocatorSlipDraft? inserted;
@@ -1507,7 +1568,6 @@ class EmployeeLocatorSlipContentState
         inserted = _LocatorSlipDraft.fromApi(data);
         setState(() => _slips.insert(0, inserted!));
       }
-      if (!mounted) return;
       final msg = inserted != null
           ? (inserted.status == _LocatorSlipStatus.pendingHr
                 ? 'Request submitted. Awaiting HR approval.'
@@ -1515,7 +1575,7 @@ class EmployeeLocatorSlipContentState
           : 'Request submitted successfully.';
       _showLocatorSnack(msg);
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       final message = _apiErrorMessage(
         e,
         fallback: 'Failed to submit request.',
@@ -1523,12 +1583,17 @@ class EmployeeLocatorSlipContentState
       setState(() => _loadingMy = false);
       await _showLocatorErrorDialog(message);
     } finally {
-      if (mounted) setState(() => _loadingMy = false);
+      if (_isCurrentAuthSession(userId, authGeneration)) {
+        setState(() => _loadingMy = false);
+      }
     }
   }
 
   Future<void> _cancelSlip(_LocatorSlipDraft item) async {
     if (!_canCancelSlip(item)) return;
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final id = item.id!.trim();
     final ok = await showDialog<bool>(
       context: context,
@@ -1549,7 +1614,7 @@ class EmployeeLocatorSlipContentState
         ],
       ),
     );
-    if (ok != true) return;
+    if (ok != true || !_isCurrentAuthSession(userId, authGeneration)) return;
 
     setState(() {
       _error = null;
@@ -1560,9 +1625,9 @@ class EmployeeLocatorSlipContentState
         '/api/locator-slips/$id/cancel',
         data: const {},
       );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       final data = res.data;
-      if (!mounted) return;
       setState(() {
         _selectedSlipId = null;
         if (data != null) {
@@ -1574,28 +1639,32 @@ class EmployeeLocatorSlipContentState
         }
       });
       await _loadMyRequests(forceRefresh: true);
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       _showLocatorSnack('Request cancelled.');
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       setState(
         () =>
             _error = _apiErrorMessage(e, fallback: 'Failed to cancel request.'),
       );
     } finally {
-      if (mounted) setState(() => _loadingMy = false);
+      if (_isCurrentAuthSession(userId, authGeneration)) {
+        setState(() => _loadingMy = false);
+      }
     }
   }
 
-  Future<bool> _checkIsDepartmentHead() async {
+  Future<bool> _checkIsDepartmentHead({
+    required String userId,
+    required String? role,
+    required int authGeneration,
+  }) async {
     try {
-      final user = context.read<AuthProvider>().user;
-      final userId = (user?.id ?? '').trim();
-      if (userId.isEmpty) return false;
       final isDeptHead = await LocatorSlipDataCache.instance
-          .checkIsDepartmentHead(userId: userId, role: user?.role);
+          .checkIsDepartmentHead(userId: userId, role: role);
+      if (!_isCurrentAuthSession(userId, authGeneration)) return false;
       if (isDeptHead) {
-        _loadDepartmentHeadRequests();
+        unawaited(_loadDepartmentHeadRequests());
       }
       return isDeptHead;
     } catch (_) {
@@ -1616,29 +1685,35 @@ class EmployeeLocatorSlipContentState
   }
 
   Future<void> _loadMyRequests({bool forceRefresh = false}) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final role = _authenticatedUserRole;
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_myRequestsLoadGeneration;
     setState(() {
       _loadingMy = true;
       _error = null;
     });
     try {
-      final user = context.read<AuthProvider>().user;
-      final userId = (user?.id ?? '').trim();
-      if (userId.isEmpty) {
-        throw StateError('No authenticated user is available.');
-      }
       final items = (await LocatorSlipDataCache.instance.listMyRequests(
         userId: userId,
-        role: user?.role,
+        role: role,
         forceRefresh: forceRefresh,
       )).map((e) => _LocatorSlipDraft.fromApi(e)).toList();
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _myRequestsLoadGeneration) {
+        return;
+      }
       setState(() {
         _slips
           ..clear()
           ..addAll(items);
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _myRequestsLoadGeneration) {
+        return;
+      }
       setState(
         () => _error = _apiErrorMessage(
           e,
@@ -1646,74 +1721,96 @@ class EmployeeLocatorSlipContentState
         ),
       );
     } finally {
-      if (mounted) setState(() => _loadingMy = false);
+      if (_isCurrentAuthSession(userId, authGeneration) &&
+          loadGeneration == _myRequestsLoadGeneration) {
+        setState(() => _loadingMy = false);
+      }
     }
   }
 
   Future<void> _loadDepartmentHeadRequests({bool forceRefresh = false}) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final role = _authenticatedUserRole;
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_approvalsLoadGeneration;
     setState(() => _loadingApprovals = true);
     try {
-      final user = context.read<AuthProvider>().user;
-      final userId = (user?.id ?? '').trim();
-      if (userId.isEmpty) {
-        throw StateError('No authenticated user is available.');
-      }
       final items =
           (await LocatorSlipDataCache.instance.listDepartmentHeadRequests(
             userId: userId,
-            role: user?.role,
+            role: role,
             forceRefresh: forceRefresh,
           )).map((e) => _LocatorSlipDraft.fromApi(e)).toList();
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _approvalsLoadGeneration) {
+        return;
+      }
       setState(() {
         _deptHeadQueue
           ..clear()
           ..addAll(items);
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _approvalsLoadGeneration) {
+        return;
+      }
       setState(() {
         _deptHeadQueue.clear();
       });
     } finally {
-      if (mounted) setState(() => _loadingApprovals = false);
+      if (_isCurrentAuthSession(userId, authGeneration) &&
+          loadGeneration == _approvalsLoadGeneration) {
+        setState(() => _loadingApprovals = false);
+      }
     }
   }
 
   Future<void> _departmentHeadApprove(_LocatorSlipDraft item) async {
     if (item.id == null || item.id!.isEmpty) return;
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/department-head-approve',
         data: const {},
       );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       await _loadDepartmentHeadRequests(forceRefresh: true);
       await _loadMyRequests(forceRefresh: true);
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       _showLocatorSnack('Approved and sent to HR for final approval.');
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       setState(() => _error = _apiErrorMessage(e, fallback: 'Approve failed.'));
     }
   }
 
   Future<void> _departmentHeadReject(_LocatorSlipDraft item) async {
     if (item.id == null || item.id!.isEmpty) return;
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final reason = await _promptRejectionReason('Department Head');
-    if (reason == null || !mounted) return;
+    if (reason == null || !_isCurrentAuthSession(userId, authGeneration)) {
+      return;
+    }
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/department-head-reject',
         data: {'reviewer_remarks': reason},
       );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       await _loadDepartmentHeadRequests(forceRefresh: true);
       await _loadMyRequests(forceRefresh: true);
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       _showLocatorSnack('Request rejected.');
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       setState(() => _error = _apiErrorMessage(e, fallback: 'Reject failed.'));
     }
   }
@@ -1809,20 +1906,26 @@ class EmployeeLocatorSlipContentState
   Future<void> _departmentHeadReturn(_LocatorSlipDraft item) async {
     final id = item.id?.trim();
     if (id == null || id.isEmpty) return;
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final remarks = await _promptCorrectionRemarks();
-    if (remarks == null || !mounted) return;
+    if (remarks == null || !_isCurrentAuthSession(userId, authGeneration)) {
+      return;
+    }
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/$id/department-head-return',
         data: {'reviewer_remarks': remarks},
       );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       await _loadDepartmentHeadRequests(forceRefresh: true);
       await _loadMyRequests(forceRefresh: true);
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       _showLocatorSnack('Request returned to the employee for correction.');
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       await _showLocatorErrorDialog(
         _apiErrorMessage(e, fallback: 'Failed to return the request.'),
       );
@@ -1832,6 +1935,9 @@ class EmployeeLocatorSlipContentState
   Future<void> _correctAndResubmit(_LocatorSlipDraft item) async {
     final id = item.id?.trim();
     if (id == null || id.isEmpty) return;
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final hasCurrentAttachment = (item.attachmentName ?? '').trim().isNotEmpty;
     final action = await showDialog<String>(
       context: context,
@@ -1860,7 +1966,9 @@ class EmployeeLocatorSlipContentState
         ],
       ),
     );
-    if (action == null || !mounted) return;
+    if (action == null || !_isCurrentAuthSession(userId, authGeneration)) {
+      return;
+    }
 
     try {
       if (action == 'replace') {
@@ -1869,7 +1977,11 @@ class EmployeeLocatorSlipContentState
           allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
           withData: true,
         );
-        if (result == null || result.files.isEmpty || !mounted) return;
+        if (result == null ||
+            result.files.isEmpty ||
+            !_isCurrentAuthSession(userId, authGeneration)) {
+          return;
+        }
         final file = result.files.single;
         final bytes = file.bytes;
         if (bytes == null) {
@@ -1882,20 +1994,22 @@ class EmployeeLocatorSlipContentState
             'file': MultipartFile.fromBytes(bytes, filename: file.name),
           }),
         );
+        if (!_isCurrentAuthSession(userId, authGeneration)) return;
       }
 
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/$id/resubmit',
         data: const {},
       );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       await _loadMyRequests(forceRefresh: true);
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       _showLocatorSnack(
         'Corrections submitted. The attachment is locked again.',
       );
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       await _showLocatorErrorDialog(
         _apiErrorMessage(e, fallback: 'Failed to resubmit the request.'),
       );
@@ -1908,6 +2022,9 @@ class EmployeeLocatorSlipContentState
     if (id == null || id.isEmpty || filename == null || filename.isEmpty) {
       return;
     }
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final messenger = ScaffoldMessenger.of(context);
     try {
       messenger.clearSnackBars();
@@ -1919,7 +2036,7 @@ class EmployeeLocatorSlipContentState
         options: Options(responseType: ResponseType.bytes),
       );
       final bytes = response.data;
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       if (bytes == null || bytes.isEmpty) {
         messenger.showSnackBar(
           const SnackBar(content: Text('Attachment could not be loaded.')),
@@ -1929,7 +2046,7 @@ class EmployeeLocatorSlipContentState
       messenger.clearSnackBars();
       await locator_attachment.openLocatorAttachmentBytes(bytes, filename);
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       messenger.clearSnackBars();
       messenger.showSnackBar(
         SnackBar(
