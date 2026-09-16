@@ -1638,13 +1638,21 @@ class FormPdf {
     required String role,
     required String? name,
     required String title,
+    DocuTrackerSourceSignature? signature,
     String? fixedNameBelow,
     bool nameOnSignatureLine = true,
   }) {
     final lineName = name?.trim() ?? '';
     final printedName = fixedNameBelow?.trim() ?? '';
-    final onLine = nameOnSignatureLine ? lineName : '';
-    final belowLine = nameOnSignatureLine
+    final isSigned = signature?.isSigned == true;
+    final resolvedName = _signatureName(
+      signature,
+      lineName.isNotEmpty ? lineName : printedName,
+    );
+    final onLine = isSigned ? '' : (nameOnSignatureLine ? lineName : '');
+    final belowLine = isSigned
+        ? resolvedName
+        : nameOnSignatureLine
         ? ''
         : (lineName.isNotEmpty ? lineName : printedName);
     return pw.Expanded(
@@ -1664,7 +1672,9 @@ class FormPdf {
               border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
             ),
             alignment: pw.Alignment.bottomCenter,
-            child: onLine.isNotEmpty
+            child: isSigned
+                ? _signatureImage(signature, height: 24)
+                : onLine.isNotEmpty
                 ? pw.Text(
                     onLine,
                     style: pw.TextStyle(
@@ -1801,7 +1811,10 @@ class FormPdf {
     );
   }
 
-  static pw.Widget _idpSignatures(IdpEntry e) {
+  static pw.Widget _idpSignatures(
+    IdpEntry e,
+    DocuTrackerSourceSignatureBundle? signatures,
+  ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -1809,18 +1822,21 @@ class FormPdf {
           role: 'Prepared by:',
           name: e.preparedBy,
           title: 'Employee',
+          signature: signatures?.signatureFor('prepared_by'),
         ),
         pw.SizedBox(width: 8),
         _idpSignatureBlock(
           role: 'Reviewed by:',
           name: e.reviewedBy,
           title: 'Department Head',
+          signature: signatures?.signatureFor('reviewed_by'),
         ),
         pw.SizedBox(width: 8),
         _idpSignatureBlock(
           role: 'Noted by:',
           name: e.notedBy,
           title: IdpEntry.defaultNotedByTitle,
+          signature: signatures?.signatureFor('noted_by'),
           fixedNameBelow: IdpEntry.defaultNotedByName,
           nameOnSignatureLine: false,
         ),
@@ -1829,6 +1845,7 @@ class FormPdf {
           role: 'Approved by:',
           name: e.approvedBy,
           title: IdpEntry.defaultApprovedByTitle,
+          signature: signatures?.signatureFor('approved_by'),
           fixedNameBelow: IdpEntry.defaultApprovedByName,
           nameOnSignatureLine: false,
         ),
@@ -1836,7 +1853,10 @@ class FormPdf {
     );
   }
 
-  static Future<pw.Document> buildIdpPdf(IdpEntry e) async {
+  static Future<pw.Document> buildIdpPdf(
+    IdpEntry e, {
+    DocuTrackerSourceSignatureBundle? signatures,
+  }) async {
     await _ensureIdpAssets();
     final doc = pw.Document(theme: _idpPdfTheme);
 
@@ -1857,7 +1877,7 @@ class FormPdf {
         pw.SizedBox(height: 5),
         _idpDevelopmentTable(e),
         pw.SizedBox(height: 10),
-        _idpSignatures(e),
+        _idpSignatures(e, signatures),
       ],
     );
 
@@ -3168,8 +3188,9 @@ class FormPdf {
 
   /// Action Brainstorming and Coaching Worksheet (L&D) — DEPARTMENT, DATE, instruction, 7-column table, Certified by / Date.
   static Future<pw.Document> buildActionBrainstormingCoachingPdf(
-    ActionBrainstormingEntry e,
-  ) async {
+    ActionBrainstormingEntry e, {
+    DocuTrackerSourceSignatureBundle? signatures,
+  }) async {
     await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
@@ -3320,8 +3341,15 @@ class FormPdf {
                         'Certified by:',
                         style: const pw.TextStyle(fontSize: 9),
                       ),
+                      if (signatures != null)
+                        _signatureImage(
+                          signatures.signatureFor('certified_by'),
+                        ),
                       pw.Text(
-                        _s(e.certifiedBy),
+                        _signatureName(
+                          signatures?.signatureFor('certified_by'),
+                          _s(e.certifiedBy),
+                        ),
                         style: pw.TextStyle(
                           fontSize: 9,
                           fontWeight: pw.FontWeight.bold,

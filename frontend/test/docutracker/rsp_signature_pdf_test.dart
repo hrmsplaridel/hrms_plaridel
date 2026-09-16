@@ -5,6 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
+import 'package:hrms_plaridel/features/learning_development/models/action_brainstorming_coaching.dart';
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
 import 'package:hrms_plaridel/features/learning_development/models/computation_of_points.dart';
 import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
@@ -14,9 +15,13 @@ import 'package:hrms_plaridel/features/learning_development/models/work_experien
 const _onePixelPng =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
-DocuTrackerSourceSignatureBundle _signatures(String table, List<String> slots) {
+DocuTrackerSourceSignatureBundle _signatures(
+  String table,
+  List<String> slots, {
+  String sourceModule = 'rsp',
+}) {
   return DocuTrackerSourceSignatureBundle.fromJson(<String, dynamic>{
-    'source_module': 'rsp',
+    'source_module': sourceModule,
     'source_table': table,
     'source_record_id': '11111111-1111-4111-8111-111111111111',
     'source_status': 'saved',
@@ -121,4 +126,20 @@ void main() {
       );
     },
   );
+
+  test('L&D coaching form generates a signed PDF', () async {
+    await _expectPdf(
+      FormPdf.buildActionBrainstormingCoachingPdf(
+        ActionBrainstormingEntry.fromJson(<String, dynamic>{
+          'department': 'Human Resource Management',
+          'date': '2026-09-16',
+          'rows': <dynamic>[],
+          'certified_by': 'Department Head',
+        }),
+        signatures: _signatures(ActionBrainstormingEntry.tableName, const [
+          'certified_by',
+        ], sourceModule: 'ld'),
+      ),
+    );
+  });
 }

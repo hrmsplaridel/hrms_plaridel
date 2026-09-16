@@ -40,10 +40,11 @@ const {
   signLeaveSourceHrApprover,
 } = require('../services/docutrackerLeaveSignatureService');
 const {
-  getRspSourceSignatures,
+  getSourceSignatures,
   listRspSignatureRequests,
-  assignRspSourceSigner,
-  signRspSourceSlot,
+  listLdSignatureRequests,
+  assignSourceSigner,
+  signSourceSlot,
 } = require('../services/docutrackerRspSignatureService');
 const {
   getLinkedSourceDocument,
@@ -566,14 +567,25 @@ router.get('/sources/rsp/signature-requests', protect, async (req, res) => {
   }
 });
 
+/** List L&D forms requiring signer setup or a signature from this user. */
+router.get('/sources/ld/signature-requests', protect, async (req, res) => {
+  try {
+    res.json(await listLdSignatureRequests(pool, req.user));
+  } catch (err) {
+    console.error('[docutracker GET L&D signature requests]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
 /** GET fixed signature slots for an authorized linked source form. */
 router.get(
   '/sources/:sourceModule/:sourceTable/:sourceRecordId/signatures',
   protect,
   async (req, res) => {
     try {
-      const load = req.params.sourceModule === 'rsp'
-        ? getRspSourceSignatures
+      const load = ['rsp', 'ld'].includes(req.params.sourceModule)
+        ? getSourceSignatures
         : getLeaveSourceSignatures;
       res.json(
         await load(
@@ -599,7 +611,7 @@ router.put(
   requireAdmin,
   async (req, res) => {
     try {
-      res.json(await assignRspSourceSigner(
+      res.json(await assignSourceSigner(
         pool,
         req.user,
         'rsp',
@@ -622,7 +634,7 @@ router.post(
   protect,
   async (req, res) => {
     try {
-      res.json(await signRspSourceSlot(
+      res.json(await signSourceSlot(
         pool,
         req.user,
         'rsp',
@@ -633,6 +645,53 @@ router.post(
       ));
     } catch (err) {
       console.error('[docutracker POST RSP source signature]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+/** Assign an active HRMS user to an L&D form signature slot. */
+router.put(
+  '/sources/ld/:sourceTable/:sourceRecordId/signatures/:slotKey/assignment',
+  protect,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      res.json(await assignSourceSigner(
+        pool,
+        req.user,
+        'ld',
+        req.params.sourceTable,
+        req.params.sourceRecordId,
+        req.params.slotKey,
+        req.body || {}
+      ));
+    } catch (err) {
+      console.error('[docutracker PUT L&D source signature assignment]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+/** Sign or replace an L&D field as its assigned HRMS user. */
+router.post(
+  '/sources/ld/:sourceTable/:sourceRecordId/signatures/:slotKey/sign',
+  protect,
+  async (req, res) => {
+    try {
+      res.json(await signSourceSlot(
+        pool,
+        req.user,
+        'ld',
+        req.params.sourceTable,
+        req.params.sourceRecordId,
+        req.params.slotKey,
+        req.body || {}
+      ));
+    } catch (err) {
+      console.error('[docutracker POST L&D source signature]', err);
       const mapped = mapWorkflowServiceError(err);
       res.status(mapped.status).json({ error: mapped.error });
     }

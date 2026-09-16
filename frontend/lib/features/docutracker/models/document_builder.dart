@@ -177,25 +177,30 @@ class DocuTrackerSourceSignatureBundle {
 
 class DocuTrackerRspSignatureRequest {
   const DocuTrackerRspSignatureRequest({
+    required this.sourceModule,
     required this.sourceTable,
     required this.sourceRecordId,
     required this.formName,
     required this.title,
     required this.sourceRecord,
     required this.signatureBundle,
+    this.requiresSetup = false,
   });
 
+  final String sourceModule;
   final String sourceTable;
   final String sourceRecordId;
   final String formName;
   final String title;
   final Map<String, dynamic> sourceRecord;
   final DocuTrackerSourceSignatureBundle signatureBundle;
+  final bool requiresSetup;
 
   factory DocuTrackerRspSignatureRequest.fromJson(Map<String, dynamic> json) {
     final record = json['source_record'];
     final bundle = json['signature_bundle'];
     return DocuTrackerRspSignatureRequest(
+      sourceModule: json['source_module']?.toString() ?? 'rsp',
       sourceTable: json['source_table']?.toString() ?? '',
       sourceRecordId: json['source_record_id']?.toString() ?? '',
       formName: json['form_name']?.toString() ?? 'RSP Form',
@@ -206,6 +211,7 @@ class DocuTrackerRspSignatureRequest {
       signatureBundle: DocuTrackerSourceSignatureBundle.fromJson(
         bundle is Map ? Map<String, dynamic>.from(bundle) : json,
       ),
+      requiresSetup: json['requires_setup'] == true,
     );
   }
 

@@ -2248,11 +2248,13 @@ CREATE TABLE IF NOT EXISTS docutracker_rsp_source_signatures (
   source_table TEXT NOT NULL CHECK (source_table IN (
     'applicants_profile_entries', 'selection_lineup_entries',
     'computation_of_points_entries', 'work_experience_sheet_entries',
-    'turn_around_time_entries'
+    'turn_around_time_entries', 'idp_entries',
+    'action_brainstorming_coaching_entries'
   )),
   source_record_id UUID NOT NULL,
   slot_key TEXT NOT NULL CHECK (slot_key IN (
-    'prepared_by', 'checked_by', 'applicant', 'noted_by'
+    'prepared_by', 'checked_by', 'applicant', 'noted_by',
+    'reviewed_by', 'approved_by', 'certified_by'
   )),
   label TEXT NOT NULL,
   assigned_signer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,

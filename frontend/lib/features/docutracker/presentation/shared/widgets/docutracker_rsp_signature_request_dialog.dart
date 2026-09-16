@@ -8,12 +8,14 @@ import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart'
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
+import 'package:hrms_plaridel/features/learning_development/models/action_brainstorming_coaching.dart';
 import 'package:hrms_plaridel/features/learning_development/models/computation_of_points.dart';
+import 'package:hrms_plaridel/features/learning_development/models/individual_development_plan.dart';
 import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
 import 'package:hrms_plaridel/features/learning_development/models/turn_around_time.dart';
 import 'package:hrms_plaridel/features/learning_development/models/work_experience_sheet.dart';
 
-Future<void> showDocuTrackerRspSignatureRequestDialog(
+Future<void> showDocuTrackerSourceSignatureRequestDialog(
   BuildContext context, {
   required DocuTrackerRspSignatureRequest request,
   VoidCallback? onChanged,
@@ -25,6 +27,16 @@ Future<void> showDocuTrackerRspSignatureRequestDialog(
         _RspSignatureRequestDialog(request: request, onChanged: onChanged),
   );
 }
+
+Future<void> showDocuTrackerRspSignatureRequestDialog(
+  BuildContext context, {
+  required DocuTrackerRspSignatureRequest request,
+  VoidCallback? onChanged,
+}) => showDocuTrackerSourceSignatureRequestDialog(
+  context,
+  request: request,
+  onChanged: onChanged,
+);
 
 class _RspSignatureRequestDialog extends StatefulWidget {
   const _RspSignatureRequestDialog({required this.request, this.onChanged});
@@ -50,28 +62,44 @@ class _RspSignatureRequestDialogState
 
   Future<Uint8List> _buildPdf() async {
     final record = widget.request.sourceRecord;
-    final document = switch (widget.request.sourceTable) {
-      ApplicantsProfileEntry.tableName => FormPdf.buildApplicantsProfilePdf(
-        ApplicantsProfileEntry.fromJson(record),
-        signatures: _bundle,
-      ),
-      SelectionLineupEntry.tableName => FormPdf.buildSelectionLineupPdf(
-        SelectionLineupEntry.fromJson(record),
-        signatures: _bundle,
-      ),
-      ComputationOfPointsEntry.tableName => FormPdf.buildComputationOfPointsPdf(
-        ComputationOfPointsEntry.fromJson(record),
-        signatures: _bundle,
-      ),
-      WorkExperienceSheetEntry.tableName => FormPdf.buildWorkExperienceSheetPdf(
-        WorkExperienceSheetEntry.fromJson(record),
-        signatures: _bundle,
-      ),
-      TurnAroundTimeEntry.tableName => FormPdf.buildTurnAroundTimePdf(
+    final document = switch ((
+      widget.request.sourceModule,
+      widget.request.sourceTable,
+    )) {
+      ('rsp', ApplicantsProfileEntry.tableName) =>
+        FormPdf.buildApplicantsProfilePdf(
+          ApplicantsProfileEntry.fromJson(record),
+          signatures: _bundle,
+        ),
+      ('rsp', SelectionLineupEntry.tableName) =>
+        FormPdf.buildSelectionLineupPdf(
+          SelectionLineupEntry.fromJson(record),
+          signatures: _bundle,
+        ),
+      ('rsp', ComputationOfPointsEntry.tableName) =>
+        FormPdf.buildComputationOfPointsPdf(
+          ComputationOfPointsEntry.fromJson(record),
+          signatures: _bundle,
+        ),
+      ('rsp', WorkExperienceSheetEntry.tableName) =>
+        FormPdf.buildWorkExperienceSheetPdf(
+          WorkExperienceSheetEntry.fromJson(record),
+          signatures: _bundle,
+        ),
+      ('rsp', TurnAroundTimeEntry.tableName) => FormPdf.buildTurnAroundTimePdf(
         TurnAroundTimeEntry.fromJson(record),
         signatures: _bundle,
       ),
-      _ => throw StateError('This RSP form cannot be previewed.'),
+      ('ld', IdpEntry.tableName) => FormPdf.buildIdpPdf(
+        IdpEntry.fromJson(record),
+        signatures: _bundle,
+      ),
+      ('ld', ActionBrainstormingEntry.tableName) =>
+        FormPdf.buildActionBrainstormingCoachingPdf(
+          ActionBrainstormingEntry.fromJson(record),
+          signatures: _bundle,
+        ),
+      _ => throw StateError('This source form cannot be previewed.'),
     };
     return (await document).save();
   }
@@ -86,7 +114,7 @@ class _RspSignatureRequestDialogState
 
   Widget _buildSignaturePanel() {
     final assignedSlots = _bundle.signatures
-        .where((signature) => signature.canSign)
+        .where((signature) => _bundle.canAssign || signature.canSign)
         .toList(growable: false);
     return ListView.separated(
       padding: const EdgeInsets.all(16),
@@ -98,7 +126,7 @@ class _RspSignatureRequestDialogState
           key: ValueKey(
             'request-${widget.request.sourceRecordId}-${signature.slotKey}',
           ),
-          sourceModule: 'rsp',
+          sourceModule: widget.request.sourceModule,
           sourceTable: widget.request.sourceTable,
           sourceRecordId: widget.request.sourceRecordId,
           slotKey: signature.slotKey,
@@ -181,7 +209,7 @@ class _RspSignatureRequestDialogState
 
   Widget _buildPreview() {
     return PdfPreview(
-      key: ValueKey('rsp-request-preview-$_previewRevision'),
+      key: ValueKey('source-request-preview-$_previewRevision'),
       build: (_) => _buildPdf(),
       canChangeOrientation: false,
       canChangePageFormat: false,

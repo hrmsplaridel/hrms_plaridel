@@ -41,6 +41,10 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | GET | `/api/docutracker/sources/rsp/signature-requests` | List saved RSP forms having a signature field assigned to the authenticated user, including the protected form preview payload |
 | PUT | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an RSP signature field |
 | POST | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/sign` | Add or replace the authenticated assigned user's RSP form signature |
+| GET | `/api/docutracker/sources/ld/{table}/{recordId}/signatures` | Load configured signature fields for an authorized saved L&D form |
+| GET | `/api/docutracker/sources/ld/signature-requests` | List L&D forms needing admin signer setup or a signature from the authenticated user |
+| PUT | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an L&D signature field |
+| POST | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/sign` | Add or replace the authenticated assigned user's L&D form signature |
 
 Builder responses include `current_user_id` and a per-field `can_sign`
 capability calculated from the authenticated backend user. The Flutter client
@@ -61,6 +65,15 @@ Only that authenticated account receives `can_sign: true` and may draw, select,
 or replace its own saved signature. Assignment changes and signature changes
 are transactional and recorded in the DocuTracker governance audit. The BI
 Form has no signature field in its current official layout.
+
+Saved L&D forms use the same server-authorized assignment and signing rules.
+Supported records are Individual Development Plan (`prepared_by`,
+`reviewed_by`, `noted_by`, and `approved_by`) and Action Brainstorming and
+Coaching (`certified_by`). Administrators can discover forms with unassigned
+fields through the L&D signature-request endpoint. Assigned users see only
+their own requests. Training Needs Analysis and Performance Evaluation are not
+given artificial signature fields because their current print layouts contain
+none.
 
 Builder responses also include `format_version`. New builder content uses
 version `2`, which renders the official `assets/forms/a4_letter.pdf` full-page

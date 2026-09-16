@@ -508,10 +508,11 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   }
 
   Future<DocuTrackerResult<List<DocuTrackerRspSignatureRequest>>>
-  getRspSignatureRequests() async {
+  getSourceSignatureRequests({required String sourceModule}) async {
     try {
+      final module = Uri.encodeComponent(sourceModule);
       final response = await ApiClient.instance.get<List<dynamic>>(
-        '$_base/sources/rsp/signature-requests',
+        '$_base/sources/$module/signature-requests',
       );
       final data = response.data ?? const <dynamic>[];
       return DocuTrackerSuccess(
@@ -528,6 +529,9 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       return DocuTrackerFailure(_apiErrorMessage(error));
     }
   }
+
+  Future<DocuTrackerResult<List<DocuTrackerRspSignatureRequest>>>
+  getRspSignatureRequests() => getSourceSignatureRequests(sourceModule: 'rsp');
 
   Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
   signSourceSignature({

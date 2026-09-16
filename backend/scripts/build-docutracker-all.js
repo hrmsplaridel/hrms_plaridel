@@ -30,6 +30,7 @@ const postSections = [
   ["19 - DEPARTMENT HEAD LEAVE E-SIGNATURE", "migrate-docutracker-leave-signatures-v2.sql"],
   ["20 - HR APPROVER LEAVE E-SIGNATURE", "migrate-docutracker-leave-signatures-v3.sql"],
   ["21 - LINKED RSP FORM E-SIGNATURES", "migrate-docutracker-rsp-source-signatures-v1.sql"],
+  ["22 - LINKED L&D FORM E-SIGNATURES", "migrate-docutracker-ld-source-signatures-v1.sql"],
 ];
 
 function readBody(file) {

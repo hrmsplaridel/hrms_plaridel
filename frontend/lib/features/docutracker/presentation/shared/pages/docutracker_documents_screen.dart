@@ -90,7 +90,7 @@ class _DocuTrackerDocumentsScreenState
       documentType: _filterType,
       status: _filterStatus,
     );
-    await provider.loadRspSignatureRequests();
+    await provider.loadSourceSignatureRequests();
 
     final repo = DocuTrackerRepository.instance;
     final creatableTypes = await repo.creatableDocumentTypes();
@@ -116,8 +116,12 @@ class _DocuTrackerDocumentsScreenState
       documents: visibleDocuments,
       userId: userId,
     );
-    final pendingRspRequests = provider.rspSignatureRequests
-        .where((request) => request.hasUnsignedAssignedSlot)
+    final pendingSourceRequests = provider.sourceSignatureRequests
+        .where(
+          (request) =>
+              request.hasUnsignedAssignedSlot ||
+              (widget.isAdmin && request.requiresSetup),
+        )
         .toList(growable: false);
 
     return Column(
@@ -132,16 +136,16 @@ class _DocuTrackerDocumentsScreenState
           ),
           const SizedBox(height: 16),
         ],
-        if (provider.rspSignatureRequestsLoading ||
+        if (provider.sourceSignatureRequestsLoading ||
             requiredDocuments.isNotEmpty ||
-            pendingRspRequests.isNotEmpty ||
-            provider.rspSignatureRequestsError != null) ...[
+            pendingSourceRequests.isNotEmpty ||
+            provider.sourceSignatureRequestsError != null) ...[
           _RequiredActionsPanel(
             documents: requiredDocuments,
-            rspRequests: pendingRspRequests,
-            loading: provider.rspSignatureRequestsLoading,
-            hasPartialError: provider.rspSignatureRequestsError != null,
-            onRefreshRsp: provider.loadRspSignatureRequests,
+            sourceRequests: pendingSourceRequests,
+            loading: provider.sourceSignatureRequestsLoading,
+            hasPartialError: provider.sourceSignatureRequestsError != null,
+            onRefreshSignatures: provider.loadSourceSignatureRequests,
             onDocumentTap: (document) => openDocuTrackerDocumentDetail(
               context,
               document: document,
@@ -423,18 +427,18 @@ class _DocuTrackerDocumentsScreenState
 class _RequiredActionsPanel extends StatefulWidget {
   const _RequiredActionsPanel({
     required this.documents,
-    required this.rspRequests,
+    required this.sourceRequests,
     required this.loading,
     required this.hasPartialError,
-    required this.onRefreshRsp,
+    required this.onRefreshSignatures,
     required this.onDocumentTap,
   });
 
   final List<DocuTrackerDocument> documents;
-  final List<DocuTrackerRspSignatureRequest> rspRequests;
+  final List<DocuTrackerRspSignatureRequest> sourceRequests;
   final bool loading;
   final bool hasPartialError;
-  final Future<void> Function() onRefreshRsp;
+  final Future<void> Function() onRefreshSignatures;
   final Future<bool> Function(DocuTrackerDocument document) onDocumentTap;
 
   @override
@@ -447,7 +451,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
   @override
   Widget build(BuildContext context) {
     final entries = <_RequiredActionEntry>[
-      ...widget.rspRequests.map(_RequiredActionEntry.rsp),
+      ...widget.sourceRequests.map(_RequiredActionEntry.source),
       ...widget.documents.map(_RequiredActionEntry.document),
     ];
     final shownEntries = _showAll ? entries : entries.take(4).toList();
@@ -508,7 +512,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                   ),
                 ),
                 TextButton(
-                  onPressed: widget.loading ? null : widget.onRefreshRsp,
+                  onPressed: widget.loading ? null : widget.onRefreshSignatures,
                   child: const Text('Retry'),
                 ),
               ],
@@ -554,7 +558,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
           if (entries.isNotEmpty) ...[
             const SizedBox(height: 4),
             const Text(
-              'DTR and RSP records remain managed by their source modules.',
+              'DTR, RSP, and L&D records remain managed by their source modules.',
               style: TextStyle(
                 color: DocuTrackerTokens.textMuted,
                 fontSize: 11,
@@ -568,27 +572,29 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
 
   Widget _buildActionCard(BuildContext context, _RequiredActionEntry entry) {
     final document = entry.document;
-    final request = entry.rspRequest;
+    final request = entry.sourceRequest;
     final isDtr = document?.sourceModule == 'dtr';
     final sourceLabel = request != null
-        ? 'RSP · ${request.formName}'
+        ? '${request.sourceModule == 'ld' ? 'L&D' : 'RSP'} · ${request.formName}'
         : isDtr
         ? 'DTR · Leave'
         : 'DocuTracker';
     final title = request?.title ?? document?.title ?? 'Required action';
     final actionLabel = request != null
-        ? 'Review and sign'
+        ? request.requiresSetup
+              ? 'Assign required signers'
+              : 'Review and sign'
         : document?.sourceActionLabel ?? 'Review document';
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () async {
         if (request != null) {
-          await showDocuTrackerRspSignatureRequestDialog(
+          await showDocuTrackerSourceSignatureRequestDialog(
             context,
             request: request,
           );
-          await widget.onRefreshRsp();
+          await widget.onRefreshSignatures();
           return;
         }
         if (document != null) await widget.onDocumentTap(document);
@@ -655,11 +661,11 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
 }
 
 class _RequiredActionEntry {
-  const _RequiredActionEntry.document(this.document) : rspRequest = null;
-  const _RequiredActionEntry.rsp(this.rspRequest) : document = null;
+  const _RequiredActionEntry.document(this.document) : sourceRequest = null;
+  const _RequiredActionEntry.source(this.sourceRequest) : document = null;
 
   final DocuTrackerDocument? document;
-  final DocuTrackerRspSignatureRequest? rspRequest;
+  final DocuTrackerRspSignatureRequest? sourceRequest;
 }
 
 class _EmptyState extends StatelessWidget {

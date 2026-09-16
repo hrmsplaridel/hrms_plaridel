@@ -2,7 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  getSourceSignatures,
   getRspSourceSignatures,
+  listLdSignatureRequests,
   listRspSignatureRequests,
   assignRspSourceSigner,
   signRspSourceSlot,
@@ -84,7 +86,8 @@ test('signature request list returns only forms assigned to the current user', a
   const pool = {
     async query(sql, params = []) {
       if (sql.includes('SELECT DISTINCT source_table')) {
-        assert.deepEqual(params, [signerId]);
+        assert.equal(params[0], signerId);
+        assert.ok(params[1].includes('selection_lineup_entries'));
         return {
           rowCount: 1,
           rows: [{
@@ -123,6 +126,79 @@ test('signature request list returns only forms assigned to the current user', a
   assert.equal(result[0].form_name, 'Selection Line-Up');
   assert.equal(result[0].title, 'Administrative Officer');
   assert.equal(result[0].signature_bundle.signatures[0].can_sign, true);
+});
+
+test('L&D admins can discover unassigned signature-bearing forms for setup', async () => {
+  const pool = {
+    async query(sql) {
+      if (sql.includes('FROM "idp_entries"') && sql.includes('ORDER BY updated_at')) {
+        return { rowCount: 1, rows: [{ source_record_id: formId }] };
+      }
+      if (
+        sql.includes('FROM "action_brainstorming_coaching_entries"') &&
+        sql.includes('ORDER BY updated_at')
+      ) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT id FROM "idp_entries"')) {
+        return sourceRow();
+      }
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT to_jsonb(source_row)')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            source_record: {
+              id: formId,
+              name: 'Juan Dela Cruz',
+              position: 'Administrative Officer',
+            },
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await listLdSignatureRequests(pool, {
+    id: adminId,
+    role: 'admin',
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source_module, 'ld');
+  assert.equal(result[0].form_name, 'Individual Development Plan');
+  assert.equal(result[0].title, 'Juan Dela Cruz - Administrative Officer');
+  assert.equal(result[0].requires_setup, true);
+  assert.deepEqual(
+    result[0].signature_bundle.signatures.map((slot) => slot.slot_key),
+    ['prepared_by', 'reviewed_by', 'noted_by', 'approved_by']
+  );
+});
+
+test('unassigned users cannot open L&D source signature fields directly', async () => {
+  const pool = {
+    async query(sql) {
+      if (sql.includes('SELECT id FROM "idp_entries"')) return sourceRow();
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        return { rowCount: 0, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  await assert.rejects(
+    getSourceSignatures(
+      pool,
+      { id: otherId, role: 'employee' },
+      'ld',
+      'idp_entries',
+      formId
+    ),
+    (error) => error.code === 'FORBIDDEN'
+  );
 });
 
 test('admin assignment is transactional and clears a different signer signature', async () => {

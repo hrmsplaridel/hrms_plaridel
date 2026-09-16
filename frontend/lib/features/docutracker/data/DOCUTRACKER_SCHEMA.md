@@ -19,7 +19,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | docutracker_signature_assets | Private drawn/uploaded signature images owned by users |
 | docutracker_signature_fields | Page placement, assigned signer, signed date, and lock state |
 | docutracker_leave_signatures | Fixed signature slots linked to authoritative DTR leave requests |
-| docutracker_rsp_source_signatures | Assigned and signed fields linked to saved RSP forms |
+| docutracker_rsp_source_signatures | Assigned and signed fields linked to allowlisted saved RSP and L&D forms; legacy table name retained for compatibility |
 
 ## docutracker_documents
 
@@ -166,9 +166,9 @@ entry to `leave_request_history`.
 
 | Column | Type | Purpose |
 |--------|------|---------|
-| source_table | TEXT | Allowlisted saved RSP form table |
+| source_table | TEXT | Allowlisted saved RSP or L&D form table |
 | source_record_id | UUID | Existing saved form record |
-| slot_key | TEXT | Fixed field such as `prepared_by`, `checked_by`, `applicant`, or `noted_by` |
+| slot_key | TEXT | Fixed field such as `prepared_by`, `checked_by`, `applicant`, `noted_by`, `reviewed_by`, `approved_by`, or `certified_by` |
 | label | TEXT | Human-readable signature field label |
 | assigned_signer_id | UUID | Active HRMS user authorized to sign the field |
 | signature_asset_id | UUID | Private signature asset selected by that user |
@@ -177,7 +177,10 @@ entry to `leave_request_history`.
 | signed_at | TIMESTAMPTZ | Server time of the latest signature |
 | created_by | UUID | Administrator who first assigned the field |
 
-The unique key is `(source_table, source_record_id, slot_key)`. Changing the
+The legacy table name is retained to avoid moving existing RSP audit data. The
+table now also stores signature metadata for L&D IDP and Action Brainstorming
+and Coaching forms. The unique key is
+`(source_table, source_record_id, slot_key)`. Changing the
 assigned user clears the previous signature atomically. The API checks the
 source table and field against a fixed allowlist, verifies that the form exists,
 and permits signing only when `assigned_signer_id` matches the authenticated

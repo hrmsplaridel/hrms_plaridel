@@ -45,9 +45,9 @@ class DocuTrackerProvider extends ChangeNotifier {
   String? _builderError;
   bool _sourceSignatureLoading = false;
   String? _sourceSignatureError;
-  List<DocuTrackerRspSignatureRequest> _rspSignatureRequests = const [];
-  bool _rspSignatureRequestsLoading = false;
-  String? _rspSignatureRequestsError;
+  List<DocuTrackerRspSignatureRequest> _sourceSignatureRequests = const [];
+  bool _sourceSignatureRequestsLoading = false;
+  String? _sourceSignatureRequestsError;
 
   // Prevent duplicate transitions due to double taps / retries.
   final Set<String> _transitionInFlight = <String>{};
@@ -704,30 +704,48 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   bool get sourceSignatureLoading => _sourceSignatureLoading;
   String? get sourceSignatureError => _sourceSignatureError;
-  List<DocuTrackerRspSignatureRequest> get rspSignatureRequests =>
-      List.unmodifiable(_rspSignatureRequests);
-  bool get rspSignatureRequestsLoading => _rspSignatureRequestsLoading;
-  String? get rspSignatureRequestsError => _rspSignatureRequestsError;
+  List<DocuTrackerRspSignatureRequest> get sourceSignatureRequests =>
+      List.unmodifiable(_sourceSignatureRequests);
+  bool get sourceSignatureRequestsLoading => _sourceSignatureRequestsLoading;
+  String? get sourceSignatureRequestsError => _sourceSignatureRequestsError;
 
-  Future<void> loadRspSignatureRequests() async {
-    if (_rspSignatureRequestsLoading) return;
-    _rspSignatureRequestsLoading = true;
-    _rspSignatureRequestsError = null;
+  List<DocuTrackerRspSignatureRequest> get rspSignatureRequests =>
+      sourceSignatureRequests
+          .where((request) => request.sourceModule == 'rsp')
+          .toList(growable: false);
+  bool get rspSignatureRequestsLoading => sourceSignatureRequestsLoading;
+  String? get rspSignatureRequestsError => sourceSignatureRequestsError;
+
+  Future<void> loadSourceSignatureRequests() async {
+    if (_sourceSignatureRequestsLoading) return;
+    _sourceSignatureRequestsLoading = true;
+    _sourceSignatureRequestsError = null;
     notifyListeners();
-    final result = await _repo.getRspSignatureRequests();
-    _rspSignatureRequestsLoading = false;
-    switch (result) {
-      case DocuTrackerSuccess<List<DocuTrackerRspSignatureRequest>>(
-        :final value,
-      ):
-        _rspSignatureRequests = value;
-      case DocuTrackerFailure<List<DocuTrackerRspSignatureRequest>>(
-        :final message,
-      ):
-        _rspSignatureRequestsError = message;
+    final results = await Future.wait([
+      _repo.getSourceSignatureRequests(sourceModule: 'rsp'),
+      _repo.getSourceSignatureRequests(sourceModule: 'ld'),
+    ]);
+    _sourceSignatureRequestsLoading = false;
+    final requests = <DocuTrackerRspSignatureRequest>[];
+    final errors = <String>[];
+    for (final result in results) {
+      switch (result) {
+        case DocuTrackerSuccess<List<DocuTrackerRspSignatureRequest>>(
+          :final value,
+        ):
+          requests.addAll(value);
+        case DocuTrackerFailure<List<DocuTrackerRspSignatureRequest>>(
+          :final message,
+        ):
+          errors.add(message);
+      }
     }
+    _sourceSignatureRequests = requests;
+    _sourceSignatureRequestsError = errors.isEmpty ? null : errors.join(' ');
     notifyListeners();
   }
+
+  Future<void> loadRspSignatureRequests() => loadSourceSignatureRequests();
 
   Future<DocuTrackerSourceSignatureBundle?> loadSourceSignatures({
     required String sourceModule,

@@ -2,26 +2,54 @@ const { createSignatureAsset } = require('./docutrackerDocumentBuilderService');
 const { writeGovernanceAudit } = require('./docutrackerGovernanceAudit');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const RSP_SIGNATURE_SLOTS = Object.freeze({
-  applicants_profile_entries: Object.freeze({
-    prepared_by: 'Prepared by',
-    checked_by: 'Checked by',
+const SOURCE_SIGNATURE_CONFIGS = Object.freeze({
+  rsp: Object.freeze({
+    label: 'RSP',
+    includeUnassignedForAdmin: false,
+    slots: Object.freeze({
+      applicants_profile_entries: Object.freeze({
+        prepared_by: 'Prepared by',
+        checked_by: 'Checked by',
+      }),
+      selection_lineup_entries: Object.freeze({ prepared_by: 'Prepared by' }),
+      computation_of_points_entries: Object.freeze({ prepared_by: 'Prepared by' }),
+      work_experience_sheet_entries: Object.freeze({ applicant: 'Signature of Applicant' }),
+      turn_around_time_entries: Object.freeze({
+        prepared_by: 'Prepared by',
+        noted_by: 'Noted by',
+      }),
+    }),
+    formNames: Object.freeze({
+      applicants_profile_entries: 'Applicants Profile',
+      selection_lineup_entries: 'Selection Line-Up',
+      computation_of_points_entries: 'Computation of Points',
+      work_experience_sheet_entries: 'Work Experience Sheet',
+      turn_around_time_entries: 'Turn Around Time',
+    }),
   }),
-  selection_lineup_entries: Object.freeze({ prepared_by: 'Prepared by' }),
-  computation_of_points_entries: Object.freeze({ prepared_by: 'Prepared by' }),
-  work_experience_sheet_entries: Object.freeze({ applicant: 'Signature of Applicant' }),
-  turn_around_time_entries: Object.freeze({
-    prepared_by: 'Prepared by',
-    noted_by: 'Noted by',
+  ld: Object.freeze({
+    label: 'L&D',
+    includeUnassignedForAdmin: true,
+    slots: Object.freeze({
+      idp_entries: Object.freeze({
+        prepared_by: 'Prepared by',
+        reviewed_by: 'Reviewed by',
+        noted_by: 'Noted by',
+        approved_by: 'Approved by',
+      }),
+      action_brainstorming_coaching_entries: Object.freeze({
+        certified_by: 'Certified by',
+      }),
+    }),
+    formNames: Object.freeze({
+      idp_entries: 'Individual Development Plan',
+      action_brainstorming_coaching_entries: 'Action Brainstorming and Coaching',
+    }),
   }),
 });
-const RSP_FORM_NAMES = Object.freeze({
-  applicants_profile_entries: 'Applicants Profile',
-  selection_lineup_entries: 'Selection Line-Up',
-  computation_of_points_entries: 'Computation of Points',
-  work_experience_sheet_entries: 'Work Experience Sheet',
-  turn_around_time_entries: 'Turn Around Time',
-});
+
+const RSP_SIGNATURE_SLOTS = SOURCE_SIGNATURE_CONFIGS.rsp.slots;
+const LD_SIGNATURE_SLOTS = SOURCE_SIGNATURE_CONFIGS.ld.slots;
 
 function serviceError(code, message) {
   const error = new Error(message);
@@ -30,25 +58,32 @@ function serviceError(code, message) {
 }
 
 function sourceConfig(sourceModule, sourceTable, sourceRecordId, slotKey = null) {
-  if (sourceModule !== 'rsp' || !Object.hasOwn(RSP_SIGNATURE_SLOTS, sourceTable)) {
-    throw serviceError('NOT_FOUND', 'RSP form signature fields were not found');
+  const normalizedModule = String(sourceModule || '').trim().toLowerCase();
+  const moduleConfig = SOURCE_SIGNATURE_CONFIGS[normalizedModule];
+  if (!moduleConfig || !Object.hasOwn(moduleConfig.slots, sourceTable)) {
+    throw serviceError('NOT_FOUND', 'Source form signature fields were not found');
   }
   if (!UUID_RE.test(String(sourceRecordId || ''))) {
-    throw serviceError('NOT_FOUND', 'RSP form was not found');
+    throw serviceError('NOT_FOUND', 'Source form was not found');
   }
-  if (slotKey != null && !Object.hasOwn(RSP_SIGNATURE_SLOTS[sourceTable], slotKey)) {
-    throw serviceError('NOT_FOUND', 'RSP signature field was not found');
+  if (slotKey != null && !Object.hasOwn(moduleConfig.slots[sourceTable], slotKey)) {
+    throw serviceError('NOT_FOUND', 'Source signature field was not found');
   }
-  return RSP_SIGNATURE_SLOTS[sourceTable];
+  return {
+    sourceModule: normalizedModule,
+    moduleConfig,
+    slots: moduleConfig.slots[sourceTable],
+    formName: moduleConfig.formNames[sourceTable],
+  };
 }
 
 async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, { forUpdate = false } = {}) {
-  const slots = sourceConfig(sourceModule, sourceTable, sourceRecordId);
+  const config = sourceConfig(sourceModule, sourceTable, sourceRecordId);
   const source = await db.query(
     `SELECT id FROM "${sourceTable}" WHERE id = $1::uuid${forUpdate ? ' FOR UPDATE' : ''}`,
     [sourceRecordId]
   );
-  if (!source.rowCount) throw serviceError('NOT_FOUND', 'RSP form was not found');
+  if (!source.rowCount) throw serviceError('NOT_FOUND', `${config.moduleConfig.label} form was not found`);
   const rows = await db.query(
     `SELECT s.id, s.slot_key, s.label, s.assigned_signer_id,
             assigned.full_name AS assigned_signer_name,
@@ -69,12 +104,12 @@ async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, 
   if (!isAdmin && !isAssigned) {
     throw serviceError('FORBIDDEN', 'Only an assigned signer can open these signature fields');
   }
-  return { slots, rows: rows.rows, isAdmin };
+  return { ...config, rows: rows.rows, isAdmin };
 }
 
 function serialize(context, user, sourceTable, sourceRecordId) {
   return {
-    source_module: 'rsp',
+    source_module: context.sourceModule,
     source_table: sourceTable,
     source_record_id: sourceRecordId,
     source_status: 'saved',
@@ -99,19 +134,19 @@ function serialize(context, user, sourceTable, sourceRecordId) {
   };
 }
 
-async function getRspSourceSignatures(pool, user, sourceModule, sourceTable, sourceRecordId) {
+async function getSourceSignatures(pool, user, sourceModule, sourceTable, sourceRecordId) {
   try {
     const context = await loadContext(pool, user, sourceModule, sourceTable, sourceRecordId);
     return serialize(context, user, sourceTable, sourceRecordId);
   } catch (error) {
     if (error?.code === '42P01') {
-      throw serviceError('UNAVAILABLE', 'RSP e-signatures are not initialized');
+      throw serviceError('UNAVAILABLE', 'Source form e-signatures are not initialized');
     }
     throw error;
   }
 }
 
-function requestTitle(sourceTable, record) {
+function requestTitle(sourceModule, sourceTable, record) {
   const candidates = {
     applicants_profile_entries: record.position_applied_for,
     selection_lineup_entries: record.vacant_position,
@@ -121,26 +156,56 @@ function requestTitle(sourceTable, record) {
         ? `${record.applicant_name} - ${record.position_applied_for}`
         : record.applicant_name || record.position_applied_for,
     turn_around_time_entries: record.position,
+    idp_entries:
+      record.name && record.position
+        ? `${record.name} - ${record.position}`
+        : record.name || record.position,
+    action_brainstorming_coaching_entries:
+      record.department && record.date
+        ? `${record.department} - ${record.date}`
+        : record.department || record.date,
   };
-  return String(candidates[sourceTable] || RSP_FORM_NAMES[sourceTable]).trim();
+  const config = sourceConfig(sourceModule, sourceTable, record.id);
+  return String(candidates[sourceTable] || config.formName).trim();
 }
 
-async function listRspSignatureRequests(pool, user) {
+async function listSourceSignatureRequests(pool, user, sourceModule) {
   try {
-    const assigned = await pool.query(
-      `SELECT DISTINCT source_table, source_record_id
-       FROM docutracker_rsp_source_signatures
-       WHERE assigned_signer_id = $1::uuid
-       ORDER BY source_table, source_record_id`,
-      [user.id]
-    );
+    const normalizedModule = String(sourceModule || '').trim().toLowerCase();
+    const moduleConfig = SOURCE_SIGNATURE_CONFIGS[normalizedModule];
+    if (!moduleConfig) throw serviceError('NOT_FOUND', 'Source signature requests were not found');
+    const isAdmin = String(user.role || '').toLowerCase() === 'admin';
+    const assignedRows = [];
+    if (isAdmin && moduleConfig.includeUnassignedForAdmin) {
+      for (const sourceTable of Object.keys(moduleConfig.slots)) {
+        const sourceRows = await pool.query(
+          `SELECT id AS source_record_id
+           FROM "${sourceTable}"
+           ORDER BY updated_at DESC NULLS LAST, id`
+        );
+        assignedRows.push(...sourceRows.rows.map((row) => ({
+          source_table: sourceTable,
+          source_record_id: row.source_record_id,
+        })));
+      }
+    } else {
+      const assigned = await pool.query(
+        `SELECT DISTINCT source_table, source_record_id
+         FROM docutracker_rsp_source_signatures
+         WHERE assigned_signer_id = $1::uuid
+           AND source_table = ANY($2::text[])
+         ORDER BY source_table, source_record_id`,
+        [user.id, Object.keys(moduleConfig.slots)]
+      );
+      assignedRows.push(...assigned.rows);
+    }
     const requests = [];
-    for (const assignment of assigned.rows) {
-      sourceConfig('rsp', assignment.source_table, assignment.source_record_id);
+    for (const assignment of assignedRows) {
+      sourceConfig(normalizedModule, assignment.source_table, assignment.source_record_id);
       const context = await loadContext(
         pool,
         user,
-        'rsp',
+        normalizedModule,
         assignment.source_table,
         assignment.source_record_id
       );
@@ -152,19 +217,23 @@ async function listRspSignatureRequests(pool, user) {
       );
       if (!source.rowCount) continue;
       const record = source.rows[0].source_record;
+      const signatureBundle = serialize(
+        context,
+        user,
+        assignment.source_table,
+        assignment.source_record_id
+      );
       requests.push({
-        source_module: 'rsp',
+        source_module: normalizedModule,
         source_table: assignment.source_table,
         source_record_id: assignment.source_record_id,
-        form_name: RSP_FORM_NAMES[assignment.source_table],
-        title: requestTitle(assignment.source_table, record),
+        form_name: moduleConfig.formNames[assignment.source_table],
+        title: requestTitle(normalizedModule, assignment.source_table, record),
         source_record: record,
-        signature_bundle: serialize(
-          context,
-          user,
-          assignment.source_table,
-          assignment.source_record_id
-        ),
+        requires_setup:
+          context.isAdmin &&
+          signatureBundle.signatures.some((signature) => !signature.assigned_signer_id),
+        signature_bundle: signatureBundle,
       });
     }
     return requests;
@@ -174,10 +243,10 @@ async function listRspSignatureRequests(pool, user) {
   }
 }
 
-async function assignRspSourceSigner(pool, user, sourceModule, sourceTable, sourceRecordId, slotKey, input) {
-  sourceConfig(sourceModule, sourceTable, sourceRecordId, slotKey);
+async function assignSourceSigner(pool, user, sourceModule, sourceTable, sourceRecordId, slotKey, input) {
+  const config = sourceConfig(sourceModule, sourceTable, sourceRecordId, slotKey);
   if (String(user.role || '').toLowerCase() !== 'admin') {
-    throw serviceError('FORBIDDEN', 'Only an administrator can assign RSP signers');
+    throw serviceError('FORBIDDEN', 'Only an administrator can assign source form signers');
   }
   const signerId = String(input.assigned_signer_id || '').trim();
   if (!UUID_RE.test(signerId)) throw serviceError('VALIDATION', 'Select an active signer');
@@ -209,9 +278,9 @@ async function assignRspSourceSigner(pool, user, sourceModule, sourceTable, sour
     await writeGovernanceAudit(client, {
       actorId: user.id,
       eventType: 'source_signer_assigned',
-      entityType: 'rsp_source_signature',
+      entityType: `${config.sourceModule}_source_signature`,
       entityId: sourceRecordId,
-      documentType: 'rsp',
+      documentType: config.sourceModule,
       targetUserId: signerId,
       beforeState: previous && { slot_key: slotKey, assigned_signer_id: previous.assigned_signer_id },
       afterState: { source_table: sourceTable, slot_key: slotKey, assigned_signer_id: signerId },
@@ -223,11 +292,11 @@ async function assignRspSourceSigner(pool, user, sourceModule, sourceTable, sour
   } finally {
     client.release();
   }
-  return getRspSourceSignatures(pool, user, sourceModule, sourceTable, sourceRecordId);
+  return getSourceSignatures(pool, user, sourceModule, sourceTable, sourceRecordId);
 }
 
-async function signRspSourceSlot(pool, user, sourceModule, sourceTable, sourceRecordId, slotKey, input) {
-  sourceConfig(sourceModule, sourceTable, sourceRecordId, slotKey);
+async function signSourceSlot(pool, user, sourceModule, sourceTable, sourceRecordId, slotKey, input) {
+  const config = sourceConfig(sourceModule, sourceTable, sourceRecordId, slotKey);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -263,9 +332,9 @@ async function signRspSourceSlot(pool, user, sourceModule, sourceTable, sourceRe
     await writeGovernanceAudit(client, {
       actorId: user.id,
       eventType: current.signature_asset_id ? 'source_signature_replaced' : 'source_signed',
-      entityType: 'rsp_source_signature',
+      entityType: `${config.sourceModule}_source_signature`,
       entityId: sourceRecordId,
-      documentType: 'rsp',
+      documentType: config.sourceModule,
       targetUserId: user.id,
       beforeState: current.signature_asset_id ? { slot_key: slotKey, signature_asset_id: current.signature_asset_id } : null,
       afterState: { source_table: sourceTable, slot_key: slotKey, signer_name: signerName },
@@ -277,13 +346,31 @@ async function signRspSourceSlot(pool, user, sourceModule, sourceTable, sourceRe
   } finally {
     client.release();
   }
-  return getRspSourceSignatures(pool, user, sourceModule, sourceTable, sourceRecordId);
+  return getSourceSignatures(pool, user, sourceModule, sourceTable, sourceRecordId);
+}
+
+const getRspSourceSignatures = getSourceSignatures;
+const assignRspSourceSigner = assignSourceSigner;
+const signRspSourceSlot = signSourceSlot;
+
+function listRspSignatureRequests(pool, user) {
+  return listSourceSignatureRequests(pool, user, 'rsp');
+}
+
+function listLdSignatureRequests(pool, user) {
+  return listSourceSignatureRequests(pool, user, 'ld');
 }
 
 module.exports = {
   RSP_SIGNATURE_SLOTS,
+  LD_SIGNATURE_SLOTS,
+  getSourceSignatures,
   getRspSourceSignatures,
+  listSourceSignatureRequests,
   listRspSignatureRequests,
+  listLdSignatureRequests,
+  assignSourceSigner,
   assignRspSourceSigner,
+  signSourceSlot,
   signRspSourceSlot,
 };

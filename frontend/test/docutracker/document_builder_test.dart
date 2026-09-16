@@ -148,6 +148,7 @@ void main() {
 
   test('RSP signature request parses its protected form preview payload', () {
     final request = DocuTrackerRspSignatureRequest.fromJson(<String, dynamic>{
+      'source_module': 'rsp',
       'source_table': 'selection_lineup_entries',
       'source_record_id': 'lineup-1',
       'form_name': 'Selection Line-Up',
@@ -173,8 +174,40 @@ void main() {
     });
 
     expect(request.formName, 'Selection Line-Up');
+    expect(request.sourceModule, 'rsp');
     expect(request.sourceRecord['vacant_position'], 'Administrative Officer');
     expect(request.hasUnsignedAssignedSlot, isTrue);
+  });
+
+  test('L&D signature request exposes admin setup state', () {
+    final request = DocuTrackerRspSignatureRequest.fromJson(<String, dynamic>{
+      'source_module': 'ld',
+      'source_table': 'idp_entries',
+      'source_record_id': 'idp-1',
+      'form_name': 'Individual Development Plan',
+      'title': 'Juan Dela Cruz - Administrative Officer',
+      'requires_setup': true,
+      'source_record': <String, dynamic>{'id': 'idp-1'},
+      'signature_bundle': <String, dynamic>{
+        'source_module': 'ld',
+        'source_table': 'idp_entries',
+        'source_record_id': 'idp-1',
+        'source_status': 'saved',
+        'can_assign': true,
+        'signatures': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'slot_key': 'prepared_by',
+            'label': 'Prepared by',
+            'assigned_signer_id': '',
+            'can_sign': false,
+          },
+        ],
+      },
+    });
+
+    expect(request.sourceModule, 'ld');
+    expect(request.requiresSetup, isTrue);
+    expect(request.signatureBundle.canAssign, isTrue);
   });
 
   test('builder trusts server field-level signing capability', () {
