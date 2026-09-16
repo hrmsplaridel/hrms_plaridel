@@ -556,7 +556,7 @@ router.get(
   }
 );
 
-/** List only saved RSP forms with a signature field assigned to this user. */
+/** List RSP forms needing admin signer setup or a signature from this user. */
 router.get('/sources/rsp/signature-requests', protect, async (req, res) => {
   try {
     res.json(await listRspSignatureRequests(pool, req.user));

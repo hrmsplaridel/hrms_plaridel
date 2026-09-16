@@ -5,7 +5,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const SOURCE_SIGNATURE_CONFIGS = Object.freeze({
   rsp: Object.freeze({
     label: 'RSP',
-    includeUnassignedForAdmin: false,
+    includeUnassignedForAdmin: true,
     slots: Object.freeze({
       applicants_profile_entries: Object.freeze({
         prepared_by: 'Prepared by',
@@ -223,6 +223,15 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
         assignment.source_table,
         assignment.source_record_id
       );
+      const requiresSetup =
+        context.isAdmin &&
+        signatureBundle.signatures.some((signature) => !signature.assigned_signer_id);
+      const hasPendingSignature = signatureBundle.signatures.some(
+        (signature) =>
+          signature.can_sign &&
+          !(signature.signature_asset_id && signature.signed_at)
+      );
+      if (!requiresSetup && !hasPendingSignature) continue;
       requests.push({
         source_module: normalizedModule,
         source_table: assignment.source_table,
@@ -230,9 +239,7 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
         form_name: moduleConfig.formNames[assignment.source_table],
         title: requestTitle(normalizedModule, assignment.source_table, record),
         source_record: record,
-        requires_setup:
-          context.isAdmin &&
-          signatureBundle.signatures.some((signature) => !signature.assigned_signer_id),
+        requires_setup: requiresSetup,
         signature_bundle: signatureBundle,
       });
     }

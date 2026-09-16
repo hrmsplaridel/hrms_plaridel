@@ -1,19 +1,35 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:printing/src/interface.dart';
 
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/learning_development/models/action_brainstorming_coaching.dart';
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
 import 'package:hrms_plaridel/features/learning_development/models/computation_of_points.dart';
+import 'package:hrms_plaridel/features/learning_development/models/individual_development_plan.dart';
 import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
 import 'package:hrms_plaridel/features/learning_development/models/turn_around_time.dart';
 import 'package:hrms_plaridel/features/learning_development/models/work_experience_sheet.dart';
 
 const _onePixelPng =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+class _NoRasterPrinting extends PrintingPlatform {
+  @override
+  Stream<PdfRaster> raster(
+    Uint8List document,
+    List<int>? pages,
+    double dpi,
+  ) async* {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 DocuTrackerSourceSignatureBundle _signatures(
   String table,
@@ -127,7 +143,32 @@ void main() {
     },
   );
 
-  test('L&D coaching form generates a signed PDF', () async {
+  test('supported L&D forms generate PDFs with persisted signatures', () async {
+    final previousPrinting = PrintingPlatform.instance;
+    PrintingPlatform.instance = _NoRasterPrinting();
+    addTearDown(() => PrintingPlatform.instance = previousPrinting);
+
+    await _expectPdf(
+      FormPdf.buildIdpPdf(
+        IdpEntry.fromJson(<String, dynamic>{
+          'name': 'Employee Person',
+          'position': 'Administrative Officer',
+          'department': 'Human Resource Management',
+          'development_plan_rows': <dynamic>[],
+          'prepared_by': 'Prepared Person',
+          'reviewed_by': 'Reviewing Person',
+          'noted_by': 'Noting Person',
+          'approved_by': 'Approving Person',
+        }),
+        signatures: _signatures(IdpEntry.tableName, const [
+          'prepared_by',
+          'reviewed_by',
+          'noted_by',
+          'approved_by',
+        ], sourceModule: 'ld'),
+      ),
+    );
+
     await _expectPdf(
       FormPdf.buildActionBrainstormingCoachingPdf(
         ActionBrainstormingEntry.fromJson(<String, dynamic>{

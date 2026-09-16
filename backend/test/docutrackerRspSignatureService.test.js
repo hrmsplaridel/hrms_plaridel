@@ -128,6 +128,109 @@ test('signature request list returns only forms assigned to the current user', a
   assert.equal(result[0].signature_bundle.signatures[0].can_sign, true);
 });
 
+test('RSP admins can discover unassigned signature-bearing forms for setup', async () => {
+  const pool = {
+    async query(sql) {
+      if (
+        sql.includes('FROM "selection_lineup_entries"') &&
+        sql.includes('ORDER BY updated_at')
+      ) {
+        return { rowCount: 1, rows: [{ source_record_id: formId }] };
+      }
+      if (sql.includes('ORDER BY updated_at')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+        return sourceRow();
+      }
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT to_jsonb(source_row)')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            source_record: {
+              id: formId,
+              vacant_position: 'Administrative Officer',
+            },
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await listRspSignatureRequests(pool, {
+    id: adminId,
+    role: 'admin',
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source_module, 'rsp');
+  assert.equal(result[0].form_name, 'Selection Line-Up');
+  assert.equal(result[0].title, 'Administrative Officer');
+  assert.equal(result[0].requires_setup, true);
+  assert.deepEqual(
+    result[0].signature_bundle.signatures.map((slot) => slot.slot_key),
+    ['prepared_by']
+  );
+});
+
+test('completed source signature requests are omitted', async () => {
+  const pool = {
+    async query(sql, params = []) {
+      if (sql.includes('SELECT DISTINCT source_table')) {
+        assert.equal(params[0], signerId);
+        return {
+          rowCount: 1,
+          rows: [{
+            source_table: 'selection_lineup_entries',
+            source_record_id: formId,
+          }],
+        };
+      }
+      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+        return sourceRow();
+      }
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        return {
+          rowCount: 1,
+          rows: [
+            signatureRow({
+              signature_asset_id: assetId,
+              signed_by: signerId,
+              signer_name_snapshot: 'Prepared Person',
+              signed_at: new Date('2026-09-16T01:00:00.000Z'),
+              mime_type: 'image/png',
+              signature_image_base64: 'c2lnbmF0dXJl',
+            }),
+          ],
+        };
+      }
+      if (sql.includes('SELECT to_jsonb(source_row)')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            source_record: {
+              id: formId,
+              vacant_position: 'Administrative Officer',
+            },
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await listRspSignatureRequests(pool, {
+    id: signerId,
+    role: 'employee',
+  });
+
+  assert.deepEqual(result, []);
+});
+
 test('L&D admins can discover unassigned signature-bearing forms for setup', async () => {
   const pool = {
     async query(sql) {

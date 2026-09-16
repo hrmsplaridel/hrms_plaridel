@@ -187,6 +187,10 @@ and permits signing only when `assigned_signer_id` matches the authenticated
 user. Assignment and signing events are also appended to
 `docutracker_governance_audit`.
 
+The RSP and L&D signature-request feeds expose unassigned forms to
+administrators for signer setup. Non-admin users receive only forms assigned to
+their account. Both feeds omit forms with no remaining setup or signing action.
+
 L&D training reports and RSP recruitment applications are linked by their
 existing source table and record ID. They are not copied into DocuTracker
 tables; their source modules remain authoritative for content, attachments,

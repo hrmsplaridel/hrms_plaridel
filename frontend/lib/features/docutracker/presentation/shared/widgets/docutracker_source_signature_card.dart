@@ -234,6 +234,19 @@ class _DocuTrackerSourceSignatureCardState
   @override
   Widget build(BuildContext context) {
     final signature = _bundle?.signatureFor(widget.slotKey);
+    final canAssign = _bundle?.canAssign == true;
+    final canSign = signature?.canSign == true;
+    final hasAssignedSigner = (signature?.assignedSignerId ?? '')
+        .trim()
+        .isNotEmpty;
+    final unsignedMessage = canAssign && !canSign
+        ? hasAssignedSigner
+              ? 'Waiting for the assigned signer'
+              : 'No signer assigned yet'
+        : widget.unsignedMessage;
+    final waitingMessage = canAssign && !hasAssignedSigner
+        ? 'Assign an account before this field can be signed.'
+        : widget.waitingMessage;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -300,7 +313,7 @@ class _DocuTrackerSourceSignatureCardState
                       filterQuality: FilterQuality.high,
                     )
                   : Text(
-                      widget.unsignedMessage,
+                      unsignedMessage,
                       style: const TextStyle(
                         color: DocuTrackerTokens.textMuted,
                       ),
@@ -359,7 +372,7 @@ class _DocuTrackerSourceSignatureCardState
               Text(
                 signature?.isSigned == true
                     ? 'The signature is saved on this form.'
-                    : widget.waitingMessage,
+                    : waitingMessage,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: DocuTrackerTokens.textMuted,

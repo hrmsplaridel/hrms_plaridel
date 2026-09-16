@@ -38,7 +38,7 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/department_head/sign` | Add or replace the assigned department head signature before endorsement |
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/hr_approver/sign` | Add or replace the authenticated HR/admin signature before final approval |
 | GET | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures` | Load the configured signature fields for an authorized saved RSP form |
-| GET | `/api/docutracker/sources/rsp/signature-requests` | List saved RSP forms having a signature field assigned to the authenticated user, including the protected form preview payload |
+| GET | `/api/docutracker/sources/rsp/signature-requests` | List saved RSP forms needing admin signer setup or a signature from the authenticated user, including the protected form preview payload; completed forms are omitted |
 | PUT | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an RSP signature field |
 | POST | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/sign` | Add or replace the authenticated assigned user's RSP form signature |
 | GET | `/api/docutracker/sources/ld/{table}/{recordId}/signatures` | Load configured signature fields for an authorized saved L&D form |
