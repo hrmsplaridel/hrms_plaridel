@@ -9,9 +9,26 @@ import 'package:shimmer/shimmer.dart';
 
 const _kClock12hrKey = 'dtr_clock_12hr';
 
+enum WelcomeStatusLayout { stacked, inline, adminHeader }
+
 /// Compact welcome header: live clock, date, and local weather (shared across portal roles).
 class AdminWelcomeStatusCard extends StatefulWidget {
-  const AdminWelcomeStatusCard({super.key});
+  const AdminWelcomeStatusCard({
+    super.key,
+    this.layout = WelcomeStatusLayout.stacked,
+    this.fillWidth = false,
+  });
+
+  /// [WelcomeStatusLayout.inline] is a single date / time / weather cluster
+  /// without extra card chrome (used by the Mayor executive header).
+  ///
+  /// [WelcomeStatusLayout.adminHeader] is the compact time | weather cluster
+  /// used only by the Admin dashboard welcome card.
+  final WelcomeStatusLayout layout;
+
+  /// When true, the admin-header cluster stretches (tablet/mobile). Desktop
+  /// keeps the cluster shrink-wrapped on the right.
+  final bool fillWidth;
 
   @override
   State<AdminWelcomeStatusCard> createState() => _AdminWelcomeStatusCardState();
@@ -25,6 +42,15 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
   LocalWeatherSnapshot? _weather;
 
   static const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  static const _weekdaysLong = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
   static const _months = [
     'Jan',
     'Feb',
@@ -38,6 +64,20 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
     'Oct',
     'Nov',
     'Dec',
+  ];
+  static const _monthsLong = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
 
   @override
@@ -127,11 +167,24 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
         '${_months[_now.month - 1]} ${_now.day}, ${_now.year}';
   }
 
+  String get _longDateLabel {
+    return '${_weekdaysLong[_now.weekday - 1]}, '
+        '${_monthsLong[_now.month - 1]} ${_now.day}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final primary = AppTheme.dashTextPrimaryOf(context);
+
+    if (widget.layout == WelcomeStatusLayout.inline) {
+      return _buildInlineCluster(primary, secondary);
+    }
+
+    if (widget.layout == WelcomeStatusLayout.adminHeader) {
+      return _buildAdminHeaderCluster(primary, secondary);
+    }
 
     Widget timeBlock({required bool compact}) {
       return Container(
@@ -303,6 +356,397 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
           );
         },
       ),
+    );
+  }
+
+  /// Presentation-only city line for the Admin header. Does not change weather data.
+  String _adminHeaderPlaceLabel(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) return 'Set location';
+    if (t.toLowerCase().startsWith('oroquieta')) return 'Oroquieta City';
+    final comma = t.indexOf(',');
+    if (comma > 0) return t.substring(0, comma).trim();
+    return t;
+  }
+
+  Widget _buildAdminHeaderCluster(Color primary, Color secondary) {
+    final fill = widget.fillWidth;
+    final dark = AppTheme.dashIsDark(context);
+
+    return ConstrainedBox(
+      constraints: fill
+          ? const BoxConstraints()
+          : const BoxConstraints(minWidth: 360, maxWidth: 430),
+      child: Container(
+        width: fill ? double.infinity : 400,
+        padding: EdgeInsets.fromLTRB(fill ? 14 : 16, 14, fill ? 12 : 14, 14),
+        decoration: BoxDecoration(
+          color: dark
+              ? Colors.white.withValues(alpha: 0.05)
+              : const Color(0xFFFFF7F0),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: AppTheme.primaryNavy.withValues(alpha: dark ? 0.22 : 0.14),
+          ),
+        ),
+        child: LayoutBuilder(
+          builder: (context, inner) {
+            final stackInner = inner.maxWidth < 300;
+            final time = _adminHeaderTimeColumn(primary, secondary);
+            final weather = _adminHeaderWeatherColumn(primary, secondary);
+            if (stackInner) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  time,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Divider(
+                      height: 1,
+                      thickness: 1,
+                      color: AppTheme.dashHairlineOf(context),
+                    ),
+                  ),
+                  weather,
+                ],
+              );
+            }
+            return IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(flex: 5, child: time),
+                  Container(
+                    width: 1,
+                    margin: const EdgeInsets.symmetric(horizontal: 12),
+                    color: AppTheme.dashHairlineOf(context),
+                  ),
+                  Expanded(flex: 6, child: weather),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _adminHeaderTimeColumn(Color primary, Color secondary) {
+    return Tooltip(
+      message: 'Toggle time format',
+      child: InkWell(
+        onTap: _toggleClockFormat,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.schedule_rounded,
+                size: 20,
+                color: AppTheme.primaryNavy.withValues(alpha: 0.9),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _timeLabel,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: primary,
+                        height: 1.15,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _dateLabel,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: secondary,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _adminHeaderWeatherColumn(Color primary, Color secondary) {
+    final refresh = _WelcomeActionButton(
+      icon: Icons.refresh_rounded,
+      tooltip: 'Refresh weather',
+      onTap: _weatherLoading ? null : () => _loadWeather(force: true),
+      loading: _weatherLoading,
+      flat: true,
+    );
+
+    if (_weatherLoading && _weather == null) {
+      return Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 28),
+            child: Shimmer.fromColors(
+              baseColor: AppTheme.dashIsDark(context)
+                  ? const Color(0xFF2A3140)
+                  : AppTheme.lightGray.withValues(alpha: 0.55),
+              highlightColor: AppTheme.dashIsDark(context)
+                  ? const Color(0xFF3D4451)
+                  : AppTheme.white,
+              period: const Duration(milliseconds: 1200),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 64,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: AppTheme.dashMutedSurfaceOf(context),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: 96,
+                    height: 11,
+                    decoration: BoxDecoration(
+                      color: AppTheme.dashMutedSurfaceOf(context),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(top: 0, right: 0, child: refresh),
+        ],
+      );
+    }
+
+    final weather = _weather;
+    if (weather == null) {
+      return Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 28, top: 4),
+            child: Text(
+              'Weather unavailable',
+              style: TextStyle(fontSize: 13, color: secondary, height: 1.3),
+            ),
+          ),
+          Positioned(top: 0, right: 0, child: refresh),
+        ],
+      );
+    }
+
+    final isDefaultLocation =
+        weather.locationSource == WeatherLocationSource.municipalityDefault;
+    final locationHint = switch (weather.locationSource) {
+      WeatherLocationSource.manual =>
+        '${weather.locationLabel}\nTap to change your saved location.',
+      WeatherLocationSource.device =>
+        '${weather.locationLabel}\nUsing your device GPS. Tap to change.',
+      WeatherLocationSource.municipalityDefault =>
+        'No custom location set.\nTap to choose your location.',
+    };
+    final placeLabel = _adminHeaderPlaceLabel(weather.locationLabel);
+
+    return Stack(
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Icon(weather.icon, size: 20, color: const Color(0xFF1565C0)),
+                  const SizedBox(width: 8),
+                  Text(
+                    weather.temperatureLabel,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: primary,
+                      height: 1.15,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                weather.condition,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: secondary,
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Tooltip(
+                message: locationHint,
+                child: InkWell(
+                  onTap: _changeLocation,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 1),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isDefaultLocation
+                              ? Icons.add_location_alt_outlined
+                              : Icons.location_on_outlined,
+                          size: 14,
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.85),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            placeLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: secondary,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Positioned(top: 0, right: 0, child: refresh),
+      ],
+    );
+  }
+
+  Widget _buildInlineCluster(Color primary, Color secondary) {
+    final weather = _weather;
+    final tempLabel = weather?.temperatureLabel;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          _longDateLabel,
+          textAlign: TextAlign.right,
+          style: TextStyle(
+            color: primary,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            height: 1.2,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Wrap(
+          alignment: WrapAlignment.end,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 6,
+          runSpacing: 4,
+          children: [
+            Icon(Icons.schedule_rounded, size: 14, color: secondary),
+            InkWell(
+              onTap: _toggleClockFormat,
+              borderRadius: BorderRadius.circular(4),
+              child: Tooltip(
+                message: 'Toggle time format',
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 1,
+                  ),
+                  child: Text(
+                    _timeLabel,
+                    style: TextStyle(
+                      color: primary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Text(
+              '|',
+              style: TextStyle(color: secondary.withValues(alpha: 0.6)),
+            ),
+            if (_weatherLoading && weather == null)
+              SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: secondary,
+                ),
+              )
+            else ...[
+              Icon(
+                weather?.icon ?? Icons.cloud_off_outlined,
+                size: 14,
+                color: secondary,
+              ),
+              InkWell(
+                onTap: _changeLocation,
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 1,
+                  ),
+                  child: Text(
+                    tempLabel ?? '—',
+                    style: TextStyle(
+                      color: primary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            InkWell(
+              onTap: _weatherLoading ? null : () => _loadWeather(force: true),
+              borderRadius: BorderRadius.circular(4),
+              child: Tooltip(
+                message: 'Refresh weather',
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: Icon(
+                    Icons.refresh_rounded,
+                    size: 14,
+                    color: secondary.withValues(alpha: 0.8),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -489,47 +933,66 @@ class _WelcomeActionButton extends StatelessWidget {
     required this.tooltip,
     required this.onTap,
     this.loading = false,
+    this.flat = false,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback? onTap;
   final bool loading;
+  final bool flat;
 
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
+    final iconWidget = loading
+        ? const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 1.6),
+          )
+        : Icon(
+            icon,
+            size: 16,
+            color: AppTheme.primaryNavy.withValues(alpha: 0.88),
+          );
+
     return Tooltip(
       message: tooltip,
       child: InkWell(
         onTap: loading ? null : onTap,
         borderRadius: BorderRadius.circular(8),
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          padding: const EdgeInsets.all(4),
-          decoration: BoxDecoration(
-            color: dark
-                ? Colors.white.withValues(alpha: 0.07)
-                : AppTheme.primaryNavy.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: dark
-                  ? Colors.white.withValues(alpha: 0.12)
-                  : AppTheme.primaryNavy.withValues(alpha: 0.14),
-            ),
-          ),
-          child: loading
-              ? const SizedBox(
-                  width: 13,
-                  height: 13,
-                  child: CircularProgressIndicator(strokeWidth: 1.6),
-                )
-              : Icon(
-                  icon,
-                  size: 14,
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.88),
+        child: flat
+            ? Padding(
+                padding: const EdgeInsets.all(6),
+                child: iconWidget,
+              )
+            : Container(
+                margin: const EdgeInsets.symmetric(vertical: 2),
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: dark
+                      ? Colors.white.withValues(alpha: 0.07)
+                      : AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: dark
+                        ? Colors.white.withValues(alpha: 0.12)
+                        : AppTheme.primaryNavy.withValues(alpha: 0.14),
+                  ),
                 ),
-        ),
+                child: loading
+                    ? const SizedBox(
+                        width: 13,
+                        height: 13,
+                        child: CircularProgressIndicator(strokeWidth: 1.6),
+                      )
+                    : Icon(
+                        icon,
+                        size: 14,
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.88),
+                      ),
+              ),
       ),
     );
   }

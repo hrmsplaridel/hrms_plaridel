@@ -5,7 +5,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/learning_development/models/ld_training_requirements.dart';
-import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dash_ui.dart';
 
 class LdTrainingRequirementsEmployeeScreen extends StatefulWidget {
   const LdTrainingRequirementsEmployeeScreen({
@@ -213,115 +212,102 @@ class _LdTrainingRequirementsEmployeeScreenState
       );
     }
 
+    const preKinds = [LdTrainingRequirementDocKind.invitationLetter];
+    const postKinds = [
+      LdTrainingRequirementDocKind.lap,
+      LdTrainingRequirementDocKind.trainingCertificate,
+    ];
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 720;
-        final hPad = wide ? 32.0 : 20.0;
+        final twoCol = constraints.maxWidth >= 900;
+        final compact = constraints.maxWidth < 768;
 
-        return SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(hPad, 24, hPad, 32),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 920),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    key: widget.tutorialHeaderKey,
-                    padding: EdgeInsets.all(wide ? 28 : 22),
-                    decoration: EmployeeDashUi.welcomeBanner(context),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const EmployeeSectionHeader(
-                          title: 'Training Requirements',
-                          icon: Icons.fact_check_outlined,
-                          subtitle:
-                              'Submit pre-training documents before travel and post-training '
-                              'documents after completing your training.',
-                        ),
-                        const SizedBox(height: 20),
-                        _ProgressSteps(record: r),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  KeyedSubtree(
-                    key: widget.tutorialProgramKey,
-                    child: _TrainingTitleCard(
-                      controller: _trainingTitleController,
-                      saving: _savingTitle,
-                      savedTitle: r.trainingTitle,
-                      onSave: _saveTrainingTitle,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  _PhaseCard(
-                    key: widget.tutorialPreTrainingKey,
-                    step: 1,
-                    title: 'Pre-training requirements',
-                    description:
-                        'Upload your invitation letter for training travel, approved by the mayor. '
-                        'HR must approve this before you can submit post-training documents.',
-                    kinds: const [
-                      LdTrainingRequirementDocKind.invitationLetter,
-                    ],
-                    record: r,
-                    status: _phaseStatus(
-                      record: r,
-                      kinds: const [
-                        LdTrainingRequirementDocKind.invitationLetter,
-                      ],
-                      approved: r.preRequirementsApproved,
-                      locked: false,
-                      isPreTraining: true,
-                    ),
-                    locked: false,
-                    wide: wide,
-                    picked: _picked,
-                    uploading: _uploading,
-                    onPick: _pick,
-                    onRemove: _removePicked,
-                    onUpload: _uploadKind,
-                    onPreview: _previewDoc,
-                  ),
-                  const SizedBox(height: 16),
-                  _PhaseCard(
-                    key: widget.tutorialPostTrainingKey,
-                    step: 2,
-                    title: 'Post-training requirements',
-                    description:
-                        'After training, upload your Learning Application Plan (LAP) and training certificates.',
-                    kinds: const [
-                      LdTrainingRequirementDocKind.lap,
-                      LdTrainingRequirementDocKind.trainingCertificate,
-                    ],
-                    record: r,
-                    status: _phaseStatus(
-                      record: r,
-                      kinds: const [
-                        LdTrainingRequirementDocKind.lap,
-                        LdTrainingRequirementDocKind.trainingCertificate,
-                      ],
-                      approved: r.postRequirementsApproved,
-                      locked: !r.preRequirementsApproved,
-                      isPreTraining: false,
-                    ),
-                    locked: !r.preRequirementsApproved,
-                    lockedMessage:
-                        'Available after HR approves your pre-training requirements.',
-                    wide: wide,
-                    picked: _picked,
-                    uploading: _uploading,
-                    onPick: _pick,
-                    onRemove: _removePicked,
-                    onUpload: _uploadKind,
-                    onPreview: _previewDoc,
-                  ),
-                ],
+        final preCard = _PhaseCard(
+          key: widget.tutorialPreTrainingKey,
+          step: 1,
+          title: 'Pre-training requirements',
+          description:
+              'Upload your invitation letter for training travel approved by the mayor.',
+          kinds: preKinds,
+          record: r,
+          status: _phaseStatus(
+            record: r,
+            kinds: preKinds,
+            approved: r.preRequirementsApproved,
+            locked: false,
+            isPreTraining: true,
+          ),
+          locked: false,
+          compact: compact,
+          picked: _picked,
+          uploading: _uploading,
+          onPick: _pick,
+          onRemove: _removePicked,
+          onUpload: _uploadKind,
+          onPreview: _previewDoc,
+        );
+        final postCard = _PhaseCard(
+          key: widget.tutorialPostTrainingKey,
+          step: 2,
+          title: 'Post-training requirements',
+          description:
+              'After training, upload your Learning Application Plan (LAP) and training certificate.',
+          kinds: postKinds,
+          record: r,
+          status: _phaseStatus(
+            record: r,
+            kinds: postKinds,
+            approved: r.postRequirementsApproved,
+            locked: !r.preRequirementsApproved,
+            isPreTraining: false,
+          ),
+          locked: !r.preRequirementsApproved,
+          lockedMessage:
+              'Post-training requirements will become available after HR approves your pre-training documents.',
+          compact: compact,
+          picked: _picked,
+          uploading: _uploading,
+          onPick: _pick,
+          onRemove: _removePicked,
+          onUpload: _uploadKind,
+          onPreview: _previewDoc,
+        );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            KeyedSubtree(
+              key: widget.tutorialHeaderKey,
+              child: _RequirementsHero(record: r, compact: compact),
+            ),
+            const SizedBox(height: 16),
+            KeyedSubtree(
+              key: widget.tutorialProgramKey,
+              child: _TrainingTitleCard(
+                controller: _trainingTitleController,
+                saving: _savingTitle,
+                savedTitle: r.trainingTitle,
+                compact: compact,
+                onSave: _saveTrainingTitle,
               ),
             ),
-          ),
+            const SizedBox(height: 16),
+            if (twoCol)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: preCard),
+                  const SizedBox(width: 20),
+                  Expanded(child: postCard),
+                ],
+              )
+            else ...[
+              preCard,
+              const SizedBox(height: 16),
+              postCard,
+            ],
+          ],
         );
       },
     );
@@ -330,90 +316,298 @@ class _LdTrainingRequirementsEmployeeScreenState
 
 enum _PhaseStatus { locked, actionNeeded, inProgress, awaitingReview, approved }
 
-class _ProgressSteps extends StatelessWidget {
-  const _ProgressSteps({required this.record});
+class _RequirementsHero extends StatelessWidget {
+  const _RequirementsHero({required this.record, required this.compact});
 
   final LdTrainingRequirementRecord record;
+  final bool compact;
 
-  static const _accent = Color(0xFFE85D04);
+  String get _currentStage {
+    if (record.postRequirementsApproved) return 'Complete';
+    if (record.preRequirementsApproved) return 'Post-training';
+    return 'Pre-training';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
+    final dark = AppTheme.dashIsDark(context);
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        compact ? 16 : 22,
+        compact ? 16 : 18,
+        compact ? 16 : 22,
+        compact ? 14 : 16,
+      ),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        gradient: LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: dark
+              ? [AppTheme.dashPanelOf(context), const Color(0xFF2A241E)]
+              : const [Colors.white, Color(0xFFFFF6EE)],
+        ),
+        border: Border.all(
+          color: dark
+              ? AppTheme.dashHairlineOf(context)
+              : AppTheme.primaryNavy.withValues(alpha: 0.14),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.18 : 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: compact ? 44 : 50,
+                height: compact ? 44 : 50,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.fact_check_outlined,
+                  color: AppTheme.primaryNavy,
+                  size: compact ? 22 : 26,
+                ),
+              ),
+              SizedBox(width: compact ? 12 : 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'EMPLOYEE TRAINING',
+                      style: TextStyle(
+                        color: AppTheme.primaryNavy,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Training Requirements',
+                      style: TextStyle(
+                        color: primary,
+                        fontSize: compact ? 22 : 28,
+                        fontWeight: FontWeight.w800,
+                        height: 1.15,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Submit and track your required pre-training and post-training documents.',
+                      style: TextStyle(
+                        color: secondary,
+                        fontSize: compact ? 13 : 14,
+                        height: 1.35,
+                      ),
+                    ),
+                    if (compact) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Current stage: $_currentStage',
+                        style: TextStyle(
+                          color: primary,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (!compact) ...[
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.dashPanelOf(context).withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.dashHairlineOf(context)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        'Current Stage',
+                        style: TextStyle(
+                          color: secondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _currentStage,
+                        style: TextStyle(
+                          color: primary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 14),
+          _ProgressSteps(record: record, compact: compact),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProgressSteps extends StatelessWidget {
+  const _ProgressSteps({required this.record, required this.compact});
+
+  final LdTrainingRequirementRecord record;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
     final preDone = record.preRequirementsApproved;
     final postDone = record.postRequirementsApproved;
     final preActive = !preDone;
     final postActive = preDone && !postDone;
+    final postLocked = !preDone;
 
-    Widget step(String label, bool done, bool active) {
-      final color = done
-          ? const Color(0xFF2E7D32)
-          : active
-          ? _accent
-          : secondary.withValues(alpha: 0.45);
+    Widget connector(bool complete) {
       return Expanded(
-        child: Column(
-          children: [
-            Container(
-              width: 28,
-              height: 28,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: done
-                    ? const Color(0xFFE8F5E9)
-                    : active
-                    ? _accent.withValues(alpha: 0.14)
-                    : AppTheme.dashMutedSurfaceOf(context),
-                shape: BoxShape.circle,
-                border: Border.all(color: color.withValues(alpha: 0.5)),
-              ),
-              child: Icon(
-                done ? Icons.check_rounded : Icons.circle,
-                size: done ? 16 : 8,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                height: 1.2,
-                color: done || active
-                    ? AppTheme.dashTextPrimaryOf(context)
-                    : secondary,
-              ),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: Container(
+            height: 2,
+            color: complete
+                ? const Color(0xFF2E7D32).withValues(alpha: 0.45)
+                : AppTheme.dashHairlineOf(context),
+          ),
         ),
       );
     }
 
     return Row(
       children: [
-        step('Pre-training', preDone, preActive),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 22),
-            child: Divider(
-              color: preDone
-                  ? const Color(0xFF2E7D32).withValues(alpha: 0.35)
-                  : AppTheme.dashHairlineOf(context),
-            ),
+        _StepNode(
+          number: 1,
+          label: compact ? 'Pre' : 'Pre-training',
+          done: preDone,
+          active: preActive,
+          locked: false,
+        ),
+        connector(preDone),
+        _StepNode(
+          number: 2,
+          label: compact ? 'Post' : 'Post-training',
+          done: postDone,
+          active: postActive,
+          locked: postLocked,
+        ),
+        connector(postDone),
+        _StepNode(
+          number: 3,
+          label: 'Complete',
+          done: postDone,
+          active: false,
+          locked: false,
+        ),
+      ],
+    );
+  }
+}
+
+class _StepNode extends StatelessWidget {
+  const _StepNode({
+    required this.number,
+    required this.label,
+    required this.done,
+    required this.active,
+    required this.locked,
+  });
+
+  final int number;
+  final String label;
+  final bool done;
+  final bool active;
+  final bool locked;
+
+  static const _accent = Color(0xFFE85D04);
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final Color ring;
+    final Color fill;
+    final Color fg;
+    if (done) {
+      ring = const Color(0xFF2E7D32);
+      fill = const Color(0xFF2E7D32);
+      fg = Colors.white;
+    } else if (active) {
+      ring = _accent;
+      fill = _accent;
+      fg = Colors.white;
+    } else {
+      ring = secondary.withValues(alpha: 0.35);
+      fill = AppTheme.dashMutedSurfaceOf(context);
+      fg = secondary;
+    }
+
+    return Column(
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: fill,
+            shape: BoxShape.circle,
+            border: Border.all(color: ring, width: 1.4),
+          ),
+          child: done
+              ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+              : locked
+              ? Icon(Icons.lock_rounded, size: 13, color: fg)
+              : Text(
+                  '$number',
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: done || active ? primary : secondary,
           ),
         ),
-        step('Post-training', postDone, postActive),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 22),
-            child: Divider(color: AppTheme.dashHairlineOf(context)),
-          ),
-        ),
-        step('Complete', postDone, false),
       ],
     );
   }
@@ -424,117 +618,165 @@ class _TrainingTitleCard extends StatelessWidget {
     required this.controller,
     required this.saving,
     required this.savedTitle,
+    required this.compact,
     required this.onSave,
   });
 
   final TextEditingController controller;
   final bool saving;
   final String? savedTitle;
+  final bool compact;
   final VoidCallback onSave;
 
   static const _accent = Color(0xFFE85D04);
 
   @override
   Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final dark = AppTheme.dashIsDark(context);
+
+    final input = TextField(
+      controller: controller,
+      textInputAction: TextInputAction.done,
+      decoration: AppTheme.dashInputDecoration(
+        context,
+        hintText: 'e.g. Leadership Enhancement Program 2026',
+        prefixIcon: const Icon(Icons.school_outlined, size: 20),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+        radius: 11,
+      ).copyWith(
+        filled: true,
+        fillColor: dark
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : const Color(0xFFF7F8FA),
+        floatingLabelBehavior: FloatingLabelBehavior.never,
+      ),
+      onSubmitted: (_) => onSave(),
+    );
+
+    final saveBtn = FilledButton.icon(
+      onPressed: saving ? null : onSave,
+      icon: saving
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.save_outlined, size: 18),
+      label: Text(saving ? 'Saving…' : 'Save Title'),
+      style: FilledButton.styleFrom(
+        backgroundColor: AppTheme.primaryNavy,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.45),
+        minimumSize: Size(compact ? double.infinity : 132, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+
     return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: EmployeeDashUi.elevatedPanel(context),
+      padding: EdgeInsets.fromLTRB(
+        compact ? 16 : 20,
+        compact ? 14 : 16,
+        compact ? 16 : 20,
+        compact ? 14 : 16,
+      ),
+      decoration: _panelDecoration(context),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: _accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.edit_note_rounded,
-                  color: _accent,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Training program',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15,
-                    color: AppTheme.dashTextPrimaryOf(context),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: controller,
-            textInputAction: TextInputAction.done,
-            decoration: AppTheme.dashInputDecoration(
-              context,
-              labelText: 'Training / program title (optional)',
-              hintText: 'e.g. Leadership Enhancement Program 2026',
-              prefixIcon: const Icon(Icons.school_outlined, size: 20),
-            ),
-            onSubmitted: (_) => onSave(),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              if (savedTitle != null && savedTitle!.trim().isNotEmpty)
+          if (compact) ...[
+            Row(
+              children: [
+                _programIcon(),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    'Saved: ${savedTitle!.trim()}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.dashTextSecondaryOf(context),
-                    ),
-                  ),
-                )
-              else
-                Expanded(
-                  child: Text(
-                    'Helps HR identify your training on their review list.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.dashTextSecondaryOf(context),
-                    ),
-                  ),
-                ),
-              FilledButton.icon(
-                onPressed: saving ? null : onSave,
-                icon: saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Training Program',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          color: primary,
                         ),
-                      )
-                    : const Icon(Icons.save_outlined, size: 18),
-                label: Text(saving ? 'Saving…' : 'Save title'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                      ),
+                      Text(
+                        'Identify the training/program associated with these requirements.',
+                        style: TextStyle(fontSize: 12, color: secondary),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            input,
+            const SizedBox(height: 10),
+            saveBtn,
+          ] else
+            Row(
+              children: [
+                _programIcon(),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 168,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Training Program',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          color: primary,
+                        ),
+                      ),
+                      Text(
+                        'Identify the training/program associated with these requirements.',
+                        style: TextStyle(fontSize: 11.5, color: secondary, height: 1.3),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: input),
+                const SizedBox(width: 12),
+                saveBtn,
+              ],
+            ),
+          if (savedTitle != null && savedTitle!.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Saved: ${savedTitle!.trim()}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: secondary),
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _programIcon() {
+    return Container(
+      width: 36,
+      height: 36,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: _accent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Icon(Icons.edit_note_rounded, color: _accent, size: 20),
     );
   }
 }
@@ -549,7 +791,7 @@ class _PhaseCard extends StatelessWidget {
     required this.record,
     required this.status,
     required this.locked,
-    required this.wide,
+    required this.compact,
     required this.picked,
     required this.uploading,
     required this.onPick,
@@ -567,7 +809,7 @@ class _PhaseCard extends StatelessWidget {
   final _PhaseStatus status;
   final bool locked;
   final String? lockedMessage;
-  final bool wide;
+  final bool compact;
   final Map<LdTrainingRequirementDocKind, PlatformFile> picked;
   final bool uploading;
   final ValueChanged<LdTrainingRequirementDocKind> onPick;
@@ -582,8 +824,25 @@ class _PhaseCard extends StatelessWidget {
     return p != null && p.trim().isNotEmpty;
   }).length;
 
+  bool _isDocLocked(LdTrainingRequirementDocKind kind) {
+    if (kind.isPreTraining) return record.preRequirementsApproved;
+    return record.postRequirementsApproved;
+  }
+
+  bool get _approved =>
+      step == 1 ? record.preRequirementsApproved : record.postRequirementsApproved;
+
+  String _docReadyLabel(LdTrainingRequirementDocKind kind) {
+    final path = record.docPath(kind);
+    if (path != null && path.trim().isNotEmpty) return 'Uploaded';
+    if (picked[kind] != null) return 'Ready';
+    return 'Pending';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
     final accentColor = switch (status) {
       _PhaseStatus.approved => const Color(0xFF2E7D32),
       _PhaseStatus.awaitingReview => const Color(0xFF1565C0),
@@ -592,182 +851,330 @@ class _PhaseCard extends StatelessWidget {
       _PhaseStatus.locked => Colors.grey.shade600,
     };
 
-    final content = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    final singleKind = kinds.length == 1;
+    final pickedSingle = singleKind ? picked[kinds.first] : null;
+    final storedSingle = singleKind
+        ? (record.docPath(kinds.first)?.trim().isNotEmpty ?? false)
+        : false;
+    final canSubmitSingle =
+        singleKind &&
+        pickedSingle != null &&
+        !locked &&
+        !_isDocLocked(kinds.first) &&
+        !uploading;
+
+    return Container(
+      decoration: _panelDecoration(context).copyWith(
+        color: locked
+            ? (AppTheme.dashIsDark(context)
+                  ? AppTheme.dashMutedSurfaceOf(context)
+                  : const Color(0xFFF7F8FA))
+            : AppTheme.dashPanelOf(context),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          compact ? 16 : 20,
+          compact ? 16 : 20,
+          compact ? 16 : 20,
+          compact ? 16 : 18,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              width: 32,
-              height: 32,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: accentColor.withValues(alpha: 0.14),
-                shape: BoxShape.circle,
-              ),
-              child: Text(
-                '$step',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: locked
+                      ? Icon(
+                          Icons.lock_rounded,
+                          size: 15,
+                          color: accentColor,
+                        )
+                      : Text(
+                          '$step',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: accentColor,
+                          ),
+                        ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                          color: primary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        description,
+                        style: TextStyle(
+                          color: secondary,
+                          height: 1.4,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _StatusBadge(status: status),
+              ],
+            ),
+            if (!locked && kinds.length > 1) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  value: kinds.isEmpty ? 0 : _uploaded / kinds.length,
+                  minHeight: 5,
+                  backgroundColor: AppTheme.dashMutedSurfaceOf(context),
                   color: accentColor,
                 ),
               ),
+              const SizedBox(height: 6),
+              Text(
+                '$_uploaded of ${kinds.length} documents uploaded',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: secondary,
+                ),
+              ),
+            ],
+            if (locked && lockedMessage != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.16),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.lock_outline_rounded,
+                      size: 16,
+                      color: AppTheme.primaryNavy,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Waiting for HR approval',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: primary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            lockedMessage!,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: secondary,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 14),
+            LayoutBuilder(
+              builder: (context, inner) {
+                final sideBySide = !compact && kinds.length > 1 && inner.maxWidth >= 420;
+                if (sideBySide) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (var i = 0; i < kinds.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 10),
+                        Expanded(
+                          child: _DocTile(
+                            kind: kinds[i],
+                            record: record,
+                            disabled: locked || _isDocLocked(kinds[i]) || uploading,
+                            picked: picked[kinds[i]],
+                            uploading: uploading,
+                            showUploadButton: !singleKind,
+                            onPick: () => onPick(kinds[i]),
+                            onRemove: () => onRemove(kinds[i]),
+                            onUpload: () => onUpload(kinds[i]),
+                            onPreview: () => onPreview(kinds[i]),
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    for (var i = 0; i < kinds.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 10),
+                      _DocTile(
+                        kind: kinds[i],
+                        record: record,
+                        disabled: locked || _isDocLocked(kinds[i]) || uploading,
+                        picked: picked[kinds[i]],
+                        uploading: uploading,
+                        showUploadButton: !singleKind,
+                        onPick: () => onPick(kinds[i]),
+                        onRemove: () => onRemove(kinds[i]),
+                        onUpload: () => onUpload(kinds[i]),
+                        onPreview: () => onPreview(kinds[i]),
+                      ),
+                    ],
+                  ],
+                );
+              },
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 17,
-                      color: locked
-                          ? AppTheme.dashTextSecondaryOf(context)
-                          : AppTheme.dashTextPrimaryOf(context),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    description,
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      height: 1.45,
-                      fontSize: 13.5,
-                    ),
-                  ),
-                ],
+            const SizedBox(height: 14),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            const SizedBox(height: 12),
+            Text(
+              'Document status',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: secondary,
               ),
             ),
-            const SizedBox(width: 8),
-            _StatusBadge(status: status),
-          ],
-        ),
-        if (!locked && kinds.length > 1) ...[
-          const SizedBox(height: 14),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(
-              value: kinds.isEmpty ? 0 : _uploaded / kinds.length,
-              minHeight: 6,
-              backgroundColor: AppTheme.dashMutedSurfaceOf(context),
-              color: accentColor,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '$_uploaded of ${kinds.length} documents uploaded',
-            style: TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-          ),
-        ],
-        if (locked && lockedMessage != null) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.grey.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.lock_outline_rounded,
-                  size: 16,
-                  color: Colors.grey.shade700,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    lockedMessage!,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontStyle: FontStyle.italic,
-                      color: AppTheme.dashTextSecondaryOf(context),
+            const SizedBox(height: 8),
+            for (final k in kinds)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _DocTile.shortLabel(k),
+                        style: TextStyle(fontSize: 13, color: primary),
+                      ),
                     ),
-                  ),
+                    Text(
+                      _docReadyLabel(k),
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: secondary,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-        ],
-        const SizedBox(height: 16),
-        if (wide && kinds.length > 1)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: kinds
-                .map(
-                  (k) => Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(right: k != kinds.last ? 10 : 0),
-                      child: _DocTile(
-                        kind: k,
-                        record: record,
-                        disabled: locked || _isDocLocked(k) || uploading,
-                        picked: picked[k],
-                        uploading: uploading,
-                        onPick: () => onPick(k),
-                        onRemove: () => onRemove(k),
-                        onUpload: () => onUpload(k),
-                        onPreview: () => onPreview(k),
+              ),
+            const SizedBox(height: 8),
+            _HrReviewRow(approved: _approved, locked: locked),
+            if (singleKind) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: compact ? Alignment.center : Alignment.centerRight,
+                child: SizedBox(
+                  width: compact ? double.infinity : 190,
+                  child: FilledButton.icon(
+                    onPressed: canSubmitSingle
+                        ? () => onUpload(kinds.first)
+                        : null,
+                    icon: uploading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.send_rounded, size: 16),
+                    label: Text(
+                      uploading
+                          ? 'Submitting…'
+                          : storedSingle
+                          ? 'Submitted'
+                          : 'Submit Documents',
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primaryNavy,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: AppTheme.primaryNavy.withValues(
+                        alpha: 0.35,
+                      ),
+                      minimumSize: const Size(0, 44),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
                   ),
-                )
-                .toList(),
-          )
-        else
-          ...kinds.map(
-            (k) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _DocTile(
-                kind: k,
-                record: record,
-                disabled: locked || _isDocLocked(k) || uploading,
-                picked: picked[k],
-                uploading: uploading,
-                onPick: () => onPick(k),
-                onRemove: () => onRemove(k),
-                onUpload: () => onUpload(k),
-                onPreview: () => onPreview(k),
+                ),
               ),
-            ),
-          ),
-      ],
-    );
-
-    return Container(
-      decoration: EmployeeDashUi.elevatedPanel(context).copyWith(
-        border: Border.all(
-          color: accentColor.withValues(alpha: locked ? 0.12 : 0.22),
+            ],
+          ],
         ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            height: 4,
-            color: accentColor.withValues(alpha: locked ? 0.25 : 0.85),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-            child: locked ? Opacity(opacity: 0.55, child: content) : content,
-          ),
-        ],
       ),
     );
   }
+}
 
-  bool _isDocLocked(LdTrainingRequirementDocKind kind) {
-    if (kind.isPreTraining) return record.preRequirementsApproved;
-    return record.postRequirementsApproved;
+class _HrReviewRow extends StatelessWidget {
+  const _HrReviewRow({required this.approved, required this.locked});
+
+  final bool approved;
+  final bool locked;
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final label = locked
+        ? 'Waiting'
+        : approved
+        ? 'Approved'
+        : 'Pending';
+    final color = approved
+        ? const Color(0xFF2E7D32)
+        : locked
+        ? Colors.grey.shade700
+        : const Color(0xFFE85D04);
+    return Row(
+      children: [
+        Text(
+          'HR Review',
+          style: TextStyle(fontSize: 13, color: secondary),
+        ),
+        const Spacer(),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -790,24 +1197,24 @@ class _StatusBadge extends StatelessWidget {
         Icons.verified_rounded,
       ),
       _PhaseStatus.awaitingReview => (
-        'Awaiting HR',
+        'Under Review',
         const Color(0xFF1565C0),
         Icons.hourglass_top_rounded,
       ),
       _PhaseStatus.inProgress => (
-        'In progress',
-        const Color(0xFFE85D04),
+        'Submitted',
+        const Color(0xFF1565C0),
         Icons.upload_file_rounded,
       ),
       _PhaseStatus.actionNeeded => (
-        'Submit documents',
+        'Pending',
         const Color(0xFFE85D04),
         Icons.upload_file_rounded,
       ),
     };
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
@@ -816,8 +1223,8 @@ class _StatusBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 5),
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 4),
           Text(
             label,
             style: TextStyle(
@@ -839,6 +1246,7 @@ class _DocTile extends StatelessWidget {
     required this.disabled,
     required this.picked,
     required this.uploading,
+    required this.showUploadButton,
     required this.onPick,
     required this.onRemove,
     required this.onUpload,
@@ -850,19 +1258,31 @@ class _DocTile extends StatelessWidget {
   final bool disabled;
   final PlatformFile? picked;
   final bool uploading;
+  final bool showUploadButton;
   final VoidCallback onPick;
   final VoidCallback onRemove;
   final VoidCallback onUpload;
   final VoidCallback onPreview;
 
-  static String _kindLabel(LdTrainingRequirementDocKind kind) {
+  static String shortLabel(LdTrainingRequirementDocKind kind) {
     switch (kind) {
       case LdTrainingRequirementDocKind.invitationLetter:
-        return 'Invitation letter for training travel (approved by the mayor)';
+        return 'Invitation Letter';
       case LdTrainingRequirementDocKind.lap:
         return 'Learning Application Plan (LAP)';
       case LdTrainingRequirementDocKind.trainingCertificate:
-        return 'Training certificate';
+        return 'Training Certificate';
+    }
+  }
+
+  static String _kindSubtitle(LdTrainingRequirementDocKind kind) {
+    switch (kind) {
+      case LdTrainingRequirementDocKind.invitationLetter:
+        return 'For training travel • Mayor-approved document';
+      case LdTrainingRequirementDocKind.lap:
+        return 'Required after training completion';
+      case LdTrainingRequirementDocKind.trainingCertificate:
+        return 'Official proof of training attendance';
     }
   }
 
@@ -877,17 +1297,28 @@ class _DocTile extends StatelessWidget {
     }
   }
 
+  static String _fileSizeLabel(PlatformFile file) {
+    final bytes = file.size;
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
   @override
   Widget build(BuildContext context) {
     final storedPath = record.docPath(kind);
     final storedName = record.docDisplayName(kind);
     final hasStored = storedPath != null && storedPath.isNotEmpty;
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
     final navy = AppTheme.primaryNavy;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.dashMutedSurfaceOf(context),
+        color: AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: hasStored
@@ -899,24 +1330,47 @@ class _DocTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(7),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(9),
                 ),
-                child: Icon(_kindIcon(kind), size: 20, color: navy),
+                child: Icon(_kindIcon(kind), size: 18, color: navy),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      shortLabel(kind),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                        color: primary,
+                      ),
+                    ),
+                    Text(
+                      _kindSubtitle(kind),
+                      style: TextStyle(fontSize: 11.5, color: secondary),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFEBEE),
+                  borderRadius: BorderRadius.circular(6),
+                ),
                 child: Text(
-                  _kindLabel(kind),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                    height: 1.35,
+                  'PDF',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.red.shade700,
                   ),
                 ),
               ),
@@ -924,118 +1378,215 @@ class _DocTile extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           if (hasStored)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE8F5E9).withValues(alpha: 0.65),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.check_circle_rounded,
-                    size: 18,
-                    color: Colors.green.shade800,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      storedName ?? 'Uploaded',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.green.shade900,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'View PDF',
-                    onPressed: disabled ? null : onPreview,
-                    icon: Icon(Icons.visibility_outlined, color: navy),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-              ),
+            _FileRow(
+              name: storedName ?? 'Uploaded',
+              meta: 'PDF',
+              onView: disabled ? null : onPreview,
             )
           else if (picked != null) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF3E0),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: const Color(0xFFE85D04).withValues(alpha: 0.25),
+            _FileRow(
+              name: picked!.name,
+              meta: 'PDF • ${_fileSizeLabel(picked!)}',
+              onRemove: disabled ? null : onRemove,
+            ),
+            if (showUploadButton) ...[
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                onPressed: disabled ? null : onUpload,
+                icon: uploading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.cloud_upload_rounded, size: 18),
+                label: Text(uploading ? 'Uploading…' : 'Upload PDF'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: navy,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.picture_as_pdf_rounded,
-                    size: 18,
-                    color: Colors.red.shade700,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      picked!.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                      ),
+            ],
+          ] else
+            CustomPaint(
+              painter: _DashedRRectPainter(
+                color: AppTheme.dashHairlineOf(context),
+                radius: 12,
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: disabled ? null : onPick,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 16,
+                      horizontal: 10,
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.cloud_upload_outlined,
+                          size: 22,
+                          color: disabled ? secondary : navy,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Drop your ${shortLabel(kind).toLowerCase()} here',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: primary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'PDF only',
+                          style: TextStyle(fontSize: 11.5, color: secondary),
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton(
+                          onPressed: disabled ? null : onPick,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: navy,
+                            side: BorderSide(
+                              color: navy.withValues(alpha: 0.4),
+                            ),
+                            minimumSize: const Size(0, 34),
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                          ),
+                          child: const Text('Choose PDF'),
+                        ),
+                      ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'Remove',
-                    onPressed: disabled ? null : onRemove,
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            FilledButton.icon(
-              onPressed: disabled ? null : onUpload,
-              icon: uploading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.cloud_upload_rounded, size: 18),
-              label: Text(uploading ? 'Uploading…' : 'Upload PDF'),
-              style: FilledButton.styleFrom(
-                backgroundColor: navy,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ] else
-            OutlinedButton.icon(
-              onPressed: disabled ? null : onPick,
-              icon: const Icon(Icons.upload_file_rounded, size: 18),
-              label: const Text('Choose PDF'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: navy,
-                side: BorderSide(color: navy.withValues(alpha: 0.35)),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
             ),
         ],
       ),
     );
+  }
+}
+
+class _FileRow extends StatelessWidget {
+  const _FileRow({
+    required this.name,
+    required this.meta,
+    this.onView,
+    this.onRemove,
+  });
+
+  final String name;
+  final String meta;
+  final VoidCallback? onView;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.picture_as_pdf_rounded,
+            size: 18,
+            color: Colors.red.shade700,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: primary,
+                  ),
+                ),
+                Text(meta, style: TextStyle(fontSize: 11, color: secondary)),
+              ],
+            ),
+          ),
+          if (onView != null)
+            TextButton(onPressed: onView, child: const Text('View')),
+          if (onRemove != null)
+            TextButton(onPressed: onRemove, child: const Text('Remove')),
+        ],
+      ),
+    );
+  }
+}
+
+BoxDecoration _panelDecoration(BuildContext context, {double radius = 18}) {
+  final dark = AppTheme.dashIsDark(context);
+  return BoxDecoration(
+    color: AppTheme.dashPanelOf(context),
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: AppTheme.dashHairlineOf(context)),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: dark ? 0.18 : 0.04),
+        blurRadius: 12,
+        offset: const Offset(0, 3),
+      ),
+    ],
+  );
+}
+
+class _DashedRRectPainter extends CustomPainter {
+  _DashedRRectPainter({required this.color, required this.radius});
+
+  final Color color;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const dashWidth = 6.0;
+    const dashGap = 4.0;
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    final rrect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      Radius.circular(radius),
+    );
+    final path = Path()..addRRect(rrect);
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final next = (distance + dashWidth).clamp(0, metric.length).toDouble();
+        canvas.drawPath(metric.extractPath(distance, next), paint);
+        distance += dashWidth + dashGap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRRectPainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.radius != radius;
   }
 }

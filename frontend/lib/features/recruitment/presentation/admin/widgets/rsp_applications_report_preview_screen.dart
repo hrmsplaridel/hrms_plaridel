@@ -640,15 +640,69 @@ class _TablePreview extends StatelessWidget {
       );
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: rows.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, index) {
-        return _ApplicantReportCard(
-          index: index + 1,
-          row: rows[index],
-          showDocuments: showAllColumns,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compactCards = constraints.maxWidth < 900;
+        if (compactCards) {
+          return ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: rows.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              return _ApplicantReportCard(
+                index: index + 1,
+                row: rows[index],
+                showDocuments: showAllColumns,
+              );
+            },
+          );
+        }
+        final primary = AppTheme.dashTextPrimaryOf(context);
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              headingRowHeight: 40,
+              dataRowMinHeight: 40,
+              dataRowMaxHeight: 56,
+              columns: const [
+                DataColumn(label: Text('Applicant')),
+                DataColumn(label: Text('Position')),
+                DataColumn(label: Text('Status')),
+                DataColumn(label: Text('Overall')),
+                DataColumn(label: Text('General')),
+                DataColumn(label: Text('Math')),
+                DataColumn(label: Text('Information')),
+                DataColumn(label: Text('BEI')),
+                DataColumn(label: Text('Applied')),
+              ],
+              rows: [
+                for (final row in rows)
+                  DataRow(
+                    cells: [
+                      DataCell(
+                        Text(
+                          row.displayFullName,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: primary,
+                          ),
+                        ),
+                      ),
+                      DataCell(Text(row.positionApplied)),
+                      DataCell(Text(row.status)),
+                      DataCell(Text(row.examScorePercent)),
+                      DataCell(Text(row.generalPercent)),
+                      DataCell(Text(row.mathPercent)),
+                      DataCell(Text(row.generalInfoPercent)),
+                      DataCell(Text(row.beiPercent)),
+                      DataCell(Text(row.appliedAt)),
+                    ],
+                  ),
+              ],
+            ),
+          ),
         );
       },
     );

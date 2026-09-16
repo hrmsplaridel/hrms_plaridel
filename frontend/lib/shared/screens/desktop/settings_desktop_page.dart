@@ -32,12 +32,15 @@ class SettingsDesktopPage extends StatelessWidget {
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
-        child: ProfileContent(
-          showAccountSection: false,
-          showPasswordSection: false,
-          showAppSettings: true,
-          initialTab: initialTab,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+        child: SizedBox(
+          width: double.infinity,
+          child: ProfileContent(
+            showAccountSection: false,
+            showPasswordSection: false,
+            showAppSettings: true,
+            initialTab: initialTab,
+          ),
         ),
       ),
     );

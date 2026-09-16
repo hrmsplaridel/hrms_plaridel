@@ -38,6 +38,12 @@ class JobVacancyItem {
   /// All applications for this position, including hired / declined / failed (from GET only).
   final int? totalApplicationCount;
 
+  /// True when HR actually listed a job title. Requirements-only rows are not applyable.
+  bool get hasListedPosition {
+    final h = headline?.trim();
+    return h != null && h.isNotEmpty;
+  }
+
   /// Headline if non-empty, else body — matches how [position_applied_for] is stored when applying.
   String? get positionKey {
     final h = headline?.trim();
@@ -105,6 +111,52 @@ class JobVacancyAnnouncement {
   static const String tableName = 'job_vacancy_announcement';
   static const String defaultId = 'default';
 
+  static bool parseHasVacancies(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      switch (value.trim().toLowerCase()) {
+        case 'true':
+        case 't':
+        case '1':
+        case 'yes':
+          return true;
+        default:
+          return false;
+      }
+    }
+    return false;
+  }
+
+  /// Vacancies that have a real job title applicants can select.
+  List<JobVacancyItem> get listedVacancies =>
+      vacancies.where((v) => v.hasListedPosition).toList(growable: false);
+
+  /// Hiring toggle is on *and* at least one position title is posted.
+  bool get isAcceptingApplications =>
+      hasVacancies && listedVacancies.isNotEmpty;
+
+  /// Cheap fingerprint so the landing page can skip rebuilds while polling.
+  String get publicListingFingerprint {
+    final items = vacancies
+        .map(
+          (v) => [
+            v.headline ?? '',
+            v.body ?? '',
+            v.education ?? '',
+            v.experience ?? '',
+            v.training ?? '',
+            v.closingDate?.toIso8601String() ?? '',
+            v.isClosed == true ? '1' : '0',
+            '${v.maxApplicants ?? ''}',
+            '${v.applicationCount ?? ''}',
+            '${v.totalApplicationCount ?? ''}',
+          ].join('\u001f'),
+        )
+        .join('\u001e');
+    return '${hasVacancies ? 1 : 0}\u001e${updatedAt?.toIso8601String() ?? ''}\u001e$items';
+  }
+
   factory JobVacancyAnnouncement.fromJson(Map<String, dynamic> json) {
     List<JobVacancyItem> vacancies = [];
     final raw = json['vacancies'];
@@ -156,12 +208,12 @@ class JobVacancyAnnouncement {
       ];
     }
     return JobVacancyAnnouncement(
-      hasVacancies: json['has_vacancies'] as bool? ?? true,
+      hasVacancies: parseHasVacancies(json['has_vacancies']),
       headline: json['headline'] as String?,
       body: json['body'] as String?,
       vacancies: vacancies,
       updatedAt: json['updated_at'] != null
-          ? DateTime.tryParse(json['updated_at'] as String)
+          ? DateTime.tryParse(json['updated_at'].toString())
           : null,
     );
   }
@@ -222,18 +274,25 @@ class JobVacancyAnnouncementRepo {
       JobVacancyAnnouncementRepo._();
 
   /// Fetches the current announcement. Public (no auth required).
-  /// Returns default (hasVacancies: true, null headline/body) if no row or error.
-  Future<JobVacancyAnnouncement> fetch() async {
+  /// Returns null when the request fails so callers can keep the last good listing.
+  Future<JobVacancyAnnouncement?> fetchIfAvailable() async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/rsp/job-vacancies',
       );
       final data = res.data;
-      if (data == null) return const JobVacancyAnnouncement(hasVacancies: true);
+      if (data == null) return null;
       return JobVacancyAnnouncement.fromJson(Map<String, dynamic>.from(data));
     } catch (_) {
-      return const JobVacancyAnnouncement(hasVacancies: true);
+      return null;
     }
+  }
+
+  /// Fetches the current announcement. Public (no auth required).
+  /// Returns closed (no openings) if no row or the request fails.
+  Future<JobVacancyAnnouncement> fetch() async {
+    return await fetchIfAvailable() ??
+        const JobVacancyAnnouncement(hasVacancies: false);
   }
 
   /// Saves the announcement (upsert). Creates the default row if missing; otherwise updates. Requires authenticated user (admin).

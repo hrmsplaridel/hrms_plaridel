@@ -6,13 +6,7 @@ import 'package:hrms_plaridel/features/recruitment/models/recruitment_applicatio
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_employee_account_setup_panel.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_attachment_actions.dart';
 
-enum _FinalReqStatusFilter {
-  all,
-  incomplete,
-  readyForReview,
-  approved,
-  hired,
-}
+enum _FinalReqStatusFilter { all, incomplete, readyForReview, approved, hired }
 
 /// Admin: track medical certificate, drug test, and NBI clearance for applicants
 /// who passed deliberation, then proceed to employee account setup.
@@ -45,7 +39,9 @@ class _RspFinalRequirementsSectionState
   void initState() {
     super.initState();
     _searchController.addListener(() {
-      setState(() => _searchQuery = _searchController.text.trim().toLowerCase());
+      setState(
+        () => _searchQuery = _searchController.text.trim().toLowerCase(),
+      );
     });
     _load();
   }
@@ -62,13 +58,9 @@ class _RspFinalRequirementsSectionState
       final apps = await RecruitmentRepo.instance.listApplications();
       if (!mounted) return;
       setState(() {
-        _applications = apps
-            .where((a) => a.finalInterviewPassed == true)
-            .toList()
-          ..sort(
-            (a, b) =>
-                a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()),
-          );
+        _applications =
+            apps.where((a) => a.finalInterviewPassed == true).toList()
+              ..sort(_compareLatestAppliedFirst);
         _loading = false;
       });
     } catch (_) {
@@ -78,6 +70,18 @@ class _RspFinalRequirementsSectionState
         _loading = false;
       });
     }
+  }
+
+  static int _compareLatestAppliedFirst(
+    RecruitmentApplication a,
+    RecruitmentApplication b,
+  ) {
+    final ad = a.createdAt ?? a.updatedAt;
+    final bd = b.createdAt ?? b.updatedAt;
+    if (ad != null && bd != null) return bd.compareTo(ad);
+    if (ad != null) return -1;
+    if (bd != null) return 1;
+    return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
   }
 
   static bool _isHired(RecruitmentApplication a) {
@@ -166,13 +170,14 @@ class _RspFinalRequirementsSectionState
 
   int get _readyCount => _applications
       .where(
-        (a) => a.hasAllFinalRequirementsUploaded && !a.finalRequirementsApproved,
+        (a) =>
+            a.hasAllFinalRequirementsUploaded && !a.finalRequirementsApproved,
       )
       .length;
 
-  int get _approvedCount =>
-      _applications.where((a) => a.finalRequirementsApproved && !_isHired(a))
-          .length;
+  int get _approvedCount => _applications
+      .where((a) => a.finalRequirementsApproved && !_isHired(a))
+      .length;
 
   int get _hiredCount => _applications.where(_isHired).length;
 
@@ -215,9 +220,9 @@ class _RspFinalRequirementsSectionState
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(userFacingApiError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
     } finally {
       if (mounted) setState(() => _savingIds.remove(app.id));
     }
@@ -229,22 +234,23 @@ class _RspFinalRequirementsSectionState
   ) async {
     setState(() => _savingIds.add(app.id));
     try {
-      await RecruitmentRepo.instance.updateOrientationAttended(app.id, attended);
+      await RecruitmentRepo.instance.updateOrientationAttended(
+        app.id,
+        attended,
+      );
       if (!mounted) return;
       final msg = attended == null
           ? 'Orientation attendance reset to pending.'
           : attended
           ? 'Orientation marked as attended.'
           : 'Orientation marked as no-show.';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg)),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(userFacingApiError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
     } finally {
       if (mounted) setState(() => _savingIds.remove(app.id));
     }
@@ -291,10 +297,7 @@ class _RspFinalRequirementsSectionState
                 children: [
                   const Text(
                     'Orientation attendance',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -396,9 +399,7 @@ class _RspFinalRequirementsSectionState
   Widget _shellTopAccent() => Container(
     height: 4,
     decoration: const BoxDecoration(
-      gradient: LinearGradient(
-        colors: [Color(0xFFE85D04), Color(0xFFFFB74D)],
-      ),
+      gradient: LinearGradient(colors: [Color(0xFFE85D04), Color(0xFFFFB74D)]),
     ),
   );
 
@@ -415,9 +416,7 @@ class _RspFinalRequirementsSectionState
       decoration: BoxDecoration(
         color: AppTheme.primaryNavy.withValues(alpha: 0.1),
         shape: BoxShape.circle,
-        border: Border.all(
-          color: AppTheme.primaryNavy.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.2)),
       ),
       alignment: Alignment.center,
       child: Text(
@@ -492,7 +491,8 @@ class _RspFinalRequirementsSectionState
         ? AppTheme.primaryNavyLight
         : AppTheme.primaryNavy;
     final filtered = _filteredApplications;
-    final hasActiveFilters = _selectedPositionFilter != null ||
+    final hasActiveFilters =
+        _selectedPositionFilter != null ||
         _selectedAppliedDate != null ||
         _statusFilter != _FinalReqStatusFilter.all ||
         _searchQuery.isNotEmpty;
@@ -668,7 +668,10 @@ class _RspFinalRequirementsSectionState
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTheme.primaryNavy, width: 2),
+              borderSide: const BorderSide(
+                color: AppTheme.primaryNavy,
+                width: 2,
+              ),
             ),
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 16,
@@ -841,7 +844,11 @@ class _RspFinalRequirementsSectionState
             padding: const EdgeInsets.all(28),
             child: Column(
               children: [
-                Icon(icon, size: 40, color: AppTheme.dashTextSecondaryOf(context)),
+                Icon(
+                  icon,
+                  size: 40,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
                 const SizedBox(height: 14),
                 Text(
                   title,
@@ -1128,8 +1135,9 @@ class _RspFinalRequirementsSectionState
                                 height: 30,
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFE85D04)
-                                      .withValues(alpha: 0.15),
+                                  color: const Color(
+                                    0xFFE85D04,
+                                  ).withValues(alpha: 0.15),
                                   shape: BoxShape.circle,
                                 ),
                                 child: Text(
@@ -1138,9 +1146,7 @@ class _RspFinalRequirementsSectionState
                                     fontWeight: FontWeight.w800,
                                     color: step3Enabled
                                         ? const Color(0xFFE85D04)
-                                        : AppTheme.dashTextSecondaryOf(
-                                            context,
-                                          ),
+                                        : AppTheme.dashTextSecondaryOf(context),
                                   ),
                                 ),
                               ),
@@ -1214,7 +1220,9 @@ class _RspFinalRequirementsSectionState
     if (hired) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Cannot reject requirements after the applicant is hired.'),
+          content: Text(
+            'Cannot reject requirements after the applicant is hired.',
+          ),
         ),
       );
       return;
@@ -1255,7 +1263,8 @@ class _RspFinalRequirementsSectionState
                   maxLength: 500,
                   decoration: const InputDecoration(
                     labelText: 'Reason for applicant (optional)',
-                    hintText: 'e.g. Unreadable scan — please upload a clearer PDF',
+                    hintText:
+                        'e.g. Unreadable scan — please upload a clearer PDF',
                     border: OutlineInputBorder(),
                     alignLabelWithHint: true,
                   ),
@@ -1301,9 +1310,9 @@ class _RspFinalRequirementsSectionState
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(userFacingApiError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
     } finally {
       if (mounted) setState(() => _savingIds.remove(app.id));
     }

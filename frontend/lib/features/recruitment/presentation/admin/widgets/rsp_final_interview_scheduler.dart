@@ -59,10 +59,20 @@ class _RspFinalInterviewSchedulerState
       final ex = _examResults[a.id.toLowerCase()];
       if (ex != null && ex.passed) out.add(a);
     }
-    out.sort(
-      (a, b) => a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()),
-    );
+    out.sort(_compareLatestAppliedFirst);
     return out;
+  }
+
+  int _compareLatestAppliedFirst(
+    RecruitmentApplication a,
+    RecruitmentApplication b,
+  ) {
+    final ad = a.createdAt ?? a.updatedAt;
+    final bd = b.createdAt ?? b.updatedAt;
+    if (ad != null && bd != null) return bd.compareTo(ad);
+    if (ad != null) return -1;
+    if (bd != null) return 1;
+    return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
   }
 
   Set<String> get _positionFilterOptions {

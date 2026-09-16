@@ -288,7 +288,7 @@ class RspApplicationStatusTimeline extends StatelessWidget {
       case 'document_approved':
         return 'Approved. Continue to the exams via the Recruitment Application page.';
       case 'document_declined':
-        return 'Your documents were not approved. You may submit a new application with updated documents.';
+        return 'Your documents were not approved. Replace the PDFs and resubmit for HR review.';
       case 'passed':
       case 'failed':
       case 'registered':

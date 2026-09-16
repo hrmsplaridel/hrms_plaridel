@@ -11,14 +11,12 @@ class HeaderSection extends StatelessWidget {
     this.onJobVacanciesTap,
     this.onRecruitmentProcessTap,
     this.onContactTap,
-    this.onLoginTap,
   });
 
   final VoidCallback? onHomeTap;
   final VoidCallback? onJobVacanciesTap;
   final VoidCallback? onRecruitmentProcessTap;
   final VoidCallback? onContactTap;
-  final VoidCallback? onLoginTap;
 
   @override
   Widget build(BuildContext context) {
@@ -125,10 +123,6 @@ class HeaderSection extends StatelessWidget {
                               onTap: onContactTap,
                               lightOnColoredHeader: true,
                             ),
-                            if (onLoginTap != null) ...[
-                              const SizedBox(width: 10),
-                              _HeaderLoginButton(onLoginTap: onLoginTap),
-                            ],
                           ],
                         ),
                       ),
@@ -137,147 +131,59 @@ class HeaderSection extends StatelessWidget {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _LguBranding(
-                            isNarrow: isNarrow,
-                            isWide: isWide,
-                            showBackground: true,
-                            lightOnColoredHeader: true,
-                          ),
-                          if (onLoginTap != null)
-                            _HeaderLoginButton(
-                              onLoginTap: onLoginTap,
-                              compact: true,
-                            ),
-                        ],
+                      _LguBranding(
+                        isNarrow: isNarrow,
+                        isWide: isWide,
+                        showBackground: true,
+                        expandWidth: true,
+                        lightOnColoredHeader: true,
                       ),
-                      if (!isNarrow) ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.2),
                           ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.2),
-                            ),
-                          ),
-                          child: Wrap(
-                            spacing: 4,
-                            runSpacing: 4,
-                            children: [
-                              _NavLink(
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _NavLink(
                                 label: 'Home',
                                 onTap: onHomeTap,
                                 lightOnColoredHeader: true,
+                                compact: isNarrow,
                               ),
-                              _NavLink(
-                                label: 'Job Vacancies',
+                            ),
+                            Expanded(
+                              child: _NavLink(
+                                label: isNarrow ? 'Vacancies' : 'Job Vacancies',
                                 onTap: onJobVacanciesTap,
                                 lightOnColoredHeader: true,
+                                compact: isNarrow,
                               ),
-                              _NavLink(
+                            ),
+                            Expanded(
+                              child: _NavLink(
                                 label: 'Contact',
                                 onTap: onContactTap,
                                 lightOnColoredHeader: true,
+                                compact: isNarrow,
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ],
                   ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Optional login button, pill shape, and hover effect.
-class _HeaderLoginButton extends StatefulWidget {
-  const _HeaderLoginButton({this.onLoginTap, this.compact = false});
-
-  final VoidCallback? onLoginTap;
-  final bool compact;
-
-  @override
-  State<_HeaderLoginButton> createState() => _HeaderLoginButtonState();
-}
-
-class _HeaderLoginButtonState extends State<_HeaderLoginButton> {
-  bool _hover = false;
-
-  static const _radius = 20.0;
-  static const _padding = EdgeInsets.symmetric(horizontal: 16, vertical: 8);
-  static const _paddingCompact = EdgeInsets.symmetric(
-    horizontal: 12,
-    vertical: 7,
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    final pad = widget.compact ? _paddingCompact : _padding;
-    final fontSize = widget.compact ? 12.5 : 13.0;
-    final iconSize = widget.compact ? 15.0 : 16.0;
-
-    return MouseRegion(
-      onEnter: kIsWeb ? (_) => setState(() => _hover = true) : null,
-      onExit: kIsWeb ? (_) => setState(() => _hover = false) : null,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(_radius),
-          boxShadow: _hover
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.18),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-        ),
-        child: FilledButton.icon(
-          onPressed: widget.onLoginTap,
-          icon: Icon(Icons.login_rounded, size: iconSize),
-          label: Text(
-            'Login',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: fontSize,
-              letterSpacing: 0.2,
-            ),
-          ),
-          style: FilledButton.styleFrom(
-            backgroundColor: _hover
-                ? Colors.white
-                : Colors.white.withValues(alpha: 0.96),
-            foregroundColor: AppTheme.primaryNavyDark,
-            padding: pad,
-            minimumSize: Size.zero,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            visualDensity: VisualDensity.compact,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(_radius),
-            ),
-            elevation: 0,
-            side: BorderSide(
-              color: AppTheme.primaryNavyDark.withValues(alpha: 0.1),
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -288,11 +194,13 @@ class _NavLink extends StatefulWidget {
     required this.label,
     this.onTap,
     this.lightOnColoredHeader = false,
+    this.compact = false,
   });
 
   final String label;
   final VoidCallback? onTap;
   final bool lightOnColoredHeader;
+  final bool compact;
 
   @override
   State<_NavLink> createState() => _NavLinkState();
@@ -313,7 +221,10 @@ class _NavLinkState extends State<_NavLink> {
           borderRadius: BorderRadius.circular(8),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            padding: EdgeInsets.symmetric(
+              horizontal: widget.compact ? 4 : 12,
+              vertical: 7,
+            ),
             decoration: BoxDecoration(
               color: widget.lightOnColoredHeader
                   ? Colors.white.withValues(alpha: _hover ? 0.18 : 0.0)
@@ -322,11 +233,14 @@ class _NavLinkState extends State<_NavLink> {
             ),
             child: Text(
               widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 color: widget.lightOnColoredHeader
                     ? Colors.white.withValues(alpha: _hover ? 1 : 0.9)
                     : AppTheme.primaryNavy,
-                fontSize: 13.5,
+                fontSize: widget.compact ? 12.5 : 13.5,
                 fontWeight: _hover ? FontWeight.w700 : FontWeight.w600,
                 letterSpacing: 0.1,
                 shadows: widget.lightOnColoredHeader

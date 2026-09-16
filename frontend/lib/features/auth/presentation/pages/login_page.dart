@@ -20,26 +20,26 @@ import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
 const _rememberKey = 'login_remember_v1';
 const _rememberEmailKey = 'login_remember_email_v1';
 
-const _kHrmsLogoAsset = 'assets/images/hrmslogo.png';
 const _kPlaridelLogoAsset = 'assets/images/Plaridel Logo.jpg';
 const _kLoginHeroImageAsset = 'assets/images/PlaridelBuildingC.png';
-
-enum _LoginLogoVariant { hrms, municipality }
-
-/// Shared radii for the login form (right panel / mobile card).
-const _kCardRadius = 28.0;
-const _kInputRadius = 14.0;
-const _kButtonRadius = 14.0;
-const _kFieldHeight = 52.0;
-
-/// Wide login split: hero panel vs form panel (≈60% / 40%).
-const _kLoginHeroFlex = 12;
-const _kLoginFormFlex = 8;
+const _kCardRadius = 18.0;
+const _kInputRadius = 12.0;
+const _kButtonRadius = 12.0;
+const _kFieldHeight = 50.0;
 const _kLoginFormMaxWidth = 440.0;
-const _kLoginHeroCardMaxWidth = 540.0;
+const _kSplitBreakpoint = 768.0;
+const _kDesktopBreakpoint = 1024.0;
 
-/// Login: wide = hero image + branding left, white form right.
-/// Narrow = full-bleed photo with elevated white form card.
+enum _LoginLayout { desktop, tablet, mobile }
+
+_LoginLayout _layoutForWidth(double width) {
+  if (width >= _kDesktopBreakpoint) return _LoginLayout.desktop;
+  if (width >= _kSplitBreakpoint) return _LoginLayout.tablet;
+  return _LoginLayout.mobile;
+}
+
+/// Login: wide = hero image + branding left, light form right.
+/// Narrow = stacked municipal hero + mobile-app style form.
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -53,6 +53,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   final _passwordFocusNode = FocusNode();
   bool _rememberMe = false;
   bool _isLoading = false;
+  String? _formError;
 
   late final AnimationController _entranceCtrl;
   late final Animation<double> _entranceFade;
@@ -63,11 +64,11 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     super.initState();
     _entranceCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
+      duration: const Duration(milliseconds: 220),
     );
     _entranceFade = CurvedAnimation(
       parent: _entranceCtrl,
-      curve: Curves.easeOutCubic,
+      curve: Curves.easeOut,
     );
     _shakeCtrl = AnimationController(
       vsync: this,
@@ -75,15 +76,6 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     );
     _entranceCtrl.forward();
     _loadRememberedCredentials();
-  }
-
-  Animation<double> _stagger(int index, {int steps = 10}) {
-    final start = (index / steps).clamp(0.0, 0.85);
-    final end = ((index + 1.4) / steps).clamp(0.15, 1.0);
-    return CurvedAnimation(
-      parent: _entranceCtrl,
-      curve: Interval(start, end, curve: Curves.easeOutCubic),
-    );
   }
 
   void _triggerShake() {
@@ -124,148 +116,140 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isWide = MediaQuery.sizeOf(context).width >= 900;
+  Widget _shakeForm(Widget child) {
+    return AnimatedBuilder(
+      animation: _shakeCtrl,
+      builder: (context, child) {
+        final t = _shakeCtrl.value;
+        final dx = t == 0 ? 0.0 : math.sin(t * math.pi * 6) * 8 * (1 - t);
+        return Transform.translate(offset: Offset(dx, 0), child: child);
+      },
+      child: child,
+    );
+  }
 
-    final form = _LoginFormContent(
+  Widget _form({required bool embeddedCard}) {
+    return _LoginFormContent(
       emailController: _emailController,
       passwordController: _passwordController,
       passwordFocusNode: _passwordFocusNode,
       rememberMe: _rememberMe,
       isLoading: _isLoading,
+      formError: _formError,
+      embeddedCard: embeddedCard,
       onRememberMeChanged: (v) => setState(() => _rememberMe = v ?? false),
       onLogin: _onLogin,
       onForgotPassword: _onForgotPassword,
-      isWebLayout: isWide,
-      isMobileLayout: !isWide,
-      stagger: _stagger,
+      onClearError: () {
+        if (_formError != null) setState(() => _formError = null);
+      },
     );
+  }
 
-    Widget shakeForm(Widget child) {
-      return AnimatedBuilder(
-        animation: _shakeCtrl,
-        builder: (context, child) {
-          final t = _shakeCtrl.value;
-          final dx = t == 0 ? 0.0 : math.sin(t * math.pi * 6) * 8 * (1 - t);
-          return Transform.translate(offset: Offset(dx, 0), child: child);
-        },
-        child: child,
-      );
-    }
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final layout = _layoutForWidth(size.width);
+    final canPop = Navigator.of(context).canPop();
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      backgroundColor: AppTheme.offWhite,
-      body: isWide
-          ? Row(
-              children: [
-                Expanded(
-                  flex: _kLoginHeroFlex,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(-0.04, 0),
-                      end: Offset.zero,
-                    ).animate(_entranceFade),
-                    child: FadeTransition(
-                      opacity: _entranceFade,
-                      child: const _LoginHeroPanel(),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: _kLoginFormFlex,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0.05, 0),
-                      end: Offset.zero,
-                    ).animate(_entranceFade),
-                    child: _LoginFormShell(
-                      isWeb: true,
-                      maxContentWidth: _kLoginFormMaxWidth,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 16,
-                      ),
-                      child: FadeTransition(
-                        opacity: _entranceFade,
-                        child: shakeForm(form),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            )
-          : Stack(
-              fit: StackFit.expand,
-              children: [
-                const _LoginHeroBackground(),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.18),
-                        Colors.black.withValues(alpha: 0.52),
-                      ],
-                    ),
-                  ),
-                ),
-                SafeArea(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final viewInsets = MediaQuery.viewInsetsOf(context);
-                      final viewport = MediaQuery.sizeOf(context);
-                      final keyboardOpen = viewInsets.bottom > 80;
-                      final compactMobile =
-                          viewport.width < 430 || viewport.height < 820;
-                      final formChild = FadeTransition(
-                        opacity: _entranceFade,
-                        child: shakeForm(form),
-                      );
-                      final horizontalInset = compactMobile ? 12.0 : 16.0;
-                      final verticalInset = compactMobile ? 12.0 : 20.0;
-                      final cardWidth =
-                          constraints.maxWidth - horizontalInset * 2;
+      backgroundColor: const Color(0xFFF6F4F1),
+      body: FadeTransition(
+        opacity: _entranceFade,
+        child: layout == _LoginLayout.mobile
+            ? _buildStacked(context, canPop: canPop)
+            : _buildSplit(context, layout: layout, canPop: canPop),
+      ),
+    );
+  }
 
-                      if (keyboardOpen) {
-                        return SingleChildScrollView(
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          padding: EdgeInsets.fromLTRB(
-                            horizontalInset,
-                            verticalInset,
-                            horizontalInset,
-                            viewInsets.bottom + verticalInset,
-                          ),
-                          child: SizedBox(width: cardWidth, child: formChild),
-                        );
-                      }
+  Widget _buildSplit(
+    BuildContext context, {
+    required _LoginLayout layout,
+    required bool canPop,
+  }) {
+    final width = MediaQuery.sizeOf(context).width;
+    final desktop = layout == _LoginLayout.desktop;
+    final formWidth = desktop ? width * 0.445 : width * 0.50;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          right: formWidth * 0.42,
+          child: _LoginHeroPanel(compact: !desktop, showBack: canPop),
+        ),
+        Positioned(
+          top: 0,
+          bottom: 0,
+          right: 0,
+          width: formWidth,
+          child: _LoginRightShelf(
+            child: _shakeForm(_form(embeddedCard: true)),
+          ),
+        ),
+      ],
+    );
+  }
 
-                      return Center(
-                        child: SingleChildScrollView(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: horizontalInset,
-                            vertical: verticalInset,
-                          ),
-                          child: SizedBox(width: cardWidth, child: formChild),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                if (Navigator.of(context).canPop())
-                  SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 8, 0, 0),
-                      child: _LoginMobileBackButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ),
-                  ),
-              ],
+  Widget _buildStacked(BuildContext context, {required bool canPop}) {
+    final media = MediaQuery.of(context);
+    final keyboardOpen = media.viewInsets.bottom > 80;
+    final landscape = media.size.height < 520;
+    final double heroHeight;
+    if (keyboardOpen) {
+      heroHeight = 0;
+    } else if (landscape) {
+      heroHeight = 132;
+    } else if (media.size.width < 360) {
+      heroHeight = 180;
+    } else if (media.size.height < 720) {
+      heroHeight = 196;
+    } else {
+      heroHeight = 228;
+    }
+
+    return Column(
+      children: [
+        if (heroHeight > 0)
+          _LoginMobileHero(
+            height: heroHeight,
+            showBack: canPop,
+          ),
+        if (heroHeight == 0 && canPop)
+          SafeArea(
+            bottom: false,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: _LoginIconBackButton(
+                onPressed: () => Navigator.of(context).pop(),
+                light: false,
+              ),
             ),
+          ),
+        Expanded(
+          child: ColoredBox(
+            color: const Color(0xFFF6F4F1),
+            child: SafeArea(
+              top: heroHeight == 0,
+              child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  keyboardOpen ? 12 : 20,
+                  20,
+                  20 + media.viewInsets.bottom,
+                ),
+                child: _shakeForm(_form(embeddedCard: false)),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -276,14 +260,15 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     if (email.isEmpty || password.isEmpty) {
       if (mounted) {
         _triggerShake();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please enter email and password')),
-        );
+        setState(() => _formError = 'Please enter email and password');
       }
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _formError = null;
+    });
     try {
       final auth = context.read<AuthProvider>();
       final errorMessage = await auth.login(email, password);
@@ -313,16 +298,12 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
         );
       } else {
         _triggerShake();
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(errorMessage)));
+        setState(() => _formError = errorMessage);
       }
     } catch (e) {
       if (mounted) {
         _triggerShake();
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Login failed: $e')));
+        setState(() => _formError = 'Login failed: $e');
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -359,56 +340,68 @@ String _readApiError(Object error, String fallback) {
   return fallback;
 }
 
-/// Building photo with a light wash and vignette. Static — no Ken Burns.
-class _LoginHeroBackground extends StatelessWidget {
-  const _LoginHeroBackground();
+class _LoginHeroImage extends StatelessWidget {
+  const _LoginHeroImage({required this.alignment});
+
+  final Alignment alignment;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
+    return Image.asset(
+      _kLoginHeroImageAsset,
+      fit: BoxFit.cover,
+      alignment: alignment,
+      filterQuality: FilterQuality.high,
+      gaplessPlayback: true,
+      errorBuilder: (_, __, ___) => Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              LoginTheme.brandingGradientStart,
+              LoginTheme.brandingGradientEnd,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LoginHeroOverlay extends StatelessWidget {
+  const _LoginHeroOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Stack(
       fit: StackFit.expand,
       children: [
-        Image.asset(
-          _kLoginHeroImageAsset,
-          fit: BoxFit.cover,
-          alignment: const Alignment(0.05, -0.1),
-          errorBuilder: (_, __, ___) => Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  LoginTheme.brandingGradientStart,
-                  LoginTheme.brandingGradientEnd,
-                ],
-              ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                Color(0x990A0A0A),
+                Color(0x330A0A0A),
+                Color(0x00000000),
+              ],
+              stops: [0.0, 0.42, 0.82],
             ),
           ),
         ),
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              stops: const [0.0, 0.28, 0.68, 1.0],
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
               colors: [
-                Colors.black.withValues(alpha: 0.10),
-                Colors.transparent,
-                LoginTheme.bluePrimary.withValues(alpha: 0.12),
-                Colors.black.withValues(alpha: 0.42),
+                Color(0xE6E85D04),
+                Color(0x99E85D04),
+                Color(0x00E85D04),
               ],
-            ),
-          ),
-        ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              center: Alignment.center,
-              radius: 1.08,
-              colors: [
-                Colors.transparent,
-                Colors.black.withValues(alpha: 0.22),
-              ],
+              stops: [0.0, 0.28, 0.62],
             ),
           ),
         ),
@@ -417,59 +410,80 @@ class _LoginHeroBackground extends StatelessWidget {
   }
 }
 
-/// Left panel on wide screens — centered glass card over the hero photo.
+/// Left panel: municipal hall photo, headline, and trust marks.
 class _LoginHeroPanel extends StatelessWidget {
-  const _LoginHeroPanel();
+  const _LoginHeroPanel({required this.compact, required this.showBack});
+
+  final bool compact;
+  final bool showBack;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        const _LoginHeroBackground(),
+        const _LoginHeroImage(alignment: Alignment(0.12, 0.08)),
+        const _LoginHeroOverlay(),
         SafeArea(
-          child: Stack(
-            children: [
-              if (Navigator.of(context).canPop())
-                const Positioned(
-                  top: 8,
-                  left: 8,
-                  child: _LoginBackButton(showLabel: true),
-                ),
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 40),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: _kLoginHeroCardMaxWidth,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const _HeroGlassCard(),
-                        const SizedBox(height: 22),
-                        const _LoginHeroFeatureRow(),
-                      ],
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final short = constraints.maxHeight < 720;
+              final brand = const _LoginHeroTopBrand();
+              final lower = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _LoginHeroHeadline(compact: compact || short),
+                  SizedBox(height: compact ? 18 : 28),
+                  _LoginHeroFeatures(compact: compact || short),
+                  const SizedBox(height: 18),
+                  Text(
+                    '“Public service is a work of heart.”',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.92),
+                      fontSize: compact ? 12.5 : 14,
+                      fontStyle: FontStyle.italic,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
+                ],
+              );
+              return Padding(
+                padding: EdgeInsets.fromLTRB(
+                  compact ? 22 : 36,
+                  16,
+                  compact ? 36 : 72,
+                  20,
                 ),
-              ),
-            ],
-          ),
-        ),
-        Positioned(
-          left: 28,
-          bottom: 24,
-          child: SafeArea(
-            top: false,
-            child: Text(
-              '© ${DateTime.now().year} Municipality of Plaridel',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.82),
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+                child: short
+                    ? SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (showBack) ...[
+                              const _LoginBackButton(showLabel: true),
+                              const SizedBox(height: 12),
+                            ],
+                            brand,
+                            const SizedBox(height: 24),
+                            lower,
+                          ],
+                        ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (showBack) ...[
+                            const _LoginBackButton(showLabel: true),
+                            const SizedBox(height: 12),
+                          ],
+                          brand,
+                          const Spacer(),
+                          lower,
+                        ],
+                      ),
+              );
+            },
           ),
         ),
       ],
@@ -477,325 +491,304 @@ class _LoginHeroPanel extends StatelessWidget {
   }
 }
 
-/// Frosted branding card over the municipal hall photo.
-class _HeroGlassCard extends StatelessWidget {
-  const _HeroGlassCard();
+class _LoginHeroTopBrand extends StatelessWidget {
+  const _LoginHeroTopBrand({this.compact = false});
+
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.28),
-            blurRadius: 44,
-            offset: const Offset(0, 18),
+    return Row(
+      children: [
+        _MunicipalityLogoCircle(
+          size: compact ? 48 : 64,
+          borderColor: Colors.white,
+          shadowAlpha: 0.18,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Municipality of Plaridel',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: compact ? 16 : 18,
+                  fontWeight: FontWeight.w800,
+                  height: 1.15,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Human Resource Management System',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                'Integrated Solutions for a Better Public Service',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.78),
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: 42,
+                height: 3,
+                decoration: BoxDecoration(
+                  color: LoginTheme.blueLight,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+            ],
           ),
-          BoxShadow(
-            color: LoginTheme.bluePrimary.withValues(alpha: 0.16),
-            blurRadius: 36,
-            offset: const Offset(0, 10),
+        ),
+      ],
+    );
+  }
+}
+
+class _LoginHeroHeadline extends StatelessWidget {
+  const _LoginHeroHeadline({required this.compact});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final titleSize = compact ? 32.0 : 44.0;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 560),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text.rich(
+            TextSpan(
+              children: [
+                const TextSpan(text: 'Empowering\n'),
+                TextSpan(
+                  text: 'Our People,\n',
+                  style: TextStyle(color: LoginTheme.blueLight),
+                ),
+                const TextSpan(text: 'Building a Better Plaridel'),
+              ],
+            ),
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: titleSize,
+              height: 1.12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.8,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'A secure and efficient Human Resource Management System\nfor a more progressive and responsive municipality.',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.92),
+              fontSize: compact ? 13 : 14.5,
+              height: 1.45,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-          child: Stack(
-            children: [
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white.withValues(alpha: 0.30),
-                      Colors.white.withValues(alpha: 0.12),
-                      Colors.white.withValues(alpha: 0.07),
-                    ],
-                  ),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.50),
-                    width: 1.5,
-                  ),
-                  borderRadius: BorderRadius.circular(28),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(32, 30, 32, 26),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const _LoginBranding(
-                        lightText: true,
-                        compact: false,
-                      ),
-                      const SizedBox(height: 18),
-                      Text(
-                        'Serving the municipal workforce with\n'
-                        'modern, secure HR services.',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.94),
-                          fontSize: 15,
-                          height: 1.55,
-                          fontWeight: FontWeight.w500,
-                          shadows: [
-                            Shadow(
-                              color: Colors.black.withValues(alpha: 0.35),
-                              blurRadius: 10,
-                              offset: const Offset(0, 1),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 22),
-                      const _SecureAccessPill(light: true),
-                    ],
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 90,
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(28),
-                      ),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.white.withValues(alpha: 0.32),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 24,
-                right: 24,
-                bottom: 0,
-                child: IgnorePointer(
-                  child: Container(
-                    height: 2,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(2),
-                      gradient: LinearGradient(
-                        colors: [
-                          Colors.transparent,
-                          LoginTheme.blueLight.withValues(alpha: 0.85),
-                          LoginTheme.bluePrimary.withValues(alpha: 0.9),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
 
-/// Trust highlights on the web hero panel.
-class _LoginHeroFeatureRow extends StatelessWidget {
-  const _LoginHeroFeatureRow();
+class _LoginHeroFeatures extends StatelessWidget {
+  const _LoginHeroFeatures({required this.compact});
+
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      alignment: WrapAlignment.center,
-      spacing: 12,
-      runSpacing: 12,
-      children: const [
-        _LoginHeroFeatureChip(
-          icon: Icons.verified_user_outlined,
-          label: 'Secure login',
-        ),
-        _LoginHeroFeatureChip(
-          icon: Icons.admin_panel_settings_outlined,
-          label: 'Admin portal',
-        ),
-        _LoginHeroFeatureChip(
-          icon: Icons.badge_outlined,
-          label: 'Employee portal',
-        ),
-        _LoginHeroFeatureChip(
-          icon: Icons.schedule_outlined,
-          label: '24/7 access',
-        ),
+    const items = [
+      (Icons.verified_user_outlined, 'Secure', 'Your data is protected'),
+      (Icons.groups_outlined, 'For Our People', 'Support municipal employees'),
+      (Icons.settings_outlined, 'Modern HR Services', 'Efficient and digital processes'),
+      (Icons.bar_chart_rounded, 'Better Service', 'A stronger Plaridel tomorrow'),
+    ];
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) SizedBox(width: compact ? 10 : 18),
+          Expanded(
+            child: Column(
+              children: [
+                Container(
+                  width: compact ? 40 : 46,
+                  height: compact ? 40 : 46,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.12),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.45)),
+                  ),
+                  child: Icon(items[i].$1, color: Colors.white, size: 20),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  items[i].$2,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: compact ? 11 : 12.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  items[i].$3,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.82),
+                    fontSize: compact ? 10 : 11,
+                    height: 1.25,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
-class _LoginHeroFeatureChip extends StatelessWidget {
-  const _LoginHeroFeatureChip({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
+class _LoginWaveClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    final w = size.width;
+    final h = size.height;
+    final path = Path()
+      ..moveTo(w * 0.20, 0)
+      ..cubicTo(w * 0.02, h * 0.14, w * 0.26, h * 0.34, w * 0.10, h * 0.52)
+      ..cubicTo(w * -0.02, h * 0.68, w * 0.22, h * 0.86, w * 0.04, h)
+      ..lineTo(w, h)
+      ..lineTo(w, 0)
+      ..close();
+    return path;
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(999),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.16),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.34)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 16, color: Colors.white),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.15,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
 }
 
-class _LoginFormShell extends StatelessWidget {
-  const _LoginFormShell({
-    required this.child,
-    this.isWeb = false,
-    this.contentPadding,
-    this.maxContentWidth = _kLoginFormMaxWidth,
-  });
+class _LoginRightShelf extends StatelessWidget {
+  const _LoginRightShelf({required this.child});
 
   final Widget child;
-  final bool isWeb;
-  final EdgeInsetsGeometry? contentPadding;
-  final double? maxContentWidth;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: isWeb
-            ? const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0xFFF7F8FA),
-                  Color(0xFFF1F3F6),
-                  Color(0xFFFAFBFC),
-                ],
-                stops: [0.0, 0.45, 1.0],
-              )
-            : null,
-        color: isWeb ? null : const Color(0xFFFAFBFC),
-        border: const Border(left: BorderSide(color: Color(0xFFE6E9EE))),
-      ),
-      child: Stack(
-        children: [
-          if (isWeb) ...[
-            Positioned.fill(
-              child: CustomPaint(painter: _LoginWebGridPainter()),
-            ),
+    return ClipPath(
+      clipper: _LoginWaveClipper(),
+      child: ColoredBox(
+        color: const Color(0xFFFFF8F3),
+        child: Stack(
+          children: [
             Positioned(
-              top: -60,
-              left: 20,
-              right: 20,
-              height: 320,
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: RadialGradient(
-                      center: Alignment.topCenter,
-                      radius: 0.95,
-                      colors: [
-                        LoginTheme.bluePrimary.withValues(alpha: 0.11),
-                        LoginTheme.blueLight.withValues(alpha: 0.04),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              right: -50,
-              bottom: 80,
+              right: -40,
+              bottom: -30,
               child: IgnorePointer(
                 child: Container(
-                  width: 200,
-                  height: 200,
+                  width: 280,
+                  height: 280,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: RadialGradient(
                       colors: [
-                        LoginTheme.bluePrimary.withValues(alpha: 0.07),
+                        LoginTheme.bluePrimary.withValues(alpha: 0.22),
+                        LoginTheme.blueLight.withValues(alpha: 0.08),
                         Colors.transparent,
                       ],
                     ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 40,
+              top: 80,
+              child: IgnorePointer(
+                child: Container(
+                  width: 160,
+                  height: 160,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        LoginTheme.blueLight.withValues(alpha: 0.10),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(56, 20, 28, 20),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: _kLoginFormMaxWidth),
+                    child: child,
                   ),
                 ),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LoginMobileHero extends StatelessWidget {
+  const _LoginMobileHero({required this.height, required this.showBack});
+
+  final double height;
+  final bool showBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final topInset = MediaQuery.paddingOf(context).top;
+    return SizedBox(
+      height: height + topInset,
+      width: double.infinity,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          const _LoginHeroImage(alignment: Alignment(0, 0.42)),
+          const _LoginHeroOverlay(),
           SafeArea(
-            child: isWeb
-                ? Center(
-                    child: SingleChildScrollView(
-                      padding:
-                          contentPadding ??
-                          const EdgeInsets.symmetric(
-                            horizontal: 28,
-                            vertical: 12,
-                          ),
-                      child: maxContentWidth == null
-                          ? child
-                          : ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: maxContentWidth!,
-                              ),
-                              child: child,
-                            ),
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (showBack)
+                    _LoginIconBackButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      light: true,
                     ),
-                  )
-                : Center(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 40,
-                        vertical: 36,
-                      ),
-                      child: child,
-                    ),
-                  ),
+                  const Spacer(),
+                  const _LoginHeroTopBrand(compact: true),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -803,24 +796,26 @@ class _LoginFormShell extends StatelessWidget {
   }
 }
 
-/// Back control on the mobile login card (light background).
-class _LoginMobileBackButton extends StatelessWidget {
-  const _LoginMobileBackButton({required this.onPressed});
+class _LoginIconBackButton extends StatelessWidget {
+  const _LoginIconBackButton({required this.onPressed, required this.light});
 
   final VoidCallback onPressed;
+  final bool light;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white.withValues(alpha: 0.92),
+      color: light
+          ? Colors.white.withValues(alpha: 0.18)
+          : Colors.white,
       shape: const CircleBorder(),
-      elevation: 2,
-      shadowColor: Colors.black.withValues(alpha: 0.12),
       child: IconButton(
         onPressed: onPressed,
-        icon: const Icon(Icons.arrow_back_rounded, size: 22),
-        color: AppTheme.textPrimary,
         tooltip: 'Back',
+        icon: Icon(
+          Icons.arrow_back_rounded,
+          color: light ? Colors.white : AppTheme.textPrimary,
+        ),
       ),
     );
   }
@@ -842,21 +837,14 @@ class _LoginBackButton extends StatelessWidget {
             color: Colors.white.withValues(alpha: 0.18),
             child: InkWell(
               onTap: () => Navigator.of(context).pop(),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
-                      Icons.arrow_back_rounded,
-                      size: 20,
-                      color: Colors.white,
-                    ),
-                    const SizedBox(width: 6),
-                    const Text(
+                    Icon(Icons.arrow_back_rounded, size: 20, color: Colors.white),
+                    SizedBox(width: 6),
+                    Text(
                       'Back',
                       style: TextStyle(
                         color: Colors.white,
@@ -890,146 +878,6 @@ class _LoginBackButton extends StatelessWidget {
   }
 }
 
-class _SecureAccessPill extends StatelessWidget {
-  const _SecureAccessPill({this.light = false});
-
-  final bool light;
-
-  @override
-  Widget build(BuildContext context) {
-    final child = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.shield_outlined,
-            size: 18,
-            color: light ? Colors.white : LoginTheme.bluePrimary,
-          ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Text(
-              'Secure access for municipal employees and HR staff.',
-              style: TextStyle(
-                color: light ? Colors.white : LoginTheme.bluePrimary,
-                fontSize: light ? 13 : 12,
-                fontWeight: FontWeight.w600,
-                height: 1.35,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (!light) {
-      return Container(
-        decoration: BoxDecoration(
-          color: LoginTheme.bluePrimary.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: LoginTheme.bluePrimary.withValues(alpha: 0.2),
-          ),
-        ),
-        child: child,
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.16),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.38)),
-          ),
-          child: child,
-        ),
-      ),
-    );
-  }
-}
-
-class _LoginBranding extends StatelessWidget {
-  const _LoginBranding({required this.lightText, required this.compact});
-
-  final bool lightText;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final titleColor = lightText ? Colors.white : AppTheme.textPrimary;
-    final subtitleColor = lightText
-        ? Colors.white.withValues(alpha: 0.92)
-        : AppTheme.textSecondary;
-    final logoSize = compact ? 72.0 : 88.0;
-
-    final logo = _MunicipalityLogoCircle(
-      size: logoSize,
-      variant: _LoginLogoVariant.municipality,
-      borderColor: lightText
-          ? Colors.white.withValues(alpha: 0.45)
-          : AppTheme.dashHairline,
-      shadowAlpha: lightText ? 0.2 : 0.08,
-    );
-
-    final titles = Column(
-      crossAxisAlignment: compact
-          ? CrossAxisAlignment.center
-          : CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Municipality of Plaridel',
-          textAlign: compact ? TextAlign.center : TextAlign.start,
-          style: TextStyle(
-            color: titleColor,
-            fontSize: compact ? 20 : 28,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.2,
-            height: 1.15,
-            shadows: lightText
-                ? [
-                    Shadow(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      blurRadius: 12,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Human Resource Management System',
-          textAlign: compact ? TextAlign.center : TextAlign.start,
-          style: TextStyle(
-            color: subtitleColor,
-            fontSize: compact ? 11 : 14,
-            fontWeight: FontWeight.w500,
-            letterSpacing: 0.1,
-            height: 1.3,
-          ),
-        ),
-      ],
-    );
-
-    if (compact) {
-      return Column(children: [logo, const SizedBox(height: 14), titles]);
-    }
-
-    return Row(
-      children: [
-        logo,
-        const SizedBox(width: 18),
-        Expanded(child: titles),
-      ],
-    );
-  }
-}
-
 class _LoginFormContent extends StatelessWidget {
   const _LoginFormContent({
     required this.emailController,
@@ -1037,12 +885,12 @@ class _LoginFormContent extends StatelessWidget {
     required this.passwordFocusNode,
     required this.rememberMe,
     required this.isLoading,
+    required this.formError,
+    required this.embeddedCard,
     required this.onRememberMeChanged,
     required this.onLogin,
     required this.onForgotPassword,
-    this.isWebLayout = false,
-    this.isMobileLayout = false,
-    this.stagger,
+    required this.onClearError,
   });
 
   final TextEditingController emailController;
@@ -1050,288 +898,152 @@ class _LoginFormContent extends StatelessWidget {
   final FocusNode passwordFocusNode;
   final bool rememberMe;
   final bool isLoading;
+  final String? formError;
+  final bool embeddedCard;
   final ValueChanged<bool?> onRememberMeChanged;
   final VoidCallback onLogin;
   final VoidCallback onForgotPassword;
-  final bool isWebLayout;
-  final bool isMobileLayout;
-  final Animation<double> Function(int index, {int steps})? stagger;
+  final VoidCallback onClearError;
 
   @override
   Widget build(BuildContext context) {
-    final subtitleColor = AppTheme.textSecondary;
-    final viewport = MediaQuery.sizeOf(context);
-    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 80;
-    final isCardForm = isWebLayout || isMobileLayout;
-    final compactMobile =
-        isMobileLayout && (viewport.width < 430 || viewport.height < 820);
-    final veryCompactMobile =
-        isMobileLayout && (viewport.width < 360 || viewport.height < 720);
-    final compact = isWebLayout || compactMobile;
+    final showFieldError = formError == 'Please enter email and password';
+    final emailEmpty = emailController.text.trim().isEmpty;
+    final passwordEmpty = passwordController.text.isEmpty;
 
-    final logoGap = veryCompactMobile ? 8.0 : (compact ? 12.0 : 24.0);
-    final badgeGap = veryCompactMobile ? 10.0 : (compact ? 12.0 : 22.0);
-    final titleGap = compact ? 8.0 : 10.0;
-    final dividerBottomGap = veryCompactMobile ? 8.0 : (compact ? 10.0 : 14.0);
-    final subtitleGap = veryCompactMobile
-        ? 14.0
-        : (compact ? 16.0 : (isWebLayout ? 22.0 : 28.0));
-    final fieldGap = veryCompactMobile ? 10.0 : (compact ? 12.0 : 14.0);
-    final actionGap = veryCompactMobile ? 12.0 : (compact ? 14.0 : 18.0);
-    final buttonGap = veryCompactMobile ? 14.0 : (compact ? 16.0 : 20.0);
-    final footerTopGap = veryCompactMobile ? 8.0 : (compact ? 10.0 : 14.0);
-    final footerBottomGap = veryCompactMobile ? 8.0 : (compact ? 10.0 : 16.0);
-    final greeting = timeOfDayGreeting();
-
-    Widget staggered(int index, Widget child) {
-      final animation = stagger?.call(index);
-      if (animation == null) return child;
-      return FadeTransition(
-        opacity: animation,
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, 0.08),
-            end: Offset.zero,
-          ).animate(animation),
-          child: child,
-        ),
-      );
-    }
-
-    final fields = Column(
+    final cardBody = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (isCardForm) ...[
-          staggered(0, Center(child: _LoginFormLogoAnimated(compact: compact))),
-          SizedBox(height: logoGap),
-          staggered(1, Center(child: _LoginWebPortalBadge())),
-          SizedBox(height: badgeGap),
+        const _LoginCardHeader(),
+        const SizedBox(height: 14),
+        const _LoginSecurityPill(),
+        if (formError != null) ...[
+          const SizedBox(height: 14),
+          _LoginInlineError(message: formError!),
         ],
-        staggered(
-          2,
-          Column(
+        const SizedBox(height: 16),
+        AutofillGroup(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _LoginLiveDateTime(compact: compact),
-              SizedBox(height: compact ? 14 : 18),
-              Text(
-                greeting,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: LoginTheme.bluePrimary,
-                  fontSize: compact ? 13.5 : 15,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.2,
-                ),
+              _LoginTextField(
+                controller: emailController,
+                label: 'Email',
+                hintText: 'name@plaridel.gov.ph',
+                icon: Icons.mail_outline_rounded,
+                nextFocusNode: passwordFocusNode,
+                autofillHints: const [AutofillHints.email],
+                error: showFieldError && emailEmpty,
+                onChanged: (_) => onClearError(),
               ),
-              SizedBox(height: compact ? 3 : 4),
-              Text(
-                'Welcome back',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: compact
-                      ? (veryCompactMobile ? 26 : 28)
-                      : (isWebLayout ? 30 : 34),
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.9,
-                  height: 1.05,
-                ),
+              const SizedBox(height: 14),
+              _PasswordTextField(
+                controller: passwordController,
+                focusNode: passwordFocusNode,
+                onSubmitted: onLogin,
+                error: showFieldError && passwordEmpty,
+                onChanged: (_) => onClearError(),
               ),
             ],
           ),
         ),
-        SizedBox(height: titleGap),
-        staggered(
-          3,
-          Center(
-            child: Container(
-              width: compact ? 48 : 56,
-              height: 3.5,
-              margin: EdgeInsets.only(bottom: dividerBottomGap),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(3),
-                gradient: const LinearGradient(
-                  colors: [LoginTheme.blueLight, LoginTheme.bluePrimary],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: LoginTheme.bluePrimary.withValues(alpha: 0.35),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-            ),
-          ),
+        const SizedBox(height: 8),
+        _LoginRememberForgotRow(
+          rememberMe: rememberMe,
+          onRememberMeChanged: onRememberMeChanged,
+          onForgotPassword: onForgotPassword,
         ),
-        staggered(
-          4,
-          Text(
-            'Sign in to continue to your HRMS portal',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: subtitleColor.withValues(alpha: 0.95),
-              fontSize: compact ? 14 : 16,
-              height: 1.35,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+        const SizedBox(height: 16),
+        _LoginToHrmsButton(
+          onPressed: isLoading ? null : onLogin,
+          isLoading: isLoading,
         ),
-        SizedBox(height: subtitleGap),
-        staggered(
-          5,
-          AutofillGroup(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _LoginTextField(
-                  controller: emailController,
-                  label: 'Email',
-                  hintText: 'name@plaridel.gov.ph',
-                  icon: Icons.mail_outline_rounded,
-                  nextFocusNode: passwordFocusNode,
-                  autofillHints: const [AutofillHints.email],
-                  premium: isCardForm,
-                ),
-                SizedBox(height: fieldGap),
-                _PasswordTextField(
-                  controller: passwordController,
-                  focusNode: passwordFocusNode,
-                  onSubmitted: onLogin,
-                  premium: isCardForm,
-                ),
-              ],
-            ),
-          ),
-        ),
-        SizedBox(height: actionGap),
-        staggered(
-          6,
-          _LoginRememberForgotRow(
-            rememberMe: rememberMe,
-            onRememberMeChanged: onRememberMeChanged,
-            onForgotPassword: onForgotPassword,
-            compact: compactMobile,
-          ),
-        ),
-        SizedBox(height: buttonGap),
-        staggered(
-          7,
-          _LoginToHrmsButton(
-            onPressed: isLoading ? null : onLogin,
-            isLoading: isLoading,
-            premium: isCardForm,
-            compact: compact,
-          ),
-        ),
-        if (!keyboardOpen) ...[
-          SizedBox(height: footerTopGap),
-          const Divider(height: 1, color: Color(0xFFEBEEF2)),
-          SizedBox(height: footerBottomGap),
-          staggered(8, _LoginFooterLinks(compact: compactMobile)),
-        ],
+        const SizedBox(height: 16),
+        const _LoginQuickAccess(),
       ],
     );
 
-    return _LoginFormCard(isMobileLayout: isMobileLayout, child: fields);
-  }
-}
-
-class _LoginRememberForgotRow extends StatelessWidget {
-  const _LoginRememberForgotRow({
-    required this.rememberMe,
-    required this.onRememberMeChanged,
-    required this.onForgotPassword,
-    this.compact = false,
-  });
-
-  final bool rememberMe;
-  final ValueChanged<bool?> onRememberMeChanged;
-  final VoidCallback onForgotPassword;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final rememberControl = _RememberMeControl(
-      rememberMe: rememberMe,
-      onChanged: onRememberMeChanged,
-      compact: compact,
-    );
-    final forgotButton = _ForgotPasswordButton(
-      onPressed: onForgotPassword,
-      compact: compact,
+    final card = DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(_kCardRadius),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 28,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          embeddedCard ? 24 : 20,
+          22,
+          embeddedCard ? 24 : 20,
+          18,
+        ),
+        child: cardBody,
+      ),
     );
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 280) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              rememberControl,
-              const SizedBox(height: 8),
-              Align(alignment: Alignment.centerRight, child: forgotButton),
-            ],
-          );
-        }
-
-        return Row(
-          children: [
-            Flexible(child: rememberControl),
-            SizedBox(width: compact ? 8 : 12),
-            forgotButton,
-          ],
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _LoginLiveHeader(),
+        const SizedBox(height: 16),
+        card,
+        const SizedBox(height: 16),
+        const _LoginFooterLinks(),
+      ],
     );
   }
 }
 
-class _RememberMeControl extends StatelessWidget {
-  const _RememberMeControl({
-    required this.rememberMe,
-    required this.onChanged,
-    this.compact = false,
-  });
-
-  final bool rememberMe;
-  final ValueChanged<bool?> onChanged;
-  final bool compact;
+class _LoginCardHeader extends StatelessWidget {
+  const _LoginCardHeader();
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        SizedBox(
-          height: 22,
-          width: 22,
-          child: Checkbox(
-            value: rememberMe,
-            onChanged: onChanged,
-            activeColor: LoginTheme.bluePrimary,
-            checkColor: Colors.white,
-            side: const BorderSide(color: Color(0xFFADB5BD), width: 1.5),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(5),
-            ),
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
+        const _MunicipalityLogoCircle(
+          size: 58,
+          borderColor: Color(0xFFE8ECF0),
+          shadowAlpha: 0.08,
         ),
-        const SizedBox(width: 10),
-        Flexible(
-          child: GestureDetector(
-            onTap: () => onChanged(!rememberMe),
-            child: Text(
-              'Remember me',
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: AppTheme.textPrimary.withValues(alpha: 0.85),
-                fontSize: compact ? 13 : 14,
-                fontWeight: FontWeight.w500,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Municipality of Plaridel',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  height: 1.15,
+                ),
               ),
-            ),
+              Text(
+                'Human Resource Management System',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Official HRMS Portal',
+                style: TextStyle(
+                  color: LoginTheme.bluePrimary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -1339,136 +1051,113 @@ class _RememberMeControl extends StatelessWidget {
   }
 }
 
-class _ForgotPasswordButton extends StatelessWidget {
-  const _ForgotPasswordButton({required this.onPressed, this.compact = false});
-
-  final VoidCallback onPressed;
-  final bool compact;
+class _LoginSecurityPill extends StatelessWidget {
+  const _LoginSecurityPill();
 
   @override
   Widget build(BuildContext context) {
-    return TextButton(
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        foregroundColor: LoginTheme.bluePrimary,
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-      child: Text(
-        'Forgot password?',
-        style: TextStyle(
-          fontWeight: FontWeight.w600,
-          fontSize: compact ? 13 : 14,
-        ),
-      ),
-    );
-  }
-}
-
-/// White login card with shadow — web and mobile full-page form.
-class _LoginFormCard extends StatelessWidget {
-  const _LoginFormCard({required this.child, this.isMobileLayout = false});
-
-  final Widget child;
-  final bool isMobileLayout;
-
-  @override
-  Widget build(BuildContext context) {
-    final screenSize = MediaQuery.sizeOf(context);
-    final screenWidth = screenSize.width;
-    final compactMobile =
-        isMobileLayout && (screenSize.width < 430 || screenSize.height < 820);
-    final horizontalPadding = isMobileLayout
-        ? (compactMobile ? 22.0 : 28.0)
-        : 28.0;
-    final topPadding = isMobileLayout ? (compactMobile ? 22.0 : 32.0) : 26.0;
-    final bottomPadding = isMobileLayout ? (compactMobile ? 20.0 : 28.0) : 22.0;
-    final card = Container(
+    return Container(
       width: double.infinity,
-      padding: EdgeInsets.fromLTRB(
-        horizontalPadding,
-        topPadding,
-        horizontalPadding,
-        bottomPadding,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(compactMobile ? 22 : _kCardRadius),
-        border: Border.all(color: const Color(0xFFEDE1D6)),
-        gradient: const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Color(0xFFFFF4EC),
-            Color(0xFFFFFAF6),
-            Colors.white,
-          ],
-          stops: [0.0, 0.18, 0.42],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: LoginTheme.bluePrimary.withValues(alpha: 0.16),
-            blurRadius: isMobileLayout ? 40 : 56,
-            offset: Offset(0, isMobileLayout ? 14 : 20),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: isMobileLayout ? 24 : 32,
-            offset: const Offset(0, 10),
+        color: const Color(0xFFFFF1E8),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.lock_outline_rounded, size: 16, color: LoginTheme.bluePrimary),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Secure access for municipal employees and HR staff.',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
+            ),
           ),
         ],
       ),
-      child: child,
-    );
-
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: isMobileLayout
-            ? screenWidth - (compactMobile ? 16 : 20)
-            : _kLoginFormMaxWidth,
-      ),
-      child: card,
     );
   }
 }
 
-/// Live clock and calendar on the login card greeting area.
-class _LoginLiveDateTime extends StatefulWidget {
-  const _LoginLiveDateTime({this.compact = false});
-
-  final bool compact;
+class _LoginQuickAccess extends StatelessWidget {
+  const _LoginQuickAccess();
 
   @override
-  State<_LoginLiveDateTime> createState() => _LoginLiveDateTimeState();
+  Widget build(BuildContext context) {
+    const items = [
+      (Icons.verified_user_outlined, 'Secure login'),
+      (Icons.admin_panel_settings_outlined, 'Admin portal'),
+      (Icons.badge_outlined, 'Employee portal'),
+    ];
+    return Column(
+      children: [
+        Text(
+          'Or quick access',
+          style: TextStyle(
+            color: AppTheme.textSecondary.withValues(alpha: 0.85),
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final item in items)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7F8FA),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE6E9EE)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(item.$1, size: 16, color: AppTheme.textSecondary),
+                    const SizedBox(width: 6),
+                    Text(
+                      item.$2,
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
-class _LoginLiveDateTimeState extends State<_LoginLiveDateTime> {
+class _LoginLiveHeader extends StatefulWidget {
+  const _LoginLiveHeader();
+
+  @override
+  State<_LoginLiveHeader> createState() => _LoginLiveHeaderState();
+}
+
+class _LoginLiveHeaderState extends State<_LoginLiveHeader> {
   late Timer _timer;
   late DateTime _now;
 
   static const _weekdays = [
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
-    'Sunday',
+    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
   ];
-
   static const _months = [
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December',
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
   ];
 
   @override
@@ -1488,9 +1177,7 @@ class _LoginLiveDateTimeState extends State<_LoginLiveDateTime> {
   }
 
   String get _timeLabel {
-    final h = _now.hour == 0
-        ? 12
-        : (_now.hour > 12 ? _now.hour - 12 : _now.hour);
+    final h = _now.hour == 0 ? 12 : (_now.hour > 12 ? _now.hour - 12 : _now.hour);
     final m = _now.minute.toString().padLeft(2, '0');
     final s = _now.second.toString().padLeft(2, '0');
     final ampm = _now.hour < 12 ? 'AM' : 'PM';
@@ -1498,64 +1185,120 @@ class _LoginLiveDateTimeState extends State<_LoginLiveDateTime> {
   }
 
   String get _dateLabel {
-    final weekday = _weekdays[_now.weekday - 1];
-    final month = _months[_now.month - 1];
-    return '$weekday, $month ${_now.day}, ${_now.year}';
+    return '${_weekdays[_now.weekday - 1]}, ${_months[_now.month - 1]} ${_now.day}, ${_now.year}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final compact = widget.compact;
-
-    return Center(
-      child: Container(
-        constraints: BoxConstraints(maxWidth: compact ? 340 : 380),
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 12 : 14,
-          vertical: compact ? 8 : 9,
+    final greeting = timeOfDayGreeting();
+    final dateBlock = Row(
+      children: [
+        const Icon(Icons.wb_sunny_rounded, color: LoginTheme.bluePrimary, size: 22),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _dateLabel,
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                _timeLabel,
+                style: const TextStyle(
+                  color: LoginTheme.bluePrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
         ),
+      ],
+    );
+    final greetingBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          '$greeting!',
+          style: const TextStyle(
+            color: LoginTheme.bluePrimary,
+            fontSize: 13.5,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        Text(
+          'Have a productive day!',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 11.5,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 360) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              dateBlock,
+              const SizedBox(height: 8),
+              Align(alignment: Alignment.centerRight, child: greetingBlock),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: dateBlock),
+            const SizedBox(width: 8),
+            greetingBlock,
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _LoginInlineError extends StatelessWidget {
+  const _LoginInlineError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: const Color(0xFFF3F4F6),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          color: const Color(0xFFFFEBEE),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFEF9A9A)),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              Icons.schedule_rounded,
-              size: compact ? 16 : 17,
-              color: LoginTheme.bluePrimary,
-            ),
-            SizedBox(width: compact ? 8 : 10),
-            Text(
-              _timeLabel,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: compact ? 13 : 14,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.2,
-                fontFeatures: const [FontFeature.tabularFigures()],
-                height: 1,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Container(
-                width: 1,
-                height: 14,
-                color: const Color(0xFFD1D5DB),
-              ),
-            ),
-            Text(
-              _dateLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: AppTheme.textSecondary.withValues(alpha: 0.95),
-                fontSize: compact ? 12 : 12.5,
-                fontWeight: FontWeight.w600,
-                height: 1.2,
+            Icon(Icons.error_outline_rounded, size: 18, color: Colors.red.shade700),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(
+                  color: Colors.red.shade800,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  height: 1.35,
+                ),
               ),
             ),
           ],
@@ -1565,179 +1308,135 @@ class _LoginLiveDateTimeState extends State<_LoginLiveDateTime> {
   }
 }
 
-/// Web form portal badge above the welcome heading.
-class _LoginWebPortalBadge extends StatelessWidget {
+class _LoginRememberForgotRow extends StatelessWidget {
+  const _LoginRememberForgotRow({
+    required this.rememberMe,
+    required this.onRememberMeChanged,
+    required this.onForgotPassword,
+  });
+
+  final bool rememberMe;
+  final ValueChanged<bool?> onRememberMeChanged;
+  final VoidCallback onForgotPassword;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [LoginTheme.blueLight, LoginTheme.bluePrimary],
-        ),
-        borderRadius: BorderRadius.circular(999),
-        boxShadow: [
-          BoxShadow(
-            color: LoginTheme.bluePrimary.withValues(alpha: 0.32),
-            blurRadius: 14,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.verified_rounded, size: 15, color: Colors.white),
-          SizedBox(width: 7),
-          Text(
-            'Official HRMS Portal',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.25,
+    final rememberControl = _RememberMeControl(
+      rememberMe: rememberMe,
+      onChanged: onRememberMeChanged,
+    );
+    final forgotButton = _ForgotPasswordButton(onPressed: onForgotPassword);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 300) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              rememberControl,
+              Align(alignment: Alignment.centerRight, child: forgotButton),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: rememberControl),
+            forgotButton,
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _RememberMeControl extends StatelessWidget {
+  const _RememberMeControl({
+    required this.rememberMe,
+    required this.onChanged,
+  });
+
+  final bool rememberMe;
+  final ValueChanged<bool?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => onChanged(!rememberMe),
+      borderRadius: BorderRadius.circular(8),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
+        child: Row(
+          children: [
+            SizedBox(
+              height: 22,
+              width: 22,
+              child: Checkbox(
+                value: rememberMe,
+                onChanged: onChanged,
+                activeColor: LoginTheme.bluePrimary,
+                checkColor: Colors.white,
+                side: const BorderSide(color: Color(0xFFADB5BD), width: 1.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            const Flexible(
+              child: Text(
+                'Remember me',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// Subtle pulse on the web login crest.
-class _LoginFormLogoAnimated extends StatefulWidget {
-  const _LoginFormLogoAnimated({this.compact = false});
+class _ForgotPasswordButton extends StatelessWidget {
+  const _ForgotPasswordButton({required this.onPressed});
 
-  final bool compact;
-
-  @override
-  State<_LoginFormLogoAnimated> createState() => _LoginFormLogoAnimatedState();
-}
-
-class _LoginFormLogoAnimatedState extends State<_LoginFormLogoAnimated>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _scale;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2800),
-    )..repeat(reverse: true);
-    _scale = Tween<double>(
-      begin: 0.99,
-      end: 1.015,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _scale,
-      builder: (context, child) =>
-          Transform.scale(scale: _scale.value, child: child),
-      child: _LoginFormLogo(compact: widget.compact),
-    );
-  }
-}
-
-/// Small crest centered at the top of the login card (right panel).
-class _LoginFormLogo extends StatelessWidget {
-  const _LoginFormLogo({this.compact = false});
-
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final seal = compact ? 52.0 : 72.0;
-    return Container(
-      padding: EdgeInsets.all(compact ? 3 : 4),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [LoginTheme.blueLight, LoginTheme.bluePrimary],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: LoginTheme.bluePrimary.withValues(alpha: 0.28),
-            blurRadius: compact ? 16 : 22,
-            offset: Offset(0, compact ? 5 : 8),
-          ),
-        ],
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: LoginTheme.bluePrimary,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        minimumSize: const Size(0, 44),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
-      child: Container(
-        padding: const EdgeInsets.all(3),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.white,
-          border: Border.all(
-            color: LoginTheme.bluePrimary.withValues(alpha: 0.12),
-            width: 2,
-          ),
-        ),
-        child: _MunicipalityLogoCircle(
-          size: seal,
-          variant: _LoginLogoVariant.hrms,
-          borderColor: const Color(0xFFE8ECF0),
-          shadowAlpha: 0.12,
-        ),
+      child: const Text(
+        'Forgot password?',
+        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
       ),
     );
   }
 }
 
-/// Faint grid on the web form panel background.
-class _LoginWebGridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    const step = 24.0;
-    final paint = Paint()
-      ..color = const Color(0xFF1A237E).withValues(alpha: 0.035)
-      ..strokeWidth = 1;
-
-    for (var x = 0.0; x < size.width; x += step) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    }
-    for (var y = 0.0; y < size.height; y += step) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-/// Circular logo mark — HRMS (form) or municipality seal (hero).
 class _MunicipalityLogoCircle extends StatelessWidget {
   const _MunicipalityLogoCircle({
     required this.size,
     required this.borderColor,
-    this.variant = _LoginLogoVariant.hrms,
     this.shadowAlpha = 0.08,
   });
 
   final double size;
   final Color borderColor;
-  final _LoginLogoVariant variant;
   final double shadowAlpha;
 
   @override
   Widget build(BuildContext context) {
-    final isHrms = variant == _LoginLogoVariant.hrms;
-    final asset = isHrms ? _kHrmsLogoAsset : _kPlaridelLogoAsset;
-    final inset = isHrms ? size * 0.12 : 0.0;
-    final fit = isHrms ? BoxFit.contain : BoxFit.cover;
-
     return Container(
       width: size,
       height: size,
@@ -1748,28 +1447,25 @@ class _MunicipalityLogoCircle extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: shadowAlpha),
-            blurRadius: size * 0.2,
-            offset: Offset(0, size * 0.05),
+            blurRadius: size * 0.18,
+            offset: Offset(0, size * 0.04),
           ),
         ],
       ),
       child: ClipOval(
-        child: Padding(
-          padding: EdgeInsets.all(inset),
-          child: Image.asset(
-            asset,
-            fit: fit,
-            width: size - inset * 2,
-            height: size - inset * 2,
-            filterQuality: FilterQuality.high,
-            gaplessPlayback: true,
-            errorBuilder: (_, __, ___) => ColoredBox(
-              color: LoginTheme.bluePrimary.withValues(alpha: 0.1),
-              child: Icon(
-                isHrms ? Icons.hub_rounded : Icons.account_balance_rounded,
-                color: LoginTheme.bluePrimary,
-                size: size * 0.4,
-              ),
+        child: Image.asset(
+          _kPlaridelLogoAsset,
+          fit: BoxFit.cover,
+          width: size,
+          height: size,
+          filterQuality: FilterQuality.high,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => ColoredBox(
+            color: LoginTheme.bluePrimary.withValues(alpha: 0.1),
+            child: Icon(
+              Icons.account_balance_rounded,
+              color: LoginTheme.bluePrimary,
+              size: size * 0.4,
             ),
           ),
         ),
@@ -1779,10 +1475,9 @@ class _MunicipalityLogoCircle extends StatelessWidget {
 }
 
 class _LoginFooterLinks extends StatelessWidget {
-  const _LoginFooterLinks({this.compact = false});
+  const _LoginFooterLinks();
 
   static const _muted = Color(0xFF6C757D);
-  final bool compact;
 
   void _showLegal(BuildContext context, String title, String body) {
     showDialog<void>(
@@ -1822,9 +1517,9 @@ class _LoginFooterLinks extends StatelessWidget {
   Widget build(BuildContext context) {
     final base = TextStyle(
       color: _muted.withValues(alpha: 0.92),
-      fontSize: compact ? 11 : 12,
+      fontSize: 12,
       fontWeight: FontWeight.w500,
-      height: compact ? 1.25 : 1.4,
+      height: 1.4,
     );
     final linkStyle = base.copyWith(
       color: LoginTheme.bluePrimary,
@@ -1846,7 +1541,10 @@ class _LoginFooterLinks extends StatelessWidget {
               'Privacy',
               'HRMS Plaridel collects and processes personal information only for official human resource management of the Municipality of Plaridel. Access is limited to authorized municipal staff.',
             ),
-            child: Text('Privacy', style: linkStyle),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+              child: Text('Privacy', style: linkStyle),
+            ),
           ),
         ),
         Text('·', style: base.copyWith(color: _muted.withValues(alpha: 0.5))),
@@ -1858,7 +1556,10 @@ class _LoginFooterLinks extends StatelessWidget {
               'Terms',
               'This portal is for official use by municipal employees and authorized HR staff. Unauthorized access or misuse of HRMS records is prohibited.',
             ),
-            child: Text('Terms', style: linkStyle),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+              child: Text('Terms', style: linkStyle),
+            ),
           ),
         ),
       ],
@@ -1874,7 +1575,8 @@ class _LoginTextField extends StatefulWidget {
     required this.icon,
     this.nextFocusNode,
     this.autofillHints,
-    this.premium = false,
+    this.error = false,
+    this.onChanged,
   });
 
   final TextEditingController controller;
@@ -1883,7 +1585,8 @@ class _LoginTextField extends StatefulWidget {
   final IconData icon;
   final FocusNode? nextFocusNode;
   final Iterable<String>? autofillHints;
-  final bool premium;
+  final bool error;
+  final ValueChanged<String>? onChanged;
 
   @override
   State<_LoginTextField> createState() => _LoginTextFieldState();
@@ -1892,7 +1595,6 @@ class _LoginTextField extends StatefulWidget {
 class _LoginTextFieldState extends State<_LoginTextField> {
   final _focusNode = FocusNode();
   bool _focused = false;
-  bool _hover = false;
 
   @override
   void initState() {
@@ -1909,19 +1611,13 @@ class _LoginTextFieldState extends State<_LoginTextField> {
 
   void _onFocus() => setState(() => _focused = _focusNode.hasFocus);
 
-  void _ensureFocus() {
-    if (!_focusNode.hasFocus) {
-      _focusNode.requestFocus();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         GestureDetector(
-          onTap: _ensureFocus,
+          onTap: () => _focusNode.requestFocus(),
           behavior: HitTestBehavior.opaque,
           child: Text(
             widget.label,
@@ -1929,58 +1625,33 @@ class _LoginTextFieldState extends State<_LoginTextField> {
               color: AppTheme.textPrimary,
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              letterSpacing: 0.15,
             ),
           ),
         ),
         const SizedBox(height: 8),
-        MouseRegion(
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            height: _kFieldHeight,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(_kInputRadius),
-              boxShadow: _focused
-                  ? [
-                      BoxShadow(
-                        color: LoginTheme.bluePrimary.withValues(alpha: 0.18),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                    ]
-                  : _hover
-                  ? [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.05),
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
-                      ),
-                    ]
-                  : null,
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: _kFieldHeight,
+          child: TextField(
+            controller: widget.controller,
+            focusNode: _focusNode,
+            keyboardType: TextInputType.emailAddress,
+            autofillHints: widget.autofillHints,
+            autocorrect: false,
+            textInputAction: TextInputAction.next,
+            onChanged: widget.onChanged,
+            onSubmitted: (_) => widget.nextFocusNode?.requestFocus(),
+            mouseCursor: SystemMouseCursors.text,
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
             ),
-            child: TextField(
-              controller: widget.controller,
-              focusNode: _focusNode,
-              keyboardType: TextInputType.emailAddress,
-              autofillHints: widget.autofillHints,
-              autocorrect: false,
-              textInputAction: TextInputAction.next,
-              onSubmitted: (_) => widget.nextFocusNode?.requestFocus(),
-              mouseCursor: SystemMouseCursors.text,
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-              ),
-              decoration: _inputDecoration(
-                hint: widget.hintText,
-                icon: widget.icon,
-                focused: _focused,
-                hovered: _hover,
-                premium: widget.premium,
-              ),
+            decoration: _inputDecoration(
+              hint: widget.hintText,
+              icon: widget.icon,
+              focused: _focused,
+              error: widget.error,
             ),
           ),
         ),
@@ -1994,13 +1665,15 @@ class _PasswordTextField extends StatefulWidget {
     required this.controller,
     this.focusNode,
     this.onSubmitted,
-    this.premium = false,
+    this.error = false,
+    this.onChanged,
   });
 
   final TextEditingController controller;
   final FocusNode? focusNode;
   final VoidCallback? onSubmitted;
-  final bool premium;
+  final bool error;
+  final ValueChanged<String>? onChanged;
 
   @override
   State<_PasswordTextField> createState() => _PasswordTextFieldState();
@@ -2009,7 +1682,6 @@ class _PasswordTextField extends StatefulWidget {
 class _PasswordTextFieldState extends State<_PasswordTextField> {
   bool _obscure = true;
   bool _focused = false;
-  bool _hover = false;
 
   @override
   void initState() {
@@ -2029,17 +1701,13 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
     }
   }
 
-  void _ensureFocus() {
-    widget.focusNode?.requestFocus();
-  }
-
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         GestureDetector(
-          onTap: _ensureFocus,
+          onTap: () => widget.focusNode?.requestFocus(),
           behavior: HitTestBehavior.opaque,
           child: const Text(
             'Password',
@@ -2047,69 +1715,45 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
               color: AppTheme.textPrimary,
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              letterSpacing: 0.15,
             ),
           ),
         ),
         const SizedBox(height: 8),
-        MouseRegion(
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            height: _kFieldHeight,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(_kInputRadius),
-              boxShadow: _focused
-                  ? [
-                      BoxShadow(
-                        color: LoginTheme.bluePrimary.withValues(alpha: 0.18),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                    ]
-                  : _hover
-                  ? [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.05),
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
-                      ),
-                    ]
-                  : null,
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: _kFieldHeight,
+          child: TextField(
+            controller: widget.controller,
+            focusNode: widget.focusNode,
+            obscureText: _obscure,
+            autofillHints: const [AutofillHints.password],
+            textInputAction: TextInputAction.done,
+            onChanged: widget.onChanged,
+            onSubmitted: (_) => widget.onSubmitted?.call(),
+            mouseCursor: SystemMouseCursors.text,
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
             ),
-            child: TextField(
-              controller: widget.controller,
-              focusNode: widget.focusNode,
-              obscureText: _obscure,
-              autofillHints: const [AutofillHints.password],
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => widget.onSubmitted?.call(),
-              mouseCursor: SystemMouseCursors.text,
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-              ),
-              decoration: _inputDecoration(
-                hint: 'Enter your password',
-                icon: Icons.lock_outline_rounded,
-                focused: _focused,
-                hovered: _hover,
-                premium: widget.premium,
-                suffix: IconButton(
-                  onPressed: () => setState(() => _obscure = !_obscure),
-                  icon: Icon(
-                    _obscure
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    color: LoginTheme.bluePrimary,
-                    size: 21,
-                  ),
-                  tooltip: _obscure ? 'Show password' : 'Hide password',
-                  style: IconButton.styleFrom(
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+            decoration: _inputDecoration(
+              hint: 'Enter your password',
+              icon: Icons.lock_outline_rounded,
+              focused: _focused,
+              error: widget.error,
+              suffix: IconButton(
+                onPressed: () => setState(() => _obscure = !_obscure),
+                icon: Icon(
+                  _obscure
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  color: LoginTheme.bluePrimary,
+                  size: 21,
+                ),
+                tooltip: _obscure ? 'Show password' : 'Hide password',
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(44, 44),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
             ),
@@ -2120,26 +1764,17 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
   }
 }
 
-Widget _inputIconBox(IconData icon) {
-  return SizedBox(
-    width: 42,
-    height: 42,
-    child: Icon(icon, color: LoginTheme.bluePrimary, size: 20),
-  );
-}
-
 InputDecoration _inputDecoration({
   required String hint,
   required IconData icon,
   required bool focused,
+  bool error = false,
   Widget? suffix,
-  bool premium = false,
-  bool hovered = false,
 }) {
-  final borderColor = focused
+  final borderColor = error
+      ? const Color(0xFFC62828)
+      : focused
       ? LoginTheme.bluePrimary
-      : hovered
-      ? const Color(0xFFD0D5DD)
       : const Color(0xFFE4E7EC);
   return InputDecoration(
     hintText: hint,
@@ -2150,10 +1785,12 @@ InputDecoration _inputDecoration({
     ),
     prefixIcon: Padding(
       padding: const EdgeInsets.only(left: 8, right: 2),
-      child: IgnorePointer(child: _inputIconBox(icon)),
+      child: IgnorePointer(
+        child: Icon(icon, color: LoginTheme.bluePrimary, size: 20),
+      ),
     ),
     prefixIconConstraints: const BoxConstraints(
-      minWidth: 48,
+      minWidth: 44,
       minHeight: _kFieldHeight,
     ),
     suffixIcon: suffix,
@@ -2176,206 +1813,119 @@ InputDecoration _inputDecoration({
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(_kInputRadius),
       borderSide: BorderSide(
-        color: LoginTheme.bluePrimary,
-        width: premium ? 2 : 1.5,
+        color: error ? const Color(0xFFC62828) : LoginTheme.bluePrimary,
+        width: 1.6,
       ),
     ),
   );
 }
 
 class _LoginToHrmsButton extends StatefulWidget {
-  const _LoginToHrmsButton({
-    this.onPressed,
-    this.isLoading = false,
-    this.premium = false,
-    this.compact = false,
-  });
+  const _LoginToHrmsButton({this.onPressed, this.isLoading = false});
 
   final VoidCallback? onPressed;
   final bool isLoading;
-  final bool premium;
-  final bool compact;
 
   @override
   State<_LoginToHrmsButton> createState() => _LoginToHrmsButtonState();
 }
 
-class _LoginToHrmsButtonState extends State<_LoginToHrmsButton>
-    with SingleTickerProviderStateMixin {
+class _LoginToHrmsButtonState extends State<_LoginToHrmsButton> {
   bool _hover = false;
-  AnimationController? _shineCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.premium) {
-      _shineCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 2400),
-      )..repeat();
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _LoginToHrmsButton oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.premium && _shineCtrl == null) {
-      _shineCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 2400),
-      )..repeat();
-    }
-  }
-
-  @override
-  void dispose() {
-    _shineCtrl?.dispose();
-    super.dispose();
-  }
+  bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onPressed != null && !widget.isLoading;
-    final height = widget.compact ? 50.0 : (widget.premium ? 56.0 : 54.0);
-
-    Widget button = AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      height: height,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(_kButtonRadius),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: enabled
-              ? [
-                  _hover ? LoginTheme.blueLight : const Color(0xFFF0671A),
-                  LoginTheme.bluePrimary,
-                  LoginTheme.blueDark,
-                ]
-              : [
-                  LoginTheme.bluePrimary.withValues(alpha: 0.45),
-                  LoginTheme.blueDark.withValues(alpha: 0.45),
-                ],
-        ),
-        boxShadow: enabled
-            ? [
-                BoxShadow(
-                  color: LoginTheme.bluePrimary.withValues(
-                    alpha: _hover ? 0.5 : 0.36,
-                  ),
-                  blurRadius: widget.premium ? 22 : 12,
-                  offset: Offset(0, _hover ? 8 : 5),
-                ),
-                if (widget.premium)
-                  BoxShadow(
-                    color: AppTheme.letterheadNavy.withValues(alpha: 0.12),
-                    blurRadius: 14,
-                    offset: const Offset(0, 4),
-                  ),
-              ]
-            : null,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: widget.isLoading ? null : widget.onPressed,
-          borderRadius: BorderRadius.circular(_kButtonRadius),
-          child: Center(
-            child: widget.isLoading
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: Colors.white,
-                    ),
-                  )
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Sign In to HRMS',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.25,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      const Icon(
-                        Icons.arrow_forward_rounded,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ],
-                  ),
-          ),
-        ),
-      ),
-    );
-
-    if (widget.premium && _shineCtrl != null) {
-      button = AnimatedBuilder(
-        animation: _shineCtrl!,
-        builder: (context, child) {
-          return Stack(
-            children: [
-              child!,
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(_kButtonRadius),
-                    child: CustomPaint(
-                      painter: _LoginButtonShinePainter(
-                        progress: _shineCtrl!.value,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-        child: button,
-      );
-    }
+    final color = !enabled
+        ? LoginTheme.bluePrimary.withValues(alpha: 0.45)
+        : _pressed
+        ? LoginTheme.blueDark
+        : _hover
+        ? const Color(0xFFF0671A)
+        : LoginTheme.bluePrimary;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: AnimatedScale(
-        scale: enabled && _hover ? 1.02 : 1,
-        duration: const Duration(milliseconds: 180),
-        child: button,
+        scale: enabled && _pressed ? 0.985 : 1,
+        duration: const Duration(milliseconds: 150),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: 50,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(_kButtonRadius),
+            boxShadow: enabled
+                ? [
+                    BoxShadow(
+                      color: LoginTheme.bluePrimary.withValues(alpha: 0.28),
+                      blurRadius: _hover ? 16 : 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: widget.isLoading ? null : widget.onPressed,
+              onHighlightChanged: (v) => setState(() => _pressed = v),
+              borderRadius: BorderRadius.circular(_kButtonRadius),
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: widget.isLoading
+                      ? const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.3,
+                                color: Colors.white,
+                              ),
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              'Signing in...',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        )
+                      : const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Sign In to HRMS',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                            Icon(
+                              Icons.arrow_forward_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
-}
-
-class _LoginButtonShinePainter extends CustomPainter {
-  const _LoginButtonShinePainter({required this.progress});
-
-  final double progress;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final x = (progress * 2 - 0.5) * size.width;
-    final rect = Rect.fromLTWH(x - 40, 0, 80, size.height);
-    final paint = Paint()
-      ..shader = LinearGradient(
-        colors: [
-          Colors.white.withValues(alpha: 0),
-          Colors.white.withValues(alpha: 0.22),
-          Colors.white.withValues(alpha: 0),
-        ],
-      ).createShader(rect);
-    canvas.drawRect(rect, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _LoginButtonShinePainter oldDelegate) =>
-      oldDelegate.progress != progress;
 }
 
 enum _ForgotPasswordStep { requestCode, resetPassword }

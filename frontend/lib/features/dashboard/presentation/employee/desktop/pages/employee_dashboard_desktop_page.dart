@@ -693,12 +693,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
                             homeScrollPadding: employeeMainScrollPadding(
                               context,
                             ),
-                            settingsScrollPadding: const EdgeInsets.fromLTRB(
-                              12,
-                              8,
-                              12,
-                              28,
-                            ),
+                            settingsScrollPadding:
+                                kDashboardSettingsScrollPadding,
                           ),
                         ),
                       ),

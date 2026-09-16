@@ -91,6 +91,11 @@ class TurnAroundTimeEntry {
 
   static const String tableName = 'turn_around_time_entries';
 
+  /// Default signatory captions on the printed Turn-Around Time form.
+  static const String defaultPreparedByTitle = 'HRMO Staff';
+  static const String defaultNotedByName = 'MARCELO B. CAÑARES';
+  static const String defaultNotedByTitle = 'HRMO III';
+
   factory TurnAroundTimeEntry.fromJson(Map<String, dynamic> json) {
     List<TurnAroundTimeApplicant> list = [];
     final raw = json['applicants'];

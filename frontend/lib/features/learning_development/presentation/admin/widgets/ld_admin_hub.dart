@@ -18,25 +18,11 @@ class LdHubFeature {
 
 const _ldHubFeatures = <LdHubFeature>[
   LdHubFeature(
-    title: 'Training Need Analysis',
+    title: 'Forms',
     subtitle:
-        'Consolidate CY training needs by department: goals, skill gaps, and recommendations.',
-    icon: Icons.school_rounded,
+        'Encode forms and print backgrounds.',
+    icon: Icons.description_rounded,
     sectionIndex: 1,
-  ),
-  LdHubFeature(
-    title: 'Action Brainstorming Worksheet',
-    subtitle:
-        'Coaching actions per employee: stop/start behaviors, goals, and department certification.',
-    icon: Icons.lightbulb_outline_rounded,
-    sectionIndex: 2,
-  ),
-  LdHubFeature(
-    title: 'Individual Development Plan (IDP)',
-    subtitle:
-        'Record qualifications, succession analysis, and employee development actions.',
-    icon: Icons.trending_up_rounded,
-    sectionIndex: 4,
   ),
   LdHubFeature(
     title: 'Training Daily Reports',

@@ -22,7 +22,13 @@ class RecruitmentHirePrefill extends ChangeNotifier {
   String? applicationId;
   String? applicantEmail;
   String? applicantFullName;
+  String? applicantFirstName;
+  String? applicantMiddleName;
+  String? applicantLastName;
+  String? applicantSuffix;
   String? applicantPhone;
+  String? applicantSex;
+  String? applicantAddress;
 
   /// Increments on each [arm] so the form reapplies even for the same applicant twice.
   int prefillStamp = 0;
@@ -56,12 +62,24 @@ class RecruitmentHirePrefill extends ChangeNotifier {
     required String applicationId,
     required String email,
     required String fullName,
+    String? firstName,
+    String? middleName,
+    String? lastName,
+    String? suffix,
     String? phone,
+    String? sex,
+    String? address,
   }) {
     this.applicationId = applicationId;
     applicantEmail = email.trim().toLowerCase();
     applicantFullName = fullName;
+    applicantFirstName = firstName?.trim();
+    applicantMiddleName = middleName?.trim();
+    applicantLastName = lastName?.trim();
+    applicantSuffix = suffix?.trim();
     applicantPhone = phone;
+    applicantSex = sex?.trim();
+    applicantAddress = address?.trim();
     prefillStamp++;
     notifyListeners();
   }
@@ -70,7 +88,13 @@ class RecruitmentHirePrefill extends ChangeNotifier {
     applicationId = null;
     applicantEmail = null;
     applicantFullName = null;
+    applicantFirstName = null;
+    applicantMiddleName = null;
+    applicantLastName = null;
+    applicantSuffix = null;
     applicantPhone = null;
+    applicantSex = null;
+    applicantAddress = null;
     notifyListeners();
   }
 }

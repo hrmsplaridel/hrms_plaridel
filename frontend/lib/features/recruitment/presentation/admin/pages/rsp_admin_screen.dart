@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +9,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:hrms_plaridel/features/learning_development/models/bi_form.dart';
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
 import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
-import 'package:hrms_plaridel/features/learning_development/models/turn_around_time.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
@@ -24,8 +21,11 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_exam_editor_ui.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/rsp_scheduling_section.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/rsp_final_requirements_section.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/rsp_job_vacancies_section.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/computation_of_points_section.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/work_experience_sheet_section.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/turn_around_time_section.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/ojt_work_immersion_evaluation_section.dart';
 import 'package:hrms_plaridel/features/recruitment/utils/rsp_applications_report_export.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_generate_report_dialog.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_applications_report_preview_screen.dart';
@@ -34,6 +34,7 @@ import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/r
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_admin_hub.dart';
+import 'package:hrms_plaridel/features/forms/presentation/admin/pages/form_background_upload_page.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 
@@ -84,7 +85,7 @@ class _RspAdminContentState extends State<RspAdminContent> {
                       setState(() => _rspSectionIndex = index),
                 )
               else if (_rspSectionIndex == 1)
-                const _RspJobVacanciesForm()
+                const RspJobVacanciesSection()
               else if (_rspSectionIndex == 2)
                 const _RspApplicationsMonitor(
                   view: _RspMonitorView.applications,
@@ -172,7 +173,7 @@ const _builtInExamPickerItems = <_RspExamPickerItem>[
   ),
 ];
 
-/// RSP: "Exams" hub — pick which exam to view/edit (BEI, General, Math, General Info).
+/// RSP: "Exams" hub â€” pick which exam to view/edit (BEI, General, Math, General Info).
 class _RspExamsSection extends StatefulWidget {
   const _RspExamsSection({required this.onBackToRsp});
 
@@ -608,9 +609,16 @@ const _builtInFormPickerItems = <_RspExamPickerItem>[
     icon: Icons.schedule_rounded,
     format: 'Tracking form',
   ),
+  _RspExamPickerItem(
+    examKey: 'ojt_work_immersion',
+    title: 'OJT / Work Immersion Evaluation',
+    subtitle: 'Interview scoring form.',
+    icon: Icons.school_outlined,
+    format: 'Evaluation form',
+  ),
 ];
 
-/// RSP: "Forms" hub — pick which form to view/edit.
+/// RSP: "Forms" hub â€” pick which form to view/edit.
 class _RspFormsSection extends StatefulWidget {
   const _RspFormsSection({required this.onBackToRsp});
 
@@ -622,6 +630,7 @@ class _RspFormsSection extends StatefulWidget {
 
 class _RspFormsSectionState extends State<_RspFormsSection> {
   _RspExamPickerItem? _selected;
+  bool _showPrintBackground = false;
 
   Widget _buildSelectedForm(_RspExamPickerItem item) {
     switch (item.examKey) {
@@ -636,7 +645,9 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
       case 'work_experience':
         return const RspWorkExperienceSheetSection();
       case 'turn_around_time':
-        return const _RspTurnAroundTimeSection();
+        return const RspTurnAroundTimeSection();
+      case 'ojt_work_immersion':
+        return const RspOjtWorkImmersionEvaluationSection();
       default:
         return const SizedBox.shrink();
     }
@@ -646,12 +657,16 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
     final navy = AppTheme.primaryNavy;
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final selectedItem = _selected;
+    final inBackground = _showPrintBackground;
     return Row(
       children: [
         TextButton.icon(
-          onPressed: selectedItem == null
+          onPressed: selectedItem == null && !inBackground
               ? widget.onBackToRsp
-              : () => setState(() => _selected = null),
+              : () => setState(() {
+                  _selected = null;
+                  _showPrintBackground = false;
+                }),
           icon: const Icon(Icons.arrow_back_rounded, size: 20),
           label: const Text('Back'),
           style: TextButton.styleFrom(foregroundColor: navy),
@@ -662,9 +677,9 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
         Text(
           'Forms',
           style: TextStyle(
-            color: selectedItem == null ? navy : secondary,
+            color: selectedItem == null && !inBackground ? navy : secondary,
             fontSize: 13,
-            fontWeight: selectedItem == null
+            fontWeight: selectedItem == null && !inBackground
                 ? FontWeight.w800
                 : FontWeight.w600,
           ),
@@ -678,6 +693,22 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
               selectedItem.title,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
+                color: AppTheme.primaryNavy,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+        if (inBackground) ...[
+          const SizedBox(width: 2),
+          Icon(Icons.chevron_right_rounded, size: 16, color: secondary),
+          const SizedBox(width: 2),
+          const Flexible(
+            child: Text(
+              'Print background',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
                 color: AppTheme.primaryNavy,
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
@@ -725,6 +756,22 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
 
   @override
   Widget build(BuildContext context) {
+    if (_showPrintBackground) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildBreadcrumb(),
+          const SizedBox(height: 12),
+          FormBackgroundUploadPage(
+            module: 'rsp',
+            embedded: true,
+            onBack: () => setState(() => _showPrintBackground = false),
+          ),
+        ],
+      );
+    }
+
     if (_selected != null) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -808,7 +855,7 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Choose which form you want to view or edit.',
+                      'Select a form or set a print background.',
                       style: TextStyle(
                         color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 13.5,
@@ -822,6 +869,10 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
           ),
         ),
         const SizedBox(height: 20),
+        FormsPrintBackgroundEntry(
+          onOpen: () => setState(() => _showPrintBackground = true),
+        ),
+        const SizedBox(height: 16),
         _formGrid(),
       ],
     );
@@ -1735,7 +1786,7 @@ Widget _rspMcqQuestionsPanel({
                   style: AppTheme.dashFieldTextStyle(context),
                   decoration: RspExamEditorUi.inputDecoration(
                     context,
-                    hintText: 'Question textâ€¦',
+                    hintText: 'Question textÃ¢â‚¬Â¦',
                   ).copyWith(labelText: null),
                 ),
                 const SizedBox(height: 14),
@@ -2416,7 +2467,7 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
   }
 }
 
-/// RSP: Background Investigation (BI) Form Ã¢â‚¬â€ list entries and add/edit form.
+/// RSP: Background Investigation (BI) Form ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â list entries and add/edit form.
 class _RspBiFormSection extends StatefulWidget {
   const _RspBiFormSection();
 
@@ -2485,8 +2536,8 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
               title: e.applicantName.trim().isEmpty
                   ? '(No applicant name)'
                   : e.applicantName,
-              subtitle: '${e.respondentName} Â· ${e.respondentRelationship}',
-              detailDialogTitle: 'BI form â€” ${e.applicantName}',
+              subtitle: '${e.respondentName} Ã‚Â· ${e.respondentRelationship}',
+              detailDialogTitle: 'BI form Ã¢â‚¬â€ ${e.applicantName}',
               previewContentWidth: 920,
               previewBuilder: () => _BiFormEditor(
                 readOnly: true,
@@ -2635,12 +2686,9 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
         filename: 'BI_Form.pdf',
         format: FormPdf.biPrintPageFormat,
         dynamicLayout: false,
+        printModule: 'rsp',
+        printFormKey: 'bi',
       );
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
-      }
     } catch (_) {}
   }
 
@@ -3080,7 +3128,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               Divider(color: AppTheme.lightGray, height: 1),
               const SizedBox(height: 20),
               Text(
-                'Page 2 â€” Functional areas & performance',
+                'Page 2 Ã¢â‚¬â€ Functional areas & performance',
                 style: TextStyle(
                   color: AppTheme.primaryNavy,
                   fontSize: 13,
@@ -3242,7 +3290,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               Divider(color: AppTheme.lightGray, height: 1),
               const SizedBox(height: 20),
               Text(
-                'Page 3 â€” Other relevant information',
+                'Page 3 Ã¢â‚¬â€ Other relevant information',
                 style: TextStyle(
                   color: AppTheme.primaryNavy,
                   fontSize: 13,
@@ -3384,9 +3432,9 @@ class _BiFormList extends StatelessWidget {
               RspRecordsCrudActions(
                 onView: () => showReadOnlySavedEntryDialog(
                   context,
-                  title: 'BI form â€” ${e.applicantName}',
+                  title: 'BI form Ã¢â‚¬â€ ${e.applicantName}',
                   subtitle:
-                      '${e.respondentName} Â· ${e.respondentRelationship}',
+                      '${e.respondentName} Ã‚Â· ${e.respondentRelationship}',
                   previewBuilder: () => _BiFormEditor(
                     readOnly: true,
                     entry: e,
@@ -3413,7 +3461,7 @@ class _BiFormList extends StatelessWidget {
   }
 }
 
-/// RSP: Applicants Profile Ã¢â‚¬â€ job vacancy details + list of applicants.
+/// RSP: Applicants Profile ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â job vacancy details + list of applicants.
 class _RspApplicantsProfileSection extends StatefulWidget {
   const _RspApplicantsProfileSection();
 
@@ -3994,12 +4042,9 @@ class _RspApplicantsProfileSectionState
         buildDocument: () => FormPdf.buildApplicantsProfilePdf(entry),
         filename: 'Applicants_Profile.pdf',
         format: FormPdf.pageLongLandscape,
+        printModule: 'rsp',
+        printFormKey: 'applicants_profile',
       );
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
-      }
     } catch (_) {}
   }
 
@@ -4034,8 +4079,8 @@ class _RspApplicantsProfileSectionState
         return SavedRecordListItem(
           title: pos,
           subtitle:
-              '${e.applicants.length} applicant(s) Â· Posted ${e.dateOfPosting ?? "â€”"}',
-          detailDialogTitle: 'Applicants profile â€” $pos',
+              '${e.applicants.length} applicant(s) Ã‚Â· Posted ${e.dateOfPosting ?? "Ã¢â‚¬â€"}',
+          detailDialogTitle: 'Applicants profile Ã¢â‚¬â€ $pos',
           previewContentWidth: 960,
           previewBuilder: () => _ApplicantsProfileFormEditor(
             readOnly: true,
@@ -4401,7 +4446,7 @@ class _ApplicantsProfileFormEditorState
     widget.onSave(_buildCurrentEntry());
   }
 
-  static String _dash(String v) => v.trim().isEmpty ? '—' : v.trim();
+  static String _dash(String v) => v.trim().isEmpty ? 'â€”' : v.trim();
 
   static String _initialsOf(String name) {
     final parts = name
@@ -4793,7 +4838,7 @@ class _ApplicantsProfileFormEditorState
         Text(
           _applicantRows.isEmpty
               ? 'No applicants yet'
-              : 'Rows ${_currentPageStart + 1}–$_currentPageEnd of ${_applicantRows.length}',
+              : 'Rows ${_currentPageStart + 1}â€“$_currentPageEnd of ${_applicantRows.length}',
           style: TextStyle(
             color: AppTheme.dashTextSecondaryOf(context),
             fontSize: 12,
@@ -4907,7 +4952,7 @@ class _ApplicantsProfileFormEditorState
                   ),
                   DataCell(
                     Text(
-                      name.isEmpty ? '—' : name,
+                      name.isEmpty ? 'â€”' : name,
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
@@ -5013,7 +5058,7 @@ class _ApplicantsProfileFormEditorState
                 ro
                     ? Text(
                         _preparedBy.text.trim().isEmpty
-                            ? '—'
+                            ? 'â€”'
                             : _preparedBy.text.trim(),
                         style: TextStyle(
                           color: primary,
@@ -5072,7 +5117,7 @@ class _ApplicantsProfileFormEditorState
                 ro
                     ? Text(
                         _checkedBy.text.trim().isEmpty
-                            ? '—'
+                            ? 'â€”'
                             : _checkedBy.text.trim(),
                         style: TextStyle(
                           color: primary,
@@ -5706,12 +5751,9 @@ class _RspSelectionLineupSectionState
         buildDocument: () => FormPdf.buildSelectionLineupPdf(entry),
         filename: 'Selection_Lineup.pdf',
         format: FormPdf.pageLetterLandscape,
+        printModule: 'rsp',
+        printFormKey: 'selection_lineup',
       );
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
-      }
     } catch (_) {}
   }
 
@@ -5745,8 +5787,8 @@ class _RspSelectionLineupSectionState
             : '(No position)';
         return SavedRecordListItem(
           title: pos,
-          subtitle: '${e.date ?? "â€”"} Â· ${e.applicants.length} applicant(s)',
-          detailDialogTitle: 'Selection line-up â€” $pos',
+          subtitle: '${e.date ?? "Ã¢â‚¬â€"} Ã‚Â· ${e.applicants.length} applicant(s)',
+          detailDialogTitle: 'Selection line-up Ã¢â‚¬â€ $pos',
           previewContentWidth: 1000,
           previewBuilder: () => _SelectionLineupEditor(
             readOnly: true,
@@ -7084,2030 +7126,7 @@ class _SelectionLineupList extends StatelessWidget {
   }
 }
 
-/// RSP: Turn-Around Time Ã¢â‚¬â€ position, office, dates, applicant tracking table. Form only, no pre-filled names.
-
-class _RspTurnAroundTimeSection extends StatefulWidget {
-  const _RspTurnAroundTimeSection();
-
-  @override
-  State<_RspTurnAroundTimeSection> createState() =>
-      _RspTurnAroundTimeSectionState();
-}
-
-class _RspTurnAroundTimeSectionState extends State<_RspTurnAroundTimeSection> {
-  List<TurnAroundTimeEntry> _entries = [];
-  bool _loading = true;
-  TurnAroundTimeEntry? _editing;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
-      final list = await TurnAroundTimeRepo.instance.list();
-      if (mounted) {
-        setState(() {
-          _entries = list;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _entries = [];
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  void _startNew() => setState(() => _editing = const TurnAroundTimeEntry());
-  void _edit(TurnAroundTimeEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
-
-  Future<void> _onSave(TurnAroundTimeEntry entry) async {
-    try {
-      if (entry.id == null) {
-        await TurnAroundTimeRepo.instance.insert(entry);
-      } else {
-        await TurnAroundTimeRepo.instance.update(entry);
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Turn-around time saved.')),
-        );
-        setState(() => _editing = null);
-        _load();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
-        );
-      }
-    }
-  }
-
-  Future<void> _onDelete(String id) async {
-    try {
-      await TurnAroundTimeRepo.instance.delete(id);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Deleted.')));
-        _load();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
-      }
-    }
-  }
-
-  Future<void> _printTat(TurnAroundTimeEntry entry) async {
-    try {
-      await FormPdf.printForm(
-        context: context,
-        buildDocument: () => FormPdf.buildTurnAroundTimePdf(entry),
-        filename: 'Turn_Around_Time.pdf',
-        format: FormPdf.pageLongLandscape,
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Print dialog opened.')));
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _downloadTat(TurnAroundTimeEntry entry) async {
-    try {
-      final doc = await FormPdf.buildTurnAroundTimePdf(entry);
-      await FormPdf.sharePdf(doc, name: 'Turn_Around_Time.pdf');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF ready to save or share.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
-      }
-    }
-  }
-
-  void _openSavedRecordsBrowser() {
-    showRspLdSavedRecordsBrowser(
-      context,
-      sheetTitle: 'Saved turn-around time records',
-      emptyMessage: 'No entries yet.',
-      loading: _loading,
-      items: _entries.map((e) {
-        final pos = e.position?.trim().isNotEmpty == true
-            ? e.position!
-            : '(No position)';
-        return SavedRecordListItem(
-          title: pos,
-          subtitle:
-              '${e.office ?? "â€”"} Â· ${e.applicants.length} applicant(s)',
-          detailDialogTitle: 'Turn-around time â€” $pos',
-          previewContentWidth: 1200,
-          previewBuilder: () => _TurnAroundTimeEditor(
-            readOnly: true,
-            entry: e,
-            onSave: (_) {},
-            onCancel: () {},
-            onPrint: (_) async {},
-            onDownloadPdf: (_) async {},
-          ),
-          onPrint: () => _printTat(e),
-        );
-      }).toList(),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Turn-Around Time',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Position, office, dates, and applicant tracking (assessment, exam, deliberation, job offer, assumption, cost). Form onlyÃ¢â‚¬â€no pre-filled names.',
-          style: TextStyle(
-            color: AppTheme.dashTextSecondaryOf(context),
-            fontSize: 14,
-          ),
-        ),
-        const SizedBox(height: 24),
-        if (_editing != null) ...[
-          _TurnAroundTimeEditor(
-            key: ValueKey(_editing?.id ?? 'new'),
-            entry: _editing!,
-            onSave: _onSave,
-            onCancel: _cancelEdit,
-            onPrint: _printTat,
-            onDownloadPdf: _downloadTat,
-          ),
-          const SizedBox(height: 24),
-        ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add turn-around time'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message:
-                'No turn-around time entries yet. Tap "Add turn-around time" to add one.',
-            icon: Icons.schedule_rounded,
-          )
-        else
-          _TurnAroundTimeList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _printTat,
-            onDownloadPdf: _downloadTat,
-          ),
-      ],
-    );
-  }
-}
-
-class _TurnAroundTimeEditor extends StatefulWidget {
-  const _TurnAroundTimeEditor({
-    super.key,
-    required this.entry,
-    this.readOnly = false,
-    required this.onSave,
-    required this.onCancel,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final TurnAroundTimeEntry entry;
-  final bool readOnly;
-  final void Function(TurnAroundTimeEntry) onSave;
-  final VoidCallback onCancel;
-  final Future<void> Function(TurnAroundTimeEntry) onPrint;
-  final Future<void> Function(TurnAroundTimeEntry) onDownloadPdf;
-
-  @override
-  State<_TurnAroundTimeEditor> createState() => _TurnAroundTimeEditorState();
-}
-
-class _TurnAroundTimeEditorState extends State<_TurnAroundTimeEditor> {
-  late List<TextEditingController> _header;
-  late List<TextEditingController> _signatory;
-  late List<Map<String, TextEditingController>> _rows;
-  final ScrollController _applicantsTableHScroll = ScrollController();
-
-  static const List<String> _rowKeys = [
-    'name',
-    'date_initial_assessment',
-    'date_contract_exam',
-    'skills_trade_exam_result',
-    'date_deliberation',
-    'date_job_offer',
-    'acceptance_date',
-    'date_assumption_to_duty',
-    'no_of_days_to_fill_up',
-    'overall_cost_per_hire',
-  ];
-
-  Map<String, TextEditingController> _tatRow(Map<String, String> values) {
-    return Map.fromEntries(
-      _rowKeys.map(
-        (k) => MapEntry(k, TextEditingController(text: values[k] ?? '')),
-      ),
-    );
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    final e = widget.entry;
-    _header = [
-      TextEditingController(text: e.position ?? ''),
-      TextEditingController(text: e.office ?? ''),
-      TextEditingController(text: e.noOfVacantPosition ?? ''),
-      TextEditingController(text: e.dateOfPublication ?? ''),
-      TextEditingController(text: e.endSearch ?? ''),
-      TextEditingController(text: e.qs ?? ''),
-    ];
-    _signatory = [
-      TextEditingController(text: e.preparedByName ?? ''),
-      TextEditingController(text: e.preparedByTitle ?? ''),
-      TextEditingController(text: e.notedByName ?? ''),
-      TextEditingController(text: e.notedByTitle ?? ''),
-    ];
-    _rows = e.applicants.isEmpty
-        ? [_tatRow({})]
-        : e.applicants
-              .map(
-                (a) => _tatRow({
-                  'name': a.name ?? '',
-                  'date_initial_assessment': a.dateInitialAssessment ?? '',
-                  'date_contract_exam': a.dateContractExam ?? '',
-                  'skills_trade_exam_result': a.skillsTradeExamResult ?? '',
-                  'date_deliberation': a.dateDeliberation ?? '',
-                  'date_job_offer': a.dateJobOffer ?? '',
-                  'acceptance_date': a.acceptanceDate ?? '',
-                  'date_assumption_to_duty': a.dateAssumptionToDuty ?? '',
-                  'no_of_days_to_fill_up': a.noOfDaysToFillUp ?? '',
-                  'overall_cost_per_hire': a.overallCostPerHire ?? '',
-                }),
-              )
-              .toList();
-  }
-
-  @override
-  void dispose() {
-    for (final c in _header) {
-      c.dispose();
-    }
-    for (final c in _signatory) {
-      c.dispose();
-    }
-    for (final row in _rows) {
-      for (final c in row.values) {
-        c.dispose();
-      }
-    }
-    super.dispose();
-  }
-
-  void _addRow() => setState(() => _rows.add(_tatRow({})));
-  void _removeRow(int i) {
-    if (_rows.length <= 1) return;
-    setState(() {
-      for (final c in _rows[i].values) {
-        c.dispose();
-      }
-      _rows.removeAt(i);
-    });
-  }
-
-  TurnAroundTimeEntry _buildCurrentEntry() {
-    final applicants = _rows
-        .map(
-          (r) => TurnAroundTimeApplicant(
-            name: r['name']!.text.trim().isEmpty
-                ? null
-                : r['name']!.text.trim(),
-            dateInitialAssessment:
-                r['date_initial_assessment']!.text.trim().isEmpty
-                ? null
-                : r['date_initial_assessment']!.text.trim(),
-            dateContractExam: r['date_contract_exam']!.text.trim().isEmpty
-                ? null
-                : r['date_contract_exam']!.text.trim(),
-            skillsTradeExamResult:
-                r['skills_trade_exam_result']!.text.trim().isEmpty
-                ? null
-                : r['skills_trade_exam_result']!.text.trim(),
-            dateDeliberation: r['date_deliberation']!.text.trim().isEmpty
-                ? null
-                : r['date_deliberation']!.text.trim(),
-            dateJobOffer: r['date_job_offer']!.text.trim().isEmpty
-                ? null
-                : r['date_job_offer']!.text.trim(),
-            acceptanceDate: r['acceptance_date']!.text.trim().isEmpty
-                ? null
-                : r['acceptance_date']!.text.trim(),
-            dateAssumptionToDuty:
-                r['date_assumption_to_duty']!.text.trim().isEmpty
-                ? null
-                : r['date_assumption_to_duty']!.text.trim(),
-            noOfDaysToFillUp: r['no_of_days_to_fill_up']!.text.trim().isEmpty
-                ? null
-                : r['no_of_days_to_fill_up']!.text.trim(),
-            overallCostPerHire: r['overall_cost_per_hire']!.text.trim().isEmpty
-                ? null
-                : r['overall_cost_per_hire']!.text.trim(),
-          ),
-        )
-        .toList();
-    return TurnAroundTimeEntry(
-      id: widget.entry.id,
-      position: _header[0].text.trim().isEmpty ? null : _header[0].text.trim(),
-      office: _header[1].text.trim().isEmpty ? null : _header[1].text.trim(),
-      noOfVacantPosition: _header[2].text.trim().isEmpty
-          ? null
-          : _header[2].text.trim(),
-      dateOfPublication: _header[3].text.trim().isEmpty
-          ? null
-          : _header[3].text.trim(),
-      endSearch: _header[4].text.trim().isEmpty ? null : _header[4].text.trim(),
-      qs: _header[5].text.trim().isEmpty ? null : _header[5].text.trim(),
-      applicants: applicants,
-      preparedByName: _signatory[0].text.trim().isEmpty
-          ? null
-          : _signatory[0].text.trim(),
-      preparedByTitle: _signatory[1].text.trim().isEmpty
-          ? null
-          : _signatory[1].text.trim(),
-      notedByName: _signatory[2].text.trim().isEmpty
-          ? null
-          : _signatory[2].text.trim(),
-      notedByTitle: _signatory[3].text.trim().isEmpty
-          ? null
-          : _signatory[3].text.trim(),
-      createdAt: widget.entry.createdAt,
-      updatedAt: widget.entry.updatedAt,
-    );
-  }
-
-  void _save() {
-    if (widget.readOnly) return;
-    widget.onSave(_buildCurrentEntry());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ro = widget.readOnly;
-    const labels = [
-      'Name of Applicant',
-      'Date of Initial Assesment',
-      'Date of Contract for trade and written exam',
-      'Skills Trade/ Exam Result',
-      'Date of Deliberation',
-      'Date of Job Offer',
-      'Acceptance date of Job Offer',
-      'Date of Assumption to Duty',
-      'No. of Days to Fill-Up Position',
-      'Overall Cost per hire',
-    ];
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const RspFormHeaderBoard(
-              formTitle: 'TURN-AROUND TIME',
-              officeName: 'MGO-Plaridel, Misamis Occidental',
-            ),
-            Center(
-              child: SizedBox(
-                width: 400,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Position:',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 13,
-                      ),
-                    ),
-                    RspSpacedOutlineField(
-                      child: TextFormField(
-                        controller: _header[0],
-                        readOnly: ro,
-                        decoration: rspUnderlinedField(''),
-                      ),
-                    ),
-                    Text(
-                      'Office:',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 13,
-                      ),
-                    ),
-                    RspSpacedOutlineField(
-                      child: TextFormField(
-                        controller: _header[1],
-                        readOnly: ro,
-                        decoration: rspUnderlinedField(''),
-                      ),
-                    ),
-                    Text(
-                      'No. of Vacant Position:',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 13,
-                      ),
-                    ),
-                    RspSpacedOutlineField(
-                      child: TextFormField(
-                        controller: _header[2],
-                        readOnly: ro,
-                        decoration: rspUnderlinedField(''),
-                      ),
-                    ),
-                    Text(
-                      'Date of Publication:',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 13,
-                      ),
-                    ),
-                    RspSpacedOutlineField(
-                      child: TextFormField(
-                        controller: _header[3],
-                        readOnly: ro,
-                        decoration: rspUnderlinedField(''),
-                      ),
-                    ),
-                    Text(
-                      'End Search:',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 13,
-                      ),
-                    ),
-                    RspSpacedOutlineField(
-                      child: TextFormField(
-                        controller: _header[4],
-                        readOnly: ro,
-                        decoration: rspUnderlinedField(''),
-                      ),
-                    ),
-                    Text(
-                      'Q.S.:',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 13,
-                      ),
-                    ),
-                    RspSpacedOutlineField(
-                      child: TextFormField(
-                        controller: _header[5],
-                        readOnly: ro,
-                        decoration: rspUnderlinedField(''),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    'Applicants (turn-around tracking)',
-                    style: TextStyle(
-                      color: AppTheme.primaryNavy,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (!ro) ...[
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: _addRow,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add applicant'),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Scroll horizontally to see all columns.',
-              style: TextStyle(
-                fontSize: 12,
-                color: AppTheme.dashTextSecondaryOf(context),
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-            const SizedBox(height: 8),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                return SizedBox(
-                  width: constraints.maxWidth,
-                  child: ScrollConfiguration(
-                    behavior: const MaterialScrollBehavior().copyWith(
-                      dragDevices: {
-                        PointerDeviceKind.touch,
-                        PointerDeviceKind.mouse,
-                        PointerDeviceKind.trackpad,
-                        PointerDeviceKind.stylus,
-                      },
-                    ),
-                    child: Scrollbar(
-                      controller: _applicantsTableHScroll,
-                      thumbVisibility: true,
-                      trackVisibility: kIsWeb,
-                      thickness: kIsWeb ? 8 : null,
-                      radius: const Radius.circular(4),
-                      child: SingleChildScrollView(
-                        controller: _applicantsTableHScroll,
-                        scrollDirection: Axis.horizontal,
-                        primary: false,
-                        physics: const ClampingScrollPhysics(),
-                        child: DataTable(
-                          horizontalMargin: 12,
-                          columnSpacing: 16,
-                          columns: [
-                            for (var i = 0; i < _rowKeys.length; i++)
-                              DataColumn(
-                                label: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    minWidth: 100,
-                                    maxWidth: 140,
-                                  ),
-                                  child: Text(
-                                    labels[i],
-                                    style: const TextStyle(fontSize: 11),
-                                    softWrap: true,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.fade,
-                                  ),
-                                ),
-                              ),
-                            const DataColumn(label: Text('')),
-                          ],
-                          rows: List.generate(_rows.length, (i) {
-                            final r = _rows[i];
-                            return DataRow(
-                              cells: [
-                                for (final k in _rowKeys)
-                                  DataCell(
-                                    SizedBox(
-                                      width: 104,
-                                      child: TextFormField(
-                                        controller: r[k],
-                                        readOnly: ro,
-                                        decoration: rspTableCellField(),
-                                      ),
-                                    ),
-                                  ),
-                                DataCell(
-                                  ro
-                                      ? const SizedBox(width: 40)
-                                      : IconButton(
-                                          icon: const Icon(
-                                            Icons.remove_circle_outline,
-                                            size: 20,
-                                          ),
-                                          onPressed: _rows.length > 1
-                                              ? () => _removeRow(i)
-                                              : null,
-                                        ),
-                                ),
-                              ],
-                            );
-                          }),
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Prepared by / Noted by',
-              style: TextStyle(
-                color: AppTheme.primaryNavy,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            _f(_signatory[0], 'Prepared by (name)'),
-            _f(_signatory[1], 'Prepared by (title)'),
-            _f(_signatory[2], 'Noted by (name)'),
-            _f(_signatory[3], 'Noted by (title)'),
-            const SizedBox(height: 16),
-            if (!ro) ...[
-              Row(
-                children: [
-                  FilledButton(onPressed: _save, child: const Text('Save')),
-                  const SizedBox(width: 12),
-                  TextButton(
-                    onPressed: widget.onCancel,
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                    icon: const Icon(Icons.print_rounded),
-                    tooltip: 'Print',
-                  ),
-                  IconButton(
-                    onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                    icon: const Icon(Icons.picture_as_pdf_rounded),
-                    tooltip: 'Download PDF',
-                  ),
-                ],
-              ),
-            ] else ...[
-              if (widget.entry.createdAt != null)
-                Text(
-                  'Created: ${widget.entry.createdAt!.toLocal()}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                ),
-              if (widget.entry.updatedAt != null)
-                Text(
-                  'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _f(TextEditingController c, String label) {
-    return RspSpacedOutlineField(
-      child: TextFormField(
-        controller: c,
-        readOnly: widget.readOnly,
-        decoration: rspUnderlinedField(label),
-      ),
-    );
-  }
-}
-
-class _TurnAroundTimeList extends StatelessWidget {
-  const _TurnAroundTimeList({
-    required this.entries,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final List<TurnAroundTimeEntry> entries;
-  final void Function(TurnAroundTimeEntry) onEdit;
-  final void Function(String id) onDelete;
-  final Future<void> Function(TurnAroundTimeEntry) onPrint;
-  final Future<void> Function(TurnAroundTimeEntry) onDownloadPdf;
-
-  @override
-  Widget build(BuildContext context) {
-    const columns = [
-      RspRecordsColumn('Position', flex: 2.4),
-      RspRecordsColumn('Office', flex: 2),
-      RspRecordsColumn('Applicants', flex: 1, align: TextAlign.center),
-      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
-    ];
-    return RspRecordsListTable(
-      columns: columns,
-      rows: entries
-          .map(
-            (e) => [
-              rspRecordsTextCell(context, e.position ?? '', bold: true),
-              rspRecordsTextCell(context, e.office ?? ''),
-              rspRecordsTextCell(
-                context,
-                '${e.applicants.length}',
-                align: TextAlign.center,
-                bold: true,
-              ),
-              RspRecordsCrudActions(
-                onView: () => showReadOnlySavedEntryDialog(
-                  context,
-                  title: 'Turn-around time',
-                  subtitle: '${e.position ?? ''} Â· ${e.office ?? ''}',
-                  previewBuilder: () => _TurnAroundTimeEditor(
-                    readOnly: true,
-                    entry: e,
-                    onSave: (_) {},
-                    onCancel: () {},
-                    onPrint: (_) async {},
-                    onDownloadPdf: (_) async {},
-                  ),
-                  contentWidth: 1200,
-                  onPrint: () => onPrint(e),
-                ),
-                onEdit: () => onEdit(e),
-                onPrint: () => onPrint(e),
-                onDownloadPdf: () => onDownloadPdf(e),
-                onDelete: () async {
-                  if (e.id != null) onDelete(e.id!);
-                },
-                deleteDialogTitle: 'Delete entry?',
-              ),
-            ],
-          )
-          .toList(),
-    );
-  }
-}
-
-/// One vacancy form entry (headline + education / experience / training).
-class _VacancyFormItem {
-  _VacancyFormItem()
-    : headline = TextEditingController(),
-      education = TextEditingController(),
-      experience = TextEditingController(),
-      training = TextEditingController(),
-      closingDate = TextEditingController(),
-      maxApplicants = TextEditingController();
-  final TextEditingController headline;
-  final TextEditingController education;
-  final TextEditingController experience;
-  final TextEditingController training;
-  final TextEditingController closingDate;
-  final TextEditingController maxApplicants;
-  void dispose() {
-    headline.dispose();
-    education.dispose();
-    experience.dispose();
-    training.dispose();
-    closingDate.dispose();
-    maxApplicants.dispose();
-  }
-}
-
-/// RSP: Job Vacancies announcement form for the landing page. Supports multiple job vacancy entries.
-class _RspJobVacanciesForm extends StatefulWidget {
-  const _RspJobVacanciesForm();
-
-  @override
-  State<_RspJobVacanciesForm> createState() => _RspJobVacanciesFormState();
-}
-
-class _RspJobVacanciesFormState extends State<_RspJobVacanciesForm> {
-  bool _loading = true;
-  bool _hasVacancies = true;
-  final List<_VacancyFormItem> _vacancies = [];
-
-  /// Parallel to [_vacancies]: when false, only the header row is shown.
-  final List<bool> _vacancyExpanded = [];
-  bool _saving = false;
-  bool _savingToggle = false;
-
-  /// Fingerprint of vacancy entries last saved to the server (not including hiring toggle).
-  String _savedVacanciesFingerprint = '';
-
-  List<Map<String, String?>> _vacancyMapsFromForm() {
-    return _vacancies.map((v) {
-      return <String, String?>{
-        'headline': v.headline.text.trim(),
-        'education': v.education.text.trim(),
-        'experience': v.experience.text.trim(),
-        'training': v.training.text.trim(),
-        'closing_date': v.closingDate.text.trim(),
-        'max_applicants': v.maxApplicants.text.trim(),
-      };
-    }).toList();
-  }
-
-  String _fingerprintVacancyMaps(List<Map<String, String?>> maps) {
-    return jsonEncode(maps);
-  }
-
-  bool get _vacanciesDirty =>
-      !_loading &&
-      _fingerprintVacancyMaps(_vacancyMapsFromForm()) !=
-          _savedVacanciesFingerprint;
-
-  Future<void> _onHasVacanciesChanged(bool value) async {
-    if (_savingToggle) return;
-    final previous = _hasVacancies;
-    setState(() {
-      _hasVacancies = value;
-      _savingToggle = true;
-    });
-    try {
-      await JobVacancyAnnouncementRepo.instance.updateHasVacancies(value);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            value
-                ? 'Landing page is now open for hiring.'
-                : 'Landing page now shows no vacancies.',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (mounted) {
-        setState(() => _hasVacancies = previous);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not update hiring status. ${userFacingApiError(e)}',
-            ),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _savingToggle = false);
-    }
-  }
-
-  String _vacancyEntrySummary(_VacancyFormItem v) {
-    final h = v.headline.text.trim();
-    if (h.isNotEmpty) {
-      return h.length > 52 ? '${h.substring(0, 52)}â€¦' : h;
-    }
-    final parts = <String>[
-      v.education.text.trim(),
-      v.experience.text.trim(),
-      v.training.text.trim(),
-    ].where((s) => s.isNotEmpty).toList();
-    if (parts.isNotEmpty) {
-      final joined = parts.join(' Â· ');
-      return joined.length > 64 ? '${joined.substring(0, 64)}â€¦' : joined;
-    }
-    final m = v.maxApplicants.text.trim();
-    if (m.isNotEmpty) return 'Max applicants: $m';
-    return 'No headline yet â€” expand to edit';
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    JobVacancyAnnouncementRepo.instance.fetch().then((a) {
-      if (!mounted) return;
-      final List<_VacancyFormItem> next = [];
-      if (a.vacancies.isNotEmpty) {
-        for (final v in a.vacancies) {
-          final item = _VacancyFormItem();
-          item.headline.text = v.headline ?? '';
-          item.education.text = v.education ?? '';
-          item.experience.text = v.experience ?? '';
-          item.training.text = v.training ?? '';
-          item.closingDate.text = v.closingDate != null
-              ? '${v.closingDate!.year.toString().padLeft(4, '0')}-${v.closingDate!.month.toString().padLeft(2, '0')}-${v.closingDate!.day.toString().padLeft(2, '0')}'
-              : _autoCloseDate();
-          if (item.education.text.isEmpty &&
-              item.experience.text.isEmpty &&
-              item.training.text.isEmpty) {
-            final legacy = v.body?.trim();
-            if (legacy != null && legacy.isNotEmpty) {
-              item.education.text = legacy;
-            }
-          }
-          item.maxApplicants.text = v.maxApplicants != null
-              ? '${v.maxApplicants}'
-              : '';
-          next.add(item);
-        }
-      } else {
-        final item = _VacancyFormItem();
-        item.headline.text = a.headline ?? '';
-        final legacy = a.body?.trim();
-        if (legacy != null && legacy.isNotEmpty) {
-          item.education.text = legacy;
-        }
-        item.closingDate.text = _autoCloseDate();
-        next.add(item);
-      }
-      if (mounted) {
-        _vacancies
-          ..clear()
-          ..addAll(next);
-        setState(() {
-          _vacancyExpanded
-            ..clear()
-            ..addAll(List<bool>.filled(_vacancies.length, true));
-          _loading = false;
-          _hasVacancies = a.hasVacancies;
-          _savedVacanciesFingerprint = _fingerprintVacancyMaps(
-            _vacancyMapsFromForm(),
-          );
-        });
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    for (final v in _vacancies) {
-      v.dispose();
-    }
-    super.dispose();
-  }
-
-  /// Returns "YYYY-MM-DD" for [n] days from today.
-  static String _autoCloseDate([int days = 15]) {
-    final d = DateTime.now().add(Duration(days: days));
-    return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-  }
-
-  void _addVacancy() {
-    final item = _VacancyFormItem();
-    item.closingDate.text = _autoCloseDate();
-    setState(() {
-      _vacancies.add(item);
-      _vacancyExpanded.add(true);
-    });
-  }
-
-  void _removeVacancy(int index) {
-    if (_vacancies.length <= 1) return;
-    setState(() {
-      _vacancies[index].dispose();
-      _vacancies.removeAt(index);
-      if (index < _vacancyExpanded.length) {
-        _vacancyExpanded.removeAt(index);
-      }
-    });
-  }
-
-  void _confirmDeleteVacancy(BuildContext context, int index) {
-    if (_vacancies.length <= 1) return;
-    final headline = _vacancies[index].headline.text.trim();
-    final title = headline.isEmpty ? 'Position ${index + 1}' : headline;
-    showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete vacancy?'),
-        content: Text(
-          'Remove "$title" from the list? Use this when the job hiring is done. You can add it again later if needed. Tap "Save vacancy entries" below to publish this change on the landing page.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    ).then((ok) {
-      if (ok == true && mounted) _removeVacancy(index);
-    });
-  }
-
-  Future<void> _save() async {
-    setState(() => _saving = true);
-    try {
-      final list = _vacancies.map((v) {
-        final rawMax = v.maxApplicants.text.trim();
-        int? maxParsed;
-        if (rawMax.isNotEmpty) {
-          maxParsed = int.tryParse(rawMax);
-          if (maxParsed != null && maxParsed < 1) maxParsed = null;
-        }
-        final ed = v.education.text.trim();
-        final ex = v.experience.text.trim();
-        final tr = v.training.text.trim();
-        final cdRaw = v.closingDate.text.trim();
-        final cd = cdRaw.isNotEmpty ? DateTime.tryParse(cdRaw) : null;
-        return JobVacancyItem(
-          headline: v.headline.text.trim().isEmpty
-              ? null
-              : v.headline.text.trim(),
-          body: null,
-          education: ed.isEmpty ? null : ed,
-          experience: ex.isEmpty ? null : ex,
-          training: tr.isEmpty ? null : tr,
-          closingDate: cd,
-          maxApplicants: maxParsed,
-        );
-      }).toList();
-      final a = JobVacancyAnnouncement(
-        hasVacancies: _hasVacancies,
-        headline: list.isNotEmpty ? list.first.headline : null,
-        body: list.isNotEmpty ? list.first.body : null,
-        vacancies: list,
-      );
-      await JobVacancyAnnouncementRepo.instance.update(a);
-      if (mounted) {
-        setState(() {
-          _savedVacanciesFingerprint = _fingerprintVacancyMaps(
-            _vacancyMapsFromForm(),
-          );
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Vacancy entries saved. Landing page will show the updated positions.',
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save. ${userFacingApiError(e)}')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  InputDecoration _vacancyInput(
-    BuildContext context, {
-    required String hint,
-    Widget? suffixIcon,
-  }) {
-    return AppTheme.dashInputDecoration(
-      context,
-      hintText: hint,
-      suffixIcon: suffixIcon,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    );
-  }
-
-  Widget _vacancyFieldLabel(BuildContext context, String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          color: AppTheme.dashTextSecondaryOf(context),
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.65,
-          height: 1.2,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hairline = AppTheme.dashHairlineOf(context);
-    final panel = AppTheme.dashPanelOf(context);
-    final muted = AppTheme.dashMutedSurfaceOf(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    AppTheme.primaryNavy.withValues(alpha: 0.14),
-                    AppTheme.primaryNavyLight.withValues(alpha: 0.08),
-                  ],
-                ),
-                border: Border.all(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.2),
-                ),
-              ),
-              child: Icon(
-                Icons.work_outline_rounded,
-                color: AppTheme.dashIsDark(context)
-                    ? AppTheme.primaryNavyLight
-                    : AppTheme.primaryNavy,
-                size: 26,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Job Vacancies Announcement',
-                    style: TextStyle(
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.4,
-                      height: 1.15,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Control what appears in the Job Vacancies section on the landing page. Add multiple entries when you have more than one position.',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 14,
-                      height: 1.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 28),
-        Container(
-          decoration: BoxDecoration(
-            color: panel,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: hairline),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.06),
-                blurRadius: 32,
-                offset: const Offset(0, 14),
-              ),
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                height: 4,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 28),
-                child: _loading
-                    ? const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(32),
-                          child: CircularProgressIndicator(),
-                        ),
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(18),
-                            decoration: BoxDecoration(
-                              color: muted,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: _hasVacancies
-                                    ? AppTheme.primaryNavy.withValues(
-                                        alpha: 0.28,
-                                      )
-                                    : hairline,
-                                width: _hasVacancies ? 1.5 : 1,
-                              ),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  width: 44,
-                                  height: 44,
-                                  decoration: BoxDecoration(
-                                    color: panel,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: hairline),
-                                  ),
-                                  child: Icon(
-                                    _hasVacancies
-                                        ? Icons.campaign_rounded
-                                        : Icons.pause_circle_outline_rounded,
-                                    color: _hasVacancies
-                                        ? AppTheme.primaryNavy
-                                        : AppTheme.dashTextSecondaryOf(context),
-                                    size: 24,
-                                  ),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              'Accepting applications',
-                                              style: TextStyle(
-                                                color:
-                                                    AppTheme.dashTextPrimaryOf(
-                                                      context,
-                                                    ),
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w700,
-                                                letterSpacing: -0.15,
-                                              ),
-                                            ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: _hasVacancies
-                                                  ? AppTheme.primaryNavy
-                                                        .withValues(alpha: 0.12)
-                                                  : AppTheme.dashTextSecondaryOf(
-                                                      context,
-                                                    ).withValues(alpha: 0.1),
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                            ),
-                                            child: Text(
-                                              _hasVacancies
-                                                  ? 'Hiring'
-                                                  : 'Closed',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w800,
-                                                letterSpacing: 0.3,
-                                                color: _hasVacancies
-                                                    ? (AppTheme.dashIsDark(
-                                                            context,
-                                                          )
-                                                          ? AppTheme
-                                                                .primaryNavyLight
-                                                          : AppTheme
-                                                                .primaryNavy)
-                                                    : AppTheme.dashTextSecondaryOf(
-                                                        context,
-                                                      ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        'When ON, the landing page shows that you are hiring. When OFF, it shows no vacancies. This saves immediately.',
-                                        style: TextStyle(
-                                          color: AppTheme.dashTextSecondaryOf(
-                                            context,
-                                          ),
-                                          fontSize: 13,
-                                          height: 1.45,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                if (_savingToggle)
-                                  const Padding(
-                                    padding: EdgeInsets.only(right: 4),
-                                    child: SizedBox(
-                                      width: 22,
-                                      height: 22,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                                  ),
-                                Switch(
-                                  value: _hasVacancies,
-                                  onChanged: _savingToggle
-                                      ? null
-                                      : _onHasVacanciesChanged,
-                                  activeTrackColor: AppTheme.primaryNavy
-                                      .withValues(alpha: 0.45),
-                                  activeThumbColor: AppTheme.primaryNavy,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 28),
-                          Divider(height: 1, color: hairline),
-                          const SizedBox(height: 24),
-                          LayoutBuilder(
-                            builder: (context, constraints) {
-                              final stackHeader = constraints.maxWidth < 520;
-                              final headerTitle = Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'Job vacancy entries',
-                                    style: TextStyle(
-                                      color: AppTheme.dashTextPrimaryOf(
-                                        context,
-                                      ),
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: -0.25,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 9,
-                                      vertical: 3,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.primaryNavy.withValues(
-                                        alpha: 0.1,
-                                      ),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      '${_vacancies.length}',
-                                      style: TextStyle(
-                                        color: AppTheme.dashIsDark(context)
-                                            ? AppTheme.primaryNavyLight
-                                            : AppTheme.primaryNavy,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                              final addBtn = FilledButton.icon(
-                                onPressed: _addVacancy,
-                                icon: const Icon(Icons.add_rounded, size: 20),
-                                label: const Text('Add new vacancy'),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: AppTheme.primaryNavy,
-                                  foregroundColor: Colors.white,
-                                  elevation: 0,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 18,
-                                    vertical: 12,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                              );
-                              if (stackHeader) {
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    headerTitle,
-                                    const SizedBox(height: 12),
-                                    Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: addBtn,
-                                    ),
-                                  ],
-                                );
-                              }
-                              return Row(
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Expanded(child: headerTitle),
-                                  addBtn,
-                                ],
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            'Tap a row to expand or collapse fields. Delete is available when there is more than one entry.',
-                            style: TextStyle(
-                              color: AppTheme.dashTextSecondaryOf(
-                                context,
-                              ).withValues(alpha: 0.9),
-                              fontSize: 13,
-                              height: 1.4,
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-                          ...List.generate(_vacancies.length, (i) {
-                            final v = _vacancies[i];
-                            final expanded = i < _vacancyExpanded.length
-                                ? _vacancyExpanded[i]
-                                : true;
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 14),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: panel,
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: expanded
-                                        ? AppTheme.primaryNavy.withValues(
-                                            alpha: 0.22,
-                                          )
-                                        : hairline,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.035,
-                                      ),
-                                      blurRadius: 12,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ],
-                                ),
-                                clipBehavior: Clip.antiAlias,
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Material(
-                                      color: expanded
-                                          ? AppTheme.primaryNavy.withValues(
-                                              alpha: 0.04,
-                                            )
-                                          : Colors.transparent,
-                                      child: InkWell(
-                                        onTap: () => setState(() {
-                                          if (i < _vacancyExpanded.length) {
-                                            _vacancyExpanded[i] =
-                                                !_vacancyExpanded[i];
-                                          }
-                                        }),
-                                        child: Padding(
-                                          padding: const EdgeInsets.fromLTRB(
-                                            14,
-                                            14,
-                                            12,
-                                            14,
-                                          ),
-                                          child: Row(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Container(
-                                                width: 36,
-                                                height: 36,
-                                                decoration: BoxDecoration(
-                                                  borderRadius:
-                                                      BorderRadius.circular(10),
-                                                  gradient: LinearGradient(
-                                                    begin: Alignment.topLeft,
-                                                    end: Alignment.bottomRight,
-                                                    colors: [
-                                                      AppTheme.primaryNavy
-                                                          .withValues(
-                                                            alpha: 0.9,
-                                                          ),
-                                                      AppTheme.primaryNavyLight
-                                                          .withValues(
-                                                            alpha: 0.75,
-                                                          ),
-                                                    ],
-                                                  ),
-                                                ),
-                                                alignment: Alignment.center,
-                                                child: Text(
-                                                  '${i + 1}',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 15,
-                                                    fontWeight: FontWeight.w800,
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 12),
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Text(
-                                                      'Position ${i + 1}',
-                                                      style: TextStyle(
-                                                        color:
-                                                            AppTheme.dashTextPrimaryOf(
-                                                              context,
-                                                            ),
-                                                        fontSize: 15,
-                                                        fontWeight:
-                                                            FontWeight.w800,
-                                                        letterSpacing: -0.2,
-                                                      ),
-                                                    ),
-                                                    if (!expanded) ...[
-                                                      const SizedBox(height: 6),
-                                                      Text(
-                                                        _vacancyEntrySummary(v),
-                                                        style: TextStyle(
-                                                          color:
-                                                              AppTheme.dashTextSecondaryOf(
-                                                                context,
-                                                              ).withValues(
-                                                                alpha: 0.92,
-                                                              ),
-                                                          fontSize: 12.5,
-                                                          height: 1.4,
-                                                          fontWeight:
-                                                              FontWeight.w500,
-                                                        ),
-                                                        maxLines: 2,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                      ),
-                                                    ],
-                                                  ],
-                                                ),
-                                              ),
-                                              Container(
-                                                width: 32,
-                                                height: 32,
-                                                decoration: BoxDecoration(
-                                                  color: panel,
-                                                  shape: BoxShape.circle,
-                                                  border: Border.all(
-                                                    color: hairline,
-                                                  ),
-                                                ),
-                                                child: Icon(
-                                                  expanded
-                                                      ? Icons
-                                                            .expand_less_rounded
-                                                      : Icons
-                                                            .expand_more_rounded,
-                                                  size: 22,
-                                                  color:
-                                                      AppTheme.dashTextSecondaryOf(
-                                                        context,
-                                                      ),
-                                                ),
-                                              ),
-                                              if (_vacancies.length > 1) ...[
-                                                const SizedBox(width: 8),
-                                                IconButton(
-                                                  onPressed: () =>
-                                                      _confirmDeleteVacancy(
-                                                        context,
-                                                        i,
-                                                      ),
-                                                  icon: Icon(
-                                                    Icons
-                                                        .delete_outline_rounded,
-                                                    size: 20,
-                                                    color: Colors.red.shade700,
-                                                  ),
-                                                  tooltip: 'Delete',
-                                                  style: IconButton.styleFrom(
-                                                    backgroundColor:
-                                                        AppTheme.dashIsDark(
-                                                          context,
-                                                        )
-                                                        ? Colors.red.shade900
-                                                              .withValues(
-                                                                alpha: 0.35,
-                                                              )
-                                                        : Colors.red.shade50,
-                                                    shape: RoundedRectangleBorder(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            10,
-                                                          ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    AnimatedSize(
-                                      duration: const Duration(
-                                        milliseconds: 220,
-                                      ),
-                                      curve: Curves.easeInOut,
-                                      alignment: Alignment.topCenter,
-                                      child: expanded
-                                          ? Padding(
-                                              padding:
-                                                  const EdgeInsets.fromLTRB(
-                                                    14,
-                                                    0,
-                                                    14,
-                                                    14,
-                                                  ),
-                                              child: Container(
-                                                padding: const EdgeInsets.all(
-                                                  18,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: muted,
-                                                  borderRadius:
-                                                      BorderRadius.circular(14),
-                                                  border: Border.all(
-                                                    color: hairline,
-                                                  ),
-                                                ),
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    _vacancyFieldLabel(
-                                                      context,
-                                                      'Headline',
-                                                    ),
-                                                    TextField(
-                                                      controller: v.headline,
-                                                      onChanged: (_) =>
-                                                          setState(() {}),
-                                                      decoration: _vacancyInput(
-                                                        context,
-                                                        hint:
-                                                            'e.g. Now Hiring: Human Resource Assistant',
-                                                      ),
-                                                      maxLines: 1,
-                                                    ),
-                                                    const SizedBox(height: 18),
-                                                    _vacancyFieldLabel(
-                                                      context,
-                                                      'Education',
-                                                    ),
-                                                    TextField(
-                                                      controller: v.education,
-                                                      onChanged: (_) =>
-                                                          setState(() {}),
-                                                      decoration: _vacancyInput(
-                                                        context,
-                                                        hint:
-                                                            'e.g. Bachelor\'s degree in relevant field',
-                                                      ),
-                                                      maxLines: 3,
-                                                    ),
-                                                    const SizedBox(height: 18),
-                                                    _vacancyFieldLabel(
-                                                      context,
-                                                      'Experience',
-                                                    ),
-                                                    TextField(
-                                                      controller: v.experience,
-                                                      onChanged: (_) =>
-                                                          setState(() {}),
-                                                      decoration: _vacancyInput(
-                                                        context,
-                                                        hint:
-                                                            'e.g. 2 years in HR or local government',
-                                                      ),
-                                                      maxLines: 3,
-                                                    ),
-                                                    const SizedBox(height: 18),
-                                                    _vacancyFieldLabel(
-                                                      context,
-                                                      'Training',
-                                                    ),
-                                                    TextField(
-                                                      controller: v.training,
-                                                      onChanged: (_) =>
-                                                          setState(() {}),
-                                                      decoration: _vacancyInput(
-                                                        context,
-                                                        hint:
-                                                            'e.g. Civil service eligibility, seminars',
-                                                      ),
-                                                      maxLines: 3,
-                                                    ),
-                                                    const SizedBox(height: 18),
-                                                    _vacancyFieldLabel(
-                                                      context,
-                                                      'Due date (auto-close)',
-                                                    ),
-                                                    Text(
-                                                      'Automatically closes 15 days after the position is posted. The system will stop accepting applicants on this date.',
-                                                      style: TextStyle(
-                                                        color:
-                                                            AppTheme.dashTextSecondaryOf(
-                                                              context,
-                                                            ).withValues(
-                                                              alpha: 0.9,
-                                                            ),
-                                                        fontSize: 12,
-                                                        height: 1.4,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 10),
-                                                    Container(
-                                                      padding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 16,
-                                                            vertical: 13,
-                                                          ),
-                                                      decoration: BoxDecoration(
-                                                        color:
-                                                            AppTheme.dashMutedSurfaceOf(
-                                                              context,
-                                                            ),
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              14,
-                                                            ),
-                                                        border: Border.all(
-                                                          color:
-                                                              AppTheme.dashHairlineOf(
-                                                                context,
-                                                              ),
-                                                        ),
-                                                      ),
-                                                      child: Row(
-                                                        children: [
-                                                          Icon(
-                                                            Icons.event_rounded,
-                                                            size: 20,
-                                                            color:
-                                                                AppTheme.dashTextSecondaryOf(
-                                                                  context,
-                                                                ),
-                                                          ),
-                                                          const SizedBox(
-                                                            width: 10,
-                                                          ),
-                                                          Expanded(
-                                                            child: Text(
-                                                              v
-                                                                      .closingDate
-                                                                      .text
-                                                                      .isNotEmpty
-                                                                  ? v
-                                                                        .closingDate
-                                                                        .text
-                                                                  : _autoCloseDate(),
-                                                              style: TextStyle(
-                                                                color:
-                                                                    AppTheme.dashTextPrimaryOf(
-                                                                      context,
-                                                                    ),
-                                                                fontSize: 15,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                          TextButton.icon(
-                                                            onPressed: () =>
-                                                                setState(() {
-                                                                  v.closingDate.text =
-                                                                      _autoCloseDate();
-                                                                }),
-                                                            icon: const Icon(
-                                                              Icons
-                                                                  .refresh_rounded,
-                                                              size: 16,
-                                                            ),
-                                                            label: const Text(
-                                                              'Reset',
-                                                              style: TextStyle(
-                                                                fontSize: 13,
-                                                              ),
-                                                            ),
-                                                            style: TextButton.styleFrom(
-                                                              foregroundColor:
-                                                                  AppTheme
-                                                                      .primaryNavy,
-                                                              padding:
-                                                                  const EdgeInsets.symmetric(
-                                                                    horizontal:
-                                                                        10,
-                                                                    vertical: 6,
-                                                                  ),
-                                                              minimumSize:
-                                                                  Size.zero,
-                                                              tapTargetSize:
-                                                                  MaterialTapTargetSize
-                                                                      .shrinkWrap,
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 18),
-                                                    _vacancyFieldLabel(
-                                                      context,
-                                                      'Max applicants',
-                                                    ),
-                                                    Text(
-                                                      'Landing page shows slots in use (pipeline only). Hired (registered), declined documents, failed exam, or failed final interview do not count toward the limit.',
-                                                      style: TextStyle(
-                                                        color:
-                                                            AppTheme.dashTextSecondaryOf(
-                                                              context,
-                                                            ).withValues(
-                                                              alpha: 0.9,
-                                                            ),
-                                                        fontSize: 12,
-                                                        height: 1.4,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 10),
-                                                    TextField(
-                                                      controller:
-                                                          v.maxApplicants,
-                                                      onChanged: (_) =>
-                                                          setState(() {}),
-                                                      keyboardType:
-                                                          TextInputType.number,
-                                                      decoration: _vacancyInput(
-                                                        context,
-                                                        hint:
-                                                            'Leave blank for no limit (e.g. 50)',
-                                                      ),
-                                                      maxLines: 1,
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            )
-                                          : const SizedBox(
-                                              width: double.infinity,
-                                            ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }),
-                          const SizedBox(height: 8),
-                          Divider(height: 1, color: hairline),
-                          const SizedBox(height: 20),
-                          if (!_vacanciesDirty && !_saving) ...[
-                            Text(
-                              'Hiring on/off saves automatically. Use the button below only after you change positions, add vacancies, or edit vacancy details.',
-                              style: TextStyle(
-                                color: AppTheme.dashTextSecondaryOf(context),
-                                fontSize: 13,
-                                height: 1.45,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                          ],
-                          DecoratedBox(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(14),
-                              gradient: LinearGradient(
-                                colors: _vacanciesDirty
-                                    ? const [
-                                        AppTheme.primaryNavy,
-                                        AppTheme.primaryNavyLight,
-                                      ]
-                                    : [
-                                        AppTheme.dashTextSecondaryOf(
-                                          context,
-                                        ).withValues(alpha: 0.35),
-                                        AppTheme.dashTextSecondaryOf(
-                                          context,
-                                        ).withValues(alpha: 0.25),
-                                      ],
-                              ),
-                              boxShadow: _vacanciesDirty
-                                  ? [
-                                      BoxShadow(
-                                        color: AppTheme.primaryNavy.withValues(
-                                          alpha: 0.28,
-                                        ),
-                                        blurRadius: 16,
-                                        offset: const Offset(0, 6),
-                                      ),
-                                    ]
-                                  : null,
-                            ),
-                            child: SizedBox(
-                              width: double.infinity,
-                              child: FilledButton.icon(
-                                onPressed: (_saving || !_vacanciesDirty)
-                                    ? null
-                                    : _save,
-                                icon: _saving
-                                    ? const SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Icon(Icons.save_rounded, size: 20),
-                                label: Text(
-                                  _saving
-                                      ? 'Saving...'
-                                      : _vacanciesDirty
-                                      ? 'Save vacancy entries on landing page'
-                                      : 'No vacancy changes to save',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.transparent,
-                                  foregroundColor: Colors.white,
-                                  shadowColor: Colors.transparent,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
+/// RSP: Turn-Around Time -- moved to turn_around_time_section.dart (RspTurnAroundTimeSection).
 
 enum _RspMonitorView { applications, examResults }
 
@@ -9127,6 +7146,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   Map<String, RecruitmentExamResult> _examResults = {};
   String? _selectedPositionFilter;
   DateTime? _selectedAppliedDate;
+  String? _statusFilter;
   final _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -9166,6 +7186,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
             !_isSameLocalDate(createdAt, _selectedAppliedDate!)) {
           return false;
         }
+      }
+      if (_statusFilter != null && _statusFilter!.isNotEmpty) {
+        if (_applicationDisplayStatus(app) != _statusFilter) return false;
       }
       if (_searchQuery.isNotEmpty) {
         final hay =
@@ -9871,8 +7894,14 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     if (_selectedAppliedDate != null) {
       parts.add('Applied date: ${_formatDateShort(_selectedAppliedDate!)}');
     }
+    if (_statusFilter != null && _statusFilter!.trim().isNotEmpty) {
+      parts.add('Status: ${_statusFilter!.trim()}');
+    }
+    if (_searchQuery.isNotEmpty) {
+      parts.add('Search: $_searchQuery');
+    }
     if (parts.isEmpty) return 'Filters: none (all applications)';
-    return 'Filters: ${parts.join(' Â· ')}';
+    return 'Filters: ${parts.join(' · ')}';
   }
 
   List<RspApplicationsReportRow> _reportRows() {
@@ -10083,11 +8112,15 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
 
   static const _kNa = 'N/A';
 
-  ({String city, String barangay, String street}) _appAddressParts(
-    RecruitmentApplication app,
-  ) {
+  ({String province, String city, String barangay, String street})
+  _appAddressParts(RecruitmentApplication app) {
     final p = parseStoredAddress(app.address);
-    return (city: p.city, barangay: p.barangay, street: p.street);
+    return (
+      province: p.province,
+      city: p.city,
+      barangay: p.barangay,
+      street: p.street,
+    );
   }
 
   String _displayOrNa(String? value) {
@@ -10098,16 +8131,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     if (v == '\u2014' || v == '\u2013' || v == '-') return _kNa;
     if (v.contains('\u00e2\u20ac')) return _kNa;
     return v;
-  }
-
-  Widget _tableCell(double width, Widget child) {
-    return TableCell(
-      verticalAlignment: TableCellVerticalAlignment.middle,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: SizedBox(width: width, child: child),
-      ),
-    );
   }
 
   String _applicationDisplayStatus(RecruitmentApplication app) {
@@ -10177,20 +8200,13 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       child: Align(
         alignment: Alignment.centerLeft,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 158),
+          constraints: const BoxConstraints(maxWidth: 200),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: fg.withValues(alpha: 0.22)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 4,
-                  offset: const Offset(0, 1),
-                ),
-              ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -10206,15 +8222,701 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                       color: fg,
                       height: 1.25,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+        ),
+      ),
+    );
+  }
+
+  bool get _hasActiveFilters =>
+      _selectedPositionFilter != null ||
+      _selectedAppliedDate != null ||
+      _statusFilter != null ||
+      _searchQuery.isNotEmpty;
+
+  void _clearAllFilters() {
+    setState(() {
+      _selectedPositionFilter = null;
+      _selectedAppliedDate = null;
+      _statusFilter = null;
+      _searchController.clear();
+    });
+  }
+
+  Widget _filterDropdown({
+    required String label,
+    required String? value,
+    required List<DropdownMenuItem<String>> items,
+    required ValueChanged<String?>? onChanged,
+    required Color hairline,
+    double width = 220,
+  }) {
+    return Semantics(
+      label: label,
+      child: SizedBox(
+        width: width,
+        height: 44,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppTheme.dashPanelOf(context),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: hairline),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                isExpanded: true,
+                isDense: true,
+                value: value,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  color: AppTheme.dashTextPrimaryOf(context),
+                ),
+                icon: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 20,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+                borderRadius: BorderRadius.circular(10),
+                items: items,
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Set<String> get _statusFilterOptions {
+    final out = <String>{};
+    for (final app in _applications) {
+      out.add(_applicationDisplayStatus(app));
+    }
+    return out;
+  }
+
+  bool _isHiredApp(RecruitmentApplication app) =>
+      app.hiredUserId != null || app.status == 'registered';
+
+  int get _summaryTotal => _applications.length;
+
+  int get _summaryForReview =>
+      _applications.where((a) => a.status == 'submitted').length;
+
+  int get _summaryHired => _applications.where(_isHiredApp).length;
+
+  int get _summaryPassed => _applications.where((a) {
+    if (_isHiredApp(a)) return false;
+    return a.status == 'passed' || a.finalInterviewPassed == true;
+  }).length;
+
+  int get _summaryInProgress => _applications.where((a) {
+    if (_isHiredApp(a)) return false;
+    if (a.status == 'submitted') return false;
+    if (a.status == 'failed' || a.status == 'document_declined') return false;
+    if (a.finalInterviewPassed == false) return false;
+    if (a.status == 'passed' || a.finalInterviewPassed == true) return false;
+    return true;
+  }).length;
+
+  int _docsSubmittedCount(RecruitmentApplication app) {
+    var n = 0;
+    for (final kind in RspApplicationDocKind.values) {
+      var path = app.docPath(kind);
+      if (path == null &&
+          kind == RspApplicationDocKind.resume &&
+          app.attachmentPath != null) {
+        path = app.attachmentPath;
+      }
+      if (path != null && path.trim().isNotEmpty) n++;
+    }
+    return n;
+  }
+
+  Future<void> _confirmSyncAttachments() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sync attachments from storage?'),
+        content: const Text(
+          'Link files already in storage to applications that show “No file”. This does not delete or overwrite existing linked documents.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryNavy),
+            child: const Text('Sync'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) await _syncAttachmentsFromStorage();
+  }
+
+  Future<void> _openApplicantDetails(
+    RecruitmentApplication app, {
+    int initialTab = 0,
+  }) async {
+    await showGeneralDialog<void>(
+      context: context,
+      barrierLabel: 'Applicant details',
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.35),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (ctx, _, __) {
+        return Align(
+          alignment: Alignment.centerRight,
+          child: Material(
+            color: AppTheme.dashPanelOf(ctx),
+            elevation: 12,
+            child: SizedBox(
+              width: MediaQuery.sizeOf(ctx).width < 720
+                  ? MediaQuery.sizeOf(ctx).width
+                  : 560,
+              height: MediaQuery.sizeOf(ctx).height,
+              child: _ApplicantDetailsDrawer(
+                app: app,
+                exam: _examResults[app.id.toLowerCase()],
+                initialTab: initialTab,
+                statusBadge: _applicationStatusBadge(
+                  ctx,
+                  _applicationDisplayStatus(app),
+                ),
+                formatDate: _formatDateShort,
+                displayOrNa: _displayOrNa,
+                addressParts: _appAddressParts,
+                sectionScore: _sectionScorePercent,
+                beiScore: _beiSectionScorePercent,
+                onEdit: () {
+                  Navigator.of(ctx).pop();
+                  _showEditApplicantDialog(app);
+                },
+                onDelete: () {
+                  Navigator.of(ctx).pop();
+                  _confirmDeleteApplicantRow(context, app);
+                },
+                onUpdated: _load,
+                onDeleteApplicant: _deleteApplicant,
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (ctx, anim, _, child) {
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          child: child,
+        );
+      },
+    );
+  }
+
+  Widget _summaryCard({
+    required String label,
+    required int value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 17, color: color),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$value',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
+                    color: AppTheme.dashTextPrimaryOf(context),
+                  ),
+                ),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.dashTextSecondaryOf(context),
                   ),
                 ),
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryRow({required bool compact}) {
+    final tiles = [
+      _summaryCard(
+        label: 'Total Applicants',
+        value: _summaryTotal,
+        icon: Icons.people_outline_rounded,
+        color: AppTheme.primaryNavy,
+      ),
+      _summaryCard(
+        label: 'In Progress',
+        value: _summaryInProgress,
+        icon: Icons.timelapse_rounded,
+        color: AppTheme.primaryNavy,
+      ),
+      _summaryCard(
+        label: 'For Review',
+        value: _summaryForReview,
+        icon: Icons.fact_check_outlined,
+        color: const Color(0xFF1565C0),
+      ),
+      _summaryCard(
+        label: 'Passed',
+        value: _summaryPassed,
+        icon: Icons.check_circle_outline_rounded,
+        color: const Color(0xFF2E7D32),
+      ),
+      _summaryCard(
+        label: 'Hired',
+        value: _summaryHired,
+        icon: Icons.badge_outlined,
+        color: const Color(0xFF6A1B9A),
+      ),
+    ];
+    if (compact) {
+      return Column(
+        children: [
+          Row(
+            children: [
+              Expanded(child: tiles[0]),
+              const SizedBox(width: 8),
+              Expanded(child: tiles[1]),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(child: tiles[2]),
+              const SizedBox(width: 8),
+              Expanded(child: tiles[3]),
+            ],
+          ),
+          const SizedBox(height: 8),
+          tiles[4],
+        ],
+      );
+    }
+    return Row(
+      children: [
+        for (var i = 0; i < tiles.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(child: tiles[i]),
+        ],
+      ],
+    );
+  }
+
+  Widget _docsSummaryChip(RecruitmentApplication app) {
+    final have = _docsSubmittedCount(app);
+    const total = 4;
+    final complete = have >= total;
+    final color = complete ? const Color(0xFF2E7D32) : AppTheme.primaryNavy;
+    return InkWell(
+      onTap: () => _openApplicantDetails(app, initialTab: 1),
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withValues(alpha: 0.22)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.description_outlined, size: 14, color: color),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                complete ? '$have / $total Complete' : '$have / $total Submitted',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
+    );
+  }
+
+  Widget _applicantActionsMenu(RecruitmentApplication app) {
+    return PopupMenuButton<String>(
+      tooltip: 'More actions',
+      padding: EdgeInsets.zero,
+      icon: const Icon(Icons.more_vert, size: 20),
+      onSelected: (value) {
+        switch (value) {
+          case 'edit':
+            _showEditApplicantDialog(app);
+          case 'delete':
+            _confirmDeleteApplicantRow(context, app);
+        }
+      },
+      itemBuilder: (ctx) => [
+        const PopupMenuItem(value: 'edit', child: Text('Edit')),
+        const PopupMenuItem(
+          value: 'delete',
+          child: Text(
+            'Delete',
+            style: TextStyle(color: Color(0xFFC62828)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildApplicationsDirectory(
+    BuildContext context,
+    List<RecruitmentApplication> apps,
+  ) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final mobile = w < 768;
+        final tablet = w >= 768 && w < 1024;
+        if (mobile) {
+          return Column(
+            children: [
+              for (final app in apps) ...[
+                _applicantMobileCard(context, app),
+                const SizedBox(height: 10),
+              ],
+            ],
+          );
+        }
+        return _applicantDesktopTable(
+          context,
+          apps,
+          showContactAndDate: !tablet,
+        );
+      },
+    );
+  }
+
+  Widget _applicantMobileCard(
+    BuildContext context,
+    RecruitmentApplication app,
+  ) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    return Material(
+      color: AppTheme.dashPanelOf(context),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => _openApplicantDetails(app),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          app.fullName.trim().isEmpty
+                              ? 'Unnamed applicant'
+                              : app.fullName.trim(),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                            color: primary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _displayOrNa(app.applicantNumber),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.primaryNavy,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _applicantActionsMenu(app),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                (app.positionAppliedFor ?? '').trim().isEmpty
+                    ? '—'
+                    : app.positionAppliedFor!.trim(),
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: primary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _applicationStatusBadge(context, _applicationDisplayStatus(app)),
+              const SizedBox(height: 8),
+              Text(
+                app.email,
+                style: TextStyle(fontSize: 12.5, color: secondary),
+              ),
+              if ((app.phone ?? '').trim().isNotEmpty)
+                Text(
+                  app.phone!.trim(),
+                  style: TextStyle(fontSize: 12.5, color: secondary),
+                ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  _docsSummaryChip(app),
+                  const Spacer(),
+                  Text(
+                    app.createdAt == null
+                        ? '—'
+                        : _formatDateShort(app.createdAt!),
+                    style: TextStyle(fontSize: 12, color: secondary),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => _openApplicantDetails(app),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryNavy,
+                    minimumSize: const Size(0, 44),
+                  ),
+                  child: const Text('View Applicant'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _applicantDesktopTable(
+    BuildContext context,
+    List<RecruitmentApplication> apps, {
+    required bool showContactAndDate,
+  }) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final hairline = AppTheme.dashHairlineOf(context);
+    final headerStyle = TextStyle(
+      fontWeight: FontWeight.w800,
+      fontSize: 11.5,
+      letterSpacing: 0.3,
+      color: AppTheme.dashIsDark(context)
+          ? AppTheme.primaryNavyLight
+          : AppTheme.letterheadNavy,
+    );
+
+    Widget header(String t, {int flex = 2}) => Expanded(
+      flex: flex,
+      child: Text(t, style: headerStyle),
+    );
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+            border: Border(bottom: BorderSide(color: hairline)),
+          ),
+          child: Row(
+            children: [
+              header('Applicant', flex: 3),
+              header('Position', flex: 2),
+              if (showContactAndDate) header('Contact', flex: 3),
+              if (showContactAndDate) header('Applied', flex: 2),
+              header('Status', flex: 2),
+              header('Documents', flex: 2),
+              const SizedBox(
+                width: 96,
+                child: Text('Actions', textAlign: TextAlign.right),
+              ),
+            ],
+          ),
+        ),
+        ...List.generate(apps.length, (i) {
+          final app = apps[i];
+          return Material(
+            color: i.isOdd
+                ? AppTheme.sectionAltOf(context).withValues(alpha: 0.4)
+                : Colors.transparent,
+            child: InkWell(
+              onTap: () => _openApplicantDetails(app),
+              hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.04),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: hairline)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            app.fullName.trim().isEmpty
+                                ? 'Unnamed applicant'
+                                : app.fullName.trim(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13.5,
+                              color: primary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _displayOrNa(app.applicantNumber),
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFFE85D04),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        (app.positionAppliedFor ?? '').trim().isEmpty
+                            ? '—'
+                            : app.positionAppliedFor!.trim(),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13, color: primary),
+                      ),
+                    ),
+                    if (showContactAndDate)
+                      Expanded(
+                        flex: 3,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              app.email,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12.5, color: primary),
+                            ),
+                            if ((app.phone ?? '').trim().isNotEmpty)
+                              Text(
+                                app.phone!.trim(),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: secondary,
+                  ),
+                ),
+              ],
+            ),
+                      ),
+                    if (showContactAndDate)
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          app.createdAt == null
+                              ? '—'
+                              : _formatDateShort(app.createdAt!),
+                          style: TextStyle(fontSize: 12.5, color: primary),
+                        ),
+                      ),
+                    Expanded(
+                      flex: 2,
+                      child: _applicationStatusBadge(
+                        context,
+                        _applicationDisplayStatus(app),
+                      ),
+                    ),
+                    Expanded(flex: 2, child: _docsSummaryChip(app)),
+                    SizedBox(
+                      width: 96,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          IconButton(
+                            tooltip: 'View applicant',
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 40,
+                            ),
+                            padding: EdgeInsets.zero,
+                            onPressed: () => _openApplicantDetails(app),
+                            icon: const Icon(Icons.visibility_outlined, size: 20),
+                          ),
+                          _applicantActionsMenu(app),
+                        ],
+                      ),
+                    ),
+                  ],
+          ),
+        ),
+      ),
+          );
+        }),
+      ],
     );
   }
 
@@ -10231,17 +8933,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         : Icons.assignment_outlined;
     final hairline = AppTheme.dashHairlineOf(context);
     final panel = AppTheme.dashPanelOf(context);
-    final muted = AppTheme.dashMutedSurfaceOf(context);
-    final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    final tableHeaderStyle = TextStyle(
-      fontWeight: FontWeight.w800,
-      fontSize: 11.5,
-      letterSpacing: 0.35,
-      color: AppTheme.dashIsDark(context)
-          ? AppTheme.primaryNavyLight
-          : AppTheme.letterheadNavy,
-    );
     final filteredApplications = _filteredApplications;
 
     final generateReportBtn = Tooltip(
@@ -10276,54 +8968,39 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       ),
     );
 
-    final syncBtn = Tooltip(
-      message:
-          'Link files already in storage to applications that show "No file" (e.g. after fixing RLS).',
-      child: TextButton.icon(
-        onPressed: (_loading || _syncing) ? null : _syncAttachmentsFromStorage,
-        icon: _syncing
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.sync_rounded, size: 20),
-        label: Text(_syncing ? 'Syncing...' : 'Sync attachments from storage'),
-        style: TextButton.styleFrom(
-          foregroundColor: AppTheme.dashIsDark(context)
-              ? AppTheme.primaryNavyLight
-              : AppTheme.primaryNavy,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        ),
+    final dateFilterLabel = _selectedAppliedDate == null
+        ? 'Applied date'
+        : _formatDateShort(_selectedAppliedDate!);
+    final dateFilterBtn = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+      decoration: BoxDecoration(
+        border: Border.all(color: hairline),
+        borderRadius: BorderRadius.circular(10),
       ),
-    );
-
-    final dateFilterBtn = OutlinedButton.icon(
-      onPressed: _loading
-          ? null
-          : () async {
-              final now = DateTime.now();
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: _selectedAppliedDate ?? now,
-                firstDate: DateTime(now.year - 10),
-                lastDate: DateTime(now.year + 1),
-                helpText: 'Filter by applied date',
-              );
-              if (picked == null || !mounted) return;
-              setState(() => _selectedAppliedDate = picked);
-            },
-      icon: const Icon(Icons.event_outlined, size: 18),
-      label: Text(
-        _selectedAppliedDate == null
-            ? 'Applied date'
-            : _formatDateShort(_selectedAppliedDate!),
-      ),
-      style: OutlinedButton.styleFrom(
-        side: BorderSide(color: hairline),
-        foregroundColor: AppTheme.dashTextPrimaryOf(context),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.event_outlined,
+            size: 18,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            dateFilterLabel,
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontWeight: FontWeight.w600,
+              fontSize: 13.5,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Icon(
+            Icons.arrow_drop_down,
+            size: 22,
+            color: AppTheme.dashTextSecondaryOf(context),
+          ),
+        ],
       ),
     );
 
@@ -10363,156 +9040,82 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
+                  Text(
                           pageTitle,
                           style: TextStyle(
                             color: AppTheme.dashTextPrimaryOf(context),
-                            fontSize: 26,
+                      fontSize: 24,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.4,
                             height: 1.15,
                           ),
                         ),
-                      ),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: panel,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: hairline),
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.refresh_rounded, size: 22),
-                          onPressed: _loading ? null : _load,
-                          tooltip: 'Refresh',
-                          style: IconButton.styleFrom(
-                            foregroundColor: AppTheme.dashIsDark(context)
-                                ? AppTheme.primaryNavyLight
-                                : AppTheme.primaryNavy,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 4),
                   Text(
                     pageSubtitle,
                     style: TextStyle(
                       color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 14,
-                      height: 1.5,
+                      fontSize: 13,
+                      height: 1.4,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
               ),
             ),
-          ],
-        ),
-        const SizedBox(height: 20),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: muted,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: hairline),
-          ),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              if (constraints.maxWidth < 640) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+            const SizedBox(width: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
                   children: [
                     generateReportBtn,
-                    if (isApplicationsView) const SizedBox(height: 10),
-                    if (isApplicationsView) syncBtn,
-                    const SizedBox(height: 10),
-                    DropdownButtonFormField<String>(
-                      initialValue: _selectedPositionFilter,
-                      decoration: InputDecoration(
-                        labelText: 'Filter position',
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
+                OutlinedButton.icon(
+                  onPressed: _loading ? null : _load,
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Refresh'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.dashTextPrimaryOf(context),
+                    side: BorderSide(color: hairline),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
                           vertical: 12,
                         ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      items: <DropdownMenuItem<String>>[
-                        const DropdownMenuItem<String>(
-                          value: null,
-                          child: Text('All positions'),
-                        ),
-                        ...(_positionFilterOptions.toList()..sort(
-                              (a, b) =>
-                                  a.toLowerCase().compareTo(b.toLowerCase()),
-                            ))
-                            .map(
-                              (p) => DropdownMenuItem<String>(
-                                value: p,
-                                child: Text(p),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                if (isApplicationsView)
+                  PopupMenuButton<String>(
+                    tooltip: 'More actions',
+                    onSelected: (v) {
+                      if (v == 'sync') _confirmSyncAttachments();
+                    },
+                    itemBuilder: (ctx) => [
+                      PopupMenuItem(
+                        value: 'sync',
+                        enabled: !_loading && !_syncing,
+                        child: Text(
+                          _syncing
+                              ? 'Syncing attachments…'
+                              : 'Sync attachments from storage',
                               ),
                             ),
                       ],
-                      onChanged: _loading
-                          ? null
-                          : (value) {
-                              setState(() => _selectedPositionFilter = value);
-                            },
-                    ),
-                    const SizedBox(height: 10),
-                    dateFilterBtn,
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        TextButton.icon(
-                          onPressed: _loading
-                              ? null
-                              : () => setState(
-                                  () => _selectedAppliedDate = DateTime.now(),
-                                ),
-                          icon: const Icon(Icons.today_outlined, size: 18),
-                          label: const Text('Today'),
-                        ),
-                        TextButton.icon(
-                          onPressed:
-                              (_loading ||
-                                  (_selectedPositionFilter == null &&
-                                      _selectedAppliedDate == null &&
-                                      _searchQuery.isEmpty))
-                              ? null
-                              : () {
-                                  setState(() {
-                                    _selectedPositionFilter = null;
-                                    _selectedAppliedDate = null;
-                                    _searchController.clear();
-                                  });
-                                },
-                          icon: const Icon(Icons.clear_all_rounded, size: 18),
-                          label: const Text('Clear filters'),
                         ),
                       ],
                     ),
                   ],
-                );
-              }
-              return Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [generateReportBtn, if (isApplicationsView) syncBtn],
-              );
-            },
-          ),
         ),
-        const SizedBox(height: 12),
+        if (isApplicationsView && !_loading) ...[
+          const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, c) =>
+                _summaryRow(compact: c.maxWidth < 900),
+          ),
+        ],
+        const SizedBox(height: 14),
         Wrap(
           spacing: 10,
           runSpacing: 10,
@@ -10524,7 +9127,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 controller: _searchController,
                 enabled: !_loading,
                 decoration: InputDecoration(
-                  labelText: 'Search applicant ID, name, email…',
+                  hintText: 'Search applicants...',
                   isDense: true,
                   prefixIcon: const Icon(Icons.search_rounded, size: 20),
                   suffixIcon: _searchQuery.isEmpty
@@ -10545,69 +9148,96 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 ),
               ),
             ),
-            SizedBox(
-              width: 320,
-              child: DropdownButtonFormField<String>(
-                initialValue: _selectedPositionFilter,
-                decoration: InputDecoration(
-                  labelText: 'Position',
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: hairline),
-                  ),
-                ),
-                items: <DropdownMenuItem<String>>[
+            _filterDropdown(
+              label: 'Position',
+              value: _selectedPositionFilter,
+              width: 260,
+              hairline: hairline,
+              items: [
                   const DropdownMenuItem<String>(
                     value: null,
-                    child: Text('All positions'),
+                  child: Text(
+                    'All positions',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   ),
                   ...(_positionFilterOptions.toList()..sort(
                         (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
                       ))
                       .map(
-                        (p) =>
-                            DropdownMenuItem<String>(value: p, child: Text(p)),
+                      (p) => DropdownMenuItem<String>(
+                        value: p,
+                        child: Text(p, overflow: TextOverflow.ellipsis),
+                      ),
                       ),
                 ],
                 onChanged: _loading
                     ? null
-                    : (value) {
-                        setState(() => _selectedPositionFilter = value);
-                      },
-              ),
+                  : (value) => setState(() => _selectedPositionFilter = value),
             ),
-            dateFilterBtn,
-            TextButton.icon(
-              onPressed: _loading
+            _filterDropdown(
+              label: 'Status',
+              value: _statusFilter,
+              width: 200,
+              hairline: hairline,
+              items: [
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text(
+                    'All statuses',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                ...(_statusFilterOptions.toList()..sort()).map(
+                  (s) => DropdownMenuItem<String>(
+                    value: s,
+                    child: Text(s, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ],
+              onChanged: _loading
                   ? null
-                  : () => setState(() => _selectedAppliedDate = DateTime.now()),
-              icon: const Icon(Icons.today_outlined, size: 18),
-              label: const Text('Today'),
+                  : (value) => setState(() => _statusFilter = value),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'Applied date',
+              enabled: !_loading,
+              onSelected: (v) async {
+                if (v == 'today') {
+                  setState(() => _selectedAppliedDate = DateTime.now());
+                  return;
+                }
+                if (v == 'clear') {
+                  setState(() => _selectedAppliedDate = null);
+                  return;
+                }
+                final now = DateTime.now();
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _selectedAppliedDate ?? now,
+                  firstDate: DateTime(now.year - 10),
+                  lastDate: DateTime(now.year + 1),
+                  helpText: 'Filter by applied date',
+                );
+                if (picked == null || !mounted) return;
+                setState(() => _selectedAppliedDate = picked);
+              },
+              itemBuilder: (ctx) => const [
+                PopupMenuItem(value: 'today', child: Text('Today')),
+                PopupMenuItem(value: 'pick', child: Text('Choose date…')),
+                PopupMenuItem(value: 'clear', child: Text('Clear date')),
+              ],
+              child: dateFilterBtn,
             ),
             TextButton.icon(
-              onPressed:
-                  (_loading ||
-                      (_selectedPositionFilter == null &&
-                          _selectedAppliedDate == null &&
-                          _searchQuery.isEmpty))
+              onPressed: (_loading || !_hasActiveFilters)
                   ? null
-                  : () {
-                      setState(() {
-                        _selectedPositionFilter = null;
-                        _selectedAppliedDate = null;
-                        _searchController.clear();
-                      });
-                    },
+                  : _clearAllFilters,
               icon: const Icon(Icons.clear_all_rounded, size: 18),
               label: const Text('Clear filters'),
             ),
             Text(
-              '${filteredApplications.length} shown',
+              '${filteredApplications.length} applicant${filteredApplications.length == 1 ? '' : 's'}',
               style: TextStyle(
                 color: secondary,
                 fontSize: 12.5,
@@ -10687,613 +9317,12 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   child: _buildScoreBreakdownDataTable(context),
                 )
               else
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final scrollWidth = constraints.maxWidth.isFinite
-                        ? constraints.maxWidth
-                        : MediaQuery.sizeOf(context).width;
-                    const fixedTableWidth = 3510.0;
-                    final tableWidth = scrollWidth > fixedTableWidth
-                        ? scrollWidth
-                        : fixedTableWidth;
-                    return SizedBox(
-                      width: scrollWidth,
-                      child: Scrollbar(
-                        controller: _horizontalScrollController,
-                        thumbVisibility: true,
-                        child: SingleChildScrollView(
-                          controller: _horizontalScrollController,
-                          scrollDirection: Axis.horizontal,
-                          physics: const BouncingScrollPhysics(
-                            parent: AlwaysScrollableScrollPhysics(),
-                          ),
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.vertical,
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(minWidth: tableWidth),
-                              child: Table(
-                                columnWidths: {
-                                  0: const FixedColumnWidth(
-                                    160,
-                                  ), // Applicant ID
-                                  1: const FixedColumnWidth(140), // First
-                                  2: const FixedColumnWidth(140), // Middle
-                                  3: const FixedColumnWidth(140), // Last
-                                  4: const FixedColumnWidth(90), // Suffix
-                                  5: const FixedColumnWidth(90), // Gender
-                                  6: const FixedColumnWidth(150), // Course
-                                  7: const FixedColumnWidth(70), // Age
-                                  8: const FixedColumnWidth(
-                                    140,
-                                  ), // Civil status
-                                  9: const FixedColumnWidth(
-                                    170,
-                                  ), // City / Municipality
-                                  10: const FixedColumnWidth(150), // Barangay
-                                  11: const FixedColumnWidth(180), // Street
-                                  12: const FixedColumnWidth(260), // Email
-                                  13: const FixedColumnWidth(140), // Phone
-                                  14: const FixedColumnWidth(
-                                    200,
-                                  ), // Position applied
-                                  15: const FixedColumnWidth(170), // Status
-                                  16: const FixedColumnWidth(
-                                    188,
-                                  ), // Application letter
-                                  17: const FixedColumnWidth(188), // Resume
-                                  18: const FixedColumnWidth(188), // TOR
-                                  19: const FixedColumnWidth(
-                                    200,
-                                  ), // Eligibility/trainings
-                                  20: const FixedColumnWidth(
-                                    248,
-                                  ), // Document review
-                                  21: const FixedColumnWidth(108), // Actions
-                                },
-                                defaultVerticalAlignment:
-                                    TableCellVerticalAlignment.middle,
-                                border: TableBorder.symmetric(
-                                  inside: BorderSide(color: hairline),
-                                ),
-                                children: [
-                                  TableRow(
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.primaryNavy.withValues(
-                                        alpha: 0.08,
-                                      ),
-                                      border: Border(
-                                        bottom: BorderSide(
-                                          color: AppTheme.primaryNavy
-                                              .withValues(alpha: 0.2),
-                                        ),
-                                      ),
-                                    ),
-                                    children: [
-                                      _tableCell(
-                                        160,
-                                        Text(
-                                          'Applicant ID',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        140,
-                                        Text(
-                                          'First name',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        140,
-                                        Text(
-                                          'Middle name',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        140,
-                                        Text(
-                                          'Last name',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        90,
-                                        Text('Suffix', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        90,
-                                        Text('Gender', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        150,
-                                        Text('Course', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        70,
-                                        Text('Age', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        140,
-                                        Text(
-                                          'Civil status',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        170,
-                                        Text(
-                                          'City / Municipality',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        150,
-                                        Text(
-                                          'Barangay',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        180,
-                                        Text('Street', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        260,
-                                        Text('Email', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        140,
-                                        Text('Phone', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        200,
-                                        Text(
-                                          'Position applied',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        170,
-                                        Text('Status', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        188,
-                                        Text(
-                                          'Application letter',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        188,
-                                        Text('Resume', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        188,
-                                        Text('TOR', style: tableHeaderStyle),
-                                      ),
-                                      _tableCell(
-                                        200,
-                                        Text(
-                                          'Eligibility / trainings (prelim.)',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        248,
-                                        Text(
-                                          'Document review',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                      _tableCell(
-                                        108,
-                                        Text(
-                                          'Actions',
-                                          style: tableHeaderStyle,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  ...List.generate(filteredApplications.length, (
-                                    ri,
-                                  ) {
-                                    final app = filteredApplications[ri];
-                                    final textStyle = TextStyle(
-                                      fontSize: 13,
-                                      color: primary,
-                                      fontWeight: FontWeight.w500,
-                                    );
-
-                                    final full = app.fullName.trim();
-                                    final parts = full
-                                        .split(RegExp(r'\s+'))
-                                        .where((p) => p.trim().isNotEmpty)
-                                        .toList();
-                                    final firstName = _displayOrNa(
-                                      (app.firstName ?? '').trim().isNotEmpty
-                                          ? app.firstName
-                                          : (parts.isNotEmpty
-                                                ? parts.first
-                                                : null),
-                                    );
-                                    final middleName = _displayOrNa(
-                                      app.middleName,
-                                    );
-                                    final lastName = _displayOrNa(
-                                      (app.lastName ?? '').trim().isNotEmpty
-                                          ? app.lastName
-                                          : (parts.length >= 2
-                                                ? parts.last
-                                                : null),
-                                    );
-                                    final suffix = _displayOrNa(app.suffix);
-                                    final gender = _displayOrNa(app.sex);
-                                    final course = _displayOrNa(app.course);
-                                    final age = _displayOrNa(app.age);
-                                    final civilStatus = _displayOrNa(
-                                      app.civilStatus,
-                                    );
-                                    final addr = _appAddressParts(app);
-                                    final city = _displayOrNa(
-                                      addr.city.isEmpty ? null : addr.city,
-                                    );
-                                    final barangay = _displayOrNa(
-                                      addr.barangay.isEmpty
-                                          ? null
-                                          : addr.barangay,
-                                    );
-                                    final street = _displayOrNa(
-                                      addr.street.isEmpty ? null : addr.street,
-                                    );
-                                    final applicantId = _displayOrNa(
-                                      app.applicantNumber,
-                                    );
-
-                                    return TableRow(
-                                      decoration: ri.isOdd
-                                          ? BoxDecoration(
-                                              color: AppTheme.sectionAltOf(
-                                                context,
-                                              ).withValues(alpha: 0.45),
-                                            )
-                                          : null,
-                                      children: [
-                                        _tableCell(
-                                          160,
-                                          SelectableText(
-                                            applicantId,
-                                            style: TextStyle(
-                                              fontSize: 12.5,
-                                              color: const Color(0xFFE85D04),
-                                              fontWeight: FontWeight.w800,
-                                              letterSpacing: 0.3,
-                                            ),
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          140,
-                                          Tooltip(
-                                            message: app.fullName,
-                                            child: Text(
-                                              firstName,
-                                              style: textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 2,
-                                              softWrap: true,
-                                            ),
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          140,
-                                          Text(
-                                            middleName,
-                                            style: textStyle,
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 2,
-                                            softWrap: true,
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          140,
-                                          Text(
-                                            lastName,
-                                            style: textStyle,
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 2,
-                                            softWrap: true,
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          90,
-                                          Text(
-                                            suffix,
-                                            style: textStyle,
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
-                                            softWrap: false,
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          90,
-                                          Text(
-                                            gender,
-                                            style: textStyle,
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
-                                            softWrap: false,
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          150,
-                                          Tooltip(
-                                            message: course,
-                                            child: Text(
-                                              course,
-                                              style: textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 2,
-                                              softWrap: true,
-                                            ),
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          70,
-                                          Text(
-                                            age,
-                                            style: textStyle,
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          140,
-                                          Text(
-                                            civilStatus,
-                                            style: textStyle,
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 2,
-                                            softWrap: true,
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          170,
-                                          Tooltip(
-                                            message: city,
-                                            child: Text(
-                                              city,
-                                              style: textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 2,
-                                              softWrap: true,
-                                            ),
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          150,
-                                          Tooltip(
-                                            message: barangay,
-                                            child: Text(
-                                              barangay,
-                                              style: textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 2,
-                                              softWrap: true,
-                                            ),
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          180,
-                                          Tooltip(
-                                            message: street,
-                                            child: Text(
-                                              street,
-                                              style: textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 2,
-                                              softWrap: true,
-                                            ),
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          260,
-                                          Tooltip(
-                                            message: app.email,
-                                            child: Text(
-                                              app.email,
-                                              style: textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 2,
-                                              softWrap: true,
-                                            ),
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          140,
-                                          Text(
-                                            _displayOrNa(app.phone),
-                                            style: textStyle,
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          200,
-                                          Tooltip(
-                                            message: _displayOrNa(
-                                              app.positionAppliedFor,
-                                            ),
-                                            child: Text(
-                                              _displayOrNa(
-                                                app.positionAppliedFor,
-                                              ),
-                                              style: textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 2,
-                                              softWrap: true,
-                                            ),
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          170,
-                                          _applicationStatusBadge(
-                                            context,
-                                            _applicationDisplayStatus(app),
-                                          ),
-                                        ),
-                                        TableCell(
-                                          verticalAlignment:
-                                              TableCellVerticalAlignment.middle,
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 8,
-                                            ),
-                                            child: _TypedDocAdminCell(
-                                              app: app,
-                                              kind: RspApplicationDocKind
-                                                  .applicationLetter,
-                                              onFileRemoved: _load,
-                                            ),
-                                          ),
-                                        ),
-                                        TableCell(
-                                          verticalAlignment:
-                                              TableCellVerticalAlignment.middle,
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 8,
-                                            ),
-                                            child: _TypedDocAdminCell(
-                                              app: app,
-                                              kind:
-                                                  RspApplicationDocKind.resume,
-                                              onFileRemoved: _load,
-                                            ),
-                                          ),
-                                        ),
-                                        TableCell(
-                                          verticalAlignment:
-                                              TableCellVerticalAlignment.middle,
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 8,
-                                            ),
-                                            child: _TypedDocAdminCell(
-                                              app: app,
-                                              kind: RspApplicationDocKind.tor,
-                                              onFileRemoved: _load,
-                                            ),
-                                          ),
-                                        ),
-                                        TableCell(
-                                          verticalAlignment:
-                                              TableCellVerticalAlignment.middle,
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 8,
-                                            ),
-                                            child: _TypedDocAdminCell(
-                                              app: app,
-                                              kind: RspApplicationDocKind
-                                                  .eligibilityTrainings,
-                                              onFileRemoved: _load,
-                                            ),
-                                          ),
-                                        ),
-                                        TableCell(
-                                          verticalAlignment:
-                                              TableCellVerticalAlignment.middle,
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 14,
-                                              vertical: 8,
-                                            ),
-                                            child: SizedBox(
-                                              width: 248,
-                                              child: _DocumentReviewCell(
-                                                app: app,
-                                                onUpdated: _load,
-                                                onDeleteApplicant:
-                                                    _deleteApplicant,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        _tableCell(
-                                          108,
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              IconButton(
-                                                onPressed: () =>
-                                                    _showEditApplicantDialog(
-                                                      app,
-                                                    ),
-                                                icon: const Icon(
-                                                  Icons.edit_outlined,
-                                                  size: 20,
-                                                ),
-                                                tooltip:
-                                                    'Edit name, email, phone',
-                                                style: IconButton.styleFrom(
-                                                  foregroundColor:
-                                                      AppTheme.dashIsDark(
-                                                        context,
-                                                      )
-                                                      ? AppTheme
-                                                            .primaryNavyLight
-                                                      : AppTheme.primaryNavy,
-                                                  padding: const EdgeInsets.all(
-                                                    6,
-                                                  ),
-                                                  minimumSize: const Size(
-                                                    32,
-                                                    32,
-                                                  ),
-                                                ),
-                                              ),
-                                              IconButton(
-                                                onPressed: () =>
-                                                    _confirmDeleteApplicantRow(
-                                                      context,
-                                                      app,
-                                                    ),
-                                                icon: const Icon(
-                                                  Icons.delete_outline_rounded,
-                                                  size: 20,
-                                                ),
-                                                tooltip: 'Delete applicant',
-                                                style: IconButton.styleFrom(
-                                                  foregroundColor: const Color(
-                                                    0xFFC62828,
-                                                  ),
-                                                  padding: const EdgeInsets.all(
-                                                    6,
-                                                  ),
-                                                  minimumSize: const Size(
-                                                    32,
-                                                    32,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    );
-                                  }),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+                  child: _buildApplicationsDirectory(
+                    context,
+                    filteredApplications,
+                  ),
                 ),
             ],
           ),
@@ -11302,6 +9331,991 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     );
   }
 }
+
+class _ApplicantDetailsDrawer extends StatelessWidget {
+  const _ApplicantDetailsDrawer({
+    required this.app,
+    required this.exam,
+    required this.initialTab,
+    required this.statusBadge,
+    required this.formatDate,
+    required this.displayOrNa,
+    required this.addressParts,
+    required this.sectionScore,
+    required this.beiScore,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onUpdated,
+    required this.onDeleteApplicant,
+  });
+
+  final RecruitmentApplication app;
+  final RecruitmentExamResult? exam;
+  final int initialTab;
+  final Widget statusBadge;
+  final String Function(DateTime) formatDate;
+  final String Function(String?) displayOrNa;
+  final ({String province, String city, String barangay, String street})
+  Function(RecruitmentApplication)
+  addressParts;
+  final double? Function(Map<String, dynamic>?, String) sectionScore;
+  final double? Function(Map<String, dynamic>?) beiScore;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final VoidCallback onUpdated;
+  final Future<void> Function(String) onDeleteApplicant;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final hairline = AppTheme.dashHairlineOf(context);
+    final compactActions = MediaQuery.sizeOf(context).width < 420;
+    final name = app.fullName.trim().isEmpty
+        ? 'Unnamed applicant'
+        : app.fullName.trim();
+    final position = (app.positionAppliedFor ?? '').trim().isEmpty
+        ? '—'
+        : app.positionAppliedFor!.trim();
+
+    return DefaultTabController(
+      length: 4,
+      initialIndex: initialTab.clamp(0, 3),
+      child: ColoredBox(
+        color: AppTheme.dashCanvasOf(context),
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+              Container(
+                height: 4,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                    Expanded(
+                      child: Text(
+                        'Applicant details',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          color: primary,
+                        ),
+                      ),
+                    ),
+                    if (compactActions) ...[
+                      IconButton(
+                        tooltip: 'Edit',
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_outlined),
+                      ),
+                      IconButton(
+                        tooltip: 'Delete',
+                        onPressed: onDelete,
+                        icon: const Icon(Icons.delete_outline_rounded),
+                        color: const Color(0xFFC62828),
+                      ),
+                    ] else ...[
+                      TextButton.icon(
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        label: const Text('Edit'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: primary,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: onDelete,
+                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                        label: const Text('Delete'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFFC62828),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.dashPanelOf(context),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: hairline),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _initialsAvatar(context, name),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                                        Text(
+                              name,
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                height: 1.2,
+                                color: primary,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryNavy.withValues(
+                                      alpha: 0.1,
+                                    ),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    displayOrNa(app.applicantNumber),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 11.5,
+                                      letterSpacing: 0.3,
+                                      color: Color(0xFFE85D04),
+                                    ),
+                                  ),
+                                ),
+                                        Text(
+                                  position,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: secondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            statusBadge,
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Material(
+                color: AppTheme.dashPanelOf(context),
+                child: const TabBar(
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  tabs: [
+                    Tab(text: 'Overview'),
+                    Tab(text: 'Documents'),
+                    Tab(text: 'Assessment'),
+                    Tab(text: 'Hiring Progress'),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    _overviewTab(context),
+                    _documentsTab(context),
+                    _assessmentTab(context),
+                    _progressTab(context),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _initialsOf(String name) {
+    final parts = name
+        .trim()
+                                        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+                                        .toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return (parts.first.substring(0, 1) + parts.last.substring(0, 1))
+        .toUpperCase();
+  }
+
+  Widget _initialsAvatar(BuildContext context, String name) {
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.22),
+        ),
+      ),
+      alignment: Alignment.center,
+                                            child: Text(
+        _initialsOf(name),
+        style: TextStyle(
+          fontWeight: FontWeight.w800,
+          fontSize: 18,
+          color: AppTheme.dashIsDark(context)
+              ? AppTheme.primaryNavyLight
+              : AppTheme.primaryNavy,
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionCard({
+    required BuildContext context,
+    required String title,
+    required IconData icon,
+    required List<Widget> children,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: AppTheme.primaryNavy),
+              const SizedBox(width: 8),
+                                          Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  color: AppTheme.dashTextPrimaryOf(context),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _infoField(BuildContext context, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+                                          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.2,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+          ),
+          const SizedBox(height: 3),
+                                          Text(
+            value,
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              height: 1.25,
+              color: AppTheme.dashTextPrimaryOf(context),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoGrid(BuildContext context, List<(String, String)> fields) {
+    final wide = MediaQuery.sizeOf(context).width >= 520;
+    final cells = fields
+        .map((f) => _infoField(context, f.$1, f.$2))
+        .toList();
+    if (!wide) return Column(children: cells);
+    return Column(
+      children: [
+        for (var i = 0; i < cells.length; i += 2)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: cells[i]),
+              const SizedBox(width: 16),
+              Expanded(
+                child: i + 1 < cells.length ? cells[i + 1] : const SizedBox(),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _overviewTab(BuildContext context) {
+    final addr = addressParts(app);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+      children: [
+        _sectionCard(
+          context: context,
+          title: 'Personal information',
+          icon: Icons.person_outline_rounded,
+          children: [
+            _infoGrid(context, [
+              ('Complete name', displayOrNa(app.fullName)),
+              ('Gender', displayOrNa(app.sex)),
+              ('Age', displayOrNa(app.age)),
+              ('Civil status', displayOrNa(app.civilStatus)),
+              ('Course', displayOrNa(app.course)),
+            ]),
+          ],
+        ),
+        _sectionCard(
+          context: context,
+          title: 'Contact information',
+          icon: Icons.contact_mail_outlined,
+          children: [
+            _infoGrid(context, [
+              ('Email', displayOrNa(app.email)),
+              ('Phone', displayOrNa(app.phone)),
+            ]),
+          ],
+        ),
+        _sectionCard(
+          context: context,
+          title: 'Address',
+          icon: Icons.location_on_outlined,
+          children: [
+            _infoGrid(context, [
+              ('Province', displayOrNa(addr.province)),
+              ('City / Municipality', displayOrNa(addr.city)),
+              ('Barangay', displayOrNa(addr.barangay)),
+              ('Street', displayOrNa(addr.street)),
+            ]),
+          ],
+        ),
+        _sectionCard(
+          context: context,
+          title: 'Application information',
+          icon: Icons.work_outline_rounded,
+          children: [
+            _infoGrid(context, [
+              ('Position applied', displayOrNa(app.positionAppliedFor)),
+              (
+                'Applied date',
+                app.createdAt == null ? '—' : formatDate(app.createdAt!),
+              ),
+              ('Applicant ID', displayOrNa(app.applicantNumber)),
+            ]),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _documentsTab(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+      children: [
+        for (final kind in RspApplicationDocKind.values)
+          _sectionCard(
+            context: context,
+            title: switch (kind) {
+              RspApplicationDocKind.applicationLetter => 'Application Letter',
+              RspApplicationDocKind.resume => 'Resume',
+              RspApplicationDocKind.tor => 'TOR',
+              RspApplicationDocKind.eligibilityTrainings =>
+                'Eligibility / Trainings',
+            },
+            icon: Icons.description_outlined,
+            children: [
+              _TypedDocAdminCell(
+                app: app,
+                kind: kind,
+                onFileRemoved: onUpdated,
+              ),
+            ],
+          ),
+        _sectionCard(
+          context: context,
+          title: 'Document review',
+          icon: Icons.fact_check_outlined,
+          children: [
+            _DocumentReviewCell(
+              app: app,
+              onUpdated: onUpdated,
+              onDeleteApplicant: onDeleteApplicant,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _scoreTile(
+    BuildContext context, {
+    required String label,
+    required String value,
+    Color? accent,
+  }) {
+    final color = accent ?? AppTheme.dashTextPrimaryOf(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _assessmentTab(BuildContext context) {
+    final e = exam;
+    if (e == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.quiz_outlined,
+                size: 36,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+              const SizedBox(height: 10),
+                                          Text(
+                'No exam recorded yet',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.dashTextPrimaryOf(context),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Scores will appear here after the applicant takes the examination.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    String pct(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)}%';
+    final passed = e.passed;
+    final resultColor = passed
+        ? const Color(0xFF2E7D32)
+        : const Color(0xFFC62828);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: resultColor.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: resultColor.withValues(alpha: 0.22)),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                passed
+                    ? Icons.check_circle_outline_rounded
+                    : Icons.cancel_outlined,
+                color: resultColor,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      passed ? 'Passed' : 'Failed',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        color: resultColor,
+                      ),
+                    ),
+                    Text(
+                      'Overall ${e.scorePercent.toStringAsFixed(1)}%',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _scoreTile(
+                context,
+                label: 'Overall',
+                value: '${e.scorePercent.toStringAsFixed(1)}%',
+                accent: AppTheme.primaryNavy,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _scoreTile(
+                context,
+                label: 'General',
+                value: pct(sectionScore(e.answersJson, 'general')),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _scoreTile(
+                context,
+                label: 'Math',
+                value: pct(sectionScore(e.answersJson, 'math')),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _scoreTile(
+                context,
+                label: 'Information',
+                value: pct(sectionScore(e.answersJson, 'general_info')),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _scoreTile(
+          context,
+          label: 'BEI',
+          value: pct(beiScore(e.answersJson)),
+        ),
+      ],
+    );
+  }
+
+  Widget _progressTab(BuildContext context) {
+    final steps = _hiringPipelineSteps(context);
+    final doneCount = steps.where((s) => s.status == _PipelineTone.done).length;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: AppTheme.dashPanelOf(context),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                                            children: [
+                  const Icon(
+                    Icons.flag_outlined,
+                    size: 16,
+                    color: AppTheme.primaryNavy,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Hiring progress',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                      color: AppTheme.dashTextPrimaryOf(context),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '$doneCount of ${steps.length} complete',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.dashTextSecondaryOf(context),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              for (var i = 0; i < steps.length; i++)
+                _progressStep(
+                                                      context,
+                  label: steps[i].label,
+                  detail: steps[i].detail,
+                  status: steps[i].status,
+                  isLast: i == steps.length - 1,
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  bool get _pipelineHired =>
+      app.status == 'registered' ||
+      (app.hiredUserId != null && app.hiredUserId!.trim().isNotEmpty);
+
+  bool get _pipelineBeiPending =>
+      exam != null && !exam!.beiGradingComplete;
+
+  bool get _pipelineExamPassed =>
+      !_pipelineBeiPending &&
+      ((exam?.passed ?? false) ||
+          app.status == 'passed' ||
+          app.status == 'registered' ||
+          _pipelineHired);
+
+  bool get _pipelineExamFailed =>
+      !_pipelineBeiPending &&
+      ((exam?.passed == false) || app.status == 'failed');
+
+  String _pipelineWhen(BuildContext context, DateTime? at) {
+    if (at == null) return '';
+    final local = at.toLocal();
+    final time = TimeOfDay.fromDateTime(local).format(context);
+    return '${formatDate(local)} · $time';
+  }
+
+  List<({String label, String detail, _PipelineTone status})>
+  _hiringPipelineSteps(BuildContext context) {
+    final status = app.status;
+    final hasExam = exam != null;
+
+    late final _PipelineTone docsTone;
+    late final String docsDetail;
+    if (status == 'document_declined') {
+      docsTone = _PipelineTone.failed;
+      docsDetail = 'Documents declined.';
+    } else if (status == 'submitted' && !hasExam) {
+      docsTone = _PipelineTone.current;
+      docsDetail = 'Awaiting HR document approval.';
+    } else if (status == 'document_approved' ||
+        status == 'exam_taken' ||
+        status == 'passed' ||
+        status == 'failed' ||
+        status == 'registered' ||
+        hasExam ||
+        _pipelineHired) {
+      docsTone = _PipelineTone.done;
+      docsDetail = 'Documents approved.';
+    } else {
+      docsTone = _PipelineTone.pending;
+      docsDetail = 'Waiting for document review.';
+    }
+
+    late final _PipelineTone examTone;
+    late final String examDetail;
+    if (_pipelineBeiPending) {
+      examTone = _PipelineTone.current;
+      examDetail = 'Written exam submitted. BEI grading in progress.';
+    } else if (hasExam ||
+        status == 'passed' ||
+        status == 'failed' ||
+        status == 'registered' ||
+        _pipelineHired) {
+      examTone = _PipelineTone.done;
+      examDetail = 'Screening exam completed.';
+    } else if (status == 'document_approved' || status == 'exam_taken') {
+      examTone = _PipelineTone.current;
+      examDetail = status == 'exam_taken'
+          ? 'Exam taken. Waiting for recorded result.'
+          : 'Eligible to take the screening exam.';
+    } else {
+      examTone = _PipelineTone.pending;
+      examDetail = 'Available after documents are approved.';
+    }
+
+    late final _PipelineTone resultTone;
+    late final String resultDetail;
+    if (_pipelineBeiPending) {
+      resultTone = _PipelineTone.current;
+      resultDetail = 'BEI scores are not complete yet.';
+    } else if (_pipelineExamPassed) {
+      resultTone = _PipelineTone.done;
+      resultDetail = 'Passed the screening exam.';
+    } else if (_pipelineExamFailed) {
+      resultTone = _PipelineTone.failed;
+      resultDetail = 'Did not pass the screening exam.';
+    } else {
+      resultTone = _PipelineTone.pending;
+      resultDetail = 'Result appears after the exam is completed and graded.';
+    }
+
+    late final _PipelineTone interviewTone;
+    late final String interviewDetail;
+    if (_pipelineHired || app.finalInterviewPassed == true) {
+      interviewTone = _PipelineTone.done;
+      interviewDetail = 'Passed deliberation / final interview.';
+    } else if (app.finalInterviewPassed == false) {
+      interviewTone = _PipelineTone.failed;
+      interviewDetail = 'Did not pass the final interview.';
+    } else if (!_pipelineExamPassed) {
+      interviewTone = _PipelineTone.pending;
+      interviewDetail = 'Available after the applicant passes the exam.';
+    } else if (app.finalInterviewAt != null) {
+      interviewTone = _PipelineTone.current;
+      interviewDetail =
+          'Scheduled: ${_pipelineWhen(context, app.finalInterviewAt)}. Waiting for result.';
+    } else {
+      interviewTone = _PipelineTone.current;
+      interviewDetail = 'Exam passed. Waiting for deliberation schedule.';
+    }
+
+    late final _PipelineTone reqTone;
+    late final String reqDetail;
+    if (_pipelineHired || app.finalRequirementsApproved) {
+      reqTone = _PipelineTone.done;
+      reqDetail = 'Medical certificate, drug test, and NBI clearance approved.';
+    } else if (app.finalInterviewPassed == false) {
+      reqTone = _PipelineTone.failed;
+      reqDetail = 'Not applicable — final interview was not passed.';
+    } else if (app.finalInterviewPassed != true) {
+      reqTone = _PipelineTone.pending;
+      reqDetail = 'Available after the applicant passes deliberation.';
+    } else if (app.hasRejectedFinalRequirement) {
+      reqTone = _PipelineTone.current;
+      reqDetail = 'A final requirement was rejected and needs re-upload.';
+    } else if (app.hasAllFinalRequirementsUploaded) {
+      reqTone = _PipelineTone.current;
+      reqDetail = 'All three documents uploaded. Awaiting HR review.';
+    } else {
+      reqTone = _PipelineTone.current;
+      reqDetail = 'Waiting for medical certificate, drug test, and NBI clearance.';
+    }
+
+    late final _PipelineTone orientTone;
+    late final String orientDetail;
+    if (_pipelineHired || app.orientationAttended == true) {
+      orientTone = _PipelineTone.done;
+      orientDetail = 'Orientation attendance confirmed.';
+    } else if (!app.finalRequirementsApproved) {
+      orientTone = _PipelineTone.pending;
+      orientDetail = 'Available after final requirements are approved.';
+    } else if (app.orientationAttended == false) {
+      orientTone = _PipelineTone.failed;
+      orientDetail = 'Recorded as missed / did not attend.';
+    } else if (app.orientationAt != null) {
+      orientTone = _PipelineTone.current;
+      orientDetail =
+          'Scheduled: ${_pipelineWhen(context, app.orientationAt)}. Waiting for attendance.';
+    } else {
+      orientTone = _PipelineTone.current;
+      orientDetail = 'Final requirements approved. Waiting for orientation schedule.';
+    }
+
+    late final _PipelineTone accountTone;
+    late final String accountDetail;
+    if (_pipelineHired || app.hrAccountSetupDone) {
+      accountTone = _PipelineTone.done;
+      accountDetail = _pipelineHired
+          ? 'Employee account is linked.'
+          : 'HR marked account setup as done.';
+    } else if (app.finalInterviewPassed == false || _pipelineExamFailed) {
+      accountTone = _PipelineTone.failed;
+      accountDetail = 'Not applicable — applicant did not continue to hiring.';
+    } else if (app.orientationAttended == true) {
+      accountTone = _PipelineTone.current;
+      accountDetail = 'Orientation done. Waiting for employee account setup.';
+    } else if (_pipelineExamPassed && app.finalInterviewPassed == true) {
+      accountTone = _PipelineTone.pending;
+      accountDetail = 'Available after orientation is completed.';
+    } else {
+      accountTone = _PipelineTone.pending;
+      accountDetail = 'Available after the applicant is cleared for hiring.';
+    }
+
+    return [
+      (
+        label: 'Application submitted',
+        detail: 'Application and initial documents received.',
+        status: _PipelineTone.done,
+      ),
+      (
+        label: 'Document review',
+        detail: docsDetail,
+        status: docsTone,
+      ),
+      (
+        label: 'Screening exams',
+        detail: examDetail,
+        status: examTone,
+      ),
+      (
+        label: 'Exam result',
+        detail: resultDetail,
+        status: resultTone,
+      ),
+      (
+        label: 'Deliberation',
+        detail: interviewDetail,
+        status: interviewTone,
+      ),
+      (
+        label: 'Final requirements',
+        detail: reqDetail,
+        status: reqTone,
+      ),
+      (
+        label: 'Orientation',
+        detail: orientDetail,
+        status: orientTone,
+      ),
+      (
+        label: 'Account setup',
+        detail: accountDetail,
+        status: accountTone,
+      ),
+    ];
+  }
+
+  Widget _progressStep(
+    BuildContext context, {
+    required String label,
+    required String detail,
+    required _PipelineTone status,
+    required bool isLast,
+  }) {
+    final Color iconColor;
+    final IconData icon;
+    switch (status) {
+      case _PipelineTone.done:
+        icon = Icons.check_circle_rounded;
+        iconColor = const Color(0xFF2E7D32);
+      case _PipelineTone.current:
+        icon = Icons.timelapse_rounded;
+        iconColor = AppTheme.primaryNavy;
+      case _PipelineTone.failed:
+        icon = Icons.cancel_rounded;
+        iconColor = const Color(0xFFC62828);
+      case _PipelineTone.pending:
+        icon = Icons.radio_button_unchecked_rounded;
+        iconColor = AppTheme.dashTextSecondaryOf(context);
+    }
+    final lineColor = status == _PipelineTone.done
+        ? const Color(0xFF2E7D32)
+        : status == _PipelineTone.failed
+        ? const Color(0xFFC62828)
+        : AppTheme.dashHairlineOf(context);
+    final titleColor = status == _PipelineTone.pending
+        ? AppTheme.dashTextSecondaryOf(context)
+        : AppTheme.dashTextPrimaryOf(context);
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Icon(icon, size: 20, color: iconColor),
+              if (!isLast)
+                Expanded(
+                  child: Container(
+                    width: 2,
+                    margin: const EdgeInsets.symmetric(vertical: 3),
+                    color: lineColor,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: isLast ? 0 : 16, top: 1),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                      color: titleColor,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    detail,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.35,
+                      color: AppTheme.dashTextSecondaryOf(context),
+                    ),
+                  ),
+                ],
+              ),
+          ),
+        ),
+      ],
+      ),
+    );
+  }
+}
+
+enum _PipelineTone { pending, current, done, failed }
 
 enum _AdminPassScoreMode { perfect, custom }
 
@@ -11522,7 +10536,7 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                         Text(
                           alreadyPassed
                               ? 'Overwrite the current passing record with perfect scores on all four screening sections.'
-                              : 'Record this applicant as passed with 100% on every exam section — even without taking the screening exam.',
+                              : 'Record this applicant as passed with 100% on every exam section â€” even without taking the screening exam.',
                           style: TextStyle(
                             color: secondary,
                             fontSize: 13.5,
@@ -12395,7 +11409,7 @@ class _AttachmentActions extends StatelessWidget {
       children: [
         Expanded(
           child: Tooltip(
-            message: 'Preview â€” $fileName',
+            message: 'Preview Ã¢â‚¬â€ $fileName',
             child: TextButton.icon(
               onPressed: () => _preview(context),
               icon: const Icon(Icons.visibility_outlined, size: 18),

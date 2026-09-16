@@ -24,6 +24,10 @@ String userFacingApiError(Object error) {
 String _dioMessage(DioException e) {
   final data = e.response?.data;
   if (data is Map) {
+    final code = data['code']?.toString().trim();
+    if (code == 'APPLICANT_VERIFICATION_REQUIRED') {
+      return 'Your application session expired. Tap Refresh status, then submit again.';
+    }
     final err = data['error']?.toString().trim();
     final details = data['details']?.toString().trim();
     if (err != null &&

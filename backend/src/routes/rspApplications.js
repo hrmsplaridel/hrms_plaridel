@@ -168,6 +168,7 @@ const RSP_APPLICATION_ROW_SELECT = `
   orientation_attended,
   status, final_interview_at, final_interview_passed, hired_user_id,
   hr_account_setup_done, hire_credentials_email_sent_at,
+  hire_login_username, hire_login_password,
   created_at, updated_at
 `.replace(/\s+/g, ' ');
 
@@ -348,6 +349,8 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS hired_user_id UUID,
       ADD COLUMN IF NOT EXISTS hr_account_setup_done BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS hire_credentials_email_sent_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS hire_login_username TEXT,
+      ADD COLUMN IF NOT EXISTS hire_login_password TEXT,
       ADD COLUMN IF NOT EXISTS position_applied_for TEXT,
       ADD COLUMN IF NOT EXISTS first_name TEXT,
       ADD COLUMN IF NOT EXISTS middle_name TEXT,
@@ -479,14 +482,12 @@ router.post('/', publicSubmissionLimiter, async (req, res) => {
         : String(positionAppliedFor).trim().slice(0, 500);
     if (position === '') position = null;
 
-    if (position) {
-      const cap = await assertPositionAcceptingApplications(position);
-      if (!cap.ok) {
-        return res.status(cap.status).json({
-          error: cap.error,
-          code: cap.code,
-        });
-      }
+    const cap = await assertPositionAcceptingApplications(position);
+    if (!cap.ok) {
+      return res.status(cap.status).json({
+        error: cap.error,
+        code: cap.code,
+      });
     }
 
     const applicantNumber = await allocateUniqueApplicantNumber();
@@ -559,10 +560,23 @@ router.get('/by-email', publicLookupLimiter, async (req, res) => {
     }
     const result = await pool.query(
       `
-      SELECT id, full_name, email, position_applied_for, status,
+      SELECT id, applicant_number, full_name, email, position_applied_for, status,
              orientation_at, orientation_attended, final_interview_at,
              final_interview_passed, final_requirements_approved,
-             hr_account_setup_done, created_at, updated_at
+             hr_account_setup_done, hired_user_id,
+             hire_credentials_email_sent_at,
+             hire_login_username, hire_login_password,
+             doc_application_letter_path, doc_application_letter_name,
+             doc_resume_path, doc_resume_name,
+             doc_tor_path, doc_tor_name,
+             doc_eligibility_trainings_path, doc_eligibility_trainings_name,
+             doc_medical_certificate_path, doc_medical_certificate_name,
+             doc_drug_test_path, doc_drug_test_name,
+             doc_nbi_clearance_path, doc_nbi_clearance_name,
+             doc_medical_certificate_reject_reason,
+             doc_drug_test_reject_reason,
+             doc_nbi_clearance_reject_reason,
+             created_at, updated_at
       FROM public.recruitment_applications
       WHERE email = $1
       ORDER BY created_at DESC
@@ -599,7 +613,34 @@ router.get('/by-email', publicLookupLimiter, async (req, res) => {
       };
     }
 
-    return res.json({ ok: true, application: row, examResult });
+    // Same identity as Continue application: email lookup is already the
+    // resume key, and Step 8 uploads require this token.
+    let applicantAccessToken = null;
+    try {
+      applicantAccessToken = signRspApplicantAccessToken(
+        row.id,
+        String(row.email || '').trim().toLowerCase(),
+      );
+    } catch (tokenErr) {
+      console.error('[rspApplications GET /by-email] applicant token', tokenErr);
+    }
+
+    const accountReady =
+      row.hr_account_setup_done === true ||
+      (row.hired_user_id && String(row.hired_user_id).trim() !== '') ||
+      String(row.status || '').toLowerCase() === 'registered';
+    const application = { ...row };
+    if (!accountReady) {
+      delete application.hire_login_username;
+      delete application.hire_login_password;
+    }
+
+    return res.json({
+      ok: true,
+      application,
+      examResult,
+      ...(applicantAccessToken ? { applicantAccessToken } : {}),
+    });
   } catch (err) {
     console.error('[rspApplications GET /by-email]', err);
     return res.status(500).json({
@@ -697,6 +738,75 @@ router.put('/:applicationId/status', protect, async (req, res) => {
     });
   }
 });
+
+// POST /api/rsp/applications/:applicationId/resubmit-documents
+// Applicant: after HR declined Step 1 documents, return the application to review.
+router.post(
+  '/:applicationId/resubmit-documents',
+  publicSubmissionLimiter,
+  rejectInvalidApplicationId,
+  requireApplicantProof,
+  async (req, res) => {
+    try {
+      await ensureRspApplicationsTables();
+      const { applicationId } = req.params;
+      const existing = await pool.query(
+        `
+        SELECT status,
+               doc_application_letter_path,
+               doc_resume_path,
+               doc_tor_path,
+               doc_eligibility_trainings_path
+        FROM public.recruitment_applications
+        WHERE id = $1
+        `,
+        [applicationId],
+      );
+      const row = existing.rows[0];
+      if (!row) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
+      if (row.status !== 'document_declined') {
+        return res.status(409).json({
+          error: 'Documents can only be resubmitted after HR has declined them.',
+          code: 'RESUBMIT_NOT_ALLOWED',
+        });
+      }
+      const missing = [
+        row.doc_application_letter_path,
+        row.doc_resume_path,
+        row.doc_tor_path,
+        row.doc_eligibility_trainings_path,
+      ].some((p) => !p || !String(p).trim());
+      if (missing) {
+        return res.status(400).json({
+          error: 'Upload all four required documents before resubmitting.',
+        });
+      }
+      const result = await pool.query(
+        `
+        UPDATE public.recruitment_applications
+        SET status = 'submitted', updated_at = now()
+        WHERE id = $1 AND status = 'document_declined'
+        `,
+        [applicationId],
+      );
+      if ((result.rowCount ?? 0) === 0) {
+        return res.status(409).json({
+          error: 'Documents can only be resubmitted after HR has declined them.',
+          code: 'RESUBMIT_NOT_ALLOWED',
+        });
+      }
+      return res.json({ ok: true, status: 'submitted' });
+    } catch (err) {
+      console.error('[rspApplications POST resubmit-documents]', err);
+      return res.status(500).json({
+        error: 'Failed to resubmit documents',
+        details: err?.message ? String(err.message) : String(err),
+      });
+    }
+  },
+);
 
 // PUT /api/rsp/applications/:applicationId/basic-info
 // Admin: correct name, email, or phone on the application record.
@@ -1291,10 +1401,13 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
     await pool.query(
       `
       UPDATE public.recruitment_applications
-      SET hire_credentials_email_sent_at = now(), updated_at = now()
+      SET hire_credentials_email_sent_at = now(),
+          hire_login_username = $2,
+          hire_login_password = $3,
+          updated_at = now()
       WHERE id = $1
       `,
-      [applicationId]
+      [applicationId, u, p]
     );
 
     return res.json({

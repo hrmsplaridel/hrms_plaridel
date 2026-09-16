@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -12,6 +13,8 @@ import 'package:hrms_plaridel/features/learning_development/models/bi_form.dart'
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'package:hrms_plaridel/features/learning_development/models/comparative_assessment.dart';
 import 'package:hrms_plaridel/features/learning_development/models/individual_development_plan.dart';
+import 'package:hrms_plaridel/features/learning_development/models/learning_application_plan.dart';
+import 'package:hrms_plaridel/features/learning_development/models/ojt_work_immersion_evaluation.dart';
 import 'package:hrms_plaridel/features/learning_development/models/performance_evaluation_form.dart';
 import 'package:hrms_plaridel/features/learning_development/models/promotion_certification.dart';
 import 'package:hrms_plaridel/features/learning_development/models/action_brainstorming_coaching.dart';
@@ -21,6 +24,8 @@ import 'package:hrms_plaridel/features/learning_development/models/selection_lin
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_need_analysis.dart';
 import 'package:hrms_plaridel/features/learning_development/models/turn_around_time.dart';
+import 'package:hrms_plaridel/features/forms/data/form_print_template_repo.dart';
+import 'package:hrms_plaridel/features/forms/models/form_print_template.dart';
 
 /// Builds PDF documents from RSP form entries and supports print / share.
 /// Paper sizes match sample files: Letter.pdf (8.5"×11"), Long Letter.pdf (8.5"×14"), A4 Letter.pdf.
@@ -48,6 +53,30 @@ class FormPdf {
     return _warmupFuture!;
   }
 
+  /// Warm letterheads, then prefetch saved backgrounds without blocking Print.
+  static void warmupThenPrefetchBackgrounds() {
+    unawaited(warmupPrintAssets().then((_) => prefetchSavedBackgrounds()));
+  }
+
+  /// Loads saved form backgrounds in the background (needs an authenticated API).
+  static Future<void> prefetchSavedBackgrounds() async {
+    try {
+      final list = await FormPrintTemplateRepo.instance.list();
+      final have = <String>{};
+      for (final t in list) {
+        have.add('${t.module}|${t.formKey}');
+        await _bindCustomTemplate(t.module, t.formKey);
+      }
+      for (final module in const ['rsp', 'ld']) {
+        for (final f in FormPrintCatalog.formsFor(module)) {
+          final key = '$module|${f.key}';
+          if (have.contains(key)) continue;
+          _customTemplateCache.putIfAbsent(key, () => const _CustomPrintBind());
+        }
+      }
+    } catch (_) {}
+  }
+
   /// Official A4 letterhead PDF (Municipality of Plaridel) for BI form print/PDF.
   static const String _a4LetterAsset = 'assets/forms/a4_letter.pdf';
   static pw.MemoryImage? _a4LetterBackground;
@@ -55,6 +84,11 @@ class FormPdf {
   /// Mayor's Office Long Letter letterhead — background for IDP print.
   static const String _idpMayorLetterAsset = 'assets/forms/long_letter.pdf';
   static pw.MemoryImage? _idpMayorLetterBackground;
+  static final Map<String, _CustomPrintBind> _customTemplateCache = {};
+  static pw.MemoryImage? _activeCustomBg;
+  static pw.MemoryImage? _lockedPrintBg;
+  static PdfPageFormat? _activeCustomFormat;
+  static String? _customTemplateError;
   static pw.Font? _idpPdfFont;
   static pw.Font? _idpPdfFontBold;
   static Uint8List? _idpBuildingBytes;
@@ -151,6 +185,170 @@ class FormPdf {
     _idpMayorLetterBackground = null;
   }
 
+  static bool get _useCustomPrintBg =>
+      _lockedPrintBg != null || _activeCustomBg != null;
+
+  static const pw.EdgeInsets _customPrintContentPadding =
+      pw.EdgeInsets.fromLTRB(42, 150, 42, 72);
+
+  /// Drops a cached upload so the next print reloads from the API.
+  static void invalidateCustomTemplate(String module, String formKey) {
+    _customTemplateCache.remove('$module|$formKey');
+    _activeCustomBg = null;
+    _lockedPrintBg = null;
+    _activeCustomFormat = null;
+  }
+
+  static PdfPageFormat _printPageFormat(PdfPageFormat fallback) {
+    return _activeCustomFormat ?? fallback;
+  }
+
+  static PdfPageFormat _pdfFormatFromPaperSize(String id) {
+    final paper = FormPrintCatalog.paperById(id);
+    return PdfPageFormat(
+      paper?.widthPt ?? 612,
+      paper?.heightPt ?? 792,
+      marginTop: 0,
+      marginBottom: 0,
+      marginLeft: 0,
+      marginRight: 0,
+    );
+  }
+
+  static PdfPageFormat _catalogFormatMatching(PdfPageFormat f) {
+    for (final s in FormPrintCatalog.paperSizes) {
+      if ((s.widthPt - f.width).abs() < 2 &&
+          (s.heightPt - f.height).abs() < 2) {
+        return _pdfFormatFromPaperSize(s.id);
+      }
+    }
+    return PdfPageFormat(
+      f.width,
+      f.height,
+      marginTop: 0,
+      marginBottom: 0,
+      marginLeft: 0,
+      marginRight: 0,
+    );
+  }
+
+  static pw.Widget _formTitleOnly(String title) {
+    if (title.isEmpty) return pw.SizedBox();
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 8),
+      child: pw.Center(
+        child: pw.Text(
+          title,
+          textAlign: pw.TextAlign.center,
+          style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  static pw.Widget _printPage(pw.Widget child) {
+    final bg = _lockedPrintBg ?? _activeCustomBg;
+    if (bg == null) return child;
+    return pw.Stack(
+      children: [
+        pw.Positioned.fill(child: pw.Image(bg, fit: pw.BoxFit.fill)),
+        pw.Positioned.fill(
+          child: pw.Padding(
+            padding: _customPrintContentPadding,
+            child: child,
+          ),
+        ),
+      ],
+    );
+  }
+
+  static Future<void> _bindCustomTemplate(String module, String formKey) async {
+    _activeCustomBg = null;
+    _lockedPrintBg = null;
+    _activeCustomFormat = null;
+    _customTemplateError = null;
+    final cacheKey = '$module|$formKey';
+    final cached = _customTemplateCache[cacheKey];
+    if (cached != null) {
+      _activeCustomBg = cached.image;
+      _lockedPrintBg = cached.image;
+      _activeCustomFormat = cached.format;
+      return;
+    }
+    try {
+      final meta = await FormPrintTemplateRepo.instance.getMeta(
+        module: module,
+        formKey: formKey,
+      );
+      if (meta == null) {
+        _customTemplateCache[cacheKey] = const _CustomPrintBind();
+        return;
+      }
+      final bytes = await FormPrintTemplateRepo.instance.fetchFileBytes(
+        module: module,
+        formKey: formKey,
+      );
+      if (bytes == null || bytes.isEmpty) {
+        _customTemplateError =
+            'Saved background file is missing. Re-upload it in Forms → Print background.';
+        return;
+      }
+      if (bytes[0] == 0x3C) {
+        _customTemplateError =
+            'Could not download the saved background. Try printing again.';
+        return;
+      }
+      final image = await _memoryImageFromTemplateBytes(
+        bytes,
+        meta.mimeType,
+        meta.originalFilename,
+      );
+      if (image == null) {
+        _customTemplateError =
+            'Could not read the uploaded file for print. Use PDF, PNG, or JPG.';
+        return;
+      }
+      final bind = _CustomPrintBind(
+        image: image,
+        format: _pdfFormatFromPaperSize(meta.paperSize),
+      );
+      _customTemplateCache[cacheKey] = bind;
+      _activeCustomBg = bind.image;
+      _lockedPrintBg = bind.image;
+      _activeCustomFormat = bind.format;
+    } catch (e) {
+      _customTemplateError =
+          'Could not load the saved form background. Printing with the default letterhead.';
+      debugPrint('Form background bind failed ($module/$formKey): $e');
+    }
+  }
+
+  static Future<pw.MemoryImage?> _memoryImageFromTemplateBytes(
+    List<int> bytes,
+    String? mimeType,
+    String? filename,
+  ) async {
+    final raw = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+    final lowerName = (filename ?? '').toLowerCase();
+    final mime = (mimeType ?? '').toLowerCase();
+    final isPdf =
+        mime.contains('pdf') ||
+        lowerName.endsWith('.pdf') ||
+        (raw.length >= 5 &&
+            raw[0] == 0x25 &&
+            raw[1] == 0x50 &&
+            raw[2] == 0x44 &&
+            raw[3] == 0x46 &&
+            raw[4] == 0x2D);
+    if (!isPdf) {
+      return pw.MemoryImage(raw);
+    }
+    await for (final page in Printing.raster(raw, pages: const [0], dpi: 96)) {
+      return pw.MemoryImage(await page.toPng());
+    }
+    return null;
+  }
+
   static Future<void> _ensureIdpPdfFonts() async {
     if (_idpPdfFont != null) return;
     final regular = await rootBundle.load('assets/fonts/NotoSans-Regular.ttf');
@@ -174,12 +372,13 @@ class FormPdf {
 
   /// IDP print layout — letterhead background with form fields drawn on top.
   static pw.Widget _idpPageLayout(pw.Widget body) {
-    if (_idpMayorLetterBackground != null) {
+    final letterhead = _lockedPrintBg ?? _activeCustomBg ?? _idpMayorLetterBackground;
+    if (letterhead != null) {
       // Match BI form: Stack + full-size foreground + Expanded so content actually paints.
       return pw.Stack(
         children: [
           pw.Positioned.fill(
-            child: pw.Image(_idpMayorLetterBackground!, fit: pw.BoxFit.fill),
+            child: pw.Image(letterhead, fit: pw.BoxFit.fill),
           ),
           pw.Positioned.fill(
             child: pw.Padding(
@@ -215,14 +414,15 @@ class FormPdf {
     pw.Widget body, {
     bool showTitle = true,
   }) {
-    if (_a4LetterBackground != null) {
+    final letterhead = _lockedPrintBg ?? _activeCustomBg ?? _a4LetterBackground;
+    if (letterhead != null) {
       final padding = showTitle
           ? _biFormContentPadding
           : _biFormContinuationPadding;
       return pw.Stack(
         children: [
           pw.Positioned.fill(
-            child: pw.Image(_a4LetterBackground!, fit: pw.BoxFit.fill),
+            child: pw.Image(letterhead, fit: pw.BoxFit.fill),
           ),
           pw.Padding(
             padding: padding,
@@ -448,12 +648,24 @@ class FormPdf {
   /// Long bond 8.5" × 14" landscape — wide RSP board forms.
   static PdfPageFormat get pageLongLandscape => pageLong.landscape;
 
-  static String _s(String? v) => v?.trim() ?? '—';
+  /// Helvetica (built-in PDF font) cannot draw Unicode dashes such as U+2014.
+  static String _pdfSafe(String v) => v
+      .replaceAll('\u2014', '-')
+      .replaceAll('\u2013', '-')
+      .replaceAll('\u2212', '-')
+      .replaceAll('\u00A0', ' ')
+      .replaceAll('\u2026', '...');
+
+  static String _s(String? v) {
+    final t = v?.trim();
+    if (t == null || t.isEmpty) return '-';
+    return _pdfSafe(t);
+  }
 
   /// Empty IDP fields stay blank (avoids missing-glyph squares from em dash).
   static String _idpField(String? v) {
     final t = v?.trim();
-    return (t == null || t.isEmpty) ? '' : t;
+    return (t == null || t.isEmpty) ? '' : _pdfSafe(t);
   }
 
   static Future<void> printDocument(
@@ -471,45 +683,52 @@ class FormPdf {
     );
   }
 
-  /// Shows loading feedback, preloads assets, builds once, then opens the print dialog.
+  static bool _printInFlight = false;
+
+  /// Builds the PDF then opens the system/browser print dialog.
+  /// Saved Form Backgrounds paper size (including 8.5" × 13") is used as the page size.
   static Future<void> printForm({
     required BuildContext context,
     required Future<pw.Document> Function() buildDocument,
     required String filename,
     PdfPageFormat? format,
-    bool dynamicLayout = true,
+    bool dynamicLayout = false,
+    String? printModule,
+    String? printFormKey,
   }) async {
-    if (!context.mounted) return;
+    if (!context.mounted || _printInFlight) return;
+    _printInFlight = true;
 
-    var loadingShown = false;
-    void showLoading() {
-      if (!context.mounted || loadingShown) return;
-      loadingShown = true;
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        useRootNavigator: true,
-        builder: (ctx) => PopScope(
-          canPop: false,
-          child: Center(
-            child: Material(
-              color: Colors.transparent,
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 28,
-                    vertical: 24,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const CircularProgressIndicator(),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Preparing print…',
-                        style: Theme.of(ctx).textTheme.bodyMedium,
-                      ),
-                    ],
+    OverlayEntry? busy;
+    void showBusy() {
+      if (!context.mounted || busy != null) return;
+      final overlay = Overlay.maybeOf(context, rootOverlay: true);
+      if (overlay == null) return;
+      busy = OverlayEntry(
+        builder: (_) => IgnorePointer(
+          child: SafeArea(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 28),
+                child: Material(
+                  elevation: 4,
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(999),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 10),
+                        Text('Opening print…'),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -517,47 +736,63 @@ class FormPdf {
           ),
         ),
       );
+      overlay.insert(busy!);
     }
 
-    void hideLoading() {
-      if (!loadingShown || !context.mounted) return;
-      loadingShown = false;
-      Navigator.of(context, rootNavigator: true).pop();
+    void hideBusy() {
+      busy?.remove();
+      busy = null;
     }
 
-    showLoading();
+    showBusy();
     try {
-      // Warmup errors are swallowed — every asset has a programmatic fallback.
-      // This prevents a first-load plugin initialisation failure from blocking print.
+      await SchedulerBinding.instance.endOfFrame;
       try {
         await warmupPrintAssets();
-      } catch (_) {
-        // Proceed; fallback rendering is used for any un-cached assets.
+      } catch (_) {}
+
+      if (printModule != null && printFormKey != null) {
+        await _bindCustomTemplate(printModule, printFormKey);
       }
 
+      final bindError = _customTemplateError;
       final doc = await buildDocument();
+      final printFormat = _catalogFormatMatching(
+        _activeCustomFormat ?? format ?? PdfPageFormat.letter,
+      );
       final bytes = await doc.save();
-      hideLoading();
+      _activeCustomBg = null;
+      _lockedPrintBg = null;
+      _activeCustomFormat = null;
+      hideBusy();
       if (!context.mounted) return;
 
-      // On web, the browser needs at least one rendered frame after the loading
-      // dialog closes before the print window can open reliably.
-      await Future.delayed(const Duration(milliseconds: 80));
+      if (bindError != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(bindError)));
+      }
+
+      await SchedulerBinding.instance.endOfFrame;
       if (!context.mounted) return;
 
       await Printing.layoutPdf(
         onLayout: (PdfPageFormat _) async => bytes,
         name: filename,
-        format: format ?? PdfPageFormat.letter,
-        dynamicLayout: dynamicLayout,
+        format: printFormat,
+        dynamicLayout: false,
+        forceCustomPrintPaper: true,
       );
     } catch (e) {
-      hideLoading();
+      hideBusy();
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
       }
+    } finally {
+      hideBusy();
+      _printInFlight = false;
     }
   }
 
@@ -583,6 +818,8 @@ class FormPdf {
       filename: 'Individual_Development_Plan.pdf',
       format: idpLayoutPrintFormat,
       dynamicLayout: false,
+      printModule: 'ld',
+      printFormKey: 'idp',
     );
   }
 
@@ -601,6 +838,22 @@ class FormPdf {
     bool useBoardHeader = false,
     String? officeName,
   }) {
+    if (_useCustomPrintBg) {
+      return _printPage(
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            if (formTitle.isNotEmpty) _formTitleOnly(formTitle),
+            pw.Expanded(
+              child: pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: body,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
@@ -646,18 +899,55 @@ class FormPdf {
     ],
   );
 
+  /// Signature line with extra blank space for a pen signature, a printed
+  /// name on the line, and a caption below (e.g. Printed Name/Over Signature).
+  static pw.Widget _signatureLineBlock(
+    String label,
+    String name, {
+    String? caption,
+    double lineWidth = 220,
+  }) => pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    mainAxisSize: pw.MainAxisSize.min,
+    children: [
+      pw.Text(
+        label,
+        style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+      ),
+      pw.SizedBox(height: 30),
+      pw.Container(
+        width: lineWidth,
+        decoration: const pw.BoxDecoration(
+          border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
+        ),
+        child: pw.Text(
+          name,
+          textAlign: pw.TextAlign.center,
+          style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+        ),
+      ),
+      if (caption != null) ...[
+        pw.SizedBox(height: 4),
+        pw.Text(caption, style: const pw.TextStyle(fontSize: 8)),
+      ],
+    ],
+  );
+
   static Future<pw.Document> buildBiFormPdf(BiFormEntry e) async {
     await Future.wait([ensureLogoLoaded(), ensureA4LetterTemplateLoaded()]);
+    await _bindCustomTemplate('rsp', 'bi');
     final doc = pw.Document();
     const formTitle = 'BACKGROUND INVESTIGATION (BI FORM)';
-    final pageFormat = _a4LetterBackground != null
-        ? pageA4.copyWith(
-            marginTop: 0,
-            marginBottom: 0,
-            marginLeft: 0,
-            marginRight: 0,
-          )
-        : pageLetter;
+    final pageFormat = _printPageFormat(
+      _a4LetterBackground != null
+          ? pageA4.copyWith(
+              marginTop: 0,
+              marginBottom: 0,
+              marginLeft: 0,
+              marginRight: 0,
+            )
+          : pageLetter,
+    );
 
     pw.Widget page1Body() => pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -863,6 +1153,7 @@ class FormPdf {
   static final PdfColor _letterheadOrange = PdfColor.fromInt(0xFFE85D04);
 
   static pw.Widget _pdfHeader(String formTitle) {
+    if (_useCustomPrintBg) return _formTitleOnly(formTitle);
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
@@ -953,6 +1244,7 @@ class FormPdf {
   }
 
   static pw.Widget _pdfFooter() {
+    if (_useCustomPrintBg) return pw.SizedBox();
     return pw.Padding(
       padding: const pw.EdgeInsets.only(top: 16),
       child: pw.Row(
@@ -1034,6 +1326,9 @@ class FormPdf {
   static Future<pw.Document> buildPerformanceEvaluationPdf(
     PerformanceEvaluationEntry e,
   ) async {
+    _activeCustomBg = null;
+    _lockedPrintBg = null;
+    _activeCustomFormat = null;
     await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
@@ -1057,7 +1352,7 @@ class FormPdf {
               ),
               pw.SizedBox(height: 6),
               pw.Text(
-                e.functionalAreas.isEmpty ? '—' : e.functionalAreas.join(', '),
+                e.functionalAreas.isEmpty ? '-' : e.functionalAreas.join(', '),
                 style: const pw.TextStyle(fontSize: 9),
               ),
               _row('Other (Please specify)', _s(e.otherFunctionalArea)),
@@ -1525,6 +1820,8 @@ class FormPdf {
     while (rows.length < 2) {
       rows.add(const IdpPlanRow());
     }
+    // Official paper has two short-term rows; extra screen rows stay in the
+    // saved record but must not push the signatories off the printed page.
     return rows.take(2).toList();
   }
 
@@ -1609,60 +1906,53 @@ class FormPdf {
     final belowLine = nameOnSignatureLine
         ? ''
         : (lineName.isNotEmpty ? lineName : printedName);
-    return pw.Expanded(
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.center,
-        children: [
-          pw.Text(
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        pw.Align(
+          alignment: pw.Alignment.centerLeft,
+          child: pw.Text(
             role,
-            style: const pw.TextStyle(fontSize: 7),
+            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+          ),
+        ),
+        // Blank strip for a physical pen signature (Applicants Profile pattern).
+        pw.SizedBox(height: 26),
+        pw.Container(
+          width: double.infinity,
+          constraints: const pw.BoxConstraints(minHeight: 12),
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
+          ),
+          alignment: pw.Alignment.bottomCenter,
+          child: onLine.isNotEmpty
+              ? pw.Text(
+                  onLine,
+                  style: pw.TextStyle(
+                    fontSize: 8,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                  textAlign: pw.TextAlign.center,
+                )
+              : pw.SizedBox(height: 10),
+        ),
+        if (belowLine.isNotEmpty) ...[
+          pw.SizedBox(height: 3),
+          pw.Text(
+            belowLine,
+            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
             textAlign: pw.TextAlign.center,
           ),
-          pw.SizedBox(height: 2),
-          pw.Container(
-            width: double.infinity,
-            height: 26,
-            decoration: const pw.BoxDecoration(
-              border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
-            ),
-            alignment: pw.Alignment.bottomCenter,
-            child: onLine.isNotEmpty
-                ? pw.Text(
-                    onLine,
-                    style: pw.TextStyle(
-                      fontSize: 8,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                    textAlign: pw.TextAlign.center,
-                  )
-                : null,
-          ),
-          if (belowLine.isNotEmpty) ...[
-            pw.SizedBox(height: 3),
-            pw.Text(
-              belowLine,
-              style: pw.TextStyle(
-                fontSize: 7.5,
-                fontWeight: pw.FontWeight.bold,
-              ),
-              textAlign: pw.TextAlign.center,
-            ),
-          ],
-          if (title.isNotEmpty) ...[
-            pw.SizedBox(height: 2),
-            pw.Text(
-              title,
-              style: pw.TextStyle(
-                fontSize: 7,
-                fontWeight: belowLine.isNotEmpty
-                    ? pw.FontWeight.normal
-                    : pw.FontWeight.bold,
-              ),
-              textAlign: pw.TextAlign.center,
-            ),
-          ],
         ],
-      ),
+        if (title.isNotEmpty) ...[
+          pw.SizedBox(height: 2),
+          pw.Text(
+            title,
+            style: const pw.TextStyle(fontSize: 7.5),
+            textAlign: pw.TextAlign.center,
+          ),
+        ],
+      ],
     );
   }
 
@@ -1764,35 +2054,48 @@ class FormPdf {
   }
 
   static pw.Widget _idpSignatures(IdpEntry e) {
-    return pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
+    pw.Widget pair(pw.Widget left, pw.Widget right) {
+      return pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Expanded(child: left),
+          pw.SizedBox(width: 28),
+          pw.Expanded(child: right),
+        ],
+      );
+    }
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
-        _idpSignatureBlock(
-          role: 'Prepared by:',
-          name: e.preparedBy,
-          title: 'Employee',
+        pair(
+          _idpSignatureBlock(
+            role: 'Prepared by:',
+            name: e.preparedBy,
+            title: 'Employee',
+          ),
+          _idpSignatureBlock(
+            role: 'Reviewed by:',
+            name: e.reviewedBy,
+            title: 'Department Head',
+          ),
         ),
-        pw.SizedBox(width: 8),
-        _idpSignatureBlock(
-          role: 'Reviewed by:',
-          name: e.reviewedBy,
-          title: 'Department Head',
-        ),
-        pw.SizedBox(width: 8),
-        _idpSignatureBlock(
-          role: 'Noted by:',
-          name: e.notedBy,
-          title: IdpEntry.defaultNotedByTitle,
-          fixedNameBelow: IdpEntry.defaultNotedByName,
-          nameOnSignatureLine: false,
-        ),
-        pw.SizedBox(width: 8),
-        _idpSignatureBlock(
-          role: 'Approved by:',
-          name: e.approvedBy,
-          title: IdpEntry.defaultApprovedByTitle,
-          fixedNameBelow: IdpEntry.defaultApprovedByName,
-          nameOnSignatureLine: false,
+        pw.SizedBox(height: 14),
+        pair(
+          _idpSignatureBlock(
+            role: 'Noted by:',
+            name: e.notedBy,
+            title: IdpEntry.defaultNotedByTitle,
+            fixedNameBelow: IdpEntry.defaultNotedByName,
+            nameOnSignatureLine: false,
+          ),
+          _idpSignatureBlock(
+            role: 'Approved by:',
+            name: e.approvedBy,
+            title: IdpEntry.defaultApprovedByTitle,
+            fixedNameBelow: IdpEntry.defaultApprovedByName,
+            nameOnSignatureLine: false,
+          ),
         ),
       ],
     );
@@ -1800,24 +2103,36 @@ class FormPdf {
 
   static Future<pw.Document> buildIdpPdf(IdpEntry e) async {
     await _ensureIdpAssets();
+    await _bindCustomTemplate('ld', 'idp');
     final doc = pw.Document(theme: _idpPdfTheme);
 
     // Use zero margins so the background image fills the full page edge-to-edge.
-    final pageFormat = pagePhilippineLong.copyWith(
-      marginTop: 0,
-      marginBottom: 0,
-      marginLeft: 0,
-      marginRight: 0,
+    final pageFormat = _printPageFormat(
+      pagePhilippineLong.copyWith(
+        marginTop: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+        marginRight: 0,
+      ),
     );
 
+    // Signatories are non-flex so they are measured first and stay above the
+    // letterhead footer. The rest of the form uses remaining space.
     final body = pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
-        _idpPersonalQualifications(e),
-        pw.SizedBox(height: 5),
-        _idpSuccessionBlock(e),
-        pw.SizedBox(height: 5),
-        _idpDevelopmentTable(e),
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              _idpPersonalQualifications(e),
+              pw.SizedBox(height: 5),
+              _idpSuccessionBlock(e),
+              pw.SizedBox(height: 6),
+              pw.Expanded(child: _idpDevelopmentTable(e)),
+            ],
+          ),
+        ),
         pw.SizedBox(height: 10),
         _idpSignatures(e),
       ],
@@ -1833,6 +2148,7 @@ class FormPdf {
     ApplicantsProfileEntry e,
   ) async {
     await ensureLogoLoaded();
+    await _bindCustomTemplate('rsp', 'applicants_profile');
     final doc = pw.Document();
     final perPage = ApplicantsProfileEntry.applicantsPerFormPage;
     final applicants = e.applicants;
@@ -1842,7 +2158,7 @@ class FormPdf {
 
     pw.Widget applicantsTable(List<ApplicantsProfileApplicant> chunk) {
       if (chunk.isEmpty) {
-        return pw.Text('—', style: const pw.TextStyle(fontSize: 10));
+        return pw.Text('-', style: const pw.TextStyle(fontSize: 10));
       }
       return pw.Table(
         border: pw.TableBorder.all(width: 0.5),
@@ -1915,11 +2231,11 @@ class FormPdf {
           : applicants.sublist(start, end);
       final title = page == 0
           ? 'APPLICANTS PROFILE'
-          : 'APPLICANTS PROFILE (Continuation — Form ${page + 1})';
+          : 'APPLICANTS PROFILE (Continuation - Form ${page + 1})';
 
       doc.addPage(
         pw.Page(
-          pageFormat: pageLongLandscape,
+          pageFormat: _printPageFormat(pageLongLandscape),
           build: (ctx) => _formLayout(
             title,
             pw.Column(
@@ -1971,6 +2287,7 @@ class FormPdf {
   }
 
   static pw.Widget _pdfHeaderBoard(String formTitle, {String? officeName}) {
+    if (_useCustomPrintBg) return _formTitleOnly(formTitle);
     final textBlock = pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.center,
       mainAxisSize: pw.MainAxisSize.min,
@@ -2070,6 +2387,9 @@ class FormPdf {
   static Future<pw.Document> buildComparativeAssessmentPdf(
     ComparativeAssessmentEntry e,
   ) async {
+    _activeCustomBg = null;
+    _lockedPrintBg = null;
+    _activeCustomFormat = null;
     await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
@@ -2115,7 +2435,7 @@ class FormPdf {
                     _row('TRAINING :', _s(e.minReqTraining)),
                     pw.SizedBox(height: 10),
                     if (e.candidates.isEmpty)
-                      pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                      pw.Text('-', style: const pw.TextStyle(fontSize: 10))
                     else
                       pw.Table(
                         border: pw.TableBorder.all(width: 0.5),
@@ -2202,6 +2522,9 @@ class FormPdf {
   static Future<pw.Document> buildPromotionCertificationPdf(
     PromotionCertificationEntry e,
   ) async {
+    _activeCustomBg = null;
+    _lockedPrintBg = null;
+    _activeCustomFormat = null;
     await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
@@ -2215,7 +2538,7 @@ class FormPdf {
               _row('Position for promotion:', _s(e.positionForPromotion)),
               pw.SizedBox(height: 10),
               if (e.candidates.isEmpty)
-                pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                pw.Text('-', style: const pw.TextStyle(fontSize: 10))
               else
                 pw.Table(
                   border: pw.TableBorder.all(width: 0.5),
@@ -2307,10 +2630,11 @@ class FormPdf {
     SelectionLineupEntry e,
   ) async {
     await ensureLogoLoaded();
+    await _bindCustomTemplate('rsp', 'selection_lineup');
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
-        pageFormat: pageLetterLandscape,
+        pageFormat: _printPageFormat(pageLetterLandscape),
         build: (ctx) => _formLayout(
           'SELECTION LINE-UP',
           pw.Column(
@@ -2331,7 +2655,7 @@ class FormPdf {
               _row('Item No.:', _s(e.itemNo)),
               pw.SizedBox(height: 10),
               if (e.applicants.isEmpty)
-                pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                pw.Text('-', style: const pw.TextStyle(fontSize: 10))
               else
                 pw.Table(
                   border: pw.TableBorder.all(width: 0.5),
@@ -2422,6 +2746,7 @@ class FormPdf {
     ComputationOfPointsEntry e,
   ) async {
     await ensureLogoLoaded();
+    await _bindCustomTemplate('rsp', 'computation_of_points');
     final doc = pw.Document();
 
     pw.Widget candidateCell(ComputationOfPointsCandidate c) {
@@ -2443,7 +2768,10 @@ class FormPdf {
               '3. Salary Grade',
               style: const pw.TextStyle(fontSize: 5.5),
             ),
-            pw.Text(_s(c.salaryGrade), style: const pw.TextStyle(fontSize: 6.5)),
+            pw.Text(
+              _s(c.salaryGrade),
+              style: const pw.TextStyle(fontSize: 6.5),
+            ),
             pw.SizedBox(height: 2),
             pw.Text('4. Rate', style: const pw.TextStyle(fontSize: 5.5)),
             pw.Text(_s(c.rate), style: const pw.TextStyle(fontSize: 6.5)),
@@ -2461,8 +2789,8 @@ class FormPdf {
 
     doc.addPage(
       pw.Page(
-        pageFormat: pageLetterLandscape,
-        build: (ctx) => pw.Column(
+        pageFormat: _printPageFormat(pageLetterLandscape),
+        build: (ctx) => _printPage(pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
             _pdfHeaderMayorOffice('COMPUTATION OF POINTS'),
@@ -2522,7 +2850,7 @@ class FormPdf {
             ),
             pw.SizedBox(height: 8),
             if (e.candidates.isEmpty)
-              pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+              pw.Text('-', style: const pw.TextStyle(fontSize: 10))
             else
               pw.Table(
                 border: pw.TableBorder.all(width: 0.5),
@@ -2587,28 +2915,22 @@ class FormPdf {
                 ],
               ),
             pw.SizedBox(height: 12),
-            pw.Text(
+            _signatureLineBlock(
               'Prepared by:',
-              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
-            ),
-            pw.Text(
-              _s(e.preparedByName),
-              style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
-            ),
-            pw.Text(
-              '(Printed Name/Over Signature)',
-              style: const pw.TextStyle(fontSize: 8),
+              _idpField(e.preparedByName),
+              caption: '(Printed Name/Over Signature)',
             ),
             pw.Spacer(),
             _pdfFooter(),
           ],
-        ),
+        )),
       ),
     );
     return doc;
   }
 
   static pw.Widget _pdfHeaderMayorOffice(String formTitle) {
+    if (_useCustomPrintBg) return _formTitleOnly(formTitle);
     return pw.Column(
       children: [
         pw.Row(
@@ -2686,10 +3008,11 @@ class FormPdf {
     WorkExperienceSheetEntry e,
   ) async {
     await ensureLogoLoaded();
+    await _bindCustomTemplate('rsp', 'work_experience');
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat.letter,
+        pageFormat: _printPageFormat(PdfPageFormat.letter),
         build: (ctx) => _formLayout(
           'WORK EXPERIENCE SHEET',
           pw.Column(
@@ -2710,7 +3033,10 @@ class FormPdf {
                     child: pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                        _row('POSITION APPLIED FOR :', _s(e.positionAppliedFor)),
+                        _row(
+                          'POSITION APPLIED FOR :',
+                          _s(e.positionAppliedFor),
+                        ),
                         _row('DEPARTMENT :', _s(e.department)),
                         pw.SizedBox(height: 8),
                         pw.Text(
@@ -2781,9 +3107,7 @@ class FormPdf {
                     pw.Container(
                       width: 220,
                       decoration: const pw.BoxDecoration(
-                        border: pw.Border(
-                          bottom: pw.BorderSide(width: 0.5),
-                        ),
+                        border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
                       ),
                       child: pw.Text(
                         _s(e.applicantName),
@@ -2811,11 +3135,12 @@ class FormPdf {
     TurnAroundTimeEntry e,
   ) async {
     await ensureLogoLoaded();
+    await _bindCustomTemplate('rsp', 'turn_around_time');
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
-        pageFormat: pageLongLandscape,
-        build: (ctx) => pw.Column(
+        pageFormat: _printPageFormat(pageLongLandscape),
+        build: (ctx) => _printPage(pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
             _pdfHeaderBoard(
@@ -2839,7 +3164,7 @@ class FormPdf {
                     _row('Q.S.:', _s(e.qs)),
                     pw.SizedBox(height: 10),
                     if (e.applicants.isEmpty)
-                      pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                      pw.Text('-', style: const pw.TextStyle(fontSize: 10))
                     else
                       pw.Table(
                         border: pw.TableBorder.all(width: 0.5),
@@ -2973,7 +3298,7 @@ class FormPdf {
             ),
             _pdfFooter(),
           ],
-        ),
+        )),
       ),
     );
     return doc;
@@ -2984,11 +3309,12 @@ class FormPdf {
     TrainingNeedAnalysisEntry e,
   ) async {
     await ensureLogoLoaded();
+    await _bindCustomTemplate('ld', 'training_need_analysis');
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
-        pageFormat: pageLetterLandscape,
-        build: (ctx) => pw.Column(
+        pageFormat: _printPageFormat(pageLetterLandscape),
+        build: (ctx) => _printPage(pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
             _pdfHeader('TRAINING NEED ANALYSIS'),
@@ -3013,7 +3339,7 @@ class FormPdf {
                   vertical: 4,
                 ),
                 child: e.rows.isEmpty
-                    ? pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                    ? pw.Text('-', style: const pw.TextStyle(fontSize: 10))
                     : pw.Table(
                         border: pw.TableBorder.all(
                           width: 0.5,
@@ -3086,7 +3412,7 @@ class FormPdf {
             ),
             _pdfFooter(),
           ],
-        ),
+        )),
       ),
     );
     return doc;
@@ -3097,11 +3423,12 @@ class FormPdf {
     ActionBrainstormingEntry e,
   ) async {
     await ensureLogoLoaded();
+    await _bindCustomTemplate('ld', 'action_brainstorming');
     final doc = pw.Document();
     doc.addPage(
       pw.Page(
-        pageFormat: pageLetterLandscape,
-        build: (ctx) => pw.Column(
+        pageFormat: _printPageFormat(pageLetterLandscape),
+        build: (ctx) => _printPage(pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
             _pdfHeader('ACTION BRAINSTORMING AND COACHING WORKSHEET'),
@@ -3120,7 +3447,7 @@ class FormPdf {
                   vertical: 4,
                 ),
                 child: e.rows.isEmpty
-                    ? pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                    ? pw.Text('-', style: const pw.TextStyle(fontSize: 10))
                     : pw.Table(
                         border: pw.TableBorder.all(
                           width: 0.5,
@@ -3239,35 +3566,27 @@ class FormPdf {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Expanded(
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(
-                        'Certified by:',
-                        style: const pw.TextStyle(fontSize: 9),
-                      ),
-                      pw.Text(
-                        _s(e.certifiedBy),
-                        style: pw.TextStyle(
-                          fontSize: 9,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                      pw.Text(
-                        'Department Head',
-                        style: const pw.TextStyle(fontSize: 8),
-                      ),
-                    ],
+                  child: _signatureLineBlock(
+                    'Certified by:',
+                    _idpField(e.certifiedBy),
+                    caption: 'Department Head',
                   ),
                 ),
                 pw.Expanded(
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text('Date:', style: const pw.TextStyle(fontSize: 9)),
                       pw.Text(
-                        _s(e.certificationDate),
-                        style: const pw.TextStyle(fontSize: 9),
+                        'Date:',
+                        style: pw.TextStyle(
+                          fontSize: 9,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.SizedBox(height: 4),
+                      pw.Text(
+                        _idpField(e.certificationDate),
+                        style: const pw.TextStyle(fontSize: 10),
                       ),
                     ],
                   ),
@@ -3277,7 +3596,7 @@ class FormPdf {
             pw.SizedBox(height: 12),
             _pdfFooter(),
           ],
-        ),
+        )),
       ),
     );
     return doc;
@@ -3285,6 +3604,9 @@ class FormPdf {
 
   /// Simple printable summary for employee training daily reports (L&D).
   static Future<void> printTrainingDailyReport(TrainingDailyReport r) async {
+    _activeCustomBg = null;
+    _lockedPrintBg = null;
+    _activeCustomFormat = null;
     await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
@@ -3323,4 +3645,693 @@ class FormPdf {
     );
     await printDocument(doc, name: 'training-daily-report.pdf');
   }
+
+  /// Learning Application Plan (L&D) — official landscape letterhead form.
+  static pw.Widget _lapMemoLine(String label, String? value) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 3.5),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.end,
+        children: [
+          pw.SizedBox(
+            width: 122,
+            child: pw.Text(
+              label,
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            ),
+          ),
+          pw.Text(':  ', style: const pw.TextStyle(fontSize: 9)),
+          pw.Expanded(
+            child: pw.Container(
+              padding: const pw.EdgeInsets.only(bottom: 1, left: 2),
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
+              ),
+              child: pw.Text(
+                _idpField(value),
+                style: const pw.TextStyle(fontSize: 9),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _lapHeader() {
+    if (_useCustomPrintBg) {
+      return _formTitleOnly('LEARNING APPLICATION PLAN');
+    }
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            _idpLogoSeal(size: 48),
+            pw.Expanded(
+              child: pw.Column(
+                children: [
+                  pw.Text(
+                    'Republic of the Philippines',
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(fontSize: 8, color: _letterheadNavy),
+                  ),
+                  pw.Text(
+                    'PROVINCE OF MISAMIS OCCIDENTAL',
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      fontSize: 8,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _letterheadNavy,
+                    ),
+                  ),
+                  pw.Text(
+                    'MUNICIPALITY OF PLARIDEL',
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      fontSize: 13,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _idpMunicipalityRed,
+                    ),
+                  ),
+                  pw.SizedBox(height: 2),
+                  pw.Text(
+                    'Human Resource Management and Development Office',
+                    textAlign: pw.TextAlign.center,
+                    style: const pw.TextStyle(fontSize: 8.5),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(width: 48, height: 48),
+          ],
+        ),
+        pw.SizedBox(height: 6),
+        pw.Container(height: 5, color: PdfColor.fromInt(0xFFF0B27A)),
+        pw.SizedBox(height: 8),
+        pw.Center(
+          child: pw.Text(
+            'LEARNING APPLICATION PLAN',
+            style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
+          ),
+        ),
+        pw.SizedBox(height: 8),
+      ],
+    );
+  }
+
+  static List<LearningApplicationPlanRow> _lapRowsForPrint(
+    LearningApplicationPlanEntry e,
+  ) {
+    final rows = List<LearningApplicationPlanRow>.from(e.entries);
+    while (rows.length < 4) {
+      rows.add(const LearningApplicationPlanRow());
+    }
+    return rows;
+  }
+
+  static pw.Widget _lapTable(LearningApplicationPlanEntry e) {
+    final rows = _lapRowsForPrint(e);
+    pw.Widget cell(String text, {bool header = false}) {
+      return pw.Container(
+        constraints: pw.BoxConstraints(minHeight: header ? 16 : 42),
+        padding: const pw.EdgeInsets.all(4),
+        alignment: header ? pw.Alignment.center : pw.Alignment.topLeft,
+        child: pw.Text(
+          text,
+          textAlign: header ? pw.TextAlign.center : pw.TextAlign.left,
+          style: pw.TextStyle(
+            fontSize: header ? 7 : 7.5,
+            fontWeight: header ? pw.FontWeight.bold : pw.FontWeight.normal,
+          ),
+        ),
+      );
+    }
+
+    return pw.Table(
+      border: pw.TableBorder.all(width: 0.7, color: PdfColors.black),
+      defaultVerticalAlignment: pw.TableCellVerticalAlignment.top,
+      columnWidths: const {
+        0: pw.FlexColumnWidth(1.15),
+        1: pw.FlexColumnWidth(1.15),
+        2: pw.FlexColumnWidth(1.35),
+        3: pw.FlexColumnWidth(1.25),
+        4: pw.FlexColumnWidth(0.85),
+        5: pw.FlexColumnWidth(1.1),
+        6: pw.FlexColumnWidth(1.15),
+      },
+      children: [
+        pw.TableRow(
+          children: [
+            cell('LEARNING', header: true),
+            cell('OBJECTIVES', header: true),
+            cell('COMPETENCY GAPS ADDRESSED', header: true),
+            cell('REAP IMPLEMENTATION', header: true),
+            cell('TIMELINE', header: true),
+            cell('PERSONS INVOLVED', header: true),
+            cell('EVIDENCE', header: true),
+          ],
+        ),
+        ...rows.map(
+          (r) => pw.TableRow(
+            children: [
+              cell(_idpField(r.learning)),
+              cell(_idpField(r.objectives)),
+              cell(_idpField(r.competencyGapsAddressed)),
+              cell(_idpField(r.reapImplementation)),
+              cell(_idpField(r.timeline)),
+              cell(_idpField(r.personsInvolved)),
+              cell(_idpField(r.evidence)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget _lapSignatures(LearningApplicationPlanEntry e) {
+    final reported = e.reportedBy?.trim() ?? '';
+    final received = (e.receivedBy?.trim().isNotEmpty ?? false)
+        ? e.receivedBy!.trim()
+        : LearningApplicationPlanEntry.defaultReceivedByName;
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'Reported by:',
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 26),
+              pw.Container(
+                width: 220,
+                constraints: const pw.BoxConstraints(minHeight: 12),
+                decoration: const pw.BoxDecoration(
+                  border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
+                ),
+                alignment: pw.Alignment.bottomCenter,
+                child: reported.isNotEmpty
+                    ? pw.Text(
+                        reported,
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(
+                          fontSize: 9,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      )
+                    : pw.SizedBox(height: 10),
+              ),
+              pw.SizedBox(height: 3),
+              pw.SizedBox(
+                width: 220,
+                child: pw.Text(
+                  'Employee Attended Training',
+                  textAlign: pw.TextAlign.center,
+                  style: const pw.TextStyle(fontSize: 8),
+                ),
+              ),
+            ],
+          ),
+        ),
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.end,
+            children: [
+              pw.SizedBox(
+                width: 220,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    pw.Align(
+                      alignment: pw.Alignment.centerLeft,
+                      child: pw.Text(
+                        'Received by:',
+                        style: pw.TextStyle(
+                          fontSize: 9,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    pw.SizedBox(height: 26),
+                    pw.Container(
+                      width: 220,
+                      constraints: const pw.BoxConstraints(minHeight: 12),
+                      decoration: const pw.BoxDecoration(
+                        border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
+                      ),
+                      child: pw.SizedBox(height: 10),
+                    ),
+                    pw.SizedBox(height: 3),
+                    pw.Text(
+                      received,
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 2),
+                    pw.Text(
+                      LearningApplicationPlanEntry.defaultReceivedByTitle,
+                      textAlign: pw.TextAlign.center,
+                      style: const pw.TextStyle(fontSize: 8),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget _lapFooter() {
+    if (_useCustomPrintBg) return pw.SizedBox();
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Container(
+          height: 46,
+          color: _letterheadNavy,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: pw.Row(
+            children: [
+              pw.Expanded(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  mainAxisAlignment: pw.MainAxisAlignment.center,
+                  children: [
+                    pw.Text(
+                      'Asenso PLARIDEL',
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.white,
+                      ),
+                    ),
+                    pw.Text(
+                      '(088) 3448-200  ·  (088) 3448-358',
+                      style: pw.TextStyle(
+                        fontSize: 7.5,
+                        color: PdfColors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_idpBuildingBytes != null)
+                pw.Container(
+                  width: 120,
+                  height: 34,
+                  child: pw.Image(
+                    pw.MemoryImage(_idpBuildingBytes!),
+                    fit: pw.BoxFit.cover,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        pw.Container(
+          height: 16,
+          color: _idpMunicipalityRed,
+          alignment: pw.Alignment.center,
+          child: pw.Text(
+            'Misamisnon Magnayong Malinawon',
+            style: pw.TextStyle(
+              fontSize: 8,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.white,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  static Future<pw.Document> buildLearningApplicationPlanPdf(
+    LearningApplicationPlanEntry e,
+  ) async {
+    await Future.wait([
+      ensureLogoLoaded(),
+      _ensureIdpPdfFonts(),
+      _loadIdpBuildingImage(),
+    ]);
+    await _bindCustomTemplate('ld', 'learning_application_plan');
+    final doc = pw.Document(theme: _idpPdfTheme);
+    doc.addPage(
+      pw.Page(
+        pageFormat: _printPageFormat(
+          pageLetterLandscape.copyWith(
+            marginTop: 22,
+            marginBottom: 0,
+            marginLeft: 28,
+            marginRight: 28,
+          ),
+        ),
+        build: (ctx) => _printPage(pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            _lapHeader(),
+            _lapMemoLine('MEMO REPORT TO', e.memoReportTo),
+            _lapMemoLine('FROM', e.from),
+            _lapMemoLine('THRU', e.thru),
+            _lapMemoLine('SUBJECT', e.subject),
+            _lapMemoLine('TITLE', e.title),
+            _lapMemoLine('DATE', e.date),
+            _lapMemoLine('VENUE', e.venue),
+            _lapMemoLine('COST', e.cost),
+            pw.SizedBox(height: 8),
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  _lapTable(e),
+                  pw.Expanded(
+                    child: pw.Row(
+                      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                      children: [
+                        for (final flex in <int>[115, 115, 135, 125, 85, 110, 115])
+                          pw.Expanded(
+                            flex: flex,
+                            child: pw.Container(
+                              decoration: const pw.BoxDecoration(
+                                border: pw.Border(
+                                  left: pw.BorderSide(width: 0.7),
+                                  bottom: pw.BorderSide(width: 0.7),
+                                ),
+                              ),
+                            ),
+                          ),
+                        pw.Container(
+                          width: 0.7,
+                          color: PdfColors.black,
+                        ),
+                      ],
+                    ),
+                  ),
+                  pw.Container(
+                    width: double.infinity,
+                    padding: const pw.EdgeInsets.fromLTRB(6, 4, 6, 4),
+                    decoration: const pw.BoxDecoration(
+                      border: pw.Border(
+                        left: pw.BorderSide(width: 0.7),
+                        right: pw.BorderSide(width: 0.7),
+                        bottom: pw.BorderSide(width: 0.7),
+                      ),
+                    ),
+                    child: pw.Text(
+                      'TYPES OF REAP: ORIENTATION, ENCODING, COACHING, MENTORING, ETC.',
+                      style: pw.TextStyle(
+                        fontSize: 8,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 10),
+            _lapSignatures(e),
+            pw.SizedBox(height: 10),
+            _lapFooter(),
+          ],
+        )),
+      ),
+    );
+    return doc;
+  }
+
+  static pw.Widget _ojtEvalLine(String label, String? value) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 4),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.end,
+        children: [
+          pw.SizedBox(
+            width: 128,
+            child: pw.Text(
+              label,
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            ),
+          ),
+          pw.Expanded(
+            child: pw.Container(
+              padding: const pw.EdgeInsets.only(bottom: 1, left: 4),
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
+              ),
+              child: pw.Text(
+                _idpField(value),
+                style: const pw.TextStyle(fontSize: 9),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _ojtEvalHeader() {
+    if (_useCustomPrintBg) {
+      return _formTitleOnly('OJT/WORK IMMERSION EVALUATION');
+    }
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            _idpLogoSeal(size: 46),
+            pw.Expanded(
+              child: pw.Column(
+                children: [
+                  pw.Text(
+                    'Republic of the Philippines',
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(fontSize: 8, color: _letterheadNavy),
+                  ),
+                  pw.Text(
+                    'PROVINCE OF MISAMIS OCCIDENTAL',
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      fontSize: 8,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _letterheadNavy,
+                    ),
+                  ),
+                  pw.Text(
+                    'MUNICIPALITY OF PLARIDEL',
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      fontSize: 12,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _letterheadNavy,
+                    ),
+                  ),
+                  pw.SizedBox(height: 2),
+                  pw.Text(
+                    'Human Resource Management and Development Office',
+                    textAlign: pw.TextAlign.center,
+                    style: const pw.TextStyle(fontSize: 8),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(width: 46, height: 46),
+          ],
+        ),
+        pw.SizedBox(height: 8),
+        pw.Center(
+          child: pw.Text(
+            'OJT/WORK IMMERSION EVALUATION',
+            style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+          ),
+        ),
+        pw.SizedBox(height: 8),
+      ],
+    );
+  }
+
+  static pw.Widget _ojtEvalCriterion({
+    required int number,
+    required String title,
+    required String prompt,
+    required int? score,
+    required String? notes,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 7),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            '$number. $title',
+            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 2),
+          pw.Text(
+            'Question Prompt: "$prompt"',
+            style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
+          ),
+          pw.SizedBox(height: 3),
+          _ojtEvalLine('Score (1-5)', score?.toString()),
+          _ojtEvalLine('Evidence/Notes', notes),
+        ],
+      ),
+    );
+  }
+
+  static Future<pw.Document> buildOjtWorkImmersionEvaluationPdf(
+    OjtWorkImmersionEvaluation e,
+  ) async {
+    await Future.wait([
+      ensureLogoLoaded(),
+      _ensureIdpPdfFonts(),
+      _loadIdpBuildingImage(),
+    ]);
+    await _bindCustomTemplate('rsp', 'ojt_work_immersion');
+    final doc = pw.Document(theme: _idpPdfTheme);
+    final total = e.totalScore;
+    doc.addPage(
+      pw.Page(
+        pageFormat: _printPageFormat(
+          pageLetter.copyWith(
+            marginTop: 24,
+            marginBottom: 0,
+            marginLeft: 32,
+            marginRight: 32,
+          ),
+        ),
+        build: (ctx) => _printPage(pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            _ojtEvalHeader(),
+            _ojtEvalLine('OJT/IMMERSION', e.ojtImmersion),
+            _ojtEvalLine('SCHOOL', e.school),
+            _ojtEvalLine('DATE OF INTERVIEW', e.interviewDate),
+            pw.SizedBox(height: 8),
+            pw.Text(
+              '(Rating Scale)',
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 3),
+            pw.Text(
+              '1. Unsatisfactory: Fails to meet the basic expectations or provide relevant examples.',
+              style: const pw.TextStyle(fontSize: 7.5),
+            ),
+            pw.Text(
+              '2. Marginal: Partially meets criteria; weak or vague examples.',
+              style: const pw.TextStyle(fontSize: 7.5),
+            ),
+            pw.Text(
+              '3. Competent: Solidly meet job requirements with clear examples.',
+              style: const pw.TextStyle(fontSize: 7.5),
+            ),
+            pw.Text(
+              '4. Above average: Exceeds standard expectations, strong evidence of skill.',
+              style: const pw.TextStyle(fontSize: 7.5),
+            ),
+            pw.Text(
+              '5. Exceptional: Outstanding proficiency, deeply relevant expertise.',
+              style: const pw.TextStyle(fontSize: 7.5),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Divider(thickness: 0.6, color: PdfColors.black),
+            pw.SizedBox(height: 6),
+            _ojtEvalCriterion(
+              number: 1,
+              title: 'Problem Solving and Decision Making',
+              prompt:
+                  'Tell me about a time you had to make a difficult decision quickly with limited information.',
+              score: e.problemSolvingScore,
+              notes: e.problemSolvingNotes,
+            ),
+            _ojtEvalCriterion(
+              number: 2,
+              title: 'Communication and Clarity',
+              prompt:
+                  'How do you explain a complex concept or project update to a non-technical stakeholder?',
+              score: e.communicationScore,
+              notes: e.communicationNotes,
+            ),
+            _ojtEvalCriterion(
+              number: 3,
+              title: 'Teamwork and Collaboration',
+              prompt:
+                  'Describe a time you worked with a difficult team member to reach a shared goal.',
+              score: e.teamworkScore,
+              notes: e.teamworkNotes,
+            ),
+            _ojtEvalCriterion(
+              number: 4,
+              title: 'Adaptability and Resilience',
+              prompt:
+                  'How do you handle sudden priority shifts or project changes under tight deadlines?',
+              score: e.adaptabilityScore,
+              notes: e.adaptabilityNotes,
+            ),
+            pw.Divider(thickness: 0.6, color: PdfColors.black),
+            pw.SizedBox(height: 6),
+            pw.Text(
+              'SUMMARY AND RECOMMENDATIONS',
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 6),
+            _ojtEvalLine(
+              'TOTAL SCORE',
+              total == null ? '          /20' : '$total /20',
+            ),
+            _ojtEvalLine(
+              'OVERALL RECOMMENDATION',
+              e.overallRecommendation,
+            ),
+            _ojtEvalLine('KEY STRENGTHS', e.keyStrengths),
+            _ojtEvalLine('KEY CONCERNS', e.keyConcerns),
+            pw.SizedBox(height: 8),
+            pw.Text(
+              'INTERVIEWER SIGNATURE:',
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 22),
+            pw.Container(
+              width: 240,
+              constraints: const pw.BoxConstraints(minHeight: 12),
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
+              ),
+              alignment: pw.Alignment.bottomCenter,
+              child: (e.interviewer ?? '').trim().isNotEmpty
+                  ? pw.Text(
+                      e.interviewer!.trim(),
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    )
+                  : pw.SizedBox(height: 10),
+            ),
+            pw.Spacer(),
+            pw.SizedBox(height: 8),
+            _lapFooter(),
+          ],
+        )),
+      ),
+    );
+    return doc;
+  }
+}
+
+class _CustomPrintBind {
+  const _CustomPrintBind({this.image, this.format});
+
+  final pw.MemoryImage? image;
+  final PdfPageFormat? format;
 }

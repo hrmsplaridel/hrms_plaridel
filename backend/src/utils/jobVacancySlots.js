@@ -23,6 +23,13 @@ function vacancyPositionKey(v) {
   return '';
 }
 
+/** Job title posted by HR. Requirements-only rows are not an applyable vacancy. */
+function vacancyListedHeadlineKey(v) {
+  if (!v || typeof v !== 'object') return '';
+  const h = typeof v.headline === 'string' ? v.headline.trim() : '';
+  return h.length ? normalizePositionKey(h) : '';
+}
+
 function normalizeStoredPositionKey(raw) {
   return normalizePositionKey(raw);
 }
@@ -51,19 +58,32 @@ function parseMaxApplicants(v) {
 }
 
 /**
+ * Loads the landing-page hiring toggle and vacancies JSON.
+ * @returns {Promise<{ hasVacancies: boolean, vacancies: object[] }>}
+ */
+async function loadAnnouncementFromDb() {
+  try {
+    const r = await pool.query(
+      `SELECT has_vacancies, vacancies FROM public.job_vacancy_announcement WHERE id = 'default' LIMIT 1`
+    );
+    const row = r.rows[0];
+    if (!row) return { hasVacancies: false, vacancies: [] };
+    return {
+      hasVacancies: row.has_vacancies === true,
+      vacancies: Array.isArray(row.vacancies) ? row.vacancies : [],
+    };
+  } catch {
+    return { hasVacancies: false, vacancies: [] };
+  }
+}
+
+/**
  * Loads vacancies JSON from the landing-page row (may be empty).
  * @returns {Promise<object[]>}
  */
 async function loadVacanciesFromDb() {
-  try {
-    const r = await pool.query(
-      `SELECT vacancies FROM public.job_vacancy_announcement WHERE id = 'default' LIMIT 1`
-    );
-    const raw = r.rows[0]?.vacancies;
-    return Array.isArray(raw) ? raw : [];
-  } catch {
-    return [];
-  }
+  const announcement = await loadAnnouncementFromDb();
+  return announcement.vacancies;
 }
 
 function findVacancyForPosition(vacancies, positionAppliedFor) {
@@ -71,6 +91,15 @@ function findVacancyForPosition(vacancies, positionAppliedFor) {
   if (!p) return null;
   for (const v of vacancies) {
     if (vacancyPositionKey(v) === p) return v;
+  }
+  return null;
+}
+
+function findListedVacancyForPosition(vacancies, positionAppliedFor) {
+  const p = normalizeStoredPositionKey(positionAppliedFor);
+  if (!p) return null;
+  for (const v of vacancies) {
+    if (vacancyListedHeadlineKey(v) === p) return v;
   }
   return null;
 }
@@ -214,11 +243,36 @@ async function assertPositionApplicationSlotAvailable(positionTrimmed) {
  */
 async function assertPositionAcceptingApplications(positionTrimmed) {
   const pos = String(positionTrimmed || '').trim();
-  if (!pos) return { ok: true };
+  if (!pos) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'No vacant position is listed. Applications cannot be submitted.',
+      code: 'NO_POSITION',
+    };
+  }
 
-  const vacancies = await loadVacanciesFromDb();
-  const vac = findVacancyForPosition(vacancies, pos);
-  if (vac && isVacancyClosedByDate(vac)) {
+  const { hasVacancies, vacancies } = await loadAnnouncementFromDb();
+  if (!hasVacancies) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'Hiring is currently closed.',
+      code: 'HIRING_CLOSED',
+    };
+  }
+
+  const vac = findListedVacancyForPosition(vacancies, pos);
+  if (!vac) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'This position is not currently open for applications.',
+      code: 'POSITION_NOT_OPEN',
+    };
+  }
+
+  if (isVacancyClosedByDate(vac)) {
     return {
       ok: false,
       status: 409,
@@ -231,11 +285,14 @@ async function assertPositionAcceptingApplications(positionTrimmed) {
 
 module.exports = {
   vacancyPositionKey,
+  vacancyListedHeadlineKey,
   normalizePositionKey,
   normalizeStoredPositionKey,
   parseMaxApplicants,
+  loadAnnouncementFromDb,
   loadVacanciesFromDb,
   findVacancyForPosition,
+  findListedVacancyForPosition,
   enrichVacanciesWithApplicationCounts,
   countTotalApplicationsForPositionKey,
   assertPositionApplicationSlotAvailable,

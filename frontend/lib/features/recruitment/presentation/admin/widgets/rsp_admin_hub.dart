@@ -59,7 +59,7 @@ const _rspHubFeatures = <RspHubFeature>[
   RspHubFeature(
     title: 'Forms',
     subtitle:
-        'View and edit BI Form, Applicants Profile, Selection Line-Up, Computation of Points, Work Experience Sheet, and Turn Around Time.',
+        'Encode forms and print backgrounds.',
     icon: Icons.description_rounded,
     sectionIndex: 21,
   ),

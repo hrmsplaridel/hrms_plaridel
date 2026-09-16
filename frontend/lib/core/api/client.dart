@@ -41,6 +41,17 @@ class ApiClient {
           try {
             options.headers['X-HRMS-Device'] = await ClientDeviceHeader.build();
           } catch (_) {}
+          final path = options.path;
+          if (path.contains('/auth/sessions') ||
+              path.contains('/auth/logout-all') ||
+              path.contains('/auth/security-activity')) {
+            try {
+              final refresh = await TokenStorage.instance.getRefreshToken();
+              if (refresh != null && refresh.isNotEmpty) {
+                options.headers['X-HRMS-Refresh'] = refresh;
+              }
+            } catch (_) {}
+          }
           return handler.next(options);
         },
         onError: (error, handler) async {

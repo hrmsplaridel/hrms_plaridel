@@ -87,6 +87,8 @@ class RecruitmentApplication {
     this.hiredUserId,
     this.hrAccountSetupDone = false,
     this.hireCredentialsEmailSentAt,
+    this.hireLoginUsername,
+    this.hireLoginPassword,
     this.createdAt,
     this.updatedAt,
   });
@@ -157,6 +159,12 @@ class RecruitmentApplication {
 
   /// Set when admin successfully sends hire credentials email (POST send-hire-email).
   final DateTime? hireCredentialsEmailSentAt;
+
+  /// Login username that HR emailed (public lookup only after account is ready).
+  final String? hireLoginUsername;
+
+  /// Login password that HR emailed (public lookup only after account is ready).
+  final String? hireLoginPassword;
 
   bool get hireCredentialsEmailSent => hireCredentialsEmailSentAt != null;
 
@@ -287,6 +295,12 @@ class RecruitmentApplication {
     return s.isEmpty ? null : s;
   }
 
+  static String? _optionalTrimmed(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
   factory RecruitmentApplication.fromJson(Map<String, dynamic> json) {
     return RecruitmentApplication(
       id: json['id'] as String,
@@ -345,6 +359,8 @@ class RecruitmentApplication {
       hireCredentialsEmailSentAt: json['hire_credentials_email_sent_at'] != null
           ? DateTime.tryParse(json['hire_credentials_email_sent_at'].toString())
           : null,
+      hireLoginUsername: _optionalTrimmed(json['hire_login_username']),
+      hireLoginPassword: _optionalTrimmed(json['hire_login_password']),
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
@@ -522,6 +538,17 @@ class RecruitmentRepo {
         : Options(headers: {'X-RSP-Applicant-Token': token});
   }
 
+  bool hasApplicantAccessToken(String applicationId) {
+    final token = _applicantTokensByApplicationId[applicationId.toLowerCase()];
+    return token != null && token.isNotEmpty;
+  }
+
+  void rememberApplicantAccessToken(String applicationId, String? token) {
+    final t = token?.trim();
+    if (t == null || t.isEmpty) return;
+    _applicantTokensByApplicationId[applicationId.toLowerCase()] = t;
+  }
+
   /// Seconds per exam. Used when API is unavailable. `0` = no countdown.
   static const Map<String, int> kDefaultRspExamTimeLimitSeconds = {
     'bei': 0,
@@ -639,10 +666,9 @@ class RecruitmentRepo {
       final applicantNumber = appRow?['applicant_number']?.toString();
       final accessToken = res.data?['applicantAccessToken']?.toString().trim();
       if (accessToken != null && accessToken.isNotEmpty) {
-        _applicantTokensByApplicationId[id.toString().toLowerCase()] =
-            accessToken;
+        rememberApplicantAccessToken(id.toString(), accessToken);
       } else if (tok != null && tok.isNotEmpty) {
-        _applicantTokensByApplicationId[id.toString().toLowerCase()] = tok;
+        rememberApplicantAccessToken(id.toString(), tok);
       }
       return (
         id: id.toString(),
@@ -768,7 +794,7 @@ class RecruitmentRepo {
   }
 
   /// Upload one final requirement PDF (after passing deliberation).
-  Future<void> uploadFinalRequirementDocument(
+  Future<({String path, String fileName})> uploadFinalRequirementDocument(
     String applicationId,
     RspFinalRequirementDocKind kind,
     List<int> fileBytes,
@@ -781,11 +807,22 @@ class RecruitmentRepo {
       throw ArgumentError('Recruitment attachments must be PDF files (.pdf).');
     }
     final kindParam = Uri.encodeQueryComponent(kind.apiValue);
-    await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
+    final res = await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
       '/api/rsp/applications/$applicationId/attachment-file?kind=$kindParam',
       bytes: fileBytes,
       fileName: fileName,
       options: _applicantOptions(applicationId),
+    );
+    final path = res.data?['path']?.toString().trim() ?? '';
+    if (path.isEmpty) {
+      throw Exception('Upload did not return a file path. Try again.');
+    }
+    final storedName = res.data?['fileName']?.toString().trim();
+    return (
+      path: path,
+      fileName: (storedName != null && storedName.isNotEmpty)
+          ? storedName
+          : fileName,
     );
   }
 
@@ -932,6 +969,25 @@ class RecruitmentRepo {
       fileName: fileName,
       options: _applicantOptions(applicationId),
     );
+  }
+
+  /// Applicant: after HR declined Step 1 documents, send the application back for review.
+  Future<void> resubmitDeclinedDocuments(String applicationId) async {
+    try {
+      await ApiClient.instance.post<Map<String, dynamic>>(
+        '/api/rsp/applications/$applicationId/resubmit-documents',
+        options: _applicantOptions(applicationId),
+      );
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      if (data is Map) {
+        final err = data['error']?.toString().trim();
+        if (err != null && err.isNotEmpty) {
+          throw Exception(err);
+        }
+      }
+      rethrow;
+    }
   }
 
   Future<void> setApplicationTypedDocument(
@@ -1123,6 +1179,10 @@ class RecruitmentRepo {
       final row = data?['application'] as Map<String, dynamic>?;
       if (row == null) return null;
       final app = RecruitmentApplication.fromJson(row);
+      rememberApplicantAccessToken(
+        app.id,
+        data?['applicantAccessToken']?.toString(),
+      );
       RecruitmentExamResult? exam;
       final er = data?['examResult'];
       if (er is Map) {
