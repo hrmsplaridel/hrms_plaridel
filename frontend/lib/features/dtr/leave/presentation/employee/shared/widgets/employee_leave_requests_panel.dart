@@ -288,25 +288,34 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
       barrierLabel: 'Close leave details',
       minWidth: 400,
       initialWidthFraction: 0.34,
-      builder: (_) => _EmployeeLeaveDetailsPanel(
-        request: request,
-        canEdit: canEdit,
-        canCancel: _canEmployeeCancel(request),
-        canPrint: request.status == LeaveRequestStatus.approved,
-        onEdit: () => widget.onEdit(request),
-        onHistory: () => _showHistory(context, request),
-        onCancel: () => widget.onCancel(request),
-        onPrint: () => widget.onPrint(request),
-        onPreviewAttachment: () => _previewAttachment(request),
-        onDownloadAttachment: () => _downloadAttachment(request),
+      builder: (_) => ScaffoldMessenger(
+        child: Builder(
+          builder: (panelContext) => _EmployeeLeaveDetailsPanel(
+            request: request,
+            canEdit: canEdit,
+            canCancel: _canEmployeeCancel(request),
+            canPrint: request.status == LeaveRequestStatus.approved,
+            onEdit: () => widget.onEdit(request),
+            onHistory: () => _showHistory(panelContext, request),
+            onCancel: () => widget.onCancel(request),
+            onPrint: () => widget.onPrint(request),
+            onPreviewAttachment: () =>
+                _previewAttachment(request, panelContext),
+            onDownloadAttachment: () =>
+                _downloadAttachment(request, panelContext),
+          ),
+        ),
       ),
     );
   }
 
-  Future<List<int>?> _loadAttachment(LeaveRequest request) async {
+  Future<List<int>?> _loadAttachment(
+    LeaveRequest request,
+    BuildContext feedbackContext,
+  ) async {
     final requestId = request.id?.trim() ?? '';
     if (requestId.isEmpty) return null;
-    final messenger = ScaffoldMessenger.of(context);
+    final messenger = ScaffoldMessenger.of(feedbackContext);
     messenger.showSnackBar(
       const SnackBar(content: Text('Loading attachment...')),
     );
@@ -315,7 +324,7 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
         requestId,
       );
       if (!mounted) return null;
-      messenger.clearSnackBars();
+      messenger.removeCurrentSnackBar();
       if (bytes == null || bytes.isEmpty) {
         messenger.showSnackBar(
           const SnackBar(content: Text('Attachment file is unavailable.')),
@@ -325,7 +334,7 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
       return bytes;
     } catch (error) {
       if (!mounted) return null;
-      messenger.clearSnackBars();
+      messenger.removeCurrentSnackBar();
       final message = error.toString().replaceFirst('Exception: ', '').trim();
       messenger.showSnackBar(
         SnackBar(
@@ -338,8 +347,11 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     }
   }
 
-  Future<void> _previewAttachment(LeaveRequest request) async {
-    final bytes = await _loadAttachment(request);
+  Future<void> _previewAttachment(
+    LeaveRequest request,
+    BuildContext panelContext,
+  ) async {
+    final bytes = await _loadAttachment(request, panelContext);
     if (!mounted || bytes == null) return;
     await showDialog<void>(
       context: context,
@@ -350,10 +362,13 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     );
   }
 
-  Future<void> _downloadAttachment(LeaveRequest request) async {
-    final bytes = await _loadAttachment(request);
-    if (!mounted || bytes == null) return;
-    final messenger = ScaffoldMessenger.of(context);
+  Future<void> _downloadAttachment(
+    LeaveRequest request,
+    BuildContext panelContext,
+  ) async {
+    final bytes = await _loadAttachment(request, panelContext);
+    if (!mounted || !panelContext.mounted || bytes == null) return;
+    final messenger = ScaffoldMessenger.of(panelContext);
     try {
       final destination = await open_attachment.downloadAttachmentBytes(
         bytes,

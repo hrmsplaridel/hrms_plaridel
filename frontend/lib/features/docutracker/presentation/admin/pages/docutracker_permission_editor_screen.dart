@@ -680,44 +680,47 @@ class _DocuTrackerPermissionEditorScreenState
       key: ValueKey('permission-role-$roleId'),
       decoration: DocuTrackerTokens.cardDecoration(context: context),
       clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        initiallyExpanded: roleId != DocuTrackerRoles.admin,
-        title: Text(
-          _roleLabel(roleId),
-          style: const TextStyle(fontWeight: FontWeight.w800),
-        ),
-        subtitle: Text(
-          isAdmin ? 'Full system access' : _documentTypeLabel(_documentType),
-        ),
-        children: [
-          if (isAdmin)
-            const ListTile(
-              leading: Icon(Icons.verified_user_outlined),
-              title: Text('Administrator access is always enabled.'),
-              subtitle: Text(
-                'Workflow approvals still require assignment to the current step.',
-              ),
-            )
-          else
-            for (final action in _accessActions)
-              SwitchListTile(
-                key: ValueKey('permission-role-$roleId-${action.key}'),
-                secondary: Icon(action.icon),
-                title: Text(action.label),
+      child: Material(
+        type: MaterialType.transparency,
+        child: ExpansionTile(
+          initiallyExpanded: roleId != DocuTrackerRoles.admin,
+          title: Text(
+            _roleLabel(roleId),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          subtitle: Text(
+            isAdmin ? 'Full system access' : _documentTypeLabel(_documentType),
+          ),
+          children: [
+            if (isAdmin)
+              const ListTile(
+                leading: Icon(Icons.verified_user_outlined),
+                title: Text('Administrator access is always enabled.'),
                 subtitle: Text(
-                  _roleSettingSubtitle(
-                    rolePolicy?.permissions[action.key]?.source,
-                    action.description,
-                  ),
+                  'Workflow approvals still require assignment to the current step.',
                 ),
-                value: _roleDraft[roleId]?[action.key] ?? false,
-                onChanged: _saving
-                    ? null
-                    : (value) => setState(() {
-                        _roleDraft[roleId]?[action.key] = value;
-                      }),
-              ),
-        ],
+              )
+            else
+              for (final action in _accessActions)
+                SwitchListTile(
+                  key: ValueKey('permission-role-$roleId-${action.key}'),
+                  secondary: Icon(action.icon),
+                  title: Text(action.label),
+                  subtitle: Text(
+                    _roleSettingSubtitle(
+                      rolePolicy?.permissions[action.key]?.source,
+                      action.description,
+                    ),
+                  ),
+                  value: _roleDraft[roleId]?[action.key] ?? false,
+                  onChanged: _saving
+                      ? null
+                      : (value) => setState(() {
+                          _roleDraft[roleId]?[action.key] = value;
+                        }),
+                ),
+          ],
+        ),
       ),
     );
   }
@@ -780,23 +783,26 @@ class _DocuTrackerPermissionEditorScreenState
           Container(
             constraints: const BoxConstraints(maxHeight: 300),
             decoration: DocuTrackerTokens.cardDecoration(context: context),
-            child: _filteredEmployees().isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('No matching active employees.'),
-                  )
-                : ListView(
-                    shrinkWrap: true,
-                    children: _filteredEmployees()
-                        .map(
-                          (employee) => ListTile(
-                            title: Text(employee.fullName),
-                            subtitle: Text(_employeeDetails(employee)),
-                            onTap: () => _selectEmployee(employee.id),
-                          ),
-                        )
-                        .toList(),
-                  ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: _filteredEmployees().isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('No matching active employees.'),
+                    )
+                  : ListView(
+                      shrinkWrap: true,
+                      children: _filteredEmployees()
+                          .map(
+                            (employee) => ListTile(
+                              title: Text(employee.fullName),
+                              subtitle: Text(_employeeDetails(employee)),
+                              onTap: () => _selectEmployee(employee.id),
+                            ),
+                          )
+                          .toList(),
+                    ),
+            ),
           ),
         ],
         const SizedBox(height: 12),
