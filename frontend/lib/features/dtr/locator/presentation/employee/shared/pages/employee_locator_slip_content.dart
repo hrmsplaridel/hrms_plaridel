@@ -90,7 +90,8 @@ class EmployeeLocatorSlipContentState
   bool _approvalHistoryLoaded = false;
   bool _loadingMoreMy = false;
   bool _loadingMoreApprovals = false;
-  String? _error;
+  String? _myRequestsError;
+  String? _approvalsError;
   String? _myLoadMoreError;
   String? _approvalLoadMoreError;
   String? _selectedStatusFilter;
@@ -171,7 +172,7 @@ class EmployeeLocatorSlipContentState
     if (_authenticatedUserId != null &&
         !_loadingMy &&
         !_myHistoryLoaded &&
-        _error == null) {
+        _myRequestsError == null) {
       unawaited(_loadMyRequests());
     }
     if (_authenticatedUserId != null &&
@@ -228,7 +229,8 @@ class EmployeeLocatorSlipContentState
     _loadingLocatorTypes = false;
     _locatorTypesLoaded = false;
     _locatorTypesError = null;
-    _error = null;
+    _myRequestsError = null;
+    _approvalsError = null;
     _selectedStatusFilter = null;
     _selectedApprovalStatusFilter = null;
     _fromDate = null;
@@ -511,20 +513,25 @@ class EmployeeLocatorSlipContentState
             formatDate: _formatDate,
           ),
           const SizedBox(height: 16),
-          if (_error != null)
+          if (_myRequestsError != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: _ErrorState(message: _error!),
+              child: _ErrorState(
+                message: _myRequestsError!,
+                onRetry: () => _loadMyRequests(forceRefresh: true),
+              ),
             ),
           if (_loadingMy)
             const _CenteredLoading(message: 'Loading locator requests...')
-          else if (_slips.isEmpty)
+          else if (_myHistoryLoaded &&
+              _slips.isEmpty &&
+              _myRequestsError == null)
             _EmptyState(
               message: _hasMyFilters
                   ? 'No locator requests match the current filters.'
                   : 'No locator requests yet. Click "File Request" to create one.',
             )
-          else ...[
+          else if (_slips.isNotEmpty) ...[
             _myRequestsTable(
               items: visibleSlips,
               maxHeight: maxListHeight,
@@ -1197,22 +1204,30 @@ class EmployeeLocatorSlipContentState
                   formatDate: _formatDate,
                 ),
                 const SizedBox(height: 16),
-                if (_error != null)
+                if (_approvalsError != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: _ErrorState(message: _error!),
+                    child: _ErrorState(
+                      message: _approvalsError!,
+                      onRetry: () =>
+                          _loadDepartmentHeadRequests(forceRefresh: true),
+                    ),
                   ),
-                if (_deptHeadQueue.isEmpty)
+                if (_approvalHistoryLoaded &&
+                    _deptHeadQueue.isEmpty &&
+                    _approvalsError == null)
                   _EmptyState(
                     message: _hasApprovalFilters
                         ? 'No locator requests match the current filters.'
                         : 'No locator requests or history yet.',
                   )
-                else if (visibleItems.isEmpty)
+                else if (_approvalHistoryLoaded &&
+                    _approvalsError == null &&
+                    visibleItems.isEmpty)
                   const _EmptyState(
                     message: 'No locator requests match the current filter.',
                   )
-                else ...[
+                else if (_deptHeadQueue.isNotEmpty) ...[
                   _approvalItemsTable(
                     items: visibleItems,
                     maxHeight: maxListHeight,
@@ -1794,7 +1809,7 @@ class EmployeeLocatorSlipContentState
       return;
     }
     setState(() {
-      _error = null;
+      _myRequestsError = null;
       _loadingMy = true;
     });
     try {
@@ -1905,7 +1920,7 @@ class EmployeeLocatorSlipContentState
     if (ok != true || !_isCurrentAuthSession(userId, authGeneration)) return;
 
     setState(() {
-      _error = null;
+      _myRequestsError = null;
       _loadingMy = true;
     });
     try {
@@ -1932,8 +1947,10 @@ class EmployeeLocatorSlipContentState
     } catch (e) {
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
       setState(
-        () =>
-            _error = _apiErrorMessage(e, fallback: 'Failed to cancel request.'),
+        () => _myRequestsError = _apiErrorMessage(
+          e,
+          fallback: 'Failed to cancel request.',
+        ),
       );
     } finally {
       if (_isCurrentAuthSession(userId, authGeneration)) {
@@ -2135,7 +2152,7 @@ class EmployeeLocatorSlipContentState
         _loadingMy = true;
         _loadingMoreMy = false;
         _myLoadMoreError = null;
-        _error = null;
+        _myRequestsError = null;
       }
     });
     try {
@@ -2174,7 +2191,7 @@ class EmployeeLocatorSlipContentState
         if (loadMore) {
           _myLoadMoreError = message;
         } else {
-          _error = message;
+          _myRequestsError = message;
         }
       });
     } finally {
@@ -2215,7 +2232,7 @@ class EmployeeLocatorSlipContentState
         _loadingApprovals = true;
         _loadingMoreApprovals = false;
         _approvalLoadMoreError = null;
-        _error = null;
+        _approvalsError = null;
       }
     });
     try {
@@ -2255,7 +2272,7 @@ class EmployeeLocatorSlipContentState
         if (loadMore) {
           _approvalLoadMoreError = message;
         } else {
-          _error = message;
+          _approvalsError = message;
         }
       });
     } finally {
@@ -2290,7 +2307,10 @@ class EmployeeLocatorSlipContentState
       _showLocatorSnack('Approved and sent to HR for final approval.');
     } catch (e) {
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
-      setState(() => _error = _apiErrorMessage(e, fallback: 'Approve failed.'));
+      setState(
+        () =>
+            _approvalsError = _apiErrorMessage(e, fallback: 'Approve failed.'),
+      );
     }
   }
 
@@ -2316,7 +2336,9 @@ class EmployeeLocatorSlipContentState
       _showLocatorSnack('Request rejected.');
     } catch (e) {
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
-      setState(() => _error = _apiErrorMessage(e, fallback: 'Reject failed.'));
+      setState(
+        () => _approvalsError = _apiErrorMessage(e, fallback: 'Reject failed.'),
+      );
     }
   }
 
@@ -2495,7 +2517,7 @@ class EmployeeLocatorSlipContentState
     }
 
     setState(() {
-      _error = null;
+      _myRequestsError = null;
       _loadingMy = true;
     });
     try {
