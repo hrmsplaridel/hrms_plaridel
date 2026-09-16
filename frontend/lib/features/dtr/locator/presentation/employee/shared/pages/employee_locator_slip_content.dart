@@ -93,9 +93,13 @@ class EmployeeLocatorSlipContentState
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
   String? _authenticatedUserId;
   String? _authenticatedUserRole;
+  DateTime? _officialHrmsDate;
+  bool _loadingOfficialDate = false;
+  String? _officialDateError;
   int _authGeneration = 0;
   int _myRequestsLoadGeneration = 0;
   int _approvalsLoadGeneration = 0;
+  int _officialDateLoadGeneration = 0;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -126,6 +130,12 @@ class EmployeeLocatorSlipContentState
     if (_authenticatedUserId != null && !_loadingMy && _slips.isEmpty) {
       unawaited(_loadMyRequests());
     }
+    if (_authenticatedUserId != null &&
+        _officialHrmsDate == null &&
+        !_loadingOfficialDate &&
+        _officialDateError == null) {
+      unawaited(_loadOfficialDate());
+    }
     final realtimeProvider = context.read<AppRealtimeProvider>();
     _locatorRealtimeSub ??= realtimeProvider.events.listen((event) {
       if (event.name != 'locator_updated') return;
@@ -153,12 +163,16 @@ class EmployeeLocatorSlipContentState
     _authGeneration += 1;
     _myRequestsLoadGeneration += 1;
     _approvalsLoadGeneration += 1;
+    _officialDateLoadGeneration += 1;
     _slips.clear();
     _deptHeadQueue.clear();
     _currentSection = _LocatorSection.requests;
     _appliedDeptHeadDefaultSection = false;
     _loadingMy = false;
     _loadingApprovals = false;
+    _officialHrmsDate = null;
+    _loadingOfficialDate = false;
+    _officialDateError = null;
     _error = null;
     _selectedStatusFilter = null;
     _selectedApprovalStatusFilter = null;
@@ -182,6 +196,48 @@ class EmployeeLocatorSlipContentState
     return mounted &&
         _authenticatedUserId == userId &&
         _authGeneration == authGeneration;
+  }
+
+  Future<void> _loadOfficialDate({bool forceRefresh = false}) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    if (_loadingOfficialDate && !forceRefresh) return;
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_officialDateLoadGeneration;
+    setState(() {
+      _loadingOfficialDate = true;
+      _officialDateError = null;
+    });
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/locator-slips/context',
+      );
+      final officialDate = _parseDateOnly(response.data?['official_date']);
+      if (officialDate == null) {
+        throw const FormatException('Missing official HRMS date');
+      }
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _officialDateLoadGeneration) {
+        return;
+      }
+      setState(() => _officialHrmsDate = officialDate);
+    } catch (error) {
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _officialDateLoadGeneration) {
+        return;
+      }
+      setState(() {
+        _officialDateError = _apiErrorMessage(
+          error,
+          fallback: 'Could not load the official HRMS date.',
+        );
+      });
+    } finally {
+      if (_isCurrentAuthSession(userId, authGeneration) &&
+          loadGeneration == _officialDateLoadGeneration) {
+        setState(() => _loadingOfficialDate = false);
+      }
+    }
   }
 
   @override
@@ -286,8 +342,18 @@ class EmployeeLocatorSlipContentState
                 employeeName: displayName,
                 onCreatePressed: () => _openCreateForm(context, displayName),
                 showCreateAction: width >= 1024,
+                createEnabled:
+                    _officialHrmsDate != null && !_loadingOfficialDate,
               ),
             ),
+            if (_officialDateError != null) ...[
+              const SizedBox(height: 12),
+              _ErrorState(
+                message:
+                    'Official HRMS date is unavailable. Filing is temporarily disabled.',
+                onRetry: () => _loadOfficialDate(forceRefresh: true),
+              ),
+            ],
             if (isDepartmentHead) ...[
               const SizedBox(height: 16),
               _LocatorSectionTabs(
@@ -1488,10 +1554,23 @@ class EmployeeLocatorSlipContentState
   }) async {
     final userId = _authenticatedUserId;
     if (userId == null) return;
+    final officialDate = _officialHrmsDate;
+    if (officialDate == null) {
+      if (!_loadingOfficialDate) {
+        unawaited(_loadOfficialDate(forceRefresh: true));
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wait for the official HRMS date, then try again.'),
+        ),
+      );
+      return;
+    }
     final authGeneration = _authGeneration;
     final form = _LocatorSlipFormDialog(
       employeeName: employeeName,
       requestTypes: _locatorTypes,
+      officialDate: officialDate,
       initialValues: initialValues,
     );
     final created = await openResponsiveRightSidePanel<_LocatorSlipDraft>(
@@ -1937,6 +2016,18 @@ class EmployeeLocatorSlipContentState
     if (id == null || id.isEmpty) return;
     final userId = _authenticatedUserId;
     if (userId == null) return;
+    final officialDate = _officialHrmsDate;
+    if (officialDate == null) {
+      if (!_loadingOfficialDate) {
+        unawaited(_loadOfficialDate(forceRefresh: true));
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wait for the official HRMS date, then try again.'),
+        ),
+      );
+      return;
+    }
     final authGeneration = _authGeneration;
     final corrected = await openResponsiveRightSidePanel<_LocatorSlipDraft>(
       context: context,
@@ -1948,6 +2039,7 @@ class EmployeeLocatorSlipContentState
         child: _LocatorSlipFormDialog(
           employeeName: item.employeeName,
           requestTypes: _locatorTypes,
+          officialDate: officialDate,
           title: 'Correct Locator Request',
           submitLabel: 'Save & Resubmit',
           initialValues: LocatorSlipFormInitialValues(
@@ -2143,11 +2235,13 @@ class _LocatorHeader extends StatelessWidget {
     required this.employeeName,
     required this.onCreatePressed,
     required this.showCreateAction,
+    required this.createEnabled,
   });
 
   final String employeeName;
   final VoidCallback onCreatePressed;
   final bool showCreateAction;
+  final bool createEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -2184,7 +2278,7 @@ class _LocatorHeader extends StatelessWidget {
           ),
           if (showCreateAction)
             FilledButton.icon(
-              onPressed: onCreatePressed,
+              onPressed: createEnabled ? onCreatePressed : null,
               icon: const Icon(Icons.add_rounded),
               label: const Text('File Request'),
             ),
@@ -2207,6 +2301,7 @@ class _LocatorSlipFormDialog extends StatefulWidget {
   const _LocatorSlipFormDialog({
     required this.employeeName,
     required this.requestTypes,
+    required this.officialDate,
     this.initialValues,
     this.title = 'File Request',
     this.submitLabel = 'Submit',
@@ -2214,6 +2309,7 @@ class _LocatorSlipFormDialog extends StatefulWidget {
 
   final String employeeName;
   final List<LocatorRequestType> requestTypes;
+  final DateTime officialDate;
   final LocatorSlipFormInitialValues? initialValues;
   final String title;
   final String submitLabel;
@@ -2224,7 +2320,7 @@ class _LocatorSlipFormDialog extends StatefulWidget {
 
 class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   final _formKey = GlobalKey<FormState>();
-  DateTime _date = DateTime.now();
+  late DateTime _date;
   LocatorRequestType _requestType = LocatorRequestType.locator;
   _WfhCoverage _wfhCoverage = _WfhCoverage.wholeDay;
   final _officeController = TextEditingController();
@@ -2307,6 +2403,12 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   @override
   void initState() {
     super.initState();
+    final today = DateTime(
+      widget.officialDate.year,
+      widget.officialDate.month,
+      widget.officialDate.day,
+    );
+    _date = today;
     final initial = widget.initialValues;
     if (widget.requestTypes.isNotEmpty) {
       if (initial?.requestTypeCode != null &&
@@ -2326,8 +2428,6 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     if (initial?.slipDate != null) {
       final date = initial!.slipDate!;
       final requested = DateTime(date.year, date.month, date.day);
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
       _date = requested.isBefore(today) ? today : requested;
     }
     if (initial?.office != null && initial!.office!.trim().isNotEmpty) {
@@ -2496,8 +2596,11 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   }
 
   Widget _datePicker() {
-    final today = DateTime.now();
-    final firstAllowedDate = DateTime(today.year, today.month, today.day);
+    final firstAllowedDate = DateTime(
+      widget.officialDate.year,
+      widget.officialDate.month,
+      widget.officialDate.day,
+    );
     return EmployeeLocatorMobileDateField(
       labelColor: AppTheme.dashTextSecondaryOf(context),
       dateLabel: _formatDate(_date),
@@ -2739,9 +2842,12 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       return;
     }
     if (!_formKey.currentState!.validate()) return;
-    final now = DateTime.now();
     final requestDate = DateTime(_date.year, _date.month, _date.day);
-    final today = DateTime(now.year, now.month, now.day);
+    final today = DateTime(
+      widget.officialDate.year,
+      widget.officialDate.month,
+      widget.officialDate.day,
+    );
     if (requestDate.isBefore(today)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -3209,9 +3315,10 @@ class _CenteredLoading extends StatelessWidget {
 }
 
 class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.message});
+  const _ErrorState({required this.message, this.onRetry});
 
   final String message;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -3223,9 +3330,23 @@ class _ErrorState extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.red.shade200),
       ),
-      child: Text(
-        message,
-        style: TextStyle(color: Colors.red.shade900, fontSize: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: Colors.red.shade900, fontSize: 12),
+            ),
+          ),
+          if (onRetry != null) ...[
+            const SizedBox(width: 12),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry'),
+            ),
+          ],
+        ],
       ),
     );
   }

@@ -26,6 +26,13 @@ test('employee locator filing allows today and future dates but blocks past date
   );
 });
 
+test('official locator date follows Manila across the UTC date boundary', () => {
+  assert.equal(
+    currentHrmsDate(new Date('2026-08-10T16:30:00.000Z')),
+    '2026-08-11'
+  );
+});
+
 test('HR correction reasons remain validated independently of approval time', () => {
   assert.equal(normalizeCorrectionReason('Too short'), null);
   assert.equal(

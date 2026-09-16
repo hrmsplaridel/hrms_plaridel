@@ -38,6 +38,7 @@ const {
   createLocatorSubmissionService,
 } = require('../services/locatorSubmissionService');
 const {
+  currentHrmsDate,
   evaluateEmployeeLocatorDateWindow,
   normalizeCorrectionReason,
 } = require('../services/locatorDatePolicy');
@@ -720,6 +721,11 @@ function isValidStatus(status) {
     'cancelled',
   ].includes(status);
 }
+
+// GET /api/locator-slips/context
+router.get('/context', protect, (_req, res) => {
+  res.json({ official_date: currentHrmsDate() });
+});
 
 // GET /api/locator-slips/department-head/check
 router.get('/department-head/check', protect, async (req, res) => {
