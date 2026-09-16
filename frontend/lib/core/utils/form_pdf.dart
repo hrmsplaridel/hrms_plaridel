@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 // Use project data models (same package)
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
 import 'package:hrms_plaridel/features/learning_development/models/bi_form.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
@@ -448,7 +449,7 @@ class FormPdf {
   /// Long bond 8.5" × 14" landscape — wide RSP board forms.
   static PdfPageFormat get pageLongLandscape => pageLong.landscape;
 
-  static String _s(String? v) => v?.trim() ?? '—';
+  static String _s(String? v) => v?.trim() ?? '-';
 
   /// Empty IDP fields stay blank (avoids missing-glyph squares from em dash).
   static String _idpField(String? v) {
@@ -636,15 +637,52 @@ class FormPdf {
 
   /// Signature block used side-by-side (Prepared by / Checked by): label on
   /// top, blank space for a pen signature, then the (typed) name below.
-  static pw.Widget _signatureBlock(String label, String value) => pw.Column(
+  static pw.Widget _signatureBlock(
+    String label,
+    String value, {
+    DocuTrackerSourceSignature? signature,
+  }) => pw.Column(
     crossAxisAlignment: pw.CrossAxisAlignment.start,
     mainAxisSize: pw.MainAxisSize.min,
     children: [
       pw.Text(label, style: const pw.TextStyle(fontSize: 10)),
-      pw.SizedBox(height: 26),
-      pw.Text(value, style: const pw.TextStyle(fontSize: 10)),
+      pw.SizedBox(
+        height: 28,
+        child: signature?.isSigned == true
+            ? pw.Image(
+                pw.MemoryImage(signature!.signatureImageBytes!),
+                fit: pw.BoxFit.contain,
+              )
+            : null,
+      ),
+      pw.Text(
+        _signatureName(signature, value),
+        style: const pw.TextStyle(fontSize: 10),
+      ),
     ],
   );
+
+  static String _signatureName(
+    DocuTrackerSourceSignature? signature,
+    String fallback,
+  ) {
+    final signerName = signature?.signerName?.trim();
+    return signerName == null || signerName.isEmpty ? fallback : signerName;
+  }
+
+  static pw.Widget _signatureImage(
+    DocuTrackerSourceSignature? signature, {
+    double height = 26,
+  }) {
+    if (signature?.isSigned != true) return pw.SizedBox(height: height);
+    return pw.SizedBox(
+      height: height,
+      child: pw.Image(
+        pw.MemoryImage(signature!.signatureImageBytes!),
+        fit: pw.BoxFit.contain,
+      ),
+    );
+  }
 
   static Future<pw.Document> buildBiFormPdf(BiFormEntry e) async {
     await Future.wait([ensureLogoLoaded(), ensureA4LetterTemplateLoaded()]);
@@ -1057,7 +1095,7 @@ class FormPdf {
               ),
               pw.SizedBox(height: 6),
               pw.Text(
-                e.functionalAreas.isEmpty ? '—' : e.functionalAreas.join(', '),
+                e.functionalAreas.isEmpty ? '-' : e.functionalAreas.join(', '),
                 style: const pw.TextStyle(fontSize: 9),
               ),
               _row('Other (Please specify)', _s(e.otherFunctionalArea)),
@@ -1830,8 +1868,9 @@ class FormPdf {
   }
 
   static Future<pw.Document> buildApplicantsProfilePdf(
-    ApplicantsProfileEntry e,
-  ) async {
+    ApplicantsProfileEntry e, {
+    DocuTrackerSourceSignatureBundle? signatures,
+  }) async {
     await ensureLogoLoaded();
     final doc = pw.Document();
     final perPage = ApplicantsProfileEntry.applicantsPerFormPage;
@@ -1842,7 +1881,7 @@ class FormPdf {
 
     pw.Widget applicantsTable(List<ApplicantsProfileApplicant> chunk) {
       if (chunk.isEmpty) {
-        return pw.Text('—', style: const pw.TextStyle(fontSize: 10));
+        return pw.Text('-', style: const pw.TextStyle(fontSize: 10));
       }
       return pw.Table(
         border: pw.TableBorder.all(width: 0.5),
@@ -1915,7 +1954,7 @@ class FormPdf {
           : applicants.sublist(start, end);
       final title = page == 0
           ? 'APPLICANTS PROFILE'
-          : 'APPLICANTS PROFILE (Continuation — Form ${page + 1})';
+          : 'APPLICANTS PROFILE (Continuation - Form ${page + 1})';
 
       doc.addPage(
         pw.Page(
@@ -1949,6 +1988,7 @@ class FormPdf {
                         child: _signatureBlock(
                           'Prepared by:',
                           _idpField(e.preparedBy),
+                          signature: signatures?.signatureFor('prepared_by'),
                         ),
                       ),
                       pw.SizedBox(width: 32),
@@ -1956,6 +1996,7 @@ class FormPdf {
                         child: _signatureBlock(
                           'Checked by:',
                           _idpField(e.checkedBy),
+                          signature: signatures?.signatureFor('checked_by'),
                         ),
                       ),
                     ],
@@ -2115,7 +2156,7 @@ class FormPdf {
                     _row('TRAINING :', _s(e.minReqTraining)),
                     pw.SizedBox(height: 10),
                     if (e.candidates.isEmpty)
-                      pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                      pw.Text('-', style: const pw.TextStyle(fontSize: 10))
                     else
                       pw.Table(
                         border: pw.TableBorder.all(width: 0.5),
@@ -2215,7 +2256,7 @@ class FormPdf {
               _row('Position for promotion:', _s(e.positionForPromotion)),
               pw.SizedBox(height: 10),
               if (e.candidates.isEmpty)
-                pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                pw.Text('-', style: const pw.TextStyle(fontSize: 10))
               else
                 pw.Table(
                   border: pw.TableBorder.all(width: 0.5),
@@ -2304,8 +2345,9 @@ class FormPdf {
   }
 
   static Future<pw.Document> buildSelectionLineupPdf(
-    SelectionLineupEntry e,
-  ) async {
+    SelectionLineupEntry e, {
+    DocuTrackerSourceSignatureBundle? signatures,
+  }) async {
     await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
@@ -2331,7 +2373,7 @@ class FormPdf {
               _row('Item No.:', _s(e.itemNo)),
               pw.SizedBox(height: 10),
               if (e.applicants.isEmpty)
-                pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                pw.Text('-', style: const pw.TextStyle(fontSize: 10))
               else
                 pw.Table(
                   border: pw.TableBorder.all(width: 0.5),
@@ -2398,9 +2440,12 @@ class FormPdf {
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              pw.SizedBox(height: 26),
+              _signatureImage(signatures?.signatureFor('prepared_by')),
               pw.Text(
-                _idpField(e.preparedByName),
+                _signatureName(
+                  signatures?.signatureFor('prepared_by'),
+                  _idpField(e.preparedByName),
+                ),
                 style: pw.TextStyle(
                   fontSize: 10,
                   fontWeight: pw.FontWeight.bold,
@@ -2419,8 +2464,9 @@ class FormPdf {
   }
 
   static Future<pw.Document> buildComputationOfPointsPdf(
-    ComputationOfPointsEntry e,
-  ) async {
+    ComputationOfPointsEntry e, {
+    DocuTrackerSourceSignatureBundle? signatures,
+  }) async {
     await ensureLogoLoaded();
     final doc = pw.Document();
 
@@ -2443,7 +2489,10 @@ class FormPdf {
               '3. Salary Grade',
               style: const pw.TextStyle(fontSize: 5.5),
             ),
-            pw.Text(_s(c.salaryGrade), style: const pw.TextStyle(fontSize: 6.5)),
+            pw.Text(
+              _s(c.salaryGrade),
+              style: const pw.TextStyle(fontSize: 6.5),
+            ),
             pw.SizedBox(height: 2),
             pw.Text('4. Rate', style: const pw.TextStyle(fontSize: 5.5)),
             pw.Text(_s(c.rate), style: const pw.TextStyle(fontSize: 6.5)),
@@ -2522,7 +2571,7 @@ class FormPdf {
             ),
             pw.SizedBox(height: 8),
             if (e.candidates.isEmpty)
-              pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+              pw.Text('-', style: const pw.TextStyle(fontSize: 10))
             else
               pw.Table(
                 border: pw.TableBorder.all(width: 0.5),
@@ -2591,8 +2640,12 @@ class FormPdf {
               'Prepared by:',
               style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
             ),
+            _signatureImage(signatures?.signatureFor('prepared_by')),
             pw.Text(
-              _s(e.preparedByName),
+              _signatureName(
+                signatures?.signatureFor('prepared_by'),
+                _s(e.preparedByName),
+              ),
               style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
             ),
             pw.Text(
@@ -2683,8 +2736,9 @@ class FormPdf {
   }
 
   static Future<pw.Document> buildWorkExperienceSheetPdf(
-    WorkExperienceSheetEntry e,
-  ) async {
+    WorkExperienceSheetEntry e, {
+    DocuTrackerSourceSignatureBundle? signatures,
+  }) async {
     await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
@@ -2710,7 +2764,10 @@ class FormPdf {
                     child: pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                        _row('POSITION APPLIED FOR :', _s(e.positionAppliedFor)),
+                        _row(
+                          'POSITION APPLIED FOR :',
+                          _s(e.positionAppliedFor),
+                        ),
                         _row('DEPARTMENT :', _s(e.department)),
                         pw.SizedBox(height: 8),
                         pw.Text(
@@ -2777,16 +2834,20 @@ class FormPdf {
                         fontWeight: pw.FontWeight.bold,
                       ),
                     ),
-                    pw.SizedBox(height: 16),
+                    _signatureImage(
+                      signatures?.signatureFor('applicant'),
+                      height: 28,
+                    ),
                     pw.Container(
                       width: 220,
                       decoration: const pw.BoxDecoration(
-                        border: pw.Border(
-                          bottom: pw.BorderSide(width: 0.5),
-                        ),
+                        border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
                       ),
                       child: pw.Text(
-                        _s(e.applicantName),
+                        _signatureName(
+                          signatures?.signatureFor('applicant'),
+                          _s(e.applicantName),
+                        ),
                         textAlign: pw.TextAlign.center,
                         style: const pw.TextStyle(fontSize: 10),
                       ),
@@ -2808,8 +2869,9 @@ class FormPdf {
   }
 
   static Future<pw.Document> buildTurnAroundTimePdf(
-    TurnAroundTimeEntry e,
-  ) async {
+    TurnAroundTimeEntry e, {
+    DocuTrackerSourceSignatureBundle? signatures,
+  }) async {
     await ensureLogoLoaded();
     final doc = pw.Document();
     doc.addPage(
@@ -2839,7 +2901,7 @@ class FormPdf {
                     _row('Q.S.:', _s(e.qs)),
                     pw.SizedBox(height: 10),
                     if (e.applicants.isEmpty)
-                      pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                      pw.Text('-', style: const pw.TextStyle(fontSize: 10))
                     else
                       pw.Table(
                         border: pw.TableBorder.all(width: 0.5),
@@ -2929,8 +2991,14 @@ class FormPdf {
                                 'Prepared by:',
                                 style: const pw.TextStyle(fontSize: 9),
                               ),
+                              _signatureImage(
+                                signatures?.signatureFor('prepared_by'),
+                              ),
                               pw.Text(
-                                _s(e.preparedByName),
+                                _signatureName(
+                                  signatures?.signatureFor('prepared_by'),
+                                  _s(e.preparedByName),
+                                ),
                                 style: pw.TextStyle(
                                   fontSize: 9,
                                   fontWeight: pw.FontWeight.bold,
@@ -2951,8 +3019,14 @@ class FormPdf {
                                 'Noted by:',
                                 style: const pw.TextStyle(fontSize: 9),
                               ),
+                              _signatureImage(
+                                signatures?.signatureFor('noted_by'),
+                              ),
                               pw.Text(
-                                _s(e.notedByName),
+                                _signatureName(
+                                  signatures?.signatureFor('noted_by'),
+                                  _s(e.notedByName),
+                                ),
                                 style: pw.TextStyle(
                                   fontSize: 9,
                                   fontWeight: pw.FontWeight.bold,
@@ -3013,7 +3087,7 @@ class FormPdf {
                   vertical: 4,
                 ),
                 child: e.rows.isEmpty
-                    ? pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                    ? pw.Text('-', style: const pw.TextStyle(fontSize: 10))
                     : pw.Table(
                         border: pw.TableBorder.all(
                           width: 0.5,
@@ -3120,7 +3194,7 @@ class FormPdf {
                   vertical: 4,
                 ),
                 child: e.rows.isEmpty
-                    ? pw.Text('—', style: const pw.TextStyle(fontSize: 10))
+                    ? pw.Text('-', style: const pw.TextStyle(fontSize: 10))
                     : pw.Table(
                         border: pw.TableBorder.all(
                           width: 0.5,

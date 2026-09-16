@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_dialog.dart';
+import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 
 class DocuTrackerSourceSignatureCard extends StatefulWidget {
@@ -40,6 +41,7 @@ class _DocuTrackerSourceSignatureCardState
   DocuTrackerSourceSignatureBundle? _bundle;
   bool _loading = true;
   bool _signing = false;
+  bool _assigning = false;
   String? _error;
 
   @override
@@ -65,9 +67,120 @@ class _DocuTrackerSourceSignatureCardState
       _bundle = bundle;
       _error = bundle == null
           ? provider.sourceSignatureError ??
-                'The leave signature could not be loaded.'
+                'The signature could not be loaded.'
           : null;
       _loading = false;
+    });
+    if (bundle != null) widget.onChanged?.call(bundle);
+  }
+
+  Future<void> _assignSigner() async {
+    final directory = EmployeeDirectoryLookup();
+    await directory.load();
+    if (!mounted) return;
+    var query = '';
+    final signerId = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, updateDialog) {
+          final matches = directory.entries
+              .where((employee) {
+                final needle = query.trim().toLowerCase();
+                if (needle.isEmpty) return true;
+                return [
+                  employee.fullName,
+                  employee.departmentName,
+                  employee.positionName,
+                ].whereType<String>().any(
+                  (value) => value.toLowerCase().contains(needle),
+                );
+              })
+              .take(15)
+              .toList(growable: false);
+          return AlertDialog(
+            title: Text('Assign ${widget.title}'),
+            content: SizedBox(
+              width: 480,
+              height: 420,
+              child: Column(
+                children: [
+                  TextField(
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Search employee',
+                      prefixIcon: Icon(Icons.search_rounded),
+                    ),
+                    onChanged: (value) => updateDialog(() => query = value),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: matches.isEmpty
+                        ? const Center(child: Text('No active employee found.'))
+                        : ListView.builder(
+                            itemCount: matches.length,
+                            itemBuilder: (context, index) {
+                              final employee = matches[index];
+                              final details =
+                                  [
+                                        employee.departmentName,
+                                        employee.positionName,
+                                      ]
+                                      .whereType<String>()
+                                      .where((value) => value.trim().isNotEmpty)
+                                      .join(' | ');
+                              return ListTile(
+                                title: Text(employee.fullName),
+                                subtitle: details.isEmpty
+                                    ? null
+                                    : Text(details),
+                                trailing:
+                                    employee.id ==
+                                        _bundle
+                                            ?.signatureFor(widget.slotKey)
+                                            ?.assignedSignerId
+                                    ? const Icon(Icons.check_rounded)
+                                    : null,
+                                onTap: () =>
+                                    Navigator.pop(dialogContext, employee.id),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (!mounted || signerId == null) return;
+    setState(() {
+      _assigning = true;
+      _error = null;
+    });
+    final provider = context.read<DocuTrackerProvider>();
+    final bundle = await provider.assignSourceSignature(
+      sourceModule: widget.sourceModule,
+      sourceTable: widget.sourceTable,
+      sourceRecordId: widget.sourceRecordId,
+      slotKey: widget.slotKey,
+      assignedSignerId: signerId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _assigning = false;
+      if (bundle != null) {
+        _bundle = bundle;
+      } else {
+        _error =
+            provider.sourceSignatureError ?? 'The signer was not assigned.';
+      }
     });
     if (bundle != null) widget.onChanged?.call(bundle);
   }
@@ -100,8 +213,7 @@ class _DocuTrackerSourceSignatureCardState
       if (bundle != null) {
         _bundle = bundle;
       } else {
-        _error =
-            provider.sourceSignatureError ?? 'The leave form was not signed.';
+        _error = provider.sourceSignatureError ?? 'The form was not signed.';
       }
     });
     if (bundle != null) {
@@ -204,11 +316,22 @@ class _DocuTrackerSourceSignatureCardState
                     ]
                     .whereType<String>()
                     .where((value) => value.isNotEmpty)
-                    .join(' • '),
+                    .join(' | '),
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: DocuTrackerTokens.textMuted,
                   fontSize: 11,
+                ),
+              ),
+            ],
+            if ((signature?.assignedSignerName ?? '').isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Assigned to ${signature!.assignedSignerName}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: DocuTrackerTokens.textMuted,
+                  fontSize: 12,
                 ),
               ),
             ],
@@ -235,7 +358,7 @@ class _DocuTrackerSourceSignatureCardState
             else
               Text(
                 signature?.isSigned == true
-                    ? 'The signature is part of this leave form.'
+                    ? 'The signature is saved on this form.'
                     : widget.waitingMessage,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -243,6 +366,23 @@ class _DocuTrackerSourceSignatureCardState
                   fontSize: 12,
                 ),
               ),
+            if (_bundle?.canAssign == true) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _assigning || _signing ? null : _assignSigner,
+                icon: _assigning
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.person_add_alt_1_rounded),
+                label: Text(
+                  (signature?.assignedSignerId ?? '').isEmpty
+                      ? 'Assign signer'
+                      : 'Change signer',
+                ),
+              ),
+            ],
           ],
         ],
       ),

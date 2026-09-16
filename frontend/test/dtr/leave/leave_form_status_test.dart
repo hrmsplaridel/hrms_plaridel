@@ -70,6 +70,24 @@ Future<void> _openForm(
 }
 
 void main() {
+  testWidgets('draft submission can validate after a delayed status check', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    await _openForm(tester, repository);
+    await tester.pumpAndSettle();
+    final response = Completer<LeaveRequest?>();
+    repository.read = () => response.future;
+    await tester.ensureVisible(find.text('Submit Request'));
+    await tester.tap(find.text('Submit Request'));
+    await tester.pump();
+    response.complete(draft);
+    await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Submit Request'), findsOneWidget);
+      expect(find.text('Required'), findsWidgets);
+  });
+
   testWidgets(
     'Submit rechecks server status before asking for a signature or writing',
     (tester) async {

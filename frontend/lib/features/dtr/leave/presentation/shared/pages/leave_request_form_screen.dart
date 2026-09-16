@@ -675,7 +675,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     setState(() => _submitFlowInFlight = true);
     try {
       if (!await _refreshSavedStatus() || !mounted) return;
-      if (!_formKey.currentState!.validate()) return;
+      // The status check temporarily replaces the editor with a loading view.
+      // Wait for it to be mounted again before validating a saved draft.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      final form = _formKey.currentState;
+      if (form == null || !form.validate()) return;
       final accountEligibilityMessage = _selectedAccountEligibilityMessage();
       if (accountEligibilityMessage != null) {
         _showMessage(accountEligibilityMessage);

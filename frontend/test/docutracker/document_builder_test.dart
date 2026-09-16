@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
@@ -106,6 +107,76 @@ void main() {
     expect(signature.signatureImageBytes, <int>[1, 2, 3, 4]);
   });
 
+  test(
+    'RSP signature bundle keeps assignment and signer capabilities separate',
+    () {
+      final bundle = DocuTrackerSourceSignatureBundle.fromJson(
+        <String, dynamic>{
+          'source_module': 'rsp',
+          'source_table': 'applicants_profile_entries',
+          'source_record_id': 'profile-1',
+          'source_status': 'saved',
+          'can_assign': true,
+          'signatures': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'slot_key': 'prepared_by',
+              'label': 'Prepared by',
+              'assigned_signer_id': 'preparer-1',
+              'assigned_signer_name': 'Prepared Person',
+              'can_sign': false,
+            },
+            <String, dynamic>{
+              'slot_key': 'checked_by',
+              'label': 'Checked by',
+              'assigned_signer_id': 'checker-1',
+              'assigned_signer_name': 'Checking Person',
+              'can_sign': true,
+            },
+          ],
+        },
+      );
+
+      expect(bundle.canAssign, isTrue);
+      expect(bundle.signatureFor('prepared_by')?.canSign, isFalse);
+      expect(bundle.signatureFor('checked_by')?.canSign, isTrue);
+      expect(
+        bundle.signatureFor('checked_by')?.assignedSignerName,
+        'Checking Person',
+      );
+    },
+  );
+
+  test('RSP signature request parses its protected form preview payload', () {
+    final request = DocuTrackerRspSignatureRequest.fromJson(<String, dynamic>{
+      'source_table': 'selection_lineup_entries',
+      'source_record_id': 'lineup-1',
+      'form_name': 'Selection Line-Up',
+      'title': 'Administrative Officer',
+      'source_record': <String, dynamic>{
+        'id': 'lineup-1',
+        'vacant_position': 'Administrative Officer',
+      },
+      'signature_bundle': <String, dynamic>{
+        'source_module': 'rsp',
+        'source_table': 'selection_lineup_entries',
+        'source_record_id': 'lineup-1',
+        'source_status': 'saved',
+        'signatures': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'slot_key': 'prepared_by',
+            'label': 'Prepared by',
+            'assigned_signer_id': 'employee-1',
+            'can_sign': true,
+          },
+        ],
+      },
+    });
+
+    expect(request.formName, 'Selection Line-Up');
+    expect(request.sourceRecord['vacant_position'], 'Administrative Officer');
+    expect(request.hasUnsignedAssignedSlot, isTrue);
+  });
+
   test('builder trusts server field-level signing capability', () {
     final data = DocuTrackerDocumentBuilderData.fromJson(<String, dynamic>{
       'document_id': 'document-1',
@@ -207,6 +278,54 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'required actions use server source actions and current assignments',
+    () {
+      final sourceAction = DocuTrackerDocument.fromJson(<String, dynamic>{
+        'id': 'source:dtr:leave-1',
+        'document_type': 'dtr',
+        'title': 'Leave request',
+        'status': 'in_review',
+        'source_module': 'dtr',
+        'source_table': 'leave_requests',
+        'source_record_id': 'leave-1',
+        'source_status': 'pending_department_head',
+        'source_action': 'department_review_in_dtr',
+        'source_action_label': 'Sign here, then review in DTR',
+        'source_only': true,
+      });
+      final assignedDocument = DocuTrackerDocument.fromJson(<String, dynamic>{
+        'id': 'document-1',
+        'document_type': 'memo',
+        'title': 'Memo for review',
+        'status': 'in_review',
+        'current_holder_id': 'user-1',
+        'current_step': 1,
+      });
+      final completedDocument = DocuTrackerDocument.fromJson(<String, dynamic>{
+        'id': 'document-2',
+        'document_type': 'memo',
+        'title': 'Completed memo',
+        'status': 'approved',
+        'current_holder_id': 'user-1',
+        'current_step': 2,
+      });
+
+      final actions = docuTrackerRequiredActionDocuments(
+        documents: <DocuTrackerDocument>[
+          sourceAction,
+          assignedDocument,
+          completedDocument,
+        ],
+        userId: 'user-1',
+      );
+
+      expect(actions, <DocuTrackerDocument>[sourceAction, assignedDocument]);
+      expect(sourceAction.sourceStatus, 'pending_department_head');
+      expect(sourceAction.sourceActionLabel, 'Sign here, then review in DTR');
+    },
+  );
 
   test('linked leave signatures parse applicant, department, and HR slots', () {
     final bundle = DocuTrackerSourceSignatureBundle.fromJson(<String, dynamic>{

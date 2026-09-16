@@ -29,6 +29,7 @@ const postSections = [
   ["18 - LINKED DTR LEAVE E-SIGNATURES", "migrate-docutracker-leave-signatures-v1.sql"],
   ["19 - DEPARTMENT HEAD LEAVE E-SIGNATURE", "migrate-docutracker-leave-signatures-v2.sql"],
   ["20 - HR APPROVER LEAVE E-SIGNATURE", "migrate-docutracker-leave-signatures-v3.sql"],
+  ["21 - LINKED RSP FORM E-SIGNATURES", "migrate-docutracker-rsp-source-signatures-v1.sql"],
 ];
 
 function readBody(file) {
@@ -95,10 +96,10 @@ const applyOnceOut = `-- =======================================================
 ${applyOnceBody}
 `;
 
-// --- Phase 3: post production hardening (10-18)
+// --- Phase 3: post production hardening (10-21)
 const postToc = postSections.map(([t]) => t);
 const postOut = buildRollup({
-  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-18)",
+  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-21)",
   descriptionLines: [
     "PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.",
     "Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.",
@@ -109,6 +110,8 @@ const postOut = buildRollup({
     "Section 16 adds A4 document content and server-locked e-signature persistence.",
     "Section 17 allows the server-audited signed history action.",
     "Section 18 links audited applicant signatures to DTR leave requests without copying leave data.",
+    "Sections 19-20 add assigned department-head and HR approval signatures for leave forms.",
+    "Section 21 adds assigned, audited signature fields to saved RSP forms.",
   ],
   tocLines: postToc,
   sections: postSections,
@@ -124,7 +127,7 @@ const orchestratorOut = `-- ====================================================
 -- This file uses psql \\ir (include relative to this file) to run, in order:
 --   1) docutracker-install-core.sql                    (sections 01-08)
 --   2) docutracker-install-production-hardening-apply-once.sql
---   3) docutracker-install-post-production-hardening.sql (sections 10-18)
+--   3) docutracker-install-post-production-hardening.sql (sections 10-21)
 --
 -- USAGE (from repo root; path must point at this file - \\ir resolves next to it):
 --   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-all-in-order.sql
@@ -138,7 +141,7 @@ const orchestratorOut = `-- ====================================================
 \\ir docutracker-install-core.sql
 \\echo 'DocuTracker phase 2/3: production hardening (apply once)...'
 \\ir docutracker-install-production-hardening-apply-once.sql
-\\echo 'DocuTracker phase 3/3: post production hardening (10-18)...'
+\\echo 'DocuTracker phase 3/3: post production hardening (10-21)...'
 \\ir docutracker-install-post-production-hardening.sql
 \\echo 'DocuTracker install finished.'
 `;

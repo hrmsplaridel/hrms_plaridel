@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
@@ -7,6 +8,8 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_form_header_footer.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 
 /// RSP: Computation of Points (Personnel Selection Board) — after Selection Line-up.
 class RspComputationOfPointsSection extends StatefulWidget {
@@ -91,18 +94,56 @@ class _RspComputationOfPointsSectionState
 
   Future<void> _print(ComputationOfPointsEntry entry) async {
     try {
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: ComputationOfPointsEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      if (!mounted) return;
       await FormPdf.printForm(
         context: context,
-        buildDocument: () => FormPdf.buildComputationOfPointsPdf(entry),
+        buildDocument: () =>
+            FormPdf.buildComputationOfPointsPdf(entry, signatures: signatures),
         filename: 'Computation_of_Points.pdf',
         format: FormPdf.pageLetterLandscape,
       );
-    } catch (_) {}
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print failed. ${userFacingApiError(error)}')),
+      );
+    }
   }
 
   Future<void> _download(ComputationOfPointsEntry entry) async {
     try {
-      final doc = await FormPdf.buildComputationOfPointsPdf(entry);
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: ComputationOfPointsEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      final doc = await FormPdf.buildComputationOfPointsPdf(
+        entry,
+        signatures: signatures,
+      );
       await FormPdf.sharePdf(doc, name: 'Computation_of_Points.pdf');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -110,9 +151,9 @@ class _RspComputationOfPointsSectionState
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed. ${userFacingApiError(e)}')),
+      );
     }
   }
 
@@ -161,7 +202,10 @@ class _RspComputationOfPointsSectionState
         const SizedBox(height: 8),
         Text(
           'Personnel Selection Board scoring sheet: position details, minimum requirements, and candidate points (education, eligibility, experience, training, performance, potential, work attitude).',
-          style: TextStyle(color: AppTheme.dashTextSecondaryOf(context), fontSize: 14),
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 14,
+          ),
         ),
         const SizedBox(height: 24),
         if (_editing != null) ...[
@@ -173,6 +217,16 @@ class _RspComputationOfPointsSectionState
             onPrint: _print,
             onDownloadPdf: _download,
           ),
+          if (_editing?.id != null) ...[
+            const SizedBox(height: 16),
+            DocuTrackerRspSignatureSection(
+              sourceTable: ComputationOfPointsEntry.tableName,
+              sourceRecordId: _editing!.id!,
+              slots: const [
+                DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
         ],
         Row(
@@ -702,7 +756,11 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(title, textAlign: TextAlign.center, style: headerStyle(Colors.white)),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: headerStyle(Colors.white),
+            ),
             if (weight != null) ...[
               const SizedBox(height: 2),
               Text(
@@ -755,10 +813,7 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
                 ),
                 for (var i = 0; i < _rows.length; i++) ...[
                   if (i > 0)
-                    Divider(
-                      height: 1,
-                      color: AppTheme.dashHairlineOf(context),
-                    ),
+                    Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -875,11 +930,7 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
     );
   }
 
-  Widget _candidateDetailField(
-    String label,
-    TextEditingController c,
-    bool ro,
-  ) {
+  Widget _candidateDetailField(String label, TextEditingController c, bool ro) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: RspSpacedOutlineField(
@@ -948,9 +999,10 @@ class _ComputationOfPointsList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(context,e.position ?? '', bold: true),
-              rspRecordsTextCell(context,e.date ?? ''),
-              rspRecordsTextCell(context,
+              rspRecordsTextCell(context, e.position ?? '', bold: true),
+              rspRecordsTextCell(context, e.date ?? ''),
+              rspRecordsTextCell(
+                context,
                 '${e.candidates.length}',
                 align: TextAlign.center,
                 bold: true,

@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/routes/docutracker_routes.dart';
@@ -74,6 +75,11 @@ void main() {
                 'title': 'Linked leave',
                 'status': 'pending',
                 'source_module': 'dtr',
+                'source_table': 'leave_requests',
+                'source_record_id': 'leave-1',
+                'source_status': 'draft',
+                'source_action': 'complete_in_dtr',
+                'source_action_label': 'Complete and submit in DTR',
                 'source_only': true,
               },
               <String, dynamic>{
@@ -140,12 +146,14 @@ void main() {
 
       await _pumpMain(tester);
 
-      expect(find.text('DocuTracker'), findsOneWidget);
+      expect(find.text('DocuTracker'), findsWidgets);
       expect(find.text('Dashboard'), findsNothing);
       expect(
         find.byKey(const ValueKey('docutracker-document-search')),
         findsOneWidget,
       );
+      expect(find.text('Required actions'), findsOneWidget);
+      expect(find.text('Complete and submit in DTR'), findsOneWidget);
       if (width == 360) {
         expect(find.text('Filters'), findsOneWidget);
         expect(find.text('Create Draft'), findsWidgets);
@@ -187,7 +195,7 @@ void main() {
 
     expect(
       find.text('Responsive memo'),
-      findsOneWidget,
+      findsWidgets,
       reason: 'Requests: $requestedPaths',
     );
     expect(find.text('Department Head'), findsOneWidget);
@@ -232,7 +240,17 @@ Future<void> _pumpMain(WidgetTester tester, {bool isAdmin = false}) async {
   await tester.pumpWidget(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(
+          create: (_) => AuthProvider()
+            ..replaceUser(
+              AppUser(
+                id: '00000000-0000-4000-8000-000000000002',
+                email: 'reviewer@hrms.local',
+                role: isAdmin ? 'admin' : 'employee',
+                fullName: 'Test Reviewer',
+              ),
+            ),
+        ),
         ChangeNotifierProvider(create: (_) => DocuTrackerProvider()),
       ],
       child: MaterialApp(
@@ -242,12 +260,14 @@ Future<void> _pumpMain(WidgetTester tester, {bool isAdmin = false}) async {
       ),
     ),
   );
-  for (var i = 0; i < 30; i++) {
+  for (var i = 0; i < 100; i++) {
     await tester.pump(const Duration(milliseconds: 20));
-    if (find
+    final createReady = find
         .byKey(const ValueKey('docutracker-create-document'))
         .evaluate()
-        .isNotEmpty) {
+        .isNotEmpty;
+    final actionsReady = find.text('Required actions').evaluate().isNotEmpty;
+    if (createReady && actionsReady) {
       break;
     }
   }

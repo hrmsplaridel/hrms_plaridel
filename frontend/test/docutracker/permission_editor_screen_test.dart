@@ -9,9 +9,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 void main() {
   var apiInitialized = false;
   Map<String, dynamic>? savedPayload;
+  var failSave = false;
 
-  Map<String, dynamic> policy({String? userId}) => {
-    'document_type': '*',
+  Map<String, dynamic> policy({String? userId, String documentType = '*'}) => {
+    'document_type': documentType,
     'actions': ['view', 'create_draft', 'download', 'submit'],
     'role_defaults': [
       for (final role in ['admin', 'hr', 'supervisor', 'employee'])
@@ -118,6 +119,9 @@ void main() {
                   statusCode: 200,
                   data: policy(
                     userId: options.queryParameters['user_id']?.toString(),
+                    documentType:
+                        options.queryParameters['document_type']?.toString() ??
+                        '*',
                   ),
                 ),
               );
@@ -126,6 +130,16 @@ void main() {
             if (options.path == '/api/docutracker/permission-policy' &&
                 options.method == 'PUT') {
               savedPayload = Map<String, dynamic>.from(options.data as Map);
+              if (failSave) {
+                handler.reject(
+                  DioException(
+                    requestOptions: options,
+                    type: DioExceptionType.connectionError,
+                    message: 'Connection failed',
+                  ),
+                );
+                return;
+              }
               handler.resolve(
                 Response(
                   requestOptions: options,
@@ -152,15 +166,21 @@ void main() {
     }
   });
 
-  setUp(() => savedPayload = null);
+  setUp(() {
+    savedPayload = null;
+    failSave = false;
+  });
 
   Future<void> pumpEditor(
     WidgetTester tester, {
     double width = 1440,
     bool userView = false,
+    String? documentType,
+    String? userId,
+    double height = 1400,
   }) async {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = Size(width, 1400);
+    tester.view.physicalSize = Size(width, height);
     addTearDown(() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
@@ -169,6 +189,8 @@ void main() {
       MaterialApp(
         home: DocuTrackerPermissionEditorScreen(
           initialTabIsUserOverride: userView,
+          initialDocumentType: documentType,
+          initialUserId: userId,
         ),
       ),
     );
@@ -248,13 +270,169 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('review and undo removes only the selected change from saving', (
+    tester,
+  ) async {
+    await pumpEditor(tester);
+    for (final action in ['view', 'download']) {
+      await tester.tap(find.byKey(ValueKey('permission-role-hr-$action')));
+      await tester.pump();
+    }
+    await tester.tap(find.byKey(const ValueKey('permission-review')));
+    await tester.pumpAndSettle();
+    expect(find.text('HR · All document types'), findsNWidgets(2));
+    expect(find.text('Blocked → Allowed'), findsNWidgets(2));
+    await tester.tap(find.byKey(const ValueKey('permission-undo-hr-view')));
+    await tester.pumpAndSettle();
+    expect(find.text('Blocked → Allowed'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<SwitchListTile>(
+            find.byKey(const ValueKey('permission-role-hr-view')),
+          )
+          .value,
+      false,
+    );
+    await tester.tap(find.byKey(const ValueKey('permission-save')));
+    await tester.pumpAndSettle();
+    expect(savedPayload?['changes'], [
+      {'role_id': 'hr', 'action': 'download', 'granted': true},
+    ]);
+  });
+
+  testWidgets(
+    'employee review names the employee and undo restores inheritance',
+    (tester) async {
+      await pumpEditor(tester, userView: true, userId: 'u-hr');
+      await tester.tap(
+        find.byKey(
+          const ValueKey(
+            'permission-user-decision-view-_EmployeeDecision.inherit',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Allow').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('permission-review')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Beatriz Reviewer · All document types'),
+        findsOneWidget,
+      );
+      expect(find.text('Use role default → Allowed'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('permission-undo-u-hr-view')));
+      await tester.pumpAndSettle();
+      expect(find.text('No pending changes.'), findsOneWidget);
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const ValueKey('permission-save')))
+            .onPressed,
+        isNull,
+      );
+      expect(savedPayload, isNull);
+    },
+  );
+
+  testWidgets(
+    'removal names all affected roles and cancels without a request',
+    (tester) async {
+      await pumpEditor(tester, width: 360, height: 800);
+      await tester.tap(find.byTooltip('More'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remove custom role settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('Roles: HR, Supervisor, Employee'), findsOneWidget);
+      expect(find.text('Document type: All document types'), findsOneWidget);
+      expect(
+        find.textContaining(
+          'Document-specific settings and employee exceptions stay in place.',
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(savedPayload, isNull);
+    },
+  );
+
+  testWidgets('removal uses the displayed document scope in one request', (
+    tester,
+  ) async {
+    await pumpEditor(tester, documentType: 'memo');
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove custom role settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Document type: Memo'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'These roles will use their All document types settings.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Remove settings'));
+    await tester.pumpAndSettle();
+    expect(savedPayload?['document_type'], 'memo');
+    final changes = (savedPayload!['changes'] as List).cast<Map>();
+    expect(changes, hasLength(12));
+    expect(changes.map((change) => change['role_id']).toSet(), {
+      'hr',
+      'supervisor',
+      'employee',
+    });
+    expect(changes.every((change) => change['granted'] == null), isTrue);
+  });
+
+  testWidgets(
+    'failed save preserves changes and prevents removal over unsaved edits',
+    (tester) async {
+      await pumpEditor(tester);
+      await tester.tap(find.byKey(const ValueKey('permission-role-hr-view')));
+      await tester.pump();
+      failSave = true;
+      await tester.tap(find.byKey(const ValueKey('permission-save')));
+      await tester.pumpAndSettle();
+      expect(find.text('1 unsaved change'), findsOneWidget);
+      expect(
+        tester
+            .widget<SwitchListTile>(
+              find.byKey(const ValueKey('permission-role-hr-view')),
+            )
+            .value,
+        isTrue,
+      );
+      await tester.tap(find.byTooltip('More'));
+      await tester.pumpAndSettle();
+      expect(find.text('Save or undo pending changes first.'), findsOneWidget);
+      final item = find.ancestor(
+        of: find.text('Remove custom role settings'),
+        matching: find.byType(PopupMenuItem<String>),
+      );
+      expect(tester.widget<PopupMenuItem<String>>(item).enabled, isFalse);
+    },
+  );
+
   for (final width in [360.0, 768.0, 1440.0]) {
     testWidgets('layout remains reachable at ${width.toInt()}px', (
       tester,
     ) async {
-      await pumpEditor(tester, width: width);
+      await pumpEditor(tester, width: width, height: 800);
       expect(find.text('System Access'), findsOneWidget);
       expect(find.byKey(const ValueKey('permission-save')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('permission-role-hr-view')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('permission-review')));
+      await tester.pumpAndSettle();
+      expect(find.text('Blocked → Allowed'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('permission-undo-hr-view')));
+      await tester.pumpAndSettle();
+      expect(find.text('No pending changes.'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }

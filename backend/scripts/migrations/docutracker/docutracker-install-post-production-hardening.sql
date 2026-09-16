@@ -1,5 +1,5 @@
 -- =============================================================================
--- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-18)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-21)
 -- =============================================================================
 -- PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.
 -- Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.
@@ -10,6 +10,8 @@
 -- Section 16 adds A4 document content and server-locked e-signature persistence.
 -- Section 17 allows the server-audited signed history action.
 -- Section 18 links audited applicant signatures to DTR leave requests without copying leave data.
+-- Sections 19-20 add assigned department-head and HR approval signatures for leave forms.
+-- Section 21 adds assigned, audited signature fields to saved RSP forms.
 --
 -- TABLE OF CONTENTS
 --   10 - STATUS SEMANTICS V2 (drop forwarded as document status)
@@ -23,6 +25,7 @@
 --   18 - LINKED DTR LEAVE E-SIGNATURES
 --   19 - DEPARTMENT HEAD LEAVE E-SIGNATURE
 --   20 - HR APPROVER LEAVE E-SIGNATURE
+--   21 - LINKED RSP FORM E-SIGNATURES
 --
 -- =============================================================================
 
@@ -849,5 +852,55 @@ ALTER TABLE docutracker_leave_signatures
 ALTER TABLE docutracker_leave_signatures
   ADD CONSTRAINT docutracker_leave_signatures_slot_check
   CHECK (slot_key IN ('applicant', 'department_head', 'hr_approver'));
+
+COMMIT;
+
+
+-- #############################################################################
+-- 21 - LINKED RSP FORM E-SIGNATURES
+-- Source file: migrate-docutracker-rsp-source-signatures-v1.sql
+-- #############################################################################
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS docutracker_rsp_source_signatures (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  source_table TEXT NOT NULL,
+  source_record_id UUID NOT NULL,
+  slot_key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  assigned_signer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  signature_asset_id UUID REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
+  signed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+  signer_name_snapshot TEXT,
+  signed_at TIMESTAMPTZ,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_rsp_source_signatures_source_check CHECK (
+    source_table IN (
+      'applicants_profile_entries',
+      'selection_lineup_entries',
+      'computation_of_points_entries',
+      'work_experience_sheet_entries',
+      'turn_around_time_entries'
+    )
+  ),
+  CONSTRAINT docutracker_rsp_source_signatures_slot_check CHECK (
+    slot_key IN ('prepared_by', 'checked_by', 'applicant', 'noted_by')
+  ),
+  CONSTRAINT docutracker_rsp_source_signatures_state_check CHECK (
+    (signature_asset_id IS NULL AND signed_by IS NULL AND signer_name_snapshot IS NULL AND signed_at IS NULL)
+    OR
+    (signature_asset_id IS NOT NULL AND signed_by = assigned_signer_id
+      AND length(btrim(signer_name_snapshot)) BETWEEN 1 AND 200 AND signed_at IS NOT NULL)
+  ),
+  CONSTRAINT docutracker_rsp_source_signatures_unique UNIQUE (
+    source_table, source_record_id, slot_key
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_rsp_source_signatures_assignee
+  ON docutracker_rsp_source_signatures(assigned_signer_id, source_table, source_record_id);
 
 COMMIT;

@@ -507,6 +507,28 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  Future<DocuTrackerResult<List<DocuTrackerRspSignatureRequest>>>
+  getRspSignatureRequests() async {
+    try {
+      final response = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/sources/rsp/signature-requests',
+      );
+      final data = response.data ?? const <dynamic>[];
+      return DocuTrackerSuccess(
+        data
+            .whereType<Map>()
+            .map(
+              (item) => DocuTrackerRspSignatureRequest.fromJson(
+                Map<String, dynamic>.from(item),
+              ),
+            )
+            .toList(growable: false),
+      );
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
   Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
   signSourceSignature({
     required String sourceModule,
@@ -535,7 +557,32 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       );
       final data = response.data;
       if (data == null) {
-        return const DocuTrackerFailure('The leave form was not signed');
+        return const DocuTrackerFailure('The form was not signed');
+      }
+      return DocuTrackerSuccess(
+        DocuTrackerSourceSignatureBundle.fromJson(data),
+      );
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
+  assignSourceSignature({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    required String slotKey,
+    required String assignedSignerId,
+  }) async {
+    try {
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '${_sourceSignaturePath(sourceModule: sourceModule, sourceTable: sourceTable, sourceRecordId: sourceRecordId)}/${Uri.encodeComponent(slotKey)}/assignment',
+        data: <String, dynamic>{'assigned_signer_id': assignedSignerId},
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The signer was not assigned');
       }
       return DocuTrackerSuccess(
         DocuTrackerSourceSignatureBundle.fromJson(data),

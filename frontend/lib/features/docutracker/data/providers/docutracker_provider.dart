@@ -45,6 +45,9 @@ class DocuTrackerProvider extends ChangeNotifier {
   String? _builderError;
   bool _sourceSignatureLoading = false;
   String? _sourceSignatureError;
+  List<DocuTrackerRspSignatureRequest> _rspSignatureRequests = const [];
+  bool _rspSignatureRequestsLoading = false;
+  String? _rspSignatureRequestsError;
 
   // Prevent duplicate transitions due to double taps / retries.
   final Set<String> _transitionInFlight = <String>{};
@@ -701,6 +704,30 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   bool get sourceSignatureLoading => _sourceSignatureLoading;
   String? get sourceSignatureError => _sourceSignatureError;
+  List<DocuTrackerRspSignatureRequest> get rspSignatureRequests =>
+      List.unmodifiable(_rspSignatureRequests);
+  bool get rspSignatureRequestsLoading => _rspSignatureRequestsLoading;
+  String? get rspSignatureRequestsError => _rspSignatureRequestsError;
+
+  Future<void> loadRspSignatureRequests() async {
+    if (_rspSignatureRequestsLoading) return;
+    _rspSignatureRequestsLoading = true;
+    _rspSignatureRequestsError = null;
+    notifyListeners();
+    final result = await _repo.getRspSignatureRequests();
+    _rspSignatureRequestsLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<List<DocuTrackerRspSignatureRequest>>(
+        :final value,
+      ):
+        _rspSignatureRequests = value;
+      case DocuTrackerFailure<List<DocuTrackerRspSignatureRequest>>(
+        :final message,
+      ):
+        _rspSignatureRequestsError = message;
+    }
+    notifyListeners();
+  }
 
   Future<DocuTrackerSourceSignatureBundle?> loadSourceSignatures({
     required String sourceModule,
@@ -775,6 +802,36 @@ class DocuTrackerProvider extends ChangeNotifier {
       mimeType: mimeType,
       sourceType: sourceType,
       saveForReuse: saveForReuse,
+    );
+    _sourceSignatureLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>(:final value):
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerSourceSignatureBundle>(:final message):
+        _sourceSignatureError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<DocuTrackerSourceSignatureBundle?> assignSourceSignature({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    required String slotKey,
+    required String assignedSignerId,
+  }) async {
+    if (_sourceSignatureLoading) return null;
+    _sourceSignatureLoading = true;
+    _sourceSignatureError = null;
+    notifyListeners();
+    final result = await _repo.assignSourceSignature(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+      slotKey: slotKey,
+      assignedSignerId: assignedSignerId,
     );
     _sourceSignatureLoading = false;
     switch (result) {

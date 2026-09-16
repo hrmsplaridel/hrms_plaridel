@@ -2243,6 +2243,37 @@ CREATE TABLE IF NOT EXISTS docutracker_signature_fields (
   )
 );
 
+CREATE TABLE IF NOT EXISTS docutracker_rsp_source_signatures (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  source_table TEXT NOT NULL CHECK (source_table IN (
+    'applicants_profile_entries', 'selection_lineup_entries',
+    'computation_of_points_entries', 'work_experience_sheet_entries',
+    'turn_around_time_entries'
+  )),
+  source_record_id UUID NOT NULL,
+  slot_key TEXT NOT NULL CHECK (slot_key IN (
+    'prepared_by', 'checked_by', 'applicant', 'noted_by'
+  )),
+  label TEXT NOT NULL,
+  assigned_signer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  signature_asset_id UUID REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
+  signed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+  signer_name_snapshot TEXT,
+  signed_at TIMESTAMPTZ,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (signature_asset_id IS NULL AND signed_by IS NULL
+      AND signer_name_snapshot IS NULL AND signed_at IS NULL)
+    OR
+    (signature_asset_id IS NOT NULL AND signed_by = assigned_signer_id
+      AND length(btrim(signer_name_snapshot)) BETWEEN 1 AND 200
+      AND signed_at IS NOT NULL)
+  ),
+  UNIQUE (source_table, source_record_id, slot_key)
+);
+
 CREATE TABLE IF NOT EXISTS docutracker_transition_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
@@ -2279,6 +2310,10 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_document_page
 CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_signer_pending
   ON docutracker_signature_fields(assigned_signer_id, document_id)
   WHERE signed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_rsp_source_signatures_assignee
+  ON docutracker_rsp_source_signatures(
+    assigned_signer_id, source_table, source_record_id
+  );
 
 CREATE INDEX IF NOT EXISTS idx_docutracker_routing_config_versions_type_version_desc
   ON docutracker_routing_config_versions(document_type, version DESC);

@@ -136,6 +136,7 @@ class DocuTrackerSourceSignatureBundle {
     required this.sourceRecordId,
     required this.sourceStatus,
     required this.signatures,
+    this.canAssign = false,
   });
 
   final String sourceModule;
@@ -143,6 +144,7 @@ class DocuTrackerSourceSignatureBundle {
   final String sourceRecordId;
   final String sourceStatus;
   final List<DocuTrackerSourceSignature> signatures;
+  final bool canAssign;
 
   DocuTrackerSourceSignature? signatureFor(String slotKey) {
     for (final signature in signatures) {
@@ -158,6 +160,7 @@ class DocuTrackerSourceSignatureBundle {
       sourceTable: json['source_table']?.toString() ?? '',
       sourceRecordId: json['source_record_id']?.toString() ?? '',
       sourceStatus: json['source_status']?.toString() ?? '',
+      canAssign: json['can_assign'] == true,
       signatures: rawSignatures is List
           ? rawSignatures
                 .whereType<Map>()
@@ -170,6 +173,45 @@ class DocuTrackerSourceSignatureBundle {
           : const <DocuTrackerSourceSignature>[],
     );
   }
+}
+
+class DocuTrackerRspSignatureRequest {
+  const DocuTrackerRspSignatureRequest({
+    required this.sourceTable,
+    required this.sourceRecordId,
+    required this.formName,
+    required this.title,
+    required this.sourceRecord,
+    required this.signatureBundle,
+  });
+
+  final String sourceTable;
+  final String sourceRecordId;
+  final String formName;
+  final String title;
+  final Map<String, dynamic> sourceRecord;
+  final DocuTrackerSourceSignatureBundle signatureBundle;
+
+  factory DocuTrackerRspSignatureRequest.fromJson(Map<String, dynamic> json) {
+    final record = json['source_record'];
+    final bundle = json['signature_bundle'];
+    return DocuTrackerRspSignatureRequest(
+      sourceTable: json['source_table']?.toString() ?? '',
+      sourceRecordId: json['source_record_id']?.toString() ?? '',
+      formName: json['form_name']?.toString() ?? 'RSP Form',
+      title: json['title']?.toString() ?? 'Signature request',
+      sourceRecord: record is Map
+          ? Map<String, dynamic>.from(record)
+          : const <String, dynamic>{},
+      signatureBundle: DocuTrackerSourceSignatureBundle.fromJson(
+        bundle is Map ? Map<String, dynamic>.from(bundle) : json,
+      ),
+    );
+  }
+
+  bool get hasUnsignedAssignedSlot => signatureBundle.signatures.any(
+    (signature) => signature.canSign && !signature.isSigned,
+  );
 }
 
 class DocuTrackerSignatureField {
