@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   parseLocatorAdminFilters,
+  parseLocatorHistoryFilters,
   parseStatusFilter,
 } = require('../src/services/locatorAdminFilters');
 
@@ -44,4 +45,47 @@ test('locator admin filters reject invalid ranges and oversized pages', () => {
     false
   );
   assert.equal(parseLocatorAdminFilters({ page_size: '500' }).ok, false);
+});
+
+test('locator history filters group UI statuses and parse paging', () => {
+  const pending = parseLocatorHistoryFilters({
+    status: 'pending',
+    page: '2',
+    page_size: '50',
+    search: 'field office',
+    from: '2026-01-01',
+    to: '2026-12-31',
+  });
+  assert.equal(pending.ok, true);
+  assert.deepEqual(pending.filters.statuses, [
+    'pending',
+    'pending_department_head',
+    'pending_hr',
+  ]);
+  assert.equal(pending.filters.page, 2);
+  assert.equal(pending.filters.pageSize, 50);
+  assert.deepEqual(
+    parseLocatorHistoryFilters({ status: 'returned' }).filters.statuses,
+    ['returned_for_correction']
+  );
+  assert.deepEqual(
+    parseLocatorHistoryFilters({ status: 'forwarded' }).filters.statuses,
+    ['pending', 'pending_hr']
+  );
+  assert.deepEqual(
+    parseLocatorHistoryFilters(
+      { status: 'pending' },
+      { departmentHead: true }
+    ).filters.statuses,
+    ['pending_department_head']
+  );
+});
+
+test('locator history filters reject invalid query values', () => {
+  assert.equal(parseLocatorHistoryFilters({ page_size: '101' }).ok, false);
+  assert.equal(parseLocatorHistoryFilters({ status: 'unknown' }).ok, false);
+  assert.equal(
+    parseLocatorHistoryFilters({ from: '2026-09-02', to: '2026-09-01' }).ok,
+    false
+  );
 });
